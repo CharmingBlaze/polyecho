@@ -517,53 +517,53 @@ function handleExitProject() {
     </div>
 
     <!-- Center: Workspace Mode Switcher Tabs with Blender Icons -->
-    <div class="flex items-center bg-dcc-850 p-0.5 rounded-lg border border-dcc-750 shadow-inner">
+    <!-- Center: Application Workspaces (MODEL, UV/PAINT, RIG, ANIMATE) -->
+    <div class="flex items-center bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle">
       <button 
         @click="toolStore.setAppMode('model')"
-        class="flex items-center gap-1.5 px-3.5 py-1 rounded text-xs font-semibold tracking-wide transition"
-        :class="toolStore.appMode === 'model' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'"
+        class="flex items-center gap-1.5 px-3 h-6 rounded-xs text-xs font-mono font-medium transition"
+        :class="toolStore.appMode === 'model' ? 'bg-ui-accent text-white font-bold shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
       >
-        <BlenderIcon name="mesh-cube" :size="14" />
+        <BlenderIcon name="mesh-cube" :size="13" />
         <span>MODEL</span>
       </button>
 
       <button 
         @click="toolStore.setAppMode('uvpaint')"
-        class="flex items-center gap-1.5 px-3.5 py-1 rounded text-xs font-semibold tracking-wide transition"
-        :class="toolStore.appMode === 'uvpaint' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'"
+        class="flex items-center gap-1.5 px-3 h-6 rounded-xs text-xs font-mono font-medium transition"
+        :class="toolStore.appMode === 'uvpaint' ? 'bg-ui-accent text-white font-bold shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
       >
-        <BlenderIcon name="uv" :size="14" />
+        <BlenderIcon name="uv" :size="13" />
         <span>UV / PAINT</span>
       </button>
 
       <button 
         @click="toolStore.setAppMode('rig')"
-        class="flex items-center gap-1.5 px-3.5 py-1 rounded text-xs font-semibold tracking-wide transition"
-        :class="toolStore.appMode === 'rig' ? 'bg-cyan-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'"
+        class="flex items-center gap-1.5 px-3 h-6 rounded-xs text-xs font-mono font-medium transition"
+        :class="toolStore.appMode === 'rig' ? 'bg-cyan-600 text-white font-bold shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
         title="Custom Skeletal Rigging Workspace"
       >
-        <BlenderIcon name="bone" :size="14" />
+        <BlenderIcon name="bone" :size="13" />
         <span>RIG</span>
       </button>
 
       <button 
         @click="toolStore.setAppMode('animate')"
-        class="flex items-center gap-1.5 px-3.5 py-1 rounded text-xs font-semibold tracking-wide transition"
-        :class="toolStore.appMode === 'animate' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'"
+        class="flex items-center gap-1.5 px-3 h-6 rounded-xs text-xs font-mono font-medium transition"
+        :class="toolStore.appMode === 'animate' ? 'bg-ui-accent text-white font-bold shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
       >
-        <BlenderIcon name="keyframe" :size="14" />
+        <BlenderIcon name="keyframe" :size="13" />
         <span>ANIMATE</span>
       </button>
     </div>
 
     <!-- Right: Hotkeys & Main Export -->
-    <div class="flex items-center space-x-2">
-
+    <div class="flex items-center space-x-1.5">
       <!-- Hotkeys modal button -->
       <button 
         @click="$emit('open-hotkeys')"
         title="Keyboard Shortcuts"
-        class="p-1 text-slate-400 hover:text-white rounded hover:bg-dcc-750 transition"
+        class="p-1.5 text-ui-textSecondary hover:text-ui-textPrimary rounded-xs hover:bg-ui-hover transition"
       >
         <Keyboard class="w-4 h-4" />
       </button>
@@ -571,7 +571,7 @@ function handleExitProject() {
       <!-- Main Export Button -->
       <button 
         @click="$emit('open-export')"
-        class="flex items-center gap-1.5 px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-xs font-semibold shadow-sm transition active:scale-95"
+        class="flex items-center gap-1.5 px-3 h-7 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs text-xs font-mono font-bold shadow-xs transition active:scale-95 border border-ui-accent/80"
       >
         <Download class="w-3.5 h-3.5" />
         <span>Export</span>

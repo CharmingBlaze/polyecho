@@ -2,29 +2,65 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  /* Semantic Design Tokens (Preserving PolyEcho Dark Theme) */
+  --ui-bg-root: #0e1013;
+  --ui-bg-panel: #14161a;
+  --ui-bg-header: #181a1f;
+  --ui-bg-surface: #1e2127;
+  --ui-bg-input: #111215;
+  --ui-bg-hover: #252830;
+  --ui-bg-active: #2e333d;
+
+  --ui-border-subtle: #1f2229;
+  --ui-border-default: #2b2f38;
+  --ui-border-strong: #3d434f;
+  --ui-border-focus: #6366f1;
+
+  --ui-accent: #6366f1;
+  --ui-accent-hover: #4f46e5;
+  --ui-accent-subtle: rgba(99, 102, 241, 0.15);
+
+  --ui-text-primary: #e6edf3;
+  --ui-text-secondary: #9da7b3;
+  --ui-text-muted: #656f7d;
+  --ui-text-accent: #818cf8;
+
+  --ui-radius-sm: 2px;
+  --ui-radius-md: 4px;
+
+  /* Standardized Density System */
+  --ui-h-header: 32px;
+  --ui-h-toolbar: 28px;
+  --ui-h-control: 24px;
+  --ui-h-control-sm: 20px;
+}
+
 @layer base {
   body {
-    @apply bg-dcc-900 text-slate-200 antialiased overflow-hidden select-none font-sans;
+    background-color: var(--ui-bg-root);
+    color: var(--ui-text-primary);
+    @apply antialiased overflow-hidden select-none font-sans text-xs;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 
   /* Custom scrollbar for DCC panels */
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
   }
 
   ::-webkit-scrollbar-track {
-    background: #181a1f;
+    background: var(--ui-bg-panel);
   }
 
   ::-webkit-scrollbar-thumb {
-    background: #323640;
-    border-radius: 3px;
+    background: var(--ui-border-default);
+    border-radius: 2px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: #434855;
+    background: var(--ui-border-strong);
   }
 
   /* Number input remove arrows */
@@ -36,4 +72,29 @@
   input[type=number] {
     -moz-appearance: textfield;
   }
+}
+
+/* Dockview theme overrides to match PolyEcho tokens */
+.dockview-theme-dark {
+  --dv-background-color: var(--ui-bg-root);
+  --dv-paneview-active-outline-color: var(--ui-accent);
+  --dv-tabs-and-actions-container-background-color: var(--ui-bg-header);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--ui-bg-panel);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--ui-bg-header);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--ui-bg-header);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--ui-bg-header);
+  --dv-tab-divider-color: var(--ui-border-subtle);
+  --dv-separator-border: var(--ui-border-subtle);
+  --dv-activegroup-visiblepanel-tab-color: var(--ui-text-primary);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--ui-text-secondary);
+  --dv-activegroup-hiddenpanel-tab-color: var(--ui-text-muted);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--ui-text-muted);
+  --dv-drag-over-background-color: rgba(99, 102, 241, 0.2);
+  --dv-drag-over-border-color: var(--ui-accent);
+}
+
+.dockview-theme-dark .tabs-and-actions-container {
+  height: 28px !important;
+  font-family: inherit;
+  font-size: 11px;
 }

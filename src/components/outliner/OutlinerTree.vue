@@ -100,24 +100,24 @@ function handleAddBone() {
 </script>
 
 <template>
-  <div class="h-full w-full bg-dcc-900 flex flex-col select-none text-xs">
+  <div class="h-full w-full bg-ui-panel flex flex-col select-none text-xs font-mono">
     <!-- Header with Tab Switcher & Quick Add -->
-    <div class="p-2.5 bg-dcc-850 border-b border-dcc-750 flex items-center justify-between">
+    <div class="h-8 px-2 bg-ui-header border-b border-ui-borderSubtle flex items-center justify-between">
       <div class="flex items-center space-x-1">
         <button 
           @click="activeTab = 'meshes'"
-          class="flex items-center gap-1.5 px-2.5 py-1 rounded font-mono font-bold text-[11px] transition"
-          :class="activeTab === 'meshes' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200 bg-dcc-900'"
+          class="flex items-center gap-1.5 px-2 h-6 rounded-xs font-bold text-[11px] transition"
+          :class="activeTab === 'meshes' ? 'bg-ui-panel text-ui-textPrimary border-b border-ui-accent shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
         >
-          <BlenderIcon name="mesh-cube" :size="13" />
+          <BlenderIcon name="mesh-cube" :size="12" />
           <span>Objects ({{ projectStore.meshes.length }})</span>
         </button>
         <button 
           @click="activeTab = 'armature'"
-          class="flex items-center gap-1.5 px-2.5 py-1 rounded font-mono font-bold text-[11px] transition"
-          :class="activeTab === 'armature' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200 bg-dcc-900'"
+          class="flex items-center gap-1.5 px-2 h-6 rounded-xs font-bold text-[11px] transition"
+          :class="activeTab === 'armature' ? 'bg-ui-panel text-ui-textPrimary border-b border-ui-accent shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
         >
-          <BlenderIcon name="bone" :size="13" />
+          <BlenderIcon name="bone" :size="12" />
           <span>Bones ({{ animationStore.armature.bones.length }})</span>
         </button>
       </div>
@@ -127,56 +127,56 @@ function handleAddBone() {
         <button 
           v-if="activeTab === 'meshes'"
           @click="showAddMeshMenu = !showAddMeshMenu" 
-          class="flex items-center gap-1 px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-mono text-[11px] font-bold shadow transition"
+          class="flex items-center gap-1 px-2 h-6 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white text-[11px] font-bold shadow-xs transition"
           title="Add 3D Primitive"
         >
-          <BlenderIcon name="plus" :size="12" />
+          <BlenderIcon name="plus" :size="11" />
           <span>Add</span>
         </button>
 
         <button 
           v-else
           @click="handleAddBone" 
-          class="flex items-center gap-1 px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-mono text-[11px] font-bold shadow transition"
+          class="flex items-center gap-1 px-2 h-6 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white text-[11px] font-bold shadow-xs transition"
           title="Add Bone"
         >
-          <BlenderIcon name="plus" :size="12" />
-          <span>{{ animationStore.selectedBoneId ? 'Child Bone' : 'Root Bone' }}</span>
+          <BlenderIcon name="plus" :size="11" />
+          <span>{{ animationStore.selectedBoneId ? 'Child' : 'Root' }}</span>
         </button>
 
         <!-- Primitive Dropdown with Blender Icons -->
         <div 
           v-if="showAddMeshMenu" 
           @mouseleave="showAddMeshMenu = false"
-          class="absolute right-0 top-7 z-50 bg-dcc-800 border border-dcc-700 shadow-2xl rounded-md py-1.5 w-36 text-slate-200 text-[11px] font-mono flex flex-col divide-y divide-dcc-750"
+          class="absolute right-0 top-7 z-50 bg-ui-header border border-ui-borderStrong shadow-2xl rounded-xs py-1 w-36 text-ui-textPrimary text-[11px] flex flex-col divide-y divide-ui-borderSubtle"
         >
-          <button @click="projectStore.addPrimitive('cube'); showAddMeshMenu = false" class="px-3 py-1.5 text-left hover:bg-dcc-700 flex items-center gap-2">
-            <BlenderIcon name="mesh-cube" :size="14" color="#f59e0b" /> Cube
+          <button @click="projectStore.addPrimitive('cube'); showAddMeshMenu = false" class="px-2.5 py-1 text-left hover:bg-ui-hover flex items-center gap-2">
+            <BlenderIcon name="mesh-cube" :size="13" color="#f59e0b" /> Cube
           </button>
-          <button @click="projectStore.addPrimitive('plane'); showAddMeshMenu = false" class="px-3 py-1.5 text-left hover:bg-dcc-700 flex items-center gap-2">
-            <BlenderIcon name="mesh-plane" :size="14" color="#38bdf8" /> Plane
+          <button @click="projectStore.addPrimitive('plane'); showAddMeshMenu = false" class="px-2.5 py-1 text-left hover:bg-ui-hover flex items-center gap-2">
+            <BlenderIcon name="mesh-plane" :size="13" color="#38bdf8" /> Plane
           </button>
-          <button @click="projectStore.addPrimitive('cylinder'); showAddMeshMenu = false" class="px-3 py-1.5 text-left hover:bg-dcc-700 flex items-center gap-2">
-            <BlenderIcon name="mesh-cylinder" :size="14" color="#10b981" /> Cylinder
+          <button @click="projectStore.addPrimitive('cylinder'); showAddMeshMenu = false" class="px-2.5 py-1 text-left hover:bg-ui-hover flex items-center gap-2">
+            <BlenderIcon name="mesh-cylinder" :size="13" color="#10b981" /> Cylinder
           </button>
-          <button @click="projectStore.addPrimitive('cone'); showAddMeshMenu = false" class="px-3 py-1.5 text-left hover:bg-dcc-700 flex items-center gap-2">
-            <BlenderIcon name="mesh-cone" :size="14" color="#f43f5e" /> Cone
+          <button @click="projectStore.addPrimitive('cone'); showAddMeshMenu = false" class="px-2.5 py-1 text-left hover:bg-ui-hover flex items-center gap-2">
+            <BlenderIcon name="mesh-cone" :size="13" color="#f43f5e" /> Cone
           </button>
-          <button @click="projectStore.addPrimitive('sphere'); showAddMeshMenu = false" class="px-3 py-1.5 text-left hover:bg-dcc-700 flex items-center gap-2">
-            <BlenderIcon name="mesh-sphere" :size="14" color="#a855f7" /> Sphere
+          <button @click="projectStore.addPrimitive('sphere'); showAddMeshMenu = false" class="px-2.5 py-1 text-left hover:bg-ui-hover flex items-center gap-2">
+            <BlenderIcon name="mesh-sphere" :size="13" color="#a855f7" /> Sphere
           </button>
         </div>
       </div>
     </div>
 
     <!-- Search Filter Bar -->
-    <div class="px-2.5 py-1.5 bg-dcc-850/60 border-b border-dcc-750 flex items-center gap-2">
-      <Search class="w-3.5 h-3.5 text-slate-500 shrink-0" />
+    <div class="px-2 py-1 bg-ui-input border-b border-ui-borderSubtle flex items-center gap-2">
+      <Search class="w-3 h-3 text-ui-textMuted shrink-0" />
       <input 
         v-model="searchQuery"
         type="text" 
         :placeholder="activeTab === 'meshes' ? 'Filter objects...' : 'Filter bones...'"
-        class="bg-transparent text-slate-200 placeholder-slate-500 font-mono text-[11px] w-full focus:outline-none"
+        class="bg-transparent text-ui-textPrimary placeholder-ui-textMuted text-[11px] w-full focus:outline-none"
       />
       <Filter class="w-3 h-3 text-slate-600 shrink-0" />
     </div>
