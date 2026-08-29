@@ -1,0 +1,111 @@
+import { defineStore } from 'pinia'
+import { ref } from 'vue'
+import { AppMode, SelectMode, ModelToolType, PaintToolType, RigToolType, AnimateToolType, SnappingSettings, ViewportSettings } from '../types/tools'
+
+export const useToolStore = defineStore('tool', () => {
+  const appMode = ref<AppMode>('model')
+  const selectMode = ref<SelectMode>('object')
+  const modelTool = ref<ModelToolType>('select')
+  const paintTool = ref<PaintToolType>('brush')
+  const rigTool = ref<RigToolType>('select_bone')
+  const animateTool = ref<AnimateToolType>('select_bone')
+
+  // Painting settings
+  const primaryColor = ref<string>('#ffffff')
+  const secondaryColor = ref<string>('#181425')
+  const brushSize = ref<number>(1)
+  const ditherPattern = ref<string>('bayer4x4')
+
+  // Stylus & Touch Settings
+  const stylusPressureEnabled = ref<boolean>(true)
+  const currentPressure = ref<number>(1.0)
+  const currentPointerType = ref<'mouse' | 'pen' | 'touch'>('mouse')
+
+  // Vertex Painting settings
+  const vertexPaintColor = ref<string>('#ffffff')
+  const vertexBrushRadius = ref<number>(0.8)
+  const vertexBrushFalloff = ref<number>(0.5) // 0 = hard, 1 = smooth falloff
+  const vertexBrushBlend = ref<'mix' | 'add' | 'multiply'>('mix')
+  const paintTarget = ref<'texture' | 'vertex'>('texture')
+  const uvWorkspaceTab = ref<'uv' | 'paint' | 'vertex'>('uv')
+
+  // Snapping
+  const snapping = ref<SnappingSettings>({
+    grid: true,
+    gridSize: 0.5,
+    vertex: false,
+    angle: 15,
+  })
+
+  // Viewport display - Clean, standard 3D modeling viewport by default
+  const viewport = ref<ViewportSettings>({
+    shading: 'textured', // Standard clean textured shading by default
+    showGrid: true,
+    showAxes: true,
+    showNormals: false,
+    showBones: true,
+    psxJitter: false,
+    psxAffine: false,
+    dither: false,
+    crtFilter: false,
+    resolutionScale: 1,
+    quadView: false,
+    xray: false,
+    shadeMode: 'flat',
+    invertZoom: true,
+  })
+
+  function setAppMode(mode: AppMode) {
+    appMode.value = mode
+    if (mode === 'model' && selectMode.value === 'bone') {
+      selectMode.value = 'object'
+    } else if (mode === 'animate' || mode === 'rig') {
+      selectMode.value = 'bone'
+    }
+  }
+
+  function setSelectMode(mode: SelectMode) {
+    selectMode.value = mode
+  }
+
+  function setModelTool(tool: ModelToolType) {
+    modelTool.value = tool
+  }
+
+  function setPaintTool(tool: PaintToolType) {
+    paintTool.value = tool
+  }
+
+  function setRigTool(tool: RigToolType) {
+    rigTool.value = tool
+  }
+
+  return {
+    appMode,
+    selectMode,
+    modelTool,
+    paintTool,
+    rigTool,
+    animateTool,
+    primaryColor,
+    secondaryColor,
+    brushSize,
+    ditherPattern,
+    stylusPressureEnabled,
+    currentPressure,
+    currentPointerType,
+    vertexPaintColor,
+    vertexBrushRadius,
+    vertexBrushFalloff,
+    vertexBrushBlend,
+    paintTarget,
+    uvWorkspaceTab,
+    snapping,
+    viewport,
+    setAppMode,
+    setSelectMode,
+    setModelTool,
+    setPaintTool,
+    setRigTool,
+  }
+})
