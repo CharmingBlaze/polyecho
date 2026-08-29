@@ -27,7 +27,6 @@ import { EditableMesh } from '../../core/mesh/MeshKernel'
 import { MeshBridge } from '../../core/mesh/MeshBridge'
 import { EditorEnvironment } from '../../core/render/EditorEnvironment'
 import { ViewportLayerManager } from '../../core/render/ViewportLayers'
-import ViewportNav from './ViewportNav.vue'
 import { 
   Move, 
   RotateCw, 
@@ -2120,10 +2119,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="relative w-full h-full overflow-hidden bg-dcc-900 flex flex-col">
-    <!-- Viewport Nav & Shading switcher -->
-    <ViewportNav @set-camera-view="setCameraView" />
-
+  <div class="relative w-full h-full overflow-hidden bg-ui-root flex flex-col">
     <!-- 3D Canvas Container -->
     <div ref="containerRef" class="w-full h-full cursor-crosshair flex-1 min-h-0 relative">
       <!-- 1. SINGLE VIEWPORT LIGHTWAVE CONTROLS -->

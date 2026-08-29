@@ -16,12 +16,14 @@ import { useToolStore } from './stores/toolStore'
 import { useProjectStore } from './stores/projectStore'
 import { useAnimationStore } from './stores/animationStore'
 import { useHistoryStore } from './stores/historyStore'
+import { useLayoutStore } from './stores/layoutStore'
 import { ProjectSerializer } from './core/project/ProjectSerializer'
 
 const toolStore = useToolStore()
 const projectStore = useProjectStore()
 const animationStore = useAnimationStore()
 const historyStore = useHistoryStore()
+const layoutStore = useLayoutStore()
 
 const showExportModal = ref(false)
 const showHotkeyModal = ref(false)
@@ -324,7 +326,7 @@ onUnmounted(() => {
     <!-- Main Workspace Area -->
     <div class="flex-1 flex overflow-hidden">
       <!-- Left Tool Palette -->
-      <LeftToolbar />
+      <LeftToolbar v-if="layoutStore.showLeftToolbar" />
 
       <!-- Center Work Area -->
       <main class="flex-1 flex flex-col overflow-hidden bg-dcc-900 relative">
@@ -368,11 +370,11 @@ onUnmounted(() => {
       </main>
 
       <!-- Right Sidebar (Outliner + Inspector + Material & Palette) -->
-      <RightSidebar />
+      <RightSidebar v-if="layoutStore.showRightSidebar" />
     </div>
 
     <!-- Desktop Bottom Status Bar Footer -->
-    <StatusBar />
+    <StatusBar v-if="layoutStore.showStatusBar" />
 
     <!-- Modals -->
     <ExportModal v-if="showExportModal" @close="showExportModal = false" />
