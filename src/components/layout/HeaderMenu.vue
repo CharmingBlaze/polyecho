@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import { useHistoryStore } from '../../stores/historyStore'
@@ -89,6 +89,21 @@ function handleOpenAddDialog() {
   window.dispatchEvent(new CustomEvent('open-add-primitive-menu', { detail: { x: 100, y: 150 } }))
   closeDropdowns()
 }
+
+function onDocumentClick(e: MouseEvent) {
+  const target = e.target as HTMLElement
+  if (!target.closest('.header-menu-container')) {
+    closeDropdowns()
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('pointerdown', onDocumentClick)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('pointerdown', onDocumentClick)
+})
 
 // File operations
 function saveProject() {
@@ -233,7 +248,7 @@ function handleExitProject() {
     <input ref="importTextureInput" type="file" accept="image/*" class="hidden" @change="handleImportTexture" />
 
     <!-- 1. LEFT: Brand & Application Dropdown Menus -->
-    <div class="flex items-center space-x-1 shrink-0">
+    <div class="header-menu-container flex items-center space-x-1 shrink-0">
       <!-- Brand Logo -->
       <div class="flex items-center space-x-1.5 mr-2 px-1.5 py-0.5 bg-ui-input rounded-xs border border-ui-borderSubtle">
         <BlenderIcon name="mesh-cube" :size="13" color="#f59e0b" />
@@ -241,7 +256,7 @@ function handleExitProject() {
       </div>
 
       <!-- File Menu -->
-      <div class="relative" @mouseleave="closeDropdowns" @click.stop>
+      <div class="relative" @click.stop>
         <button 
           class="px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
           :class="{ 'bg-ui-hover text-ui-textPrimary': activeDropdown === 'file' }"
@@ -296,7 +311,7 @@ function handleExitProject() {
       </div>
 
       <!-- Edit Menu -->
-      <div class="relative" @mouseleave="closeDropdowns" @click.stop>
+      <div class="relative" @click.stop>
         <button 
           class="px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
           :class="{ 'bg-ui-hover text-ui-textPrimary': activeDropdown === 'edit' }"
@@ -331,7 +346,7 @@ function handleExitProject() {
       </div>
 
       <!-- Add Primitive & CAD Menu -->
-      <div class="relative" @mouseleave="closeDropdowns" @click.stop>
+      <div class="relative" @click.stop>
         <button 
           class="px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
           :class="{ 'bg-ui-hover text-ui-textPrimary': activeDropdown === 'add' }"
@@ -432,7 +447,7 @@ function handleExitProject() {
       </div>
 
       <!-- View & Window Menu (Panels, Layout, Cameras) -->
-      <div class="relative" @mouseleave="closeDropdowns" @click.stop>
+      <div class="relative" @click.stop>
         <button 
           class="px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
           :class="{ 'bg-ui-hover text-ui-textPrimary': activeDropdown === 'view' }"

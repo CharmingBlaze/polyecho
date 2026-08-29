@@ -23,7 +23,7 @@ const toolStore = useToolStore()
 const activeTab = ref<'outliner' | 'props' | 'material'>('props')
 
 // Photoshop / DCC Floating & Resizable Panel States
-const isFloating = ref(false)
+const isFloating = ref(true)
 const isMinimized = ref(false)
 const width = ref(320)
 const height = ref(560)

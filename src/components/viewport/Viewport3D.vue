@@ -34,7 +34,7 @@ import {
   Maximize2,
   Check,
   X,
-  Sparkles
+  GripHorizontal
 } from 'lucide-vue-next'
 
 const projectStore = useProjectStore()
@@ -93,6 +93,7 @@ const transformProxy = new THREE.Object3D()
 let dragStartProxyMatrix = new THREE.Matrix4()
 let dragStartProxyMatrixInverse = new THREE.Matrix4()
 const dragStartVertexMap = new Map<string, THREE.Vector3>()
+const dragStartMultiMeshMap = new Map<string, { position: THREE.Vector3; rotation: THREE.Euler; scale: THREE.Vector3 }>()
 
 function initThree() {
   if (!containerRef.value) return
@@ -666,13 +667,21 @@ function updateTransformGizmo() {
     transformControls.setMode('translate')
     return
   } else if (toolStore.selectMode === 'object') {
-    transformProxy.position.set(activeMesh.position.x, activeMesh.position.y, activeMesh.position.z)
-    transformProxy.rotation.set(
-      THREE.MathUtils.degToRad(activeMesh.rotation.x),
-      THREE.MathUtils.degToRad(activeMesh.rotation.y),
-      THREE.MathUtils.degToRad(activeMesh.rotation.z)
-    )
-    transformProxy.scale.set(activeMesh.scale.x, activeMesh.scale.y, activeMesh.scale.z)
+    if (projectStore.selectedMeshIds.length > 1) {
+      const selectedMeshes = projectStore.meshes.filter(m => projectStore.selectedMeshIds.includes(m.id))
+      const centroid = computeCentroid(selectedMeshes.map(m => m.position))
+      transformProxy.position.set(centroid.x, centroid.y, centroid.z)
+      transformProxy.rotation.set(0, 0, 0)
+      transformProxy.scale.set(1, 1, 1)
+    } else {
+      transformProxy.position.set(activeMesh.position.x, activeMesh.position.y, activeMesh.position.z)
+      transformProxy.rotation.set(
+        THREE.MathUtils.degToRad(activeMesh.rotation.x),
+        THREE.MathUtils.degToRad(activeMesh.rotation.y),
+        THREE.MathUtils.degToRad(activeMesh.rotation.z)
+      )
+      transformProxy.scale.set(activeMesh.scale.x, activeMesh.scale.y, activeMesh.scale.z)
+    }
     transformProxy.updateMatrixWorld()
     transformControls.attach(transformProxy)
   } else if (toolStore.selectMode === 'vertex' && projectStore.selectedVertexIds.length > 0) {
@@ -780,6 +789,20 @@ function onGizmoDragStart() {
   dragStartProxyMatrixInverse.copy(dragStartProxyMatrix).invert()
 
   dragStartVertexMap.clear()
+  dragStartMultiMeshMap.clear()
+
+  const targetMeshes = projectStore.meshes.filter(m => projectStore.selectedMeshIds.includes(m.id) || m.id === projectStore.activeMeshId)
+  for (const m of targetMeshes) {
+    dragStartMultiMeshMap.set(m.id, {
+      position: new THREE.Vector3(m.position.x, m.position.y, m.position.z),
+      rotation: new THREE.Euler(
+        THREE.MathUtils.degToRad(m.rotation.x),
+        THREE.MathUtils.degToRad(m.rotation.y),
+        THREE.MathUtils.degToRad(m.rotation.z)
+      ),
+      scale: new THREE.Vector3(m.scale.x, m.scale.y, m.scale.z)
+    })
+  }
 
   const activeMesh = projectStore.activeMesh
   if (activeMesh) {
@@ -914,6 +937,58 @@ function onGizmoObjectChange() {
   }
 
   if (toolStore.selectMode === 'object') {
+    if (projectStore.selectedMeshIds.length > 1) {
+      const deltaMatrix = new THREE.Matrix4().multiplyMatrices(
+        transformProxy.matrixWorld,
+        dragStartProxyMatrixInverse
+      )
+
+      for (const meshObj of projectStore.meshes) {
+        if (projectStore.selectedMeshIds.includes(meshObj.id)) {
+          const startData = dragStartMultiMeshMap.get(meshObj.id)
+          if (startData) {
+            const startMatrix = new THREE.Matrix4().compose(
+              startData.position,
+              new THREE.Quaternion().setFromEuler(startData.rotation),
+              startData.scale
+            )
+            const transformedMatrix = new THREE.Matrix4().multiplyMatrices(deltaMatrix, startMatrix)
+            const newPos = new THREE.Vector3()
+            const newQuat = new THREE.Quaternion()
+            const newScale = new THREE.Vector3()
+            transformedMatrix.decompose(newPos, newQuat, newScale)
+            const newEuler = new THREE.Euler().setFromQuaternion(newQuat)
+
+            meshObj.position.x = newPos.x
+            meshObj.position.y = newPos.y
+            meshObj.position.z = newPos.z
+
+            meshObj.rotation.x = THREE.MathUtils.radToDeg(newEuler.x)
+            meshObj.rotation.y = THREE.MathUtils.radToDeg(newEuler.y)
+            meshObj.rotation.z = THREE.MathUtils.radToDeg(newEuler.z)
+
+            meshObj.scale.x = newScale.x
+            meshObj.scale.y = newScale.y
+            meshObj.scale.z = newScale.z
+
+            const threeMesh = layers.modelGroup.getObjectByName(meshObj.id)
+            if (threeMesh) {
+              threeMesh.position.copy(newPos)
+              threeMesh.quaternion.copy(newQuat)
+              threeMesh.scale.copy(newScale)
+            }
+            const wire = layers.wireframeGroup.getObjectByName(`${meshObj.id}_wire`)
+            if (wire) {
+              wire.position.copy(newPos)
+              wire.quaternion.copy(newQuat)
+              wire.scale.copy(newScale)
+            }
+          }
+        }
+      }
+      return
+    }
+
     activeMesh.position.x = transformProxy.position.x
     activeMesh.position.y = transformProxy.position.y
     activeMesh.position.z = transformProxy.position.z
@@ -1989,6 +2064,17 @@ function handlePrimitiveCreatedEvent(e: any) {
   }
 }
 
+function handleStartPrimitivePlacementEvent(e: any) {
+  if (e && e.detail) {
+    startModalOperator('primitive', {
+      primitiveType: e.detail.type || e.detail.primitiveType || 'BOX',
+      mode: e.detail.mode || PrimitivePlacementMode.CAD_DRAW,
+      orientation: e.detail.orientation || 'WORLD',
+      parameters: e.detail.parameters
+    })
+  }
+}
+
 function handleGlobalPointerMove(e: PointerEvent) {
   lastHoverClientPos = { x: e.clientX, y: e.clientY }
   if (operatorManager.state.value.active) {
@@ -2069,6 +2155,37 @@ function triggerStepBack() {
   operatorManager.handlePointerDown({ button: 2 } as any)
 }
 
+// Floating & Movable Operator HUD
+const hudPos = ref({ x: typeof window !== 'undefined' ? Math.max(20, Math.round(window.innerWidth / 2 - 220)) : 220, y: 52 })
+const isHudDragging = ref(false)
+let hudDragOffset = { x: 0, y: 0 }
+
+function startHudDrag(e: MouseEvent) {
+  if (e.button !== 0) return
+  isHudDragging.value = true
+  hudDragOffset = {
+    x: e.clientX - hudPos.value.x,
+    y: e.clientY - hudPos.value.y
+  }
+
+  const onMouseMove = (moveEvent: MouseEvent) => {
+    if (!isHudDragging.value) return
+    const maxX = window.innerWidth - 320
+    const maxY = window.innerHeight - 90
+    hudPos.value.x = Math.max(10, Math.min(maxX, moveEvent.clientX - hudDragOffset.x))
+    hudPos.value.y = Math.max(40, Math.min(maxY, moveEvent.clientY - hudDragOffset.y))
+  }
+
+  const onMouseUp = () => {
+    isHudDragging.value = false
+    window.removeEventListener('mousemove', onMouseMove)
+    window.removeEventListener('mouseup', onMouseUp)
+  }
+
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('mouseup', onMouseUp)
+}
+
 watch(() => toolStore.viewport.invertZoom, (inv) => {
   if (orbitControls) {
     orbitControls.zoomSpeed = inv ? -1.0 : 1.0
@@ -2084,6 +2201,7 @@ onMounted(() => {
   window.addEventListener('set-camera-view', handleCameraViewEvent)
   window.addEventListener('blender-modal-op', handleBlenderModalEvent)
   window.addEventListener('primitive-created', handlePrimitiveCreatedEvent)
+  window.addEventListener('start-primitive-placement', handleStartPrimitivePlacementEvent)
   window.addEventListener('pointermove', handleGlobalPointerMove)
   window.addEventListener('keydown', handleGlobalKeyDown, true)
   window.addEventListener('wheel', handleGlobalWheel, { passive: false })
@@ -2094,6 +2212,7 @@ onUnmounted(() => {
   window.removeEventListener('set-camera-view', handleCameraViewEvent)
   window.removeEventListener('blender-modal-op', handleBlenderModalEvent)
   window.removeEventListener('primitive-created', handlePrimitiveCreatedEvent)
+  window.removeEventListener('start-primitive-placement', handleStartPrimitivePlacementEvent)
   window.removeEventListener('pointermove', handleGlobalPointerMove)
   window.removeEventListener('keydown', handleGlobalKeyDown, true)
   window.removeEventListener('wheel', handleGlobalWheel)
@@ -2322,103 +2441,121 @@ onUnmounted(() => {
       </template>
     </svg>
 
-    <!-- Blender Modal Operator Interactive HUD (Stylus & Touch Ready) -->
+    <!-- Blender Modal Operator Interactive HUD (Floating, Movable & Closable) -->
     <div 
       v-if="operatorManager.state.value.active"
-      class="absolute top-12 left-1/2 -translate-x-1/2 z-50 flex flex-wrap items-center gap-2.5 bg-dcc-900/95 border border-dcc-700/90 px-3.5 py-1.5 rounded-xl shadow-2xl backdrop-blur-xl font-mono select-none pointer-events-auto ring-1 ring-white/10 max-w-[95vw]"
+      class="fixed z-50 flex flex-col bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl font-sans select-none pointer-events-auto max-w-[95vw] min-w-[360px]"
+      :style="{ left: `${hudPos.x}px`, top: `${hudPos.y}px` }"
     >
-      <!-- Tool Badge -->
-      <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-600/30 border border-indigo-500/50 text-indigo-300 font-bold text-xs uppercase tracking-wider shadow-xs">
-        <Sparkles class="w-3.5 h-3.5 text-indigo-400" />
-        <span>{{ operatorManager.state.value.operatorName }}</span>
-      </div>
-
-      <!-- Live Numerical & Status Feedback -->
-      <div class="text-xs font-semibold text-slate-200 tracking-wide px-1">
-        {{ operatorManager.state.value.statusText }}
-      </div>
-
-      <!-- Interactive Stylus & Keyboard Quick Controls -->
-      <div class="flex items-center gap-1.5 pl-2 border-l border-dcc-750">
-        <!-- Axis Constraint Buttons -->
-        <div class="flex items-center bg-dcc-850 rounded-lg p-0.5 border border-dcc-750">
-          <button 
-            @click="triggerAxisConstraint('x')"
-            class="px-2 py-1 rounded text-[10px] font-bold text-rose-400 hover:bg-rose-500/20 active:scale-95 transition"
-            title="Lock to X Axis (X)"
-          >
-            X
-          </button>
-          <button 
-            @click="triggerAxisConstraint('y')"
-            class="px-2 py-1 rounded text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/20 active:scale-95 transition"
-            title="Lock to Y Axis (Y)"
-          >
-            Y
-          </button>
-          <button 
-            @click="triggerAxisConstraint('z')"
-            class="px-2 py-1 rounded text-[10px] font-bold text-sky-400 hover:bg-sky-500/20 active:scale-95 transition"
-            title="Lock to Z Axis (Z)"
-          >
-            Z
-          </button>
+      <!-- Panel Header Bar (Draggable) -->
+      <div 
+        class="flex items-center justify-between px-2.5 py-1 bg-ui-header border-b border-ui-borderSubtle cursor-move rounded-t-xs text-xs text-ui-textMuted group"
+        @mousedown="startHudDrag"
+        title="Drag to reposition HUD"
+      >
+        <div class="flex items-center gap-1.5">
+          <GripHorizontal class="w-3.5 h-3.5 text-ui-textMuted group-hover:text-ui-textSecondary transition" />
+          <span class="font-semibold text-ui-textPrimary text-[11px]">{{ operatorManager.state.value.operatorName }}</span>
         </div>
-
-        <!-- Snap & Precision Buttons -->
         <button 
-          @click="triggerToggleSnap"
-          class="px-2 py-1 bg-dcc-850 hover:bg-dcc-750 border border-dcc-750 rounded-lg text-[10px] text-slate-300 font-bold active:scale-95 transition"
-          title="Toggle Grid / Angle Snapping (Ctrl)"
-        >
-          Snap
-        </button>
-
-        <button 
-          @click="triggerTogglePrecision"
-          class="px-2 py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderDefault rounded-xs text-[10px] text-ui-textSecondary font-bold active:scale-95 transition"
-          title="Precision Mode (Shift)"
-        >
-          Slow
-        </button>
-
-        <!-- Orientation Toggle for Placement -->
-        <button 
-          v-if="operatorManager.state.value.operatorName.includes('Primitive')"
-          @click="triggerToggleOrientation"
-          class="px-2 py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderDefault rounded-xs text-[10px] text-amber-400 font-bold active:scale-95 transition"
-          title="Toggle Align to World vs Surface (O)"
-        >
-          Align
-        </button>
-
-        <!-- Step Back Button (Stylus Friendly Alternative to RMB) -->
-        <button 
-          @click="triggerStepBack"
-          class="px-2 py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderDefault rounded-xs text-[10px] text-ui-textMuted hover:text-ui-textPrimary active:scale-95 transition"
-          title="Step Back / Cancel Stage (RMB)"
-        >
-          Back
-        </button>
-
-        <!-- Confirm Action Button -->
-        <button 
-          @click="operatorManager.confirm()" 
-          class="px-2.5 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xs shadow-xs ml-1 flex items-center gap-1 active:scale-95 transition border border-emerald-500/80"
-          title="Confirm Operation (LMB / Enter)"
-        >
-          <Check class="w-3.5 h-3.5" />
-          <span>Confirm</span>
-        </button>
-
-        <!-- Cancel Action Button -->
-        <button 
-          @click="operatorManager.cancel()" 
-          class="px-2 py-0.5 bg-ui-input hover:bg-rose-950/60 hover:text-rose-300 text-ui-textMuted border border-ui-borderDefault text-xs rounded-xs active:scale-95 transition"
+          @click="operatorManager.cancel()"
+          class="p-0.5 text-ui-textMuted hover:text-rose-400 hover:bg-rose-950/40 rounded-xs transition"
           title="Cancel Operation (Esc)"
         >
           <X class="w-3.5 h-3.5" />
         </button>
+      </div>
+
+      <!-- Panel Body: Status and Controls -->
+      <div class="p-2 flex flex-col gap-2 bg-ui-panel text-xs rounded-b-xs">
+        <!-- Live Status & Instruction Text -->
+        <div class="text-[11px] text-ui-textSecondary font-mono bg-ui-input/70 px-2 py-1 rounded-xs border border-ui-borderSubtle">
+          {{ operatorManager.state.value.statusText }}
+        </div>
+
+        <!-- Interactive Controls Row -->
+        <div class="flex items-center justify-between gap-2 pt-0.5">
+          <!-- Axis Constraint Group -->
+          <div class="flex items-center bg-ui-input rounded-xs p-0.5 border border-ui-borderSubtle">
+            <button 
+              @click="triggerAxisConstraint('x')"
+              class="px-1.5 py-0.5 rounded-xs text-[10px] font-bold text-rose-400 hover:bg-rose-500/20 active:scale-95 transition"
+              title="Lock to X Axis (X)"
+            >
+              X
+            </button>
+            <button 
+              @click="triggerAxisConstraint('y')"
+              class="px-1.5 py-0.5 rounded-xs text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/20 active:scale-95 transition"
+              title="Lock to Y Axis (Y)"
+            >
+              Y
+            </button>
+            <button 
+              @click="triggerAxisConstraint('z')"
+              class="px-1.5 py-0.5 rounded-xs text-[10px] font-bold text-sky-400 hover:bg-sky-500/20 active:scale-95 transition"
+              title="Lock to Z Axis (Z)"
+            >
+              Z
+            </button>
+          </div>
+
+          <!-- Modifiers & Snapping Controls -->
+          <div class="flex items-center gap-1">
+            <button 
+              @click="triggerToggleSnap"
+              class="px-2 py-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[11px] text-ui-textSecondary font-medium active:scale-95 transition"
+              title="Toggle Grid / Angle Snapping (Ctrl)"
+            >
+              Snap
+            </button>
+
+            <button 
+              @click="triggerTogglePrecision"
+              class="px-2 py-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[11px] text-ui-textSecondary font-medium active:scale-95 transition"
+              title="Precision Mode (Shift)"
+            >
+              Slow
+            </button>
+
+            <button 
+              v-if="operatorManager.state.value.operatorName.includes('Primitive')"
+              @click="triggerToggleOrientation"
+              class="px-2 py-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[11px] text-amber-400 font-medium active:scale-95 transition"
+              title="Toggle Align to World vs Surface (O)"
+            >
+              Align
+            </button>
+
+            <button 
+              @click="triggerStepBack"
+              class="px-2 py-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[11px] text-ui-textMuted hover:text-ui-textPrimary active:scale-95 transition"
+              title="Step Back / Cancel Stage (RMB)"
+            >
+              Back
+            </button>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="flex items-center gap-1.5 pl-1.5 border-l border-ui-borderSubtle">
+            <button 
+              @click="operatorManager.confirm()" 
+              class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs rounded-xs shadow-xs flex items-center gap-1 active:scale-95 transition border border-emerald-500/80"
+              title="Confirm Operation (LMB / Enter)"
+            >
+              <Check class="w-3.5 h-3.5" />
+              <span>Confirm</span>
+            </button>
+
+            <button 
+              @click="operatorManager.cancel()" 
+              class="px-2 py-1 bg-ui-surface hover:bg-rose-950/60 hover:text-rose-300 text-ui-textMuted border border-ui-borderSubtle text-xs rounded-xs active:scale-95 transition"
+              title="Cancel Operation (Esc)"
+            >
+              <X class="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
