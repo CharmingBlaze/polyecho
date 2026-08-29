@@ -271,22 +271,22 @@ function handleExitProject() {
 
     <!-- Left: Brand + Menus -->
     <div class="flex items-center space-x-1">
-      <div class="flex items-center space-x-2 mr-3 px-1.5 py-0.5 bg-dcc-800 rounded border border-dcc-700">
-        <BlenderIcon name="mesh-cube" :size="16" color="#f59e0b" />
-        <span class="font-bold tracking-wider text-xs uppercase text-slate-200 font-mono">POLY<span class="text-indigo-400">ECHO</span></span>
+      <div class="flex items-center space-x-2 mr-2 px-1.5 py-0.5 bg-ui-input rounded-xs border border-ui-borderSubtle">
+        <BlenderIcon name="mesh-cube" :size="15" color="#f59e0b" />
+        <span class="font-bold tracking-wider text-xs uppercase text-ui-textPrimary font-mono">POLY<span class="text-ui-accent">ECHO</span></span>
       </div>
 
       <!-- File Menu -->
       <div class="relative" @click.stop>
         <button 
-          class="px-2.5 py-1 text-xs font-medium rounded hover:bg-dcc-750 text-slate-300 hover:text-white transition"
-          :class="{ 'bg-dcc-750 text-white': activeDropdown === 'file' }"
+          class="px-2.5 py-1 text-xs font-mono font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
+          :class="{ 'bg-ui-hover text-ui-textPrimary': activeDropdown === 'file' }"
           @click="toggleDropdown('file')"
         >
           File
         </button>
 
-        <div v-if="activeDropdown === 'file'" class="absolute left-0 top-full mt-1 w-56 bg-dcc-850 border border-dcc-700 rounded-lg shadow-2xl py-1 z-50 text-xs animate-in fade-in zoom-in-95 duration-100">
+        <div v-if="activeDropdown === 'file'" class="absolute left-0 top-full mt-1 w-56 bg-ui-header border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs animate-in fade-in zoom-in-95 duration-75">
           <!-- New -->
           <button @click="$emit('new-project'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-dcc-750 flex items-center justify-between">
             <span class="flex items-center gap-2"><Plus class="w-3.5 h-3.5 text-indigo-400" /> New Project...</span>

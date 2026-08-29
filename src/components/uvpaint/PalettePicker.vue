@@ -76,7 +76,7 @@ function setSecondaryColor(e: MouseEvent, hex: string) {
           v-for="(color, idx) in projectStore.activePalette.colors" 
           :key="idx"
           class="w-full h-5 rounded-xs border border-ui-borderSubtle hover:scale-105 active:scale-95 transition cursor-pointer relative"
-          :class="{ 'ring-1 ring-ui-accent border-white': toolStore.primaryColor.toLowerCase() === color.toLowerCase() }"
+          :class="{ 'ring-1 ring-ui-accent border-ui-accent': toolStore.primaryColor.toLowerCase() === color.toLowerCase() }"
           :style="{ backgroundColor: color }"
           :title="`Left-Click: Primary, Right-Click: Secondary (${color})`"
           @click="setColor(color)"

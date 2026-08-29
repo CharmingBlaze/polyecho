@@ -2425,21 +2425,5 @@ onUnmounted(() => {
         </button>
       </div>
     </div>
-
-    <!-- HUD Stats Bar (Tris, Verts, Mode) -->
-    <div class="absolute bottom-2.5 left-2.5 bg-ui-panel/90 backdrop-blur-xs px-2 py-0.5 rounded-xs border border-ui-borderSubtle shadow-xs text-[10px] font-mono text-ui-textMuted flex items-center space-x-2.5 select-none pointer-events-none z-20">
-      <span>Tris: <strong class="text-ui-textPrimary">{{ projectStore.stats?.tris ?? 0 }}</strong></span>
-      <span>Verts: <strong class="text-ui-textPrimary">{{ projectStore.stats?.verts ?? 0 }}</strong></span>
-      <span>Faces: <strong class="text-ui-textPrimary">{{ projectStore.stats?.faces ?? 0 }}</strong></span>
-      <span v-if="(projectStore.stats?.selectedFaces ?? 0) > 0" class="text-amber-400 font-bold">
-        Sel Faces: {{ projectStore.stats?.selectedFaces }}
-      </span>
-      <span v-if="(projectStore.stats?.selectedVerts ?? 0) > 0" class="text-amber-400 font-bold">
-        Sel Verts: {{ projectStore.stats?.selectedVerts }}
-      </span>
-      <span class="text-ui-textAccent uppercase font-bold">{{ toolStore.appMode }} / {{ toolStore.selectMode }}</span>
-      <span v-if="toolStore.viewport.quadView" class="text-amber-400 font-bold uppercase">[QUAD VIEW]</span>
-      <span v-if="toolStore.viewport.xray" class="text-cyan-400 font-bold uppercase">[X-RAY]</span>
-    </div>
   </div>
 </template>

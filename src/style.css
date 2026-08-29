@@ -3,18 +3,18 @@
 @tailwind utilities;
 
 :root {
-  /* Semantic Design Tokens (Preserving PolyEcho Dark Theme) */
+  /* Semantic Design Tokens (PolyEcho Dark Theme) */
   --ui-bg-root: #0e1013;
   --ui-bg-panel: #14161a;
   --ui-bg-header: #181a1f;
   --ui-bg-surface: #1e2127;
   --ui-bg-input: #111215;
   --ui-bg-hover: #252830;
-  --ui-bg-active: #2e333d;
+  --ui-bg-active: #2a2f3a;
 
-  --ui-border-subtle: #1f2229;
-  --ui-border-default: #2b2f38;
-  --ui-border-strong: #3d434f;
+  --ui-border-subtle: #20232a;
+  --ui-border-default: #282c35;
+  --ui-border-strong: #363b47;
   --ui-border-focus: #6366f1;
 
   --ui-accent: #6366f1;
@@ -37,6 +37,10 @@
 }
 
 @layer base {
+  *, ::before, ::after {
+    border-color: var(--ui-border-default);
+  }
+
   body {
     background-color: var(--ui-bg-root);
     color: var(--ui-text-primary);

@@ -6,6 +6,7 @@ import RightSidebar from './components/layout/RightSidebar.vue'
 import Viewport3D from './components/viewport/Viewport3D.vue'
 import PixelCanvas from './components/uvpaint/PixelCanvas.vue'
 import Timeline from './components/animation/Timeline.vue'
+import StatusBar from './components/layout/StatusBar.vue'
 import ExportModal from './components/modals/ExportModal.vue'
 import HotkeyModal from './components/modals/HotkeyModal.vue'
 import NewProjectModal from './components/modals/NewProjectModal.vue'
@@ -369,6 +370,9 @@ onUnmounted(() => {
       <!-- Right Sidebar (Outliner + Inspector + Material & Palette) -->
       <RightSidebar />
     </div>
+
+    <!-- Desktop Bottom Status Bar Footer -->
+    <StatusBar />
 
     <!-- Modals -->
     <ExportModal v-if="showExportModal" @close="showExportModal = false" />
