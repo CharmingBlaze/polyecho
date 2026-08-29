@@ -1394,6 +1394,7 @@ function onWheel(event: WheelEvent) {
 
 // Raycasting for Selection & Hover Highlighting
 function onPointerDown(event: PointerEvent) {
+  if (operatorManager.state.value.active) return
   if (event.button !== 0) return
   if (transformControls.dragging || isGizmoDragging || (transformControls as any).axis !== null) {
     orbitControls.enabled = false
@@ -1524,6 +1525,7 @@ function onPointerDown(event: PointerEvent) {
 }
 
 function onPointerMove(event: PointerEvent) {
+  if (operatorManager.state.value.active) return
   lastHoverClientPos = { x: event.clientX, y: event.clientY }
   if (isGizmoDragging || transformControls.dragging || (transformControls as any).axis !== null) {
     orbitControls.enabled = false
@@ -1625,7 +1627,10 @@ function startModalOperator(tool: string, options?: any) {
     viewportElement: containerRef.value || document.body,
     pivotMode: 'MEDIAN',
     previewGroup: layers.previewGroup,
+    sceneGroup: layers.modelGroup,
+    allMeshes: projectStore.meshes,
     viewportKind: vpKind,
+    quadrant: activeQuadrant.value,
     onUpdatePreview: () => {
       if (activeMesh) {
         const updatedMeshObj = MeshBridge.editableMeshToMeshObject(
@@ -2078,6 +2083,13 @@ function handleStartPrimitivePlacementEvent(e: any) {
 function handleGlobalPointerMove(e: PointerEvent) {
   lastHoverClientPos = { x: e.clientX, y: e.clientY }
   if (operatorManager.state.value.active) {
+    updateActiveCameraAndQuadrant(e)
+    if (operatorManager.activeOperator) {
+      (operatorManager.activeOperator as any).ctx.camera = activeCamera
+      const vpKind = activeQuadrant.value === 'top_left' ? 'top' : (activeQuadrant.value === 'bottom_left' ? 'front' : (activeQuadrant.value === 'bottom_right' ? 'right' : 'persp'))
+      ;(operatorManager.activeOperator as any).ctx.viewportKind = vpKind
+      ;(operatorManager.activeOperator as any).ctx.quadrant = activeQuadrant.value
+    }
     operatorManager.handlePointerMove(e)
   }
 }
@@ -2107,21 +2119,47 @@ function handleGlobalWheel(e: WheelEvent) {
 }
 
 function handleGlobalPointerDown(e: MouseEvent) {
-  if (operatorManager.state.value.active) {
-    if (operatorManager.handlePointerDown(e)) {
-      e.preventDefault()
-      e.stopPropagation()
+  if (!operatorManager.state.value.active) return
+
+  // Prevent drawing in 3D scene when clicking on any UI button, floating panel, modal, inspector, etc.
+  const target = e.target as HTMLElement | null
+  if (target) {
+    if (
+      target.tagName === 'BUTTON' ||
+      target.tagName === 'INPUT' ||
+      target.tagName === 'SELECT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.closest('button') ||
+      target.closest('input') ||
+      target.closest('select') ||
+      target.closest('textarea') ||
+      target.closest('.pointer-events-auto') ||
+      (renderer && renderer.domElement && target !== renderer.domElement)
+    ) {
       return
     }
-    if (e.button === 0) {
-      e.preventDefault()
-      e.stopPropagation()
-      operatorManager.confirm()
-    } else if (e.button === 2) {
-      e.preventDefault()
-      e.stopPropagation()
-      operatorManager.cancel()
-    }
+  }
+
+  updateActiveCameraAndQuadrant(e)
+  if (operatorManager.activeOperator) {
+    (operatorManager.activeOperator as any).ctx.camera = activeCamera
+    const vpKind = activeQuadrant.value === 'top_left' ? 'top' : (activeQuadrant.value === 'bottom_left' ? 'front' : (activeQuadrant.value === 'bottom_right' ? 'right' : 'persp'))
+    ;(operatorManager.activeOperator as any).ctx.viewportKind = vpKind
+    ;(operatorManager.activeOperator as any).ctx.quadrant = activeQuadrant.value
+  }
+  if (operatorManager.handlePointerDown(e)) {
+    e.preventDefault()
+    e.stopPropagation()
+    return
+  }
+  if (e.button === 0) {
+    e.preventDefault()
+    e.stopPropagation()
+    operatorManager.confirm()
+  } else if (e.button === 2) {
+    e.preventDefault()
+    e.stopPropagation()
+    operatorManager.cancel()
   }
 }
 

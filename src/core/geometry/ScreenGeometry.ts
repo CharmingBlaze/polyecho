@@ -33,10 +33,34 @@ export class ScreenGeometry {
   static screenToRay(
     screenPos: ScreenPoint,
     camera: THREE.Camera,
-    viewportRect: DOMRect | { left: number; top: number; width: number; height: number }
+    viewportRect: DOMRect | { left: number; top: number; width: number; height: number },
+    quadrant?: 'top_left' | 'top_right' | 'bottom_left' | 'bottom_right' | 'main'
   ): THREE.Ray {
-    const ndcX = ((screenPos.x - viewportRect.left) / viewportRect.width) * 2 - 1
-    const ndcY = -((screenPos.y - viewportRect.top) / viewportRect.height) * 2 + 1
+    let subLeft = viewportRect.left
+    let subTop = viewportRect.top
+    let subWidth = viewportRect.width
+    let subHeight = viewportRect.height
+
+    if (quadrant === 'top_left') {
+      subWidth = viewportRect.width / 2
+      subHeight = viewportRect.height / 2
+    } else if (quadrant === 'top_right') {
+      subLeft = viewportRect.left + viewportRect.width / 2
+      subWidth = viewportRect.width / 2
+      subHeight = viewportRect.height / 2
+    } else if (quadrant === 'bottom_left') {
+      subTop = viewportRect.top + viewportRect.height / 2
+      subWidth = viewportRect.width / 2
+      subHeight = viewportRect.height / 2
+    } else if (quadrant === 'bottom_right') {
+      subLeft = viewportRect.left + viewportRect.width / 2
+      subTop = viewportRect.top + viewportRect.height / 2
+      subWidth = viewportRect.width / 2
+      subHeight = viewportRect.height / 2
+    }
+
+    const ndcX = ((screenPos.x - subLeft) / subWidth) * 2 - 1
+    const ndcY = -((screenPos.y - subTop) / subHeight) * 2 + 1
     const raycaster = new THREE.Raycaster()
     raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera)
     return raycaster.ray

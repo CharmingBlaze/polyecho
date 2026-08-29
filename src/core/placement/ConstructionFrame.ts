@@ -66,6 +66,63 @@ export class ConstructionFrameResolver {
    */
   static getFrameFromSurfaceNormal(origin: THREE.Vector3, normal: THREE.Vector3): ConstructionFrame {
     const W = normal.clone().normalize()
+
+    // Upward surface (Ground / Top face)
+    if (Math.abs(W.x) < 1e-4 && Math.abs(W.z) < 1e-4 && W.y > 0.9) {
+      return {
+        origin: origin.clone(),
+        axisU: new THREE.Vector3(1, 0, 0),
+        axisV: new THREE.Vector3(0, 0, 1),
+        axisW: new THREE.Vector3(0, 1, 0)
+      }
+    }
+    // Downward surface (Ceiling / Bottom face)
+    if (Math.abs(W.x) < 1e-4 && Math.abs(W.z) < 1e-4 && W.y < -0.9) {
+      return {
+        origin: origin.clone(),
+        axisU: new THREE.Vector3(1, 0, 0),
+        axisV: new THREE.Vector3(0, 0, -1),
+        axisW: new THREE.Vector3(0, -1, 0)
+      }
+    }
+    // Vertical Wall Z+
+    if (Math.abs(W.x) < 1e-4 && Math.abs(W.y) < 1e-4 && W.z > 0.9) {
+      return {
+        origin: origin.clone(),
+        axisU: new THREE.Vector3(1, 0, 0),
+        axisV: new THREE.Vector3(0, 1, 0),
+        axisW: new THREE.Vector3(0, 0, 1)
+      }
+    }
+    // Vertical Wall Z-
+    if (Math.abs(W.x) < 1e-4 && Math.abs(W.y) < 1e-4 && W.z < -0.9) {
+      return {
+        origin: origin.clone(),
+        axisU: new THREE.Vector3(-1, 0, 0),
+        axisV: new THREE.Vector3(0, 1, 0),
+        axisW: new THREE.Vector3(0, 0, -1)
+      }
+    }
+    // Vertical Wall X+
+    if (Math.abs(W.y) < 1e-4 && Math.abs(W.z) < 1e-4 && W.x > 0.9) {
+      return {
+        origin: origin.clone(),
+        axisU: new THREE.Vector3(0, 0, -1),
+        axisV: new THREE.Vector3(0, 1, 0),
+        axisW: new THREE.Vector3(1, 0, 0)
+      }
+    }
+    // Vertical Wall X-
+    if (Math.abs(W.y) < 1e-4 && Math.abs(W.z) < 1e-4 && W.x < -0.9) {
+      return {
+        origin: origin.clone(),
+        axisU: new THREE.Vector3(0, 0, 1),
+        axisV: new THREE.Vector3(0, 1, 0),
+        axisW: new THREE.Vector3(-1, 0, 0)
+      }
+    }
+
+    // General arbitrary surface normal
     const reference = Math.abs(W.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0)
     const U = new THREE.Vector3().crossVectors(reference, W).normalize()
     const V = new THREE.Vector3().crossVectors(W, U).normalize()

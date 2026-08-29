@@ -27,7 +27,10 @@ const isFloating = ref(true)
 const isMinimized = ref(false)
 const width = ref(320)
 const height = ref(560)
-const pos = ref({ x: window.innerWidth - 340, y: 46 })
+const pos = ref({ 
+  x: typeof window !== 'undefined' ? Math.max(20, window.innerWidth - 332) : 950, 
+  y: 90 
+})
 
 const isDragging = ref(false)
 let dragOffset = { x: 0, y: 0 }
@@ -47,8 +50,8 @@ function toggleFloating() {
   isFloating.value = !isFloating.value
   if (isFloating.value) {
     pos.value = {
-      x: Math.max(20, window.innerWidth - width.value - 16),
-      y: 46
+      x: Math.max(20, window.innerWidth - width.value - 12),
+      y: 90
     }
   }
 }

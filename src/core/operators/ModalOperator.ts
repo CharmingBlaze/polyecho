@@ -15,7 +15,10 @@ export interface OperatorContext {
   viewportElement: HTMLElement
   pivotMode: PivotMode
   previewGroup?: THREE.Group
+  sceneGroup?: THREE.Group
+  allMeshes?: any[]
   viewportKind?: 'persp' | 'top' | 'front' | 'right'
+  quadrant?: 'top_left' | 'top_right' | 'bottom_left' | 'bottom_right' | 'main'
   onUpdatePreview: () => void
   onCommit: (actionName: string) => void
   onCancel: () => void

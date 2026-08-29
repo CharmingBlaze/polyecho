@@ -295,7 +295,8 @@ function handleKeyDown(e: KeyboardEvent) {
     case 'delete':
     case 'x':
       if (toolStore.appMode === 'model') {
-        if (toolStore.selectMode === 'face') projectStore.performDelete('face')
+        if (toolStore.selectMode === 'object') projectStore.performDelete('object')
+        else if (toolStore.selectMode === 'face') projectStore.performDelete('face')
         else if (toolStore.selectMode === 'edge') projectStore.performDelete('edge')
         else projectStore.performDelete('vertex')
       } else if (toolStore.appMode === 'rig' && animationStore.selectedBoneId) {

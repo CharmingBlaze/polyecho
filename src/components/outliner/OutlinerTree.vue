@@ -73,12 +73,7 @@ function duplicateMesh(id: string) {
 }
 
 function deleteMesh(id: string) {
-  if (projectStore.meshes.length <= 1) return
-  projectStore.recordState('Delete Mesh')
-  projectStore.meshes = projectStore.meshes.filter(m => m.id !== id)
-  if (projectStore.activeMeshId === id) {
-    projectStore.activeMeshId = projectStore.meshes[0].id
-  }
+  projectStore.deleteMesh(id)
 }
 
 function startRename(id: string, currentName: string) {
@@ -242,7 +237,6 @@ function handleAddBone() {
               <BlenderIcon v-else name="eye-closed" :size="13" />
             </button>
             <button 
-              v-if="projectStore.meshes.length > 1"
               @click.stop="deleteMesh(mesh.id)" 
               class="p-1 hover:bg-rose-500/20 rounded text-slate-400 hover:text-rose-400 transition" 
               title="Delete Object"

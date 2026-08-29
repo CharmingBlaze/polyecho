@@ -34,7 +34,7 @@ export class PrimitivePlacementOperator extends ModalOperator {
   public primitiveType: PrimitiveType = 'BOX'
   public mode: PrimitivePlacementMode = PrimitivePlacementMode.CAD_DRAW
   public state: PrimitivePlacementState = PrimitivePlacementState.WAITING_FOR_START
-  public placementOrientation: PlacementOrientation = 'WORLD'
+  public placementOrientation: PlacementOrientation = 'SURFACE'
 
   public currentParams: PrimitiveParameters = { width: 1, depth: 1, height: 1 }
   public frame: ConstructionFrame | null = null
@@ -51,7 +51,7 @@ export class PrimitivePlacementOperator extends ModalOperator {
   constructor(
     type: PrimitiveType = 'BOX',
     mode: PrimitivePlacementMode = PrimitivePlacementMode.CAD_DRAW,
-    orientation: PlacementOrientation = 'WORLD',
+    orientation: PlacementOrientation = 'SURFACE',
     params?: PrimitiveParameters
   ) {
     super()
@@ -63,7 +63,7 @@ export class PrimitivePlacementOperator extends ModalOperator {
   }
 
   public evaluate(): void {
-    // Placement operator updates live ghost preview
+    // Live evaluation handled in ghost preview
   }
 
   begin(ctx: OperatorContext, startPointer: { x: number; y: number }) {
@@ -90,7 +90,7 @@ export class PrimitivePlacementOperator extends ModalOperator {
       this.updateCadGhost()
     }
 
-    this.ctx.onUpdatePreview()
+    this.ctx.onUpdatePreview?.()
     this.updateStatus()
   }
 
@@ -111,25 +111,34 @@ export class PrimitivePlacementOperator extends ModalOperator {
           this.startPoint.copy(this.placementHit.worldPosition)
           this.primaryPoint.copy(this.startPoint)
 
-          // Lock construction frame from initial click
-          const vpKind = (this.ctx as any).viewportKind || 'persp'
-          this.frame = ConstructionFrameResolver.getFrameForViewport(
-            vpKind,
-            this.startPoint,
-            this.placementHit.type === 'FACE' ? this.placementHit.worldNormal : undefined
-          )
+          // Lock construction frame from surface normal or active viewport kind
+          const vpKind = this.ctx.viewportKind || 'persp'
+          if (this.placementHit.type === 'FACE') {
+            const normal = this.placementHit.worldNormal.clone().normalize()
+            this.frame = ConstructionFrameResolver.getFrameFromSurfaceNormal(
+              this.startPoint,
+              normal.lengthSq() > 0.001 ? normal : new THREE.Vector3(0, 1, 0)
+            )
+          } else {
+            this.frame = ConstructionFrameResolver.getFrameForViewport(
+              vpKind,
+              this.startPoint
+            )
+          }
 
           this.state = PrimitivePlacementState.DRAWING_PRIMARY
+          this.updateCadGhost()
           this.updateStatus()
           return true
         }
       } else if (this.state === PrimitivePlacementState.DRAWING_PRIMARY) {
         if (kind === 'RECTANGULAR' || kind === 'RADIAL_HEIGHT' || kind === 'LINEAR_HEIGHT') {
           this.state = PrimitivePlacementState.DRAWING_SECONDARY
+          this.updateCadGhost()
           this.updateStatus()
           return true
         } else {
-          // RADIAL or Plane (1-stage drawing)
+          // Flat 2D shape (Plane / Circle)
           this.commitPrimitive()
           return true
         }
@@ -182,15 +191,33 @@ export class PrimitivePlacementOperator extends ModalOperator {
 
   private resolvePlacementHit(pointer: { x: number; y: number }) {
     const rect = this.ctx.viewportElement.getBoundingClientRect()
-    const ray = ScreenGeometry.screenToRay(pointer, this.ctx.camera, rect)
+    const ray = ScreenGeometry.screenToRay(pointer, this.ctx.camera, rect, this.ctx.quadrant)
 
-    // In Secondary Stage (Extrusion Height), intersect the vertical camera-facing billboard plane
+    // 1. In CAD Draw Primary Stage (2D footprint on surface): intersect the surface tangent plane
+    if (this.state === PrimitivePlacementState.DRAWING_PRIMARY && this.frame) {
+      const surfacePlane = new THREE.Plane().setFromNormalAndCoplanarPoint(this.frame.axisW, this.startPoint)
+      const hitPoint = ray.intersectPlane(surfacePlane, new THREE.Vector3())
+      if (hitPoint) {
+        this.placementHit = {
+          type: 'FACE',
+          objectId: null,
+          faceId: null,
+          worldPosition: hitPoint,
+          worldNormal: this.frame.axisW.clone()
+        }
+        return
+      }
+    }
+
+    // 2. In CAD Draw Secondary Stage (Extrusion Height): intersect camera-facing vertical billboard plane
     if (this.state === PrimitivePlacementState.DRAWING_SECONDARY && this.frame) {
       const cameraDir = new THREE.Vector3()
       this.ctx.camera.getWorldDirection(cameraDir)
 
-      // Find vector orthogonal to axisW closest to camera forward
-      let planeNormal = cameraDir.clone().sub(this.frame.axisW.clone().multiplyScalar(cameraDir.dot(this.frame.axisW))).normalize()
+      let planeNormal = cameraDir.clone().sub(
+        this.frame.axisW.clone().multiplyScalar(cameraDir.dot(this.frame.axisW))
+      ).normalize()
+
       if (planeNormal.lengthSq() < 0.001) {
         planeNormal = this.frame.axisU.clone()
       }
@@ -212,42 +239,89 @@ export class PrimitivePlacementOperator extends ModalOperator {
     let closestDist = Infinity
     let hit: PlacementHit | null = null
 
-    // 1. Raycast existing mesh faces
-    for (const [fId, face] of this.ctx.mesh.faces) {
-      if (face.vertexIds.length < 3) continue
-      const p0 = this.ctx.mesh.vertices.get(face.vertexIds[0])?.position
-      const p1 = this.ctx.mesh.vertices.get(face.vertexIds[1])?.position
-      const p2 = this.ctx.mesh.vertices.get(face.vertexIds[2])?.position
-      if (!p0 || !p1 || !p2) continue
+    // 3. Raycast all scene meshes
+    const allMeshes = this.ctx.allMeshes || (this.ctx.mesh ? [{
+      id: 'active',
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      vertices: Array.from(this.ctx.mesh.vertices.values()).map(v => ({ id: String(v.id), position: v.position })),
+      faces: Array.from(this.ctx.mesh.faces.values()).map(f => ({ id: String(f.id), vertexIds: f.vertexIds.map(String) }))
+    }] : [])
 
-      const intersect = ray.intersectTriangle(p0, p1, p2, false, new THREE.Vector3())
-      if (intersect) {
-        const d = ray.origin.distanceTo(intersect)
-        if (d < closestDist) {
-          closestDist = d
-          const fn = face.normal ? face.normal.clone() : new THREE.Vector3(0, 1, 0)
-          hit = {
-            type: 'FACE',
-            objectId: null,
-            faceId: fId,
-            worldPosition: intersect,
-            worldNormal: fn
+    for (const meshObj of allMeshes) {
+      const vertMap = new Map<string, THREE.Vector3>()
+      for (const v of meshObj.vertices) {
+        vertMap.set(v.id, new THREE.Vector3(
+          meshObj.position.x + v.position.x,
+          meshObj.position.y + v.position.y,
+          meshObj.position.z + v.position.z
+        ))
+      }
+
+      for (const face of meshObj.faces) {
+        if (!face.vertexIds || face.vertexIds.length < 3) continue
+        const p0 = vertMap.get(face.vertexIds[0])
+        const p1 = vertMap.get(face.vertexIds[1])
+        const p2 = vertMap.get(face.vertexIds[2])
+        if (!p0 || !p1 || !p2) continue
+
+        // Test first triangle
+        let intersect = ray.intersectTriangle(p0, p1, p2, false, new THREE.Vector3())
+        let triNormal = new THREE.Vector3().crossVectors(
+          p1.clone().sub(p0),
+          p2.clone().sub(p0)
+        ).normalize()
+
+        // Test second triangle if quad
+        if (!intersect && face.vertexIds.length >= 4) {
+          const p3 = vertMap.get(face.vertexIds[3])
+          if (p3) {
+            intersect = ray.intersectTriangle(p0, p2, p3, false, new THREE.Vector3())
+            if (intersect) {
+              triNormal = new THREE.Vector3().crossVectors(
+                p2.clone().sub(p0),
+                p3.clone().sub(p0)
+              ).normalize()
+            }
+          }
+        }
+
+        if (intersect) {
+          const d = ray.origin.distanceTo(intersect)
+          if (d < closestDist) {
+            closestDist = d
+            hit = {
+              type: 'FACE',
+              objectId: meshObj.id,
+              faceId: null,
+              worldPosition: intersect,
+              worldNormal: triNormal
+            }
           }
         }
       }
     }
 
-    // 2. Ground Grid plane fallback (Y = 0)
+    // 4. Viewport-Specific Grid fallback (Top/Persp -> Y=0, Front -> Z=0, Right -> X=0)
     if (!hit) {
-      const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
-      const groundHit = ray.intersectPlane(groundPlane, new THREE.Vector3())
-      if (groundHit) {
+      const vpKind = this.ctx.viewportKind || 'persp'
+      let gridNormal = new THREE.Vector3(0, 1, 0)
+      if (vpKind === 'front') {
+        gridNormal = new THREE.Vector3(0, 0, 1)
+      } else if (vpKind === 'right') {
+        gridNormal = new THREE.Vector3(1, 0, 0)
+      }
+
+      const gridPlane = new THREE.Plane(gridNormal, 0)
+      const gridHit = ray.intersectPlane(gridPlane, new THREE.Vector3())
+      if (gridHit) {
         hit = {
           type: 'GRID',
           objectId: null,
           faceId: null,
-          worldPosition: groundHit,
-          worldNormal: new THREE.Vector3(0, 1, 0)
+          worldPosition: gridHit,
+          worldNormal: gridNormal
         }
       }
     }
@@ -270,7 +344,7 @@ export class PrimitivePlacementOperator extends ModalOperator {
     const rot = SurfacePlacementSolver.calculateRotation(this.placementHit, this.placementOrientation)
 
     this.ghost.update(this.primitiveType, this.currentParams, pos, rot)
-    this.dimensionText = `Position: (${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}, ${pos.z.toFixed(2)})`
+    this.dimensionText = `Surface: (${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}, ${pos.z.toFixed(2)})`
   }
 
   private updateCadGhost() {
@@ -280,55 +354,69 @@ export class PrimitivePlacementOperator extends ModalOperator {
     const def = PrimitiveRegistry.get(this.primitiveType)
     const kind = def?.creationKind || 'RECTANGULAR'
 
+    // Compute surface basis rotation quaternion (X -> axisU, Y -> axisW normal, Z -> axisV)
+    let Z = this.frame.axisV.clone().normalize()
+    if (new THREE.Matrix4().makeBasis(this.frame.axisU, this.frame.axisW, Z).determinant() < 0) {
+      Z.negate()
+    }
+    const rotMatrix = new THREE.Matrix4().makeBasis(this.frame.axisU, this.frame.axisW, Z)
+    const rotation = new THREE.Quaternion().setFromRotationMatrix(rotMatrix)
+
     if (this.state === PrimitivePlacementState.DRAWING_PRIMARY) {
       this.primaryPoint.copy(currentWorld)
       const delta = currentWorld.clone().sub(this.startPoint)
       const { u, v } = ConstructionFrameResolver.projectToUVW(delta, this.frame)
 
-      const width = Math.max(0.1, Math.abs(u))
-      const depth = Math.max(0.1, Math.abs(v))
+      const width = Math.max(0.02, Math.abs(u))
+      const depth = Math.max(0.02, Math.abs(v))
 
       if (kind === 'RECTANGULAR') {
         const height = 0.05
         this.currentParams = { width, depth, height }
-        const centerU = u / 2
-        const centerV = v / 2
-        const center = ConstructionFrameResolver.uvwToWorld(centerU, centerV, height / 2, this.frame)
-        this.ghost.update(this.primitiveType, this.currentParams, center)
-        this.dimensionText = `U: ${width.toFixed(3)}  |  V: ${depth.toFixed(3)}`
+        const center = this.startPoint.clone()
+          .addScaledVector(this.frame.axisU, u / 2)
+          .addScaledVector(this.frame.axisV, v / 2)
+          .addScaledVector(this.frame.axisW, height / 2)
+
+        this.ghost.update(this.primitiveType, this.currentParams, center, rotation)
+        this.dimensionText = `Width: ${width.toFixed(2)}  |  Depth: ${depth.toFixed(2)}`
       } else if (kind === 'RADIAL' || kind === 'RADIAL_HEIGHT') {
-        const radius = Math.max(0.05, Math.hypot(u, v))
+        const radius = Math.max(0.02, Math.hypot(u, v))
         const height = 0.05
         this.currentParams = { radius, height }
-        this.ghost.update(this.primitiveType, this.currentParams, this.startPoint)
-        this.dimensionText = `Radius: ${radius.toFixed(3)}`
+        const center = this.startPoint.clone().addScaledVector(this.frame.axisW, height / 2)
+
+        this.ghost.update(this.primitiveType, this.currentParams, center, rotation)
+        this.dimensionText = `Radius: ${radius.toFixed(2)}`
       }
     } else if (this.state === PrimitivePlacementState.DRAWING_SECONDARY) {
       this.secondaryPoint.copy(currentWorld)
       const delta = currentWorld.clone().sub(this.primaryPoint)
       const w = delta.dot(this.frame.axisW)
 
-      const height = Math.max(0.05, Math.abs(w))
+      const height = Math.max(0.02, Math.abs(w))
       this.currentParams = { ...this.currentParams, height }
 
       const halfW = (w >= 0 ? 1 : -1) * (height / 2)
 
       if (kind === 'RECTANGULAR' || kind === 'LINEAR_HEIGHT') {
         const baseDelta = this.primaryPoint.clone().sub(this.startPoint)
-        const baseCenter = this.startPoint.clone().addScaledVector(baseDelta, 0.5)
+        const { u: finalU, v: finalV } = ConstructionFrameResolver.projectToUVW(baseDelta, this.frame)
+        const baseCenter = this.startPoint.clone()
+          .addScaledVector(this.frame.axisU, finalU / 2)
+          .addScaledVector(this.frame.axisV, finalV / 2)
         const center = baseCenter.clone().addScaledVector(this.frame.axisW, halfW)
-        this.ghost.update(this.primitiveType, this.currentParams, center)
 
+        this.ghost.update(this.primitiveType, this.currentParams, center, rotation)
         const u = (this.currentParams as any).width || 1
         const v = (this.currentParams as any).depth || 1
-        this.dimensionText = `Height: ${height.toFixed(3)}  |  U: ${u.toFixed(2)}  |  V: ${v.toFixed(2)}`
+        this.dimensionText = `Height: ${height.toFixed(2)}  |  Width: ${u.toFixed(2)}  |  Depth: ${v.toFixed(2)}`
       } else {
         // Radial with height (Cylinder, Cone, Capsule, Tube, Arch)
         const center = this.startPoint.clone().addScaledVector(this.frame.axisW, halfW)
-        this.ghost.update(this.primitiveType, this.currentParams, center)
-
+        this.ghost.update(this.primitiveType, this.currentParams, center, rotation)
         const rad = (this.currentParams as any).radius || 0.5
-        this.dimensionText = `Height: ${height.toFixed(3)}  |  Radius: ${rad.toFixed(2)}`
+        this.dimensionText = `Height: ${height.toFixed(2)}  |  Radius: ${rad.toFixed(2)}`
       }
     }
   }
@@ -406,14 +494,14 @@ export class PrimitivePlacementOperator extends ModalOperator {
     const orientLabel = this.placementOrientation === 'WORLD' ? 'World' : 'Surface'
 
     if (this.mode === PrimitivePlacementMode.PLACE) {
-      this.statusText = `${this.primitiveType} [${modeLabel}] (LMB: Place | O: Orientation [${orientLabel}] | Esc: Exit) | ${this.dimensionText}`
+      this.statusText = `${this.primitiveType} [${modeLabel}] (LMB: Place on Surface | O: Align [${orientLabel}] | Esc: Exit) | ${this.dimensionText}`
     } else {
       if (this.state === PrimitivePlacementState.WAITING_FOR_START) {
-        this.statusText = `${this.primitiveType} [${modeLabel}] (LMB: Set Start Corner | Esc: Exit)`
+        this.statusText = `${this.primitiveType} [${modeLabel}] (LMB: Click Any Surface to Start Base | Esc: Exit)`
       } else if (this.state === PrimitivePlacementState.DRAWING_PRIMARY) {
-        this.statusText = `${this.primitiveType} [${modeLabel}] (LMB: Lock Base Footprint | RMB: Back | Esc: Exit) | ${this.dimensionText}`
+        this.statusText = `${this.primitiveType} [${modeLabel}] (LMB: Lock Surface Footprint | RMB: Back | Esc: Exit) | ${this.dimensionText}`
       } else {
-        this.statusText = `${this.primitiveType} [${modeLabel}] (LMB: Lock Extrusion Height | RMB: Back | Esc: Exit) | ${this.dimensionText}`
+        this.statusText = `${this.primitiveType} [${modeLabel}] (LMB: Lock Surface Extrusion | RMB: Back | Esc: Exit) | ${this.dimensionText}`
       }
     }
   }

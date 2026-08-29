@@ -4,22 +4,61 @@ import { PrimitiveType } from '../../core/primitives/PrimitiveTypes'
 import { PrimitivePlacementMode } from '../../core/operators/placement/PrimitivePlacementOperator'
 import { PlacementOrientation } from '../../core/placement/SurfacePlacementSolver'
 import BlenderIcon from '../icons/BlenderIcon.vue'
-import { X, Search, Sparkles, Box, Shapes, Building2 } from 'lucide-vue-next'
+import { 
+  X, 
+  Search, 
+  Box, 
+  Shapes, 
+  Building2, 
+  GripHorizontal, 
+  Minus, 
+  Plus 
+} from 'lucide-vue-next'
 
 const visible = ref(false)
-const position = ref({ x: 100, y: 100 })
+const isMinimized = ref(false)
+const position = ref({ x: 120, y: 70 })
 const activeTab = ref<'basic' | 'shapes' | 'build'>('basic')
 const searchQuery = ref('')
 
 const placementMode = ref<PrimitivePlacementMode>(PrimitivePlacementMode.CAD_DRAW)
-const orientation = ref<PlacementOrientation>('WORLD')
+const orientation = ref<PlacementOrientation>('SURFACE')
+
+const isDragging = ref(false)
+let dragOffset = { x: 0, y: 0 }
+
+function startDrag(e: MouseEvent) {
+  if (e.button !== 0) return
+  isDragging.value = true
+  dragOffset = {
+    x: e.clientX - position.value.x,
+    y: e.clientY - position.value.y
+  }
+
+  const onMouseMove = (moveEvent: MouseEvent) => {
+    if (!isDragging.value) return
+    const maxX = window.innerWidth - 320
+    const maxY = window.innerHeight - 80
+    position.value.x = Math.max(10, Math.min(maxX, moveEvent.clientX - dragOffset.x))
+    position.value.y = Math.max(40, Math.min(maxY, moveEvent.clientY - dragOffset.y))
+  }
+
+  const onMouseUp = () => {
+    isDragging.value = false
+    window.removeEventListener('mousemove', onMouseMove)
+    window.removeEventListener('mouseup', onMouseUp)
+  }
+
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('mouseup', onMouseUp)
+}
 
 interface PrimitiveItem {
   type: PrimitiveType
   label: string
   desc: string
   category: 'basic' | 'shapes' | 'build'
-  icon: any
+  icon: string
   color: string
 }
 
@@ -55,14 +94,20 @@ const filteredPrimitives = computed(() => {
   return PRIMITIVES.filter(p => p.category === activeTab.value)
 })
 
-function openAt(x: number, y: number) {
-  const panelWidth = 380
-  const panelHeight = 440
-  const clampedX = Math.min(x, window.innerWidth - panelWidth - 20)
-  const clampedY = Math.min(y, window.innerHeight - panelHeight - 20)
-  position.value = { x: Math.max(20, clampedX), y: Math.max(20, clampedY) }
+function openAt(x?: number, y?: number) {
+  if (x !== undefined && y !== undefined) {
+    const panelWidth = 360
+    const panelHeight = 440
+    const clampedX = Math.min(x, window.innerWidth - panelWidth - 20)
+    const clampedY = Math.min(y, window.innerHeight - panelHeight - 20)
+    position.value = { x: Math.max(20, clampedX), y: Math.max(40, clampedY) }
+  }
   searchQuery.value = ''
   visible.value = true
+}
+
+function toggle() {
+  visible.value = !visible.value
 }
 
 function close() {
@@ -71,28 +116,18 @@ function close() {
 
 function selectPrimitive(type: PrimitiveType) {
   window.dispatchEvent(
-    new CustomEvent('blender-modal-op', {
+    new CustomEvent('start-primitive-placement', {
       detail: {
-        tool: 'primitive',
-        primitiveType: type,
+        type,
         mode: placementMode.value,
         orientation: orientation.value
       }
     })
   )
-  close()
-}
-
-let lastMousePos = { x: window.innerWidth / 2 - 190, y: window.innerHeight / 2 - 200 }
-
-function handleGlobalPointerMove(e: PointerEvent) {
-  lastMousePos = { x: e.clientX, y: e.clientY }
 }
 
 function handleGlobalKeyDown(e: KeyboardEvent) {
   if (e.key === 'Escape' && visible.value) {
-    e.preventDefault()
-    e.stopPropagation()
     close()
     return
   }
@@ -101,134 +136,143 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
     if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
     e.preventDefault()
     e.stopPropagation()
-    openAt(lastMousePos.x, lastMousePos.y)
+    toggle()
   }
 }
 
 function handleOpenEvent(e: any) {
   if (e && e.detail) {
-    openAt(e.detail.x ?? lastMousePos.x, e.detail.y ?? lastMousePos.y)
+    openAt(e.detail.x, e.detail.y)
+  } else {
+    toggle()
   }
 }
 
 onMounted(() => {
-  window.addEventListener('pointermove', handleGlobalPointerMove)
   window.addEventListener('keydown', handleGlobalKeyDown, true)
   window.addEventListener('open-add-primitive-menu', handleOpenEvent)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('pointermove', handleGlobalPointerMove)
   window.removeEventListener('keydown', handleGlobalKeyDown, true)
   window.removeEventListener('open-add-primitive-menu', handleOpenEvent)
 })
 
 defineExpose({
   openAt,
+  toggle,
   close
 })
 </script>
 
 <template>
+  <!-- Floating, Movable, Closable & Minimizable Primitive Panel -->
   <div 
     v-if="visible" 
-    class="fixed inset-0 z-50 select-none"
-    @click="close"
-    @contextmenu.prevent="close"
+    class="fixed z-50 flex flex-col bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl font-sans select-none pointer-events-auto w-[360px] text-xs transition-shadow"
+    :style="{ left: `${position.x}px`, top: `${position.y}px` }"
   >
-    <!-- Floating Glassmorphism Modal Panel -->
+    <!-- Panel Draggable Header Bar -->
     <div 
-      class="absolute bg-dcc-900/95 backdrop-blur-xl border border-dcc-700/80 shadow-2xl rounded-xl p-3 flex flex-col text-xs text-slate-200 w-[370px] animate-in fade-in zoom-in-95 duration-100 ring-1 ring-white/10"
-      :style="{ left: `${position.x}px`, top: `${position.y}px` }"
-      @click.stop
+      class="flex items-center justify-between px-2.5 py-1.5 bg-ui-header border-b border-ui-borderSubtle cursor-move rounded-t-xs text-xs text-ui-textMuted group select-none"
+      @mousedown="startDrag"
+      title="Drag to move panel"
     >
-      <!-- Header Bar with Title & Close -->
-      <div class="flex items-center justify-between pb-2 border-b border-dcc-750/70 mb-2.5">
-        <div class="flex items-center space-x-2">
-          <div class="w-6 h-6 rounded-lg bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center text-indigo-300">
-            <Sparkles class="w-3.5 h-3.5" />
-          </div>
-          <div>
-            <h3 class="font-bold text-slate-100 text-xs tracking-wide">Add Primitive</h3>
-            <span class="text-[10px] text-slate-400 font-mono">16 Unified Mesh Generators</span>
-          </div>
-        </div>
-
-        <button 
-          @click="close" 
-          class="p-1 rounded-lg hover:bg-dcc-750 text-slate-400 hover:text-white transition"
-          title="Close (Esc)"
-        >
-          <X class="w-4 h-4" />
-        </button>
+      <div class="flex items-center space-x-1.5">
+        <GripHorizontal class="w-3.5 h-3.5 text-ui-textMuted group-hover:text-ui-textSecondary transition" />
+        <span class="font-semibold text-ui-textPrimary text-xs tracking-wide">Add Primitives & CAD</span>
       </div>
 
-      <!-- Touch/Stylus Workflow & Orientation Switches -->
-      <div class="grid grid-cols-2 gap-2 bg-dcc-850/80 border border-dcc-750 rounded-lg p-1.5 mb-2.5">
-        <!-- Workflow: CAD vs Place -->
+      <div class="flex items-center space-x-1" @mousedown.stop>
+        <!-- Minimize Button -->
+        <button 
+          @click="isMinimized = !isMinimized" 
+          class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary transition"
+          :title="isMinimized ? 'Expand Panel' : 'Minimize Panel'"
+        >
+          <Plus v-if="isMinimized" class="w-3.5 h-3.5" />
+          <Minus v-else class="w-3.5 h-3.5" />
+        </button>
+
+        <!-- Close Button -->
+        <button 
+          @click="close" 
+          class="p-1 rounded-xs hover:bg-rose-950/50 text-ui-textMuted hover:text-rose-300 transition"
+          title="Close (Esc)"
+        >
+          <X class="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
+
+    <!-- Body Content (Hidden when minimized) -->
+    <div v-show="!isMinimized" class="p-2.5 flex flex-col space-y-2.5 bg-ui-panel text-xs rounded-b-xs">
+      <!-- Mode & Alignment Dual Row -->
+      <div class="grid grid-cols-2 gap-2 bg-ui-input/80 border border-ui-borderSubtle rounded-xs p-1.5">
+        <!-- Placement Mode: CAD Draw vs Place -->
         <div class="flex flex-col space-y-1">
-          <span class="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-wider px-1">Workflow</span>
-          <div class="grid grid-cols-2 gap-1 bg-dcc-900 p-0.5 rounded-md border border-dcc-750/70">
+          <span class="text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider px-0.5">Mode</span>
+          <div class="grid grid-cols-2 gap-1 bg-ui-surface p-0.5 rounded-xs border border-ui-borderSubtle">
             <button 
               @click="placementMode = PrimitivePlacementMode.CAD_DRAW" 
-              class="py-1 rounded text-[10px] font-bold transition flex items-center justify-center space-x-1"
-              :class="placementMode === PrimitivePlacementMode.CAD_DRAW ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'"
-              title="CAD Draw Mode (Interactive 2-stage drag & extrusion)"
+              class="py-1 rounded-xs text-[10px] font-medium transition text-center"
+              :class="placementMode === PrimitivePlacementMode.CAD_DRAW ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40 font-semibold shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary'"
+              title="CAD Draw Mode: Click and drag footprint on any surface, then extrude height"
             >
-              <span>CAD Draw</span>
+              CAD Draw
             </button>
             <button 
               @click="placementMode = PrimitivePlacementMode.PLACE" 
-              class="py-1 rounded text-[10px] font-bold transition flex items-center justify-center space-x-1"
-              :class="placementMode === PrimitivePlacementMode.PLACE ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'"
-              title="Place Mode (Instant drop on grid / surface)"
+              class="py-1 rounded-xs text-[10px] font-medium transition text-center"
+              :class="placementMode === PrimitivePlacementMode.PLACE ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40 font-semibold shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary'"
+              title="Place Mode: One-click instant drop on any surface"
             >
-              <span>Place</span>
+              Direct
             </button>
           </div>
         </div>
 
-        <!-- Orientation: World vs Surface -->
+        <!-- Surface Alignment: Surface Normal vs World -->
         <div class="flex flex-col space-y-1">
-          <span class="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-wider px-1">Align To</span>
-          <div class="grid grid-cols-2 gap-1 bg-dcc-900 p-0.5 rounded-md border border-dcc-750/70">
-            <button 
-              @click="orientation = 'WORLD'" 
-              class="py-1 rounded text-[10px] font-bold transition flex items-center justify-center space-x-1"
-              :class="orientation === 'WORLD' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'"
-              title="Align upright to World Grid"
-            >
-              <span>World</span>
-            </button>
+          <span class="text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider px-0.5">Align To</span>
+          <div class="grid grid-cols-2 gap-1 bg-ui-surface p-0.5 rounded-xs border border-ui-borderSubtle">
             <button 
               @click="orientation = 'SURFACE'" 
-              class="py-1 rounded text-[10px] font-bold transition flex items-center justify-center space-x-1"
-              :class="orientation === 'SURFACE' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'"
-              title="Align perpendicular to Surface Normal"
+              class="py-1 rounded-xs text-[10px] font-medium transition text-center"
+              :class="orientation === 'SURFACE' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40 font-semibold shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary'"
+              title="Orient perpendicular to clicked surface normal"
             >
-              <span>Surface</span>
+              Surface
+            </button>
+            <button 
+              @click="orientation = 'WORLD'" 
+              class="py-1 rounded-xs text-[10px] font-medium transition text-center"
+              :class="orientation === 'WORLD' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40 font-semibold shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary'"
+              title="Align upright to World axes"
+            >
+              World
             </button>
           </div>
         </div>
       </div>
 
       <!-- Search Input -->
-      <div class="relative mb-2.5">
-        <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+      <div class="relative">
+        <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-ui-textMuted pointer-events-none" />
         <input 
           v-model="searchQuery"
           type="text" 
-          placeholder="Search primitives (e.g. cylinder, stairs, box)..." 
-          class="w-full bg-dcc-850/90 border border-dcc-750 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition font-sans"
+          placeholder="Filter primitives (cube, stairs, arch, cone)..." 
+          class="w-full bg-ui-input border border-ui-borderSubtle hover:border-ui-borderDefault focus:border-ui-accent rounded-xs pl-8 pr-3 py-1.5 text-xs text-ui-textPrimary placeholder-ui-textMuted focus:outline-none transition font-sans"
         />
       </div>
 
       <!-- Category Tabs (When Not Searching) -->
-      <div v-if="!searchQuery" class="flex items-center space-x-1 mb-2 bg-dcc-850/60 p-0.5 rounded-lg border border-dcc-750/60">
+      <div v-if="!searchQuery" class="flex items-center space-x-1 bg-ui-input/60 p-0.5 rounded-xs border border-ui-borderSubtle">
         <button 
           @click="activeTab = 'basic'"
-          class="flex-1 py-1 px-2 rounded-md text-[11px] font-bold transition flex items-center justify-center space-x-1.5"
-          :class="activeTab === 'basic' ? 'bg-dcc-750 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200 hover:bg-dcc-800'"
+          class="flex-1 py-1 px-2 rounded-xs text-[11px] font-medium transition flex items-center justify-center space-x-1.5"
+          :class="activeTab === 'basic' ? 'bg-ui-surface text-ui-textPrimary border border-ui-borderDefault shadow-xs font-semibold' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
         >
           <Box class="w-3 h-3 text-amber-400" />
           <span>Basic</span>
@@ -236,8 +280,8 @@ defineExpose({
 
         <button 
           @click="activeTab = 'shapes'"
-          class="flex-1 py-1 px-2 rounded-md text-[11px] font-bold transition flex items-center justify-center space-x-1.5"
-          :class="activeTab === 'shapes' ? 'bg-dcc-750 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200 hover:bg-dcc-800'"
+          class="flex-1 py-1 px-2 rounded-xs text-[11px] font-medium transition flex items-center justify-center space-x-1.5"
+          :class="activeTab === 'shapes' ? 'bg-ui-surface text-ui-textPrimary border border-ui-borderDefault shadow-xs font-semibold' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
         >
           <Shapes class="w-3 h-3 text-sky-400" />
           <span>Shapes</span>
@@ -245,41 +289,41 @@ defineExpose({
 
         <button 
           @click="activeTab = 'build'"
-          class="flex-1 py-1 px-2 rounded-md text-[11px] font-bold transition flex items-center justify-center space-x-1.5"
-          :class="activeTab === 'build' ? 'bg-dcc-750 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200 hover:bg-dcc-800'"
+          class="flex-1 py-1 px-2 rounded-xs text-[11px] font-medium transition flex items-center justify-center space-x-1.5"
+          :class="activeTab === 'build' ? 'bg-ui-surface text-ui-textPrimary border border-ui-borderDefault shadow-xs font-semibold' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
         >
           <Building2 class="w-3 h-3 text-emerald-400" />
-          <span>Build</span>
+          <span>CAD Build</span>
         </button>
       </div>
 
-      <!-- Touch & Stylus Friendly Primitive Grid Cards -->
-      <div class="grid grid-cols-2 gap-1.5 max-h-56 overflow-y-auto pr-0.5 custom-scrollbar">
+      <!-- Grid of Primitives -->
+      <div class="grid grid-cols-2 gap-1.5 max-h-60 overflow-y-auto pr-0.5">
         <button 
           v-for="item in filteredPrimitives" 
           :key="item.type"
           @click="selectPrimitive(item.type)"
-          class="group p-2 rounded-lg bg-dcc-850 hover:bg-dcc-750/90 border border-dcc-750 hover:border-indigo-500/60 flex items-center space-x-2.5 transition active:scale-[0.98] text-left"
+          class="p-2 rounded-xs bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle hover:border-ui-accent/50 flex items-center space-x-2.5 transition active:scale-[0.98] text-left group"
         >
           <div 
-            class="w-7 h-7 rounded-md bg-dcc-900 border border-dcc-700/80 flex items-center justify-center shrink-0 group-hover:scale-105 transition shadow-inner"
+            class="w-7 h-7 rounded-xs bg-ui-input border border-ui-borderSubtle flex items-center justify-center shrink-0 group-hover:border-ui-borderDefault transition"
           >
-            <BlenderIcon :name="item.icon" :size="16" :color="item.color" />
+            <BlenderIcon :name="(item.icon as any)" :size="16" :color="item.color" />
           </div>
 
           <div class="flex flex-col min-w-0 flex-1">
-            <span class="font-bold text-slate-200 group-hover:text-white text-xs truncate">{{ item.label }}</span>
-            <span class="text-[9px] text-slate-400 truncate">{{ item.desc }}</span>
+            <span class="font-medium text-ui-textPrimary group-hover:text-ui-accent text-xs truncate">{{ item.label }}</span>
+            <span class="text-[10px] text-ui-textMuted truncate">{{ item.desc }}</span>
           </div>
         </button>
       </div>
 
-      <!-- Footer Hotkey & Stylus Hint -->
-      <div class="pt-2 mt-2 border-t border-dcc-750/70 text-[10px] text-slate-400 font-mono flex items-center justify-between">
+      <!-- Footer Info -->
+      <div class="pt-1.5 border-t border-ui-borderSubtle text-[10px] text-ui-textMuted font-mono flex items-center justify-between">
         <span class="flex items-center gap-1">
-          <kbd class="px-1.5 py-0.5 bg-dcc-800 rounded border border-dcc-700 text-slate-300">Shift+A</kbd> to summon
+          <kbd class="px-1 py-0.5 bg-ui-input rounded-xs border border-ui-borderSubtle text-ui-textSecondary">Shift+A</kbd> toggle panel
         </span>
-        <span class="text-slate-500">Touch & Stylus Ready</span>
+        <span class="text-ui-textMuted">Click surface to draw</span>
       </div>
     </div>
   </div>

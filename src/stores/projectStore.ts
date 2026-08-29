@@ -321,7 +321,31 @@ export const useProjectStore = defineStore('project', () => {
     replaceMesh(result.mesh)
   }
 
-  function performDelete(mode: 'vertex' | 'edge' | 'face') {
+  function deleteMesh(id: string) {
+    recordState('Delete Object')
+    meshes.value = meshes.value.filter(m => m.id !== id)
+    selectedMeshIds.value = selectedMeshIds.value.filter(mId => mId !== id)
+    if (activeMeshId.value === id) {
+      activeMeshId.value = meshes.value[0]?.id || ''
+    }
+    clearSubSelections()
+  }
+
+  function deleteSelectedMeshes() {
+    const targetIds = new Set(selectedMeshIds.value.length > 0 ? selectedMeshIds.value : (activeMeshId.value ? [activeMeshId.value] : []))
+    if (targetIds.size === 0) return
+    recordState('Delete Object(s)')
+    meshes.value = meshes.value.filter(m => !targetIds.has(m.id))
+    selectedMeshIds.value = []
+    activeMeshId.value = meshes.value[0]?.id || ''
+    clearSubSelections()
+  }
+
+  function performDelete(mode: 'vertex' | 'edge' | 'face' | 'object') {
+    if (mode === 'object') {
+      deleteSelectedMeshes()
+      return
+    }
     if (!activeMesh.value) return
     recordState(`Delete ${mode}`)
     const ids = mode === 'face' ? selectedFaceIds.value : (mode === 'edge' ? selectedEdgeIds.value : selectedVertexIds.value)
@@ -627,6 +651,8 @@ export const useProjectStore = defineStore('project', () => {
     performJoinMeshes,
     performFlipNormals,
     performDelete,
+    deleteMesh,
+    deleteSelectedMeshes,
     performDissolve,
     performConnectVertices,
     performCleanupMesh,
