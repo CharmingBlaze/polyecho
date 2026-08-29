@@ -48,7 +48,7 @@ const emit = defineEmits<{
         <button 
           @click="toolStore.viewport.shading = 'textured'" 
           class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="toolStore.viewport.shading === 'textured' ? 'bg-ui-surface text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          :class="toolStore.viewport.shading === 'textured' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
           title="Textured Shading"
         >
           <BlenderIcon name="shading-textured" :size="11" />
@@ -58,7 +58,7 @@ const emit = defineEmits<{
         <button 
           @click="toolStore.viewport.shading = 'solid'" 
           class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="toolStore.viewport.shading === 'solid' ? 'bg-ui-surface text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          :class="toolStore.viewport.shading === 'solid' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
           title="Solid Shading"
         >
           <BlenderIcon name="shading-solid" :size="11" />
@@ -68,7 +68,7 @@ const emit = defineEmits<{
         <button 
           @click="toolStore.viewport.shading = 'wireframe'" 
           class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="toolStore.viewport.shading === 'wireframe' ? 'bg-ui-surface text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          :class="toolStore.viewport.shading === 'wireframe' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
           title="Wireframe Mode"
         >
           <BlenderIcon name="shading-wire" :size="11" />
@@ -78,7 +78,7 @@ const emit = defineEmits<{
         <button 
           @click="toolStore.viewport.shading = 'psx'" 
           class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="toolStore.viewport.shading === 'psx' ? 'bg-ui-surface text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          :class="toolStore.viewport.shading === 'psx' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
           title="PSX Retro Preview"
         >
           <BlenderIcon name="shading-rendered" :size="11" />
@@ -91,7 +91,7 @@ const emit = defineEmits<{
         <button 
           @click="toolStore.viewport.shadeMode = 'flat'" 
           class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="toolStore.viewport.shadeMode === 'flat' ? 'bg-amber-600/30 text-amber-300 font-bold border border-amber-500/50' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          :class="toolStore.viewport.shadeMode === 'flat' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
           title="Flat Shading (Face Normals - Low-Poly Default)"
         >
           <span>Flat</span>
@@ -100,7 +100,7 @@ const emit = defineEmits<{
         <button 
           @click="toolStore.viewport.shadeMode = 'smooth'" 
           class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="toolStore.viewport.shadeMode === 'smooth' ? 'bg-indigo-600/30 text-indigo-300 font-bold border border-indigo-500/50' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          :class="toolStore.viewport.shadeMode === 'smooth' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
           title="Smooth Shading (Vertex Normals)"
         >
           <span>Smooth</span>
@@ -111,7 +111,7 @@ const emit = defineEmits<{
       <button 
         @click="toolStore.viewport.xray = !toolStore.viewport.xray" 
         class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs border text-[10px] transition"
-        :class="toolStore.viewport.xray ? 'bg-ui-accentSubtle text-ui-textAccent border-ui-accent/50 font-bold' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault hover:text-ui-textPrimary'"
+        :class="toolStore.viewport.xray ? 'bg-ui-accentSubtle text-ui-textAccent border-ui-accent/40 font-bold shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault hover:text-ui-textPrimary'"
         title="Toggle X-Ray (Translucent Mesh)"
       >
         <BlenderIcon name="xray" :size="11" />
@@ -122,7 +122,7 @@ const emit = defineEmits<{
       <button 
         @click="toolStore.viewport.quadView = !toolStore.viewport.quadView" 
         class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs border text-[10px] transition"
-        :class="toolStore.viewport.quadView ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-bold' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault hover:text-ui-textPrimary'"
+        :class="toolStore.viewport.quadView ? 'bg-ui-accentSubtle text-ui-textAccent border-ui-accent/40 font-bold shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault hover:text-ui-textPrimary'"
         title="Toggle Quad View (Top/Front/Right/Persp)"
       >
         <LayoutGrid class="w-3 h-3" />
@@ -133,31 +133,30 @@ const emit = defineEmits<{
       <button 
         @click="animationStore.showBones = !animationStore.showBones"
         class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs border text-[10px] transition"
-        :class="animationStore.showBones ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50 font-bold' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault hover:text-ui-textPrimary'"
+        :class="animationStore.showBones ? 'bg-ui-accentSubtle text-ui-textAccent border-ui-accent/40 font-bold shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault hover:text-ui-textPrimary'"
         title="Toggle Bone Overlay in Viewport"
       >
         <BlenderIcon name="bone" :size="11" />
         <span>Bones</span>
       </button>
 
-      <!-- Invert Zoom (Trackpad/Wheel) Toggle -->
+      <!-- Invert Zoom Preference -->
       <button 
         @click="toolStore.viewport.invertZoom = !toolStore.viewport.invertZoom"
         class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs border text-[10px] transition"
-        :class="toolStore.viewport.invertZoom ? 'bg-indigo-600/30 text-indigo-300 border-indigo-500/50 font-bold' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault hover:text-ui-textPrimary'"
-        title="Toggle Invert Zoom Direction (Ideal for laptop two-finger trackpad & natural scrolling)"
+        :class="toolStore.viewport.invertZoom ? 'bg-ui-accentSubtle text-ui-textAccent border-ui-accent/40 font-bold shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault hover:text-ui-textPrimary'"
+        title="Toggle Invert Zoom Direction"
       >
         <span>Inv Zoom</span>
       </button>
 
-      <!-- CRT Overlay -->
+      <!-- Reset Camera Button -->
       <button 
-        @click="toolStore.viewport.crtFilter = !toolStore.viewport.crtFilter" 
-        class="p-1 rounded hover:bg-dcc-750 text-slate-400 hover:text-slate-200 transition"
-        :class="{ 'text-amber-400': toolStore.viewport.crtFilter }"
-        title="Toggle CRT Scanline Overlay"
+        @click="emit('setCameraView', 'persp')"
+        title="Reset Camera (Home)"
+        class="p-1 text-ui-textMuted hover:text-ui-textPrimary rounded-xs bg-ui-input border border-ui-borderDefault hover:bg-ui-hover transition"
       >
-        <Tv class="w-3.5 h-3.5" />
+        <Tv class="w-3 h-3" />
       </button>
     </div>
   </div>

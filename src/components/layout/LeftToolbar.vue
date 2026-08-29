@@ -40,119 +40,119 @@ function handleStartKnife() {
 </script>
 
 <template>
-  <aside class="w-[74px] bg-dcc-850 border-r border-dcc-750 flex flex-col items-center py-2 select-none z-20 overflow-y-auto custom-scrollbar">
+  <aside class="w-[74px] bg-ui-panel border-r border-ui-borderSubtle flex flex-col items-center py-1.5 select-none z-20 overflow-y-auto font-mono">
     <!-- 1. SELECTION MODES (2 Columns, 3 Rows = 6 Symmetrical Slots) -->
-    <div class="w-full px-1.5 border-b border-dcc-750 pb-2 mb-1.5">
-      <div class="text-[9px] font-mono font-bold text-slate-500 uppercase tracking-wider mb-1 px-1">Select</div>
+    <div class="w-full px-1 border-b border-ui-borderSubtle pb-1.5 mb-1">
+      <div class="text-[9px] font-bold text-ui-textMuted uppercase tracking-wider mb-1 px-1">Select</div>
       <div class="grid grid-cols-2 gap-1 w-full">
         <!-- Object Mode (4) -->
         <button 
           @click="toolStore.selectMode = 'object'"
-          class="w-full h-8 flex items-center justify-center rounded transition relative"
-          :class="toolStore.selectMode === 'object' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/50 shadow-xs' : 'text-slate-400 hover:text-slate-200 hover:bg-dcc-750'"
+          class="w-full h-7 flex items-center justify-center rounded-xs transition relative"
+          :class="toolStore.selectMode === 'object' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/50 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Object Mode (4 / Tab)"
         >
-          <BlenderIcon name="object-mode" :size="16" />
+          <BlenderIcon name="object-mode" :size="15" />
           <span class="absolute bottom-0.5 right-0.5 text-[8px] font-mono font-bold opacity-60">4</span>
         </button>
 
         <!-- Origin / Pivot Mode (5) -->
         <button 
           @click="toolStore.selectMode = 'origin'"
-          class="w-full h-8 flex items-center justify-center rounded transition relative"
-          :class="toolStore.selectMode === 'origin' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/50 shadow-xs' : 'text-slate-400 hover:text-slate-200 hover:bg-dcc-750'"
+          class="w-full h-7 flex items-center justify-center rounded-xs transition relative"
+          :class="toolStore.selectMode === 'origin' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/50 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Origin / Pivot Edit (5 / P)"
         >
-          <BlenderIcon name="origin" :size="16" />
+          <BlenderIcon name="origin" :size="15" />
           <span class="absolute bottom-0.5 right-0.5 text-[8px] font-mono font-bold opacity-60">5</span>
         </button>
 
         <!-- Vertex Mode (1) -->
         <button 
           @click="toolStore.selectMode = 'vertex'"
-          class="w-full h-8 flex items-center justify-center rounded transition relative"
-          :class="toolStore.selectMode === 'vertex' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/50 shadow-xs' : 'text-slate-400 hover:text-slate-200 hover:bg-dcc-750'"
+          class="w-full h-7 flex items-center justify-center rounded-xs transition relative"
+          :class="toolStore.selectMode === 'vertex' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/50 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Vertex Select (1)"
         >
-          <BlenderIcon name="vertex-select" :size="16" />
+          <BlenderIcon name="vertex-select" :size="15" />
           <span class="absolute bottom-0.5 right-0.5 text-[8px] font-mono font-bold opacity-60">1</span>
         </button>
 
         <!-- Edge Mode (2) -->
         <button 
           @click="toolStore.selectMode = 'edge'"
-          class="w-full h-8 flex items-center justify-center rounded transition relative"
-          :class="toolStore.selectMode === 'edge' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/50 shadow-xs' : 'text-slate-400 hover:text-slate-200 hover:bg-dcc-750'"
+          class="w-full h-7 flex items-center justify-center rounded-xs transition relative"
+          :class="toolStore.selectMode === 'edge' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/50 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Edge Select (2)"
         >
-          <BlenderIcon name="edge-select" :size="16" />
+          <BlenderIcon name="edge-select" :size="15" />
           <span class="absolute bottom-0.5 right-0.5 text-[8px] font-mono font-bold opacity-60">2</span>
         </button>
 
         <!-- Face Mode (3) -->
         <button 
           @click="toolStore.selectMode = 'face'"
-          class="w-full h-8 flex items-center justify-center rounded transition relative"
-          :class="toolStore.selectMode === 'face' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/50 shadow-xs' : 'text-slate-400 hover:text-slate-200 hover:bg-dcc-750'"
+          class="w-full h-7 flex items-center justify-center rounded-xs transition relative"
+          :class="toolStore.selectMode === 'face' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/50 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Face Select (3)"
         >
-          <BlenderIcon name="face-select" :size="16" />
+          <BlenderIcon name="face-select" :size="15" />
           <span class="absolute bottom-0.5 right-0.5 text-[8px] font-mono font-bold opacity-60">3</span>
         </button>
 
         <!-- Snapping Quick Toggle -->
         <button 
           @click="toolStore.snapping.grid = !toolStore.snapping.grid"
-          class="w-full h-8 flex items-center justify-center rounded transition relative"
-          :class="toolStore.snapping.grid ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/50 shadow-xs' : 'text-slate-400 hover:text-slate-200 hover:bg-dcc-750'"
+          class="w-full h-7 flex items-center justify-center rounded-xs transition relative"
+          :class="toolStore.snapping.grid ? 'bg-ui-accentSubtle text-ui-textAccent border border-ui-accent/40 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Toggle Grid Snapping (Shift+Tab)"
         >
-          <BlenderIcon name="snap" :size="15" />
+          <BlenderIcon name="snap" :size="14" />
         </button>
       </div>
     </div>
 
     <!-- 2. TRANSFORM TOOLS (2 Columns, 2 Rows = 4 Symmetrical Slots) -->
-    <div class="w-full px-1.5 border-b border-dcc-750 pb-2 mb-1.5">
-      <div class="text-[9px] font-mono font-bold text-slate-500 uppercase tracking-wider mb-1 px-1">Gizmo</div>
+    <div class="w-full px-1 border-b border-ui-borderSubtle pb-1.5 mb-1">
+      <div class="text-[9px] font-bold text-ui-textMuted uppercase tracking-wider mb-1 px-1">Gizmo</div>
       <div class="grid grid-cols-2 gap-1 w-full">
         <!-- Move Tool -->
         <button 
           @click="toolStore.modelTool = 'move'"
-          class="w-full h-8 flex items-center justify-center rounded transition"
-          :class="toolStore.modelTool === 'move' ? 'bg-dcc-700 text-indigo-400 border border-indigo-500/50 shadow-xs' : 'text-slate-400 hover:text-slate-200 hover:bg-dcc-750'"
+          class="w-full h-7 flex items-center justify-center rounded-xs transition"
+          :class="toolStore.modelTool === 'move' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/50 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Move Tool (G / W)"
         >
-          <BlenderIcon name="tool-move" :size="16" />
+          <BlenderIcon name="tool-move" :size="15" />
         </button>
 
         <!-- Rotate Tool -->
         <button 
           @click="toolStore.modelTool = 'rotate'"
-          class="w-full h-8 flex items-center justify-center rounded transition"
-          :class="toolStore.modelTool === 'rotate' ? 'bg-dcc-700 text-indigo-400 border border-indigo-500/50 shadow-xs' : 'text-slate-400 hover:text-slate-200 hover:bg-dcc-750'"
+          class="w-full h-7 flex items-center justify-center rounded-xs transition"
+          :class="toolStore.modelTool === 'rotate' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/50 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Rotate Tool (R)"
         >
-          <BlenderIcon name="tool-rotate" :size="16" />
+          <BlenderIcon name="tool-rotate" :size="15" />
         </button>
 
         <!-- Scale Tool -->
         <button 
           @click="toolStore.modelTool = 'scale'"
-          class="w-full h-8 flex items-center justify-center rounded transition"
-          :class="toolStore.modelTool === 'scale' ? 'bg-dcc-700 text-indigo-400 border border-indigo-500/50 shadow-xs' : 'text-slate-400 hover:text-slate-200 hover:bg-dcc-750'"
+          class="w-full h-7 flex items-center justify-center rounded-xs transition"
+          :class="toolStore.modelTool === 'scale' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/50 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Scale Tool (S)"
         >
-          <BlenderIcon name="tool-scale" :size="16" />
+          <BlenderIcon name="tool-scale" :size="15" />
         </button>
 
         <!-- Add Primitive Popout Button -->
         <button 
           @click="handleOpenAddPrimitive"
-          class="w-full h-8 flex items-center justify-center rounded text-amber-400 hover:bg-dcc-750 transition border border-amber-500/30 bg-amber-500/10"
+          class="w-full h-7 flex items-center justify-center rounded-xs text-amber-400 hover:bg-ui-hover transition border border-amber-500/30 bg-amber-500/10"
           title="Add Primitive Menu (Shift+A)"
         >
-          <BlenderIcon name="mesh-cube" :size="15" color="#f59e0b" />
+          <BlenderIcon name="mesh-cube" :size="14" color="#f59e0b" />
         </button>
       </div>
     </div>

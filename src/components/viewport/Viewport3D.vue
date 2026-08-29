@@ -2380,7 +2380,7 @@ onUnmounted(() => {
 
         <button 
           @click="triggerTogglePrecision"
-          class="px-2 py-1 bg-dcc-850 hover:bg-dcc-750 border border-dcc-750 rounded-lg text-[10px] text-slate-300 font-bold active:scale-95 transition"
+          class="px-2 py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderDefault rounded-xs text-[10px] text-ui-textSecondary font-bold active:scale-95 transition"
           title="Precision Mode (Shift)"
         >
           Slow
@@ -2390,7 +2390,7 @@ onUnmounted(() => {
         <button 
           v-if="operatorManager.state.value.operatorName.includes('Primitive')"
           @click="triggerToggleOrientation"
-          class="px-2 py-1 bg-dcc-850 hover:bg-dcc-750 border border-dcc-750 rounded-lg text-[10px] text-amber-400 font-bold active:scale-95 transition"
+          class="px-2 py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderDefault rounded-xs text-[10px] text-amber-400 font-bold active:scale-95 transition"
           title="Toggle Align to World vs Surface (O)"
         >
           Align
@@ -2399,7 +2399,7 @@ onUnmounted(() => {
         <!-- Step Back Button (Stylus Friendly Alternative to RMB) -->
         <button 
           @click="triggerStepBack"
-          class="px-2 py-1 bg-dcc-850 hover:bg-dcc-750 border border-dcc-750 rounded-lg text-[10px] text-slate-400 hover:text-slate-200 active:scale-95 transition"
+          class="px-2 py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderDefault rounded-xs text-[10px] text-ui-textMuted hover:text-ui-textPrimary active:scale-95 transition"
           title="Step Back / Cancel Stage (RMB)"
         >
           Back
@@ -2408,7 +2408,7 @@ onUnmounted(() => {
         <!-- Confirm Action Button -->
         <button 
           @click="operatorManager.confirm()" 
-          class="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg shadow-sm ml-1 flex items-center gap-1 active:scale-95 transition"
+          class="px-2.5 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xs shadow-xs ml-1 flex items-center gap-1 active:scale-95 transition border border-emerald-500/80"
           title="Confirm Operation (LMB / Enter)"
         >
           <Check class="w-3.5 h-3.5" />
@@ -2418,7 +2418,7 @@ onUnmounted(() => {
         <!-- Cancel Action Button -->
         <button 
           @click="operatorManager.cancel()" 
-          class="px-2.5 py-1 bg-dcc-800 hover:bg-rose-950/60 hover:text-rose-300 text-slate-400 border border-dcc-700 text-xs rounded-lg active:scale-95 transition"
+          class="px-2 py-0.5 bg-ui-input hover:bg-rose-950/60 hover:text-rose-300 text-ui-textMuted border border-ui-borderDefault text-xs rounded-xs active:scale-95 transition"
           title="Cancel Operation (Esc)"
         >
           <X class="w-3.5 h-3.5" />
@@ -2427,17 +2427,17 @@ onUnmounted(() => {
     </div>
 
     <!-- HUD Stats Bar (Tris, Verts, Mode) -->
-    <div class="absolute bottom-3 left-3 bg-dcc-850/80 backdrop-blur-sm px-2.5 py-1 rounded border border-dcc-700/60 shadow text-[11px] font-mono text-slate-400 flex items-center space-x-3 select-none pointer-events-none z-20">
-      <span>Tris: <strong class="text-slate-200">{{ projectStore.stats?.tris ?? 0 }}</strong></span>
-      <span>Verts: <strong class="text-slate-200">{{ projectStore.stats?.verts ?? 0 }}</strong></span>
-      <span>Faces: <strong class="text-slate-200">{{ projectStore.stats?.faces ?? 0 }}</strong></span>
+    <div class="absolute bottom-2.5 left-2.5 bg-ui-panel/90 backdrop-blur-xs px-2 py-0.5 rounded-xs border border-ui-borderSubtle shadow-xs text-[10px] font-mono text-ui-textMuted flex items-center space-x-2.5 select-none pointer-events-none z-20">
+      <span>Tris: <strong class="text-ui-textPrimary">{{ projectStore.stats?.tris ?? 0 }}</strong></span>
+      <span>Verts: <strong class="text-ui-textPrimary">{{ projectStore.stats?.verts ?? 0 }}</strong></span>
+      <span>Faces: <strong class="text-ui-textPrimary">{{ projectStore.stats?.faces ?? 0 }}</strong></span>
       <span v-if="(projectStore.stats?.selectedFaces ?? 0) > 0" class="text-amber-400 font-bold">
         Sel Faces: {{ projectStore.stats?.selectedFaces }}
       </span>
       <span v-if="(projectStore.stats?.selectedVerts ?? 0) > 0" class="text-amber-400 font-bold">
         Sel Verts: {{ projectStore.stats?.selectedVerts }}
       </span>
-      <span class="text-indigo-400 uppercase font-bold">{{ toolStore.appMode }} / {{ toolStore.selectMode }}</span>
+      <span class="text-ui-textAccent uppercase font-bold">{{ toolStore.appMode }} / {{ toolStore.selectMode }}</span>
       <span v-if="toolStore.viewport.quadView" class="text-amber-400 font-bold uppercase">[QUAD VIEW]</span>
       <span v-if="toolStore.viewport.xray" class="text-cyan-400 font-bold uppercase">[X-RAY]</span>
     </div>
