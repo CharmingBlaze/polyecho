@@ -80,13 +80,13 @@ function handleInput(event: Event) {
 
 <template>
   <div 
-    class="flex items-center h-6 bg-ui-input border border-ui-borderDefault hover:border-ui-borderStrong focus-within:border-ui-accent rounded-xs px-1.5 text-xs font-mono transition select-none group"
-    :class="{ 'opacity-50 pointer-events-none': disabled, 'cursor-ew-resize': !disabled }"
+    class="flex items-center h-6 bg-ui-input border border-ui-borderSubtle hover:border-ui-borderDefault focus-within:border-ui-accent rounded-xs px-1.5 text-xs font-mono transition select-none group"
+    :class="{ 'opacity-40 pointer-events-none': disabled, 'cursor-ew-resize': !disabled }"
     @mousedown="handleMouseDown"
   >
     <span 
       v-if="label" 
-      class="text-[10px] font-bold shrink-0 mr-1 select-none"
+      class="text-[10px] font-semibold shrink-0 mr-1 select-none opacity-80"
       :class="labelColor || 'text-ui-textSecondary'"
     >
       {{ label }}
@@ -99,7 +99,7 @@ function handleInput(event: Event) {
       :max="max"
       :value="modelValue"
       :disabled="disabled"
-      class="w-full bg-transparent text-right text-ui-textPrimary font-mono text-xs focus:outline-none cursor-text selection:bg-ui-accent/40"
+      class="w-full bg-transparent text-right text-ui-textPrimary font-mono tabular-nums text-xs focus:outline-none cursor-text selection:bg-ui-accent/40"
       @change="handleInput"
     />
 

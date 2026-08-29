@@ -85,6 +85,11 @@ function handleStartPrimitivePlacement(type: PrimitiveType) {
   closeDropdowns()
 }
 
+function handleOpenAddDialog() {
+  window.dispatchEvent(new CustomEvent('open-add-primitive-menu', { detail: { x: 100, y: 150 } }))
+  closeDropdowns()
+}
+
 // File operations
 function saveProject() {
   const json = ProjectSerializer.serialize(
@@ -220,7 +225,7 @@ function handleExitProject() {
 </script>
 
 <template>
-  <header class="h-ui-header bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between text-xs select-none z-30 font-mono">
+  <header class="h-ui-header bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between text-xs select-none z-30 font-sans">
     <!-- Hidden Inputs for File Import -->
     <input ref="loadProjectInput" type="file" accept=".psxproj" class="hidden" @change="handleLoadProject" />
     <input ref="importObjInput" type="file" accept=".obj" class="hidden" @change="handleImportObj" />
@@ -231,14 +236,14 @@ function handleExitProject() {
     <div class="flex items-center space-x-1 shrink-0">
       <!-- Brand Logo -->
       <div class="flex items-center space-x-1.5 mr-2 px-1.5 py-0.5 bg-ui-input rounded-xs border border-ui-borderSubtle">
-        <BlenderIcon name="mesh-cube" :size="14" color="#f59e0b" />
-        <span class="font-bold tracking-wider text-xs uppercase text-ui-textPrimary font-mono">POLY<span class="text-ui-accent">ECHO</span></span>
+        <BlenderIcon name="mesh-cube" :size="13" color="#f59e0b" />
+        <span class="font-bold tracking-wide text-xs uppercase text-ui-textPrimary font-mono">POLY<span class="text-ui-accent">ECHO</span></span>
       </div>
 
       <!-- File Menu -->
       <div class="relative" @mouseleave="closeDropdowns" @click.stop>
         <button 
-          class="px-2 py-1 text-xs font-mono font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
+          class="px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
           :class="{ 'bg-ui-hover text-ui-textPrimary': activeDropdown === 'file' }"
           @click="toggleDropdown('file')"
           @mouseenter="activeDropdown && (activeDropdown = 'file')"
@@ -265,20 +270,20 @@ function handleExitProject() {
 
           <div class="h-px bg-ui-borderSubtle my-1"></div>
 
-          <div class="px-3 py-1 text-[10px] font-mono font-bold text-ui-textMuted uppercase tracking-wider">Import</div>
+          <div class="px-3 py-1 text-[10px] font-bold text-ui-textMuted uppercase tracking-wider">Import</div>
           <button @click="importObjInput?.click()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
-            <Upload class="w-3.5 h-3.5 text-sky-400" /> Wavefront (.obj)
+            <Upload class="w-3.5 h-3.5 text-ui-textMuted" /> Wavefront (.obj)
           </button>
           <button @click="importGltfInput?.click()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
-            <Upload class="w-3.5 h-3.5 text-indigo-400" /> GLTF / GLB (.glb)
+            <Upload class="w-3.5 h-3.5 text-ui-textMuted" /> GLTF / GLB (.glb)
           </button>
           <button @click="importTextureInput?.click()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
-            <ImageIcon class="w-3.5 h-3.5 text-pink-400" /> Texture (PNG, JPG)
+            <ImageIcon class="w-3.5 h-3.5 text-ui-textMuted" /> Texture (PNG, JPG)
           </button>
 
           <div class="h-px bg-ui-borderSubtle my-1"></div>
 
-          <button @click="$emit('open-export'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-amber-400 font-bold">
+          <button @click="$emit('open-export'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-amber-400 font-medium">
             <span class="flex items-center gap-2"><Sparkles class="w-3.5 h-3.5" /> Export Game Assets...</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+E</span>
           </button>
@@ -293,7 +298,7 @@ function handleExitProject() {
       <!-- Edit Menu -->
       <div class="relative" @mouseleave="closeDropdowns" @click.stop>
         <button 
-          class="px-2 py-1 text-xs font-mono font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
+          class="px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
           :class="{ 'bg-ui-hover text-ui-textPrimary': activeDropdown === 'edit' }"
           @click="toggleDropdown('edit')"
           @mouseenter="activeDropdown && (activeDropdown = 'edit')"
@@ -302,55 +307,126 @@ function handleExitProject() {
         </button>
         <div v-if="activeDropdown === 'edit'" class="absolute left-0 top-full mt-0.5 w-52 bg-[#181a1f] opacity-100 border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
           <button @click="historyStore.undo(); closeDropdowns()" :disabled="historyStore.undoStack.length === 0" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between disabled:opacity-40">
-            <span class="flex items-center gap-2"><Undo2 class="w-3.5 h-3.5" /> Undo</span>
+            <span class="flex items-center gap-2"><Undo2 class="w-3.5 h-3.5 text-ui-textMuted" /> Undo</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+Z</span>
           </button>
           <button @click="historyStore.redo(); closeDropdowns()" :disabled="historyStore.redoStack.length === 0" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between disabled:opacity-40">
-            <span class="flex items-center gap-2"><Redo2 class="w-3.5 h-3.5" /> Redo</span>
+            <span class="flex items-center gap-2"><Redo2 class="w-3.5 h-3.5 text-ui-textMuted" /> Redo</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+Y</span>
           </button>
           <div class="h-px bg-ui-borderSubtle my-1"></div>
           <button @click="projectStore.duplicateSelection(toolStore.selectMode); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-amber-300">
-            <span class="flex items-center gap-2"><CopyPlus class="w-3.5 h-3.5" /> Duplicate</span>
+            <span class="flex items-center gap-2"><CopyPlus class="w-3.5 h-3.5 text-ui-textMuted" /> Duplicate</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Shift+D</span>
           </button>
           <button @click="projectStore.copySelection(toolStore.selectMode); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
-            <span class="flex items-center gap-2"><Copy class="w-3.5 h-3.5" /> Copy</span>
+            <span class="flex items-center gap-2"><Copy class="w-3.5 h-3.5 text-ui-textMuted" /> Copy</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+C</span>
           </button>
           <button @click="projectStore.pasteClipboard(); closeDropdowns()" :disabled="!projectStore.clipboard" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between disabled:opacity-40">
-            <span class="flex items-center gap-2"><ClipboardPaste class="w-3.5 h-3.5" /> Paste</span>
+            <span class="flex items-center gap-2"><ClipboardPaste class="w-3.5 h-3.5 text-ui-textMuted" /> Paste</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+V</span>
           </button>
         </div>
       </div>
 
-      <!-- Add Primitive Menu -->
+      <!-- Add Primitive & CAD Menu -->
       <div class="relative" @mouseleave="closeDropdowns" @click.stop>
         <button 
-          class="px-2 py-1 text-xs font-mono font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
+          class="px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
           :class="{ 'bg-ui-hover text-ui-textPrimary': activeDropdown === 'add' }"
           @click="toggleDropdown('add')"
           @mouseenter="activeDropdown && (activeDropdown = 'add')"
         >
           Add
         </button>
-        <div v-if="activeDropdown === 'add'" class="absolute left-0 top-full mt-0.5 w-60 bg-[#181a1f] opacity-100 border border-ui-borderStrong rounded-xs shadow-2xl py-1.5 z-50 text-xs max-h-[85vh] overflow-y-auto">
-          <div class="px-2.5 py-0.5 text-[10px] font-bold text-ui-textMuted uppercase tracking-wider">Basic</div>
-          <button @click="handleStartPrimitivePlacement('BOX')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2">
-            <BlenderIcon name="mesh-cube" :size="14" color="#f59e0b" /> Box / Cube
+        <div v-if="activeDropdown === 'add'" class="absolute left-0 top-full mt-0.5 w-64 bg-[#181a1f] opacity-100 border border-ui-borderStrong rounded-xs shadow-2xl py-1.5 z-50 text-xs max-h-[85vh] overflow-y-auto">
+          <!-- Placement Mode Selector -->
+          <div class="px-2.5 py-1 border-b border-ui-borderSubtle mb-1 bg-ui-input/60">
+            <div class="text-[10px] font-semibold text-ui-textMuted uppercase mb-1">Placement Mode</div>
+            <div class="grid grid-cols-2 gap-1 text-[10px]">
+              <button 
+                @click="currentPlacementMode = PrimitivePlacementMode.CAD_DRAW"
+                class="px-1.5 py-0.5 rounded-xs border text-left"
+                :class="currentPlacementMode === PrimitivePlacementMode.CAD_DRAW ? 'bg-ui-active text-ui-textAccent border-ui-accent/40 font-medium' : 'bg-ui-surface text-ui-textSecondary border-ui-borderSubtle hover:bg-ui-hover'"
+              >
+                CAD Draw
+              </button>
+              <button 
+                @click="currentPlacementMode = PrimitivePlacementMode.PLACE"
+                class="px-1.5 py-0.5 rounded-xs border text-left"
+                :class="currentPlacementMode === PrimitivePlacementMode.PLACE ? 'bg-ui-active text-ui-textAccent border-ui-accent/40 font-medium' : 'bg-ui-surface text-ui-textSecondary border-ui-borderSubtle hover:bg-ui-hover'"
+              >
+                Direct Place
+              </button>
+            </div>
+          </div>
+
+          <!-- Basic 3D -->
+          <div class="px-2.5 py-0.5 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">Basic 3D</div>
+          <button @click="handleStartPrimitivePlacement('BOX')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
+            <BlenderIcon name="mesh-cube" :size="14" color="#8d939d" /> Box / Cube
           </button>
-          <button @click="handleStartPrimitivePlacement('PLANE')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2">
-            <BlenderIcon name="mesh-plane" :size="14" color="#38bdf8" /> Plane / Grid
+          <button @click="handleStartPrimitivePlacement('PLANE')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
+            <BlenderIcon name="mesh-plane" :size="14" color="#8d939d" /> Plane / Grid
           </button>
-          <button @click="handleStartPrimitivePlacement('SPHERE')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2">
-            <BlenderIcon name="mesh-sphere" :size="14" color="#a855f7" /> Sphere
+          <button @click="handleStartPrimitivePlacement('SPHERE')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
+            <BlenderIcon name="mesh-sphere" :size="14" color="#8d939d" /> UV Sphere
           </button>
-          <button @click="handleStartPrimitivePlacement('CYLINDER')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2">
-            <BlenderIcon name="mesh-cylinder" :size="14" color="#10b981" /> Cylinder
+          <button @click="handleStartPrimitivePlacement('ICOSPHERE')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
+            <BlenderIcon name="mesh-icosphere" :size="14" color="#8d939d" /> Icosphere
           </button>
-          <button @click="handleStartPrimitivePlacement('CONE')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2">
-            <BlenderIcon name="mesh-cone" :size="14" color="#f43f5e" /> Cone
+          <button @click="handleStartPrimitivePlacement('CYLINDER')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
+            <BlenderIcon name="mesh-cylinder" :size="14" color="#8d939d" /> Cylinder
+          </button>
+          <button @click="handleStartPrimitivePlacement('CONE')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
+            <BlenderIcon name="mesh-cone" :size="14" color="#8d939d" /> Cone
+          </button>
+          <button @click="handleStartPrimitivePlacement('PYRAMID')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
+            <BlenderIcon name="mesh-cone" :size="14" color="#8d939d" /> Pyramid
+          </button>
+
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+
+          <!-- Extended Shapes -->
+          <div class="px-2.5 py-0.5 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">Shapes</div>
+          <button @click="handleStartPrimitivePlacement('CIRCLE')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
+            <BlenderIcon name="mesh-circle" :size="14" color="#8d939d" /> Circle / Disc
+          </button>
+          <button @click="handleStartPrimitivePlacement('PRISM')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
+            <BlenderIcon name="mesh-cylinder" :size="14" color="#8d939d" /> Prism
+          </button>
+          <button @click="handleStartPrimitivePlacement('TORUS')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
+            <BlenderIcon name="mesh-torus" :size="14" color="#8d939d" /> Torus / Donut
+          </button>
+          <button @click="handleStartPrimitivePlacement('CAPSULE')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
+            <BlenderIcon name="mesh-cylinder" :size="14" color="#8d939d" /> Capsule
+          </button>
+          <button @click="handleStartPrimitivePlacement('WEDGE')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
+            <BlenderIcon name="mesh-cube" :size="14" color="#8d939d" /> Wedge / Ramp
+          </button>
+          <button @click="handleStartPrimitivePlacement('TUBE')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
+            <BlenderIcon name="mesh-torus" :size="14" color="#8d939d" /> Tube / Pipe
+          </button>
+
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+
+          <!-- CAD & Architectural -->
+          <div class="px-2.5 py-0.5 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">CAD & Architectural</div>
+          <button @click="handleStartPrimitivePlacement('WALL')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
+            <BlenderIcon name="mesh-plane" :size="14" color="#8d939d" /> Wall Segment
+          </button>
+          <button @click="handleStartPrimitivePlacement('STAIRS')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
+            <BlenderIcon name="mesh-cube" :size="14" color="#8d939d" /> Stairs
+          </button>
+          <button @click="handleStartPrimitivePlacement('ARCH')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
+            <BlenderIcon name="mesh-torus" :size="14" color="#8d939d" /> Arch
+          </button>
+
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+          <button @click="handleOpenAddDialog" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-amber-400 font-medium">
+            <span>Browse All Primitives...</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Shift+A</span>
           </button>
         </div>
       </div>
@@ -358,7 +434,7 @@ function handleExitProject() {
       <!-- View & Window Menu (Panels, Layout, Cameras) -->
       <div class="relative" @mouseleave="closeDropdowns" @click.stop>
         <button 
-          class="px-2 py-1 text-xs font-mono font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
+          class="px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
           :class="{ 'bg-ui-hover text-ui-textPrimary': activeDropdown === 'view' }"
           @click="toggleDropdown('view')"
           @mouseenter="activeDropdown && (activeDropdown = 'view')"
@@ -367,48 +443,48 @@ function handleExitProject() {
         </button>
         <div v-if="activeDropdown === 'view'" class="absolute left-0 top-full mt-0.5 w-64 bg-[#181a1f] opacity-100 border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
           <!-- Panels Toggle -->
-          <div class="px-3 py-1 text-[10px] font-mono font-bold text-ui-textMuted uppercase tracking-wider">Panels & Windows</div>
+          <div class="px-3 py-1 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">Panels & Windows</div>
           <button @click="layoutStore.toggleLeftToolbar(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2">
-              <PanelLeft class="w-3.5 h-3.5 text-ui-accent" />
+              <PanelLeft class="w-3.5 h-3.5 text-ui-textMuted" />
               <span>Left Toolbar</span>
             </span>
-            <span class="text-ui-textAccent font-bold text-[10px]">{{ layoutStore.showLeftToolbar ? 'VISIBLE' : 'HIDDEN' }}</span>
+            <span class="text-ui-textAccent font-medium text-[10px]">{{ layoutStore.showLeftToolbar ? 'VISIBLE' : 'HIDDEN' }}</span>
           </button>
 
           <button @click="layoutStore.toggleRightSidebar(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2">
-              <PanelRight class="w-3.5 h-3.5 text-ui-accent" />
+              <PanelRight class="w-3.5 h-3.5 text-ui-textMuted" />
               <span>Right Inspector</span>
             </span>
-            <span class="text-ui-textAccent font-bold text-[10px]">{{ layoutStore.showRightSidebar ? 'VISIBLE' : 'HIDDEN' }}</span>
+            <span class="text-ui-textAccent font-medium text-[10px]">{{ layoutStore.showRightSidebar ? 'VISIBLE' : 'HIDDEN' }}</span>
           </button>
 
           <button @click="layoutStore.toggleStatusBar(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2">
-              <Tv class="w-3.5 h-3.5 text-emerald-400" />
+              <Tv class="w-3.5 h-3.5 text-ui-textMuted" />
               <span>Status Bar Footer</span>
             </span>
-            <span class="text-ui-textAccent font-bold text-[10px]">{{ layoutStore.showStatusBar ? 'VISIBLE' : 'HIDDEN' }}</span>
+            <span class="text-ui-textAccent font-medium text-[10px]">{{ layoutStore.showStatusBar ? 'VISIBLE' : 'HIDDEN' }}</span>
           </button>
 
           <div class="h-px bg-ui-borderSubtle my-1"></div>
 
           <!-- Viewport Layout -->
           <button @click="toolStore.viewport.quadView = !toolStore.viewport.quadView; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
-            <span class="flex items-center gap-2"><LayoutGrid class="w-3.5 h-3.5 text-amber-400" /> Quad View Layout</span>
+            <span class="flex items-center gap-2"><LayoutGrid class="w-3.5 h-3.5 text-ui-textMuted" /> Quad View Layout</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+Alt+Q</span>
           </button>
 
           <button @click="toolStore.viewport.xray = !toolStore.viewport.xray; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
-            <span class="flex items-center gap-2"><Eye class="w-3.5 h-3.5 text-cyan-400" /> X-Ray Transparent</span>
+            <span class="flex items-center gap-2"><Eye class="w-3.5 h-3.5 text-ui-textMuted" /> X-Ray Transparent</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Alt+Z</span>
           </button>
 
           <div class="h-px bg-ui-borderSubtle my-1"></div>
 
           <!-- Reset Layout -->
-          <button @click="layoutStore.resetLayout(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2 text-amber-400 font-bold">
+          <button @click="layoutStore.resetLayout(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2 text-amber-400 font-medium">
             <RotateCcw class="w-3.5 h-3.5" /> Reset Default Panel Layout
           </button>
         </div>
@@ -419,8 +495,8 @@ function handleExitProject() {
     <div class="flex items-center bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle shrink-0">
       <button 
         @click="toolStore.setAppMode('model')"
-        class="flex items-center gap-1.5 px-2.5 h-6 rounded-xs text-xs font-mono font-medium transition"
-        :class="toolStore.appMode === 'model' ? 'bg-ui-accent text-white font-bold shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+        class="flex items-center gap-1.5 px-2.5 h-6 rounded-xs text-xs font-semibold transition"
+        :class="toolStore.appMode === 'model' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
       >
         <BlenderIcon name="mesh-cube" :size="13" />
         <span>MODEL</span>
@@ -428,8 +504,8 @@ function handleExitProject() {
 
       <button 
         @click="toolStore.setAppMode('uvpaint')"
-        class="flex items-center gap-1.5 px-2.5 h-6 rounded-xs text-xs font-mono font-medium transition"
-        :class="toolStore.appMode === 'uvpaint' ? 'bg-ui-accent text-white font-bold shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+        class="flex items-center gap-1.5 px-2.5 h-6 rounded-xs text-xs font-semibold transition"
+        :class="toolStore.appMode === 'uvpaint' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
       >
         <BlenderIcon name="uv" :size="13" />
         <span>UV / PAINT</span>
@@ -437,8 +513,8 @@ function handleExitProject() {
 
       <button 
         @click="toolStore.setAppMode('rig')"
-        class="flex items-center gap-1.5 px-2.5 h-6 rounded-xs text-xs font-mono font-medium transition"
-        :class="toolStore.appMode === 'rig' ? 'bg-cyan-600 text-white font-bold shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+        class="flex items-center gap-1.5 px-2.5 h-6 rounded-xs text-xs font-semibold transition"
+        :class="toolStore.appMode === 'rig' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
         title="Custom Skeletal Rigging Workspace"
       >
         <BlenderIcon name="bone" :size="13" />
@@ -447,8 +523,8 @@ function handleExitProject() {
 
       <button 
         @click="toolStore.setAppMode('animate')"
-        class="flex items-center gap-1.5 px-2.5 h-6 rounded-xs text-xs font-mono font-medium transition"
-        :class="toolStore.appMode === 'animate' ? 'bg-ui-accent text-white font-bold shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+        class="flex items-center gap-1.5 px-2.5 h-6 rounded-xs text-xs font-semibold transition"
+        :class="toolStore.appMode === 'animate' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
       >
         <BlenderIcon name="keyframe" :size="13" />
         <span>ANIMATE</span>

@@ -190,35 +190,35 @@ function startResizeCorner(e: MouseEvent) {
     <!-- Body Content (Hidden when minimized) -->
     <div v-show="!isMinimized" class="flex-1 flex flex-col min-h-0 overflow-hidden">
       <!-- Dense Inspector Tab Navigation -->
-      <div class="h-7 bg-ui-header border-b border-ui-borderSubtle grid grid-cols-3 text-xs shrink-0">
+      <div class="h-7 bg-ui-header border-b border-ui-borderSubtle grid grid-cols-3 text-xs shrink-0 font-sans">
         <!-- 1. Outliner Tab -->
         <button 
           @click="activeTab = 'outliner'"
-          class="flex items-center justify-center gap-1 transition text-[10px] font-medium border-b"
-          :class="activeTab === 'outliner' ? 'bg-ui-panel text-ui-textPrimary font-bold border-ui-accent shadow-xs' : 'border-transparent text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          class="flex items-center justify-center gap-1.5 transition text-[11px] border-b-2"
+          :class="activeTab === 'outliner' ? 'bg-ui-panel text-ui-textPrimary font-semibold border-ui-accent' : 'border-transparent text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
         >
-          <Layers class="w-3 h-3" />
-          <span>OUTLINER</span>
+          <Layers class="w-3 h-3 text-ui-textMuted" />
+          <span>Outliner</span>
         </button>
 
         <!-- 2. Properties Tab -->
         <button 
           @click="activeTab = 'props'"
-          class="flex items-center justify-center gap-1 transition text-[10px] font-medium border-b"
-          :class="activeTab === 'props' ? 'bg-ui-panel text-ui-textPrimary font-bold border-ui-accent shadow-xs' : 'border-transparent text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          class="flex items-center justify-center gap-1.5 transition text-[11px] border-b-2"
+          :class="activeTab === 'props' ? 'bg-ui-panel text-ui-textPrimary font-semibold border-ui-accent' : 'border-transparent text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
         >
-          <Sliders class="w-3 h-3" />
-          <span>{{ toolStore.appMode === 'rig' ? 'RIG' : toolStore.appMode === 'animate' ? 'ANIM' : toolStore.appMode === 'uvpaint' ? 'PAINT' : 'PROPS' }}</span>
+          <Sliders class="w-3 h-3 text-ui-textMuted" />
+          <span>{{ toolStore.appMode === 'rig' ? 'Rig' : toolStore.appMode === 'animate' ? 'Animate' : toolStore.appMode === 'uvpaint' ? 'Paint' : 'Properties' }}</span>
         </button>
 
         <!-- 3. Shading / Material Tab -->
         <button 
           @click="activeTab = 'material'"
-          class="flex items-center justify-center gap-1 transition text-[10px] font-medium border-b"
-          :class="activeTab === 'material' ? 'bg-ui-panel text-ui-textPrimary font-bold border-ui-accent shadow-xs' : 'border-transparent text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          class="flex items-center justify-center gap-1.5 transition text-[11px] border-b-2"
+          :class="activeTab === 'material' ? 'bg-ui-panel text-ui-textPrimary font-semibold border-ui-accent' : 'border-transparent text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
         >
-          <Sparkles class="w-3 h-3" />
-          <span>SHADING</span>
+          <Sparkles class="w-3 h-3 text-ui-textMuted" />
+          <span>Shading</span>
         </button>
       </div>
 

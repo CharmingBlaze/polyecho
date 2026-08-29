@@ -4,7 +4,7 @@ import { useToolStore } from '../../stores/toolStore'
 import { useProjectStore } from '../../stores/projectStore'
 import { useAnimationStore } from '../../stores/animationStore'
 import BlenderIcon from '../icons/BlenderIcon.vue'
-import { MousePointer, Layers, Grid } from 'lucide-vue-next'
+import { Layers, Grid } from 'lucide-vue-next'
 
 const toolStore = useToolStore()
 const projectStore = useProjectStore()
@@ -34,47 +34,44 @@ const contextualHints = computed(() => {
 </script>
 
 <template>
-  <footer class="h-6 bg-ui-header border-t border-ui-borderSubtle px-2.5 flex items-center justify-between text-[11px] font-mono text-ui-textMuted select-none shrink-0 z-30">
+  <footer class="h-6 bg-ui-header border-t border-ui-borderSubtle px-2.5 flex items-center justify-between text-[11px] font-sans text-ui-textMuted select-none shrink-0 z-30">
     <!-- Left: Contextual Shortcut Hints -->
     <div class="flex items-center space-x-2 truncate max-w-[55%]">
-      <div class="flex items-center space-x-1 text-ui-textSecondary shrink-0">
-        <MousePointer class="w-3 h-3 text-ui-accent" />
-        <span class="font-bold text-[10px] uppercase text-ui-textPrimary">{{ toolStore.appMode }}:</span>
-      </div>
-      <span class="text-ui-textMuted truncate text-[10px]">{{ contextualHints }}</span>
+      <span class="font-semibold text-[10px] uppercase text-ui-textSecondary shrink-0">{{ toolStore.appMode }}:</span>
+      <span class="text-ui-textMuted truncate text-[10px] font-mono">{{ contextualHints }}</span>
     </div>
 
     <!-- Right: Scene Statistics, Active Selection, Snap & Mode -->
     <div class="flex items-center space-x-3 shrink-0 text-[10px]">
-      <!-- Stats (Tris, Verts, Faces) -->
+      <!-- Stats (Tris, Verts, Faces) with Tabular Numerals -->
       <div class="flex items-center space-x-2 border-r border-ui-borderSubtle pr-3">
-        <span>Tris: <strong class="text-ui-textPrimary">{{ projectStore.stats?.tris ?? 0 }}</strong></span>
-        <span>Verts: <strong class="text-ui-textPrimary">{{ projectStore.stats?.verts ?? 0 }}</strong></span>
-        <span>Faces: <strong class="text-ui-textPrimary">{{ projectStore.stats?.faces ?? 0 }}</strong></span>
-        <span v-if="(projectStore.stats?.selectedVerts ?? 0) > 0" class="text-amber-400 font-bold">
+        <span class="text-ui-textMuted">Tris <span class="text-ui-textPrimary font-mono tabular-nums font-medium">{{ projectStore.stats?.tris ?? 0 }}</span></span>
+        <span class="text-ui-textMuted">Verts <span class="text-ui-textPrimary font-mono tabular-nums font-medium">{{ projectStore.stats?.verts ?? 0 }}</span></span>
+        <span class="text-ui-textMuted">Faces <span class="text-ui-textPrimary font-mono tabular-nums font-medium">{{ projectStore.stats?.faces ?? 0 }}</span></span>
+        <span v-if="(projectStore.stats?.selectedVerts ?? 0) > 0" class="text-ui-textAccent font-mono tabular-nums">
           Sel: {{ projectStore.stats?.selectedVerts }}v
         </span>
-        <span v-else-if="(projectStore.stats?.selectedFaces ?? 0) > 0" class="text-amber-400 font-bold">
+        <span v-else-if="(projectStore.stats?.selectedFaces ?? 0) > 0" class="text-ui-textAccent font-mono tabular-nums">
           Sel: {{ projectStore.stats?.selectedFaces }}f
         </span>
       </div>
 
       <!-- Objects count -->
       <div class="flex items-center space-x-1 border-r border-ui-borderSubtle pr-3">
-        <Layers class="w-3 h-3 text-ui-textSecondary" />
-        <span>{{ projectStore.meshes.length }} Obj</span>
+        <Layers class="w-3 h-3 text-ui-textMuted" />
+        <span class="text-ui-textMuted"><span class="text-ui-textPrimary font-mono tabular-nums font-medium">{{ projectStore.meshes.length }}</span> Obj</span>
       </div>
 
       <!-- Grid Snap Status -->
       <div class="flex items-center space-x-1 border-r border-ui-borderSubtle pr-3">
-        <Grid class="w-3 h-3" :class="toolStore.snapping.grid ? 'text-ui-accent' : 'text-ui-textMuted'" />
-        <span :class="toolStore.snapping.grid ? 'text-ui-textPrimary font-bold' : 'text-ui-textMuted'">
+        <Grid class="w-3 h-3" :class="toolStore.snapping.grid ? 'text-ui-textAccent' : 'text-ui-textMuted'" />
+        <span :class="toolStore.snapping.grid ? 'text-ui-textSecondary font-medium font-mono tabular-nums' : 'text-ui-textMuted font-mono'">
           {{ toolStore.snapping.grid ? 'Snap: 0.1m' : 'Snap: Off' }}
         </span>
       </div>
 
       <!-- Active Mode Badge -->
-      <div class="flex items-center space-x-1 px-1.5 py-0.2 bg-ui-input border border-ui-borderDefault rounded-xs text-[9px] font-bold text-ui-textAccent uppercase">
+      <div class="flex items-center space-x-1 px-1.5 py-0.2 bg-ui-input border border-ui-borderSubtle rounded-xs text-[9px] font-medium text-ui-textSecondary uppercase">
         <BlenderIcon name="mesh-cube" :size="10" />
         <span>{{ toolStore.appMode }} / {{ toolStore.selectMode }}</span>
       </div>

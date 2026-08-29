@@ -26,7 +26,7 @@ function toggle() {
   <div class="border-b border-ui-borderSubtle">
     <!-- Section Header -->
     <div 
-      class="h-7 bg-ui-header/80 hover:bg-ui-hover px-2 flex items-center justify-between text-xs font-mono select-none cursor-pointer transition"
+      class="h-6 bg-ui-header hover:bg-ui-hover px-2 flex items-center justify-between text-xs select-none cursor-pointer transition"
       @click="toggle"
     >
       <div class="flex items-center space-x-1.5 truncate">
@@ -35,7 +35,7 @@ function toggle() {
           :is="isOpen ? ChevronDown : ChevronRight" 
           class="w-3 h-3 text-ui-textMuted shrink-0" 
         />
-        <span class="font-bold text-[11px] uppercase tracking-wider text-ui-textSecondary truncate">
+        <span class="font-sans font-semibold text-[11px] text-ui-textSecondary truncate">
           {{ title }}
         </span>
       </div>

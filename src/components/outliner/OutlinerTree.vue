@@ -193,11 +193,11 @@ function handleAddBone() {
           v-for="mesh in filteredMeshes" 
           :key="mesh.id"
           @click="selectMesh(mesh.id)"
-          class="flex items-center justify-between px-2.5 py-2 rounded cursor-pointer transition border"
-          :class="mesh.id === projectStore.activeMeshId ? 'bg-indigo-600/25 border-indigo-500/50 text-indigo-100 shadow-sm' : 'bg-dcc-850/70 border-dcc-750 text-slate-300 hover:bg-dcc-800 hover:text-white'"
+          class="flex items-center justify-between px-2.5 py-1.5 rounded-xs cursor-pointer transition border text-xs"
+          :class="mesh.id === projectStore.activeMeshId ? 'bg-ui-active border-ui-accent/40 text-ui-textPrimary' : 'bg-ui-surface/60 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover hover:text-ui-textPrimary'"
         >
           <div class="flex items-center space-x-2 flex-1 min-w-0 mr-1.5">
-            <BlenderIcon name="mesh-cube" :size="15" :color="mesh.id === projectStore.activeMeshId ? '#818cf8' : '#94a3b8'" />
+            <BlenderIcon name="mesh-cube" :size="14" :color="mesh.id === projectStore.activeMeshId ? '#818cf8' : '#8d939d'" />
             
             <input 
               v-if="editingItemId === mesh.id"

@@ -263,32 +263,35 @@ function removeMirrorModifier() {
 </script>
 
 <template>
-  <div class="flex flex-col select-none text-xs font-mono">
+  <div class="flex flex-col select-none text-xs font-sans">
     <!-- Active Object Identity Header -->
-    <div class="h-8 bg-ui-header border-b border-ui-borderSubtle px-2.5 flex items-center justify-between">
-      <span class="font-bold text-ui-textSecondary uppercase tracking-wider text-[11px]">Object</span>
-      <span class="font-bold text-amber-400 truncate max-w-[150px]">{{ activeItem?.name || 'No Selection' }}</span>
+    <div class="h-7 bg-ui-header border-b border-ui-borderSubtle px-2.5 flex items-center justify-between">
+      <div class="flex items-center space-x-1.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-ui-accent"></span>
+        <span class="text-[11px] font-medium text-ui-textMuted">Object</span>
+      </div>
+      <span class="font-semibold text-ui-textPrimary truncate max-w-[150px]">{{ activeItem?.name || 'No Selection' }}</span>
     </div>
 
     <div v-if="activeItem" class="flex flex-col divide-y divide-ui-borderSubtle">
       <!-- 1. Transform Section -->
       <UiSection title="Transform" :default-open="true">
         <!-- Quick Actions -->
-        <div v-if="toolStore.appMode === 'model'" class="grid grid-cols-2 gap-1 mb-2">
+        <div v-if="toolStore.appMode === 'model'" class="grid grid-cols-2 gap-1.5 mb-2.5">
           <UiButton @click="handleDuplicateMesh" size="xs">
-            <Copy class="w-3 h-3 text-indigo-400" />
+            <Copy class="w-3 h-3 text-ui-textMuted" />
             <span>Duplicate</span>
           </UiButton>
           <UiButton @click="handleMirrorX" size="xs">
-            <FlipHorizontal class="w-3 h-3 text-emerald-400" />
+            <FlipHorizontal class="w-3 h-3 text-ui-textMuted" />
             <span>Mirror X</span>
           </UiButton>
         </div>
 
         <!-- Location -->
         <div class="space-y-1">
-          <div class="flex items-center text-[10px] text-ui-textMuted uppercase font-bold gap-1">
-            <Move class="w-3 h-3 text-indigo-400" />
+          <div class="flex items-center text-[10px] text-ui-textSecondary font-medium gap-1">
+            <Move class="w-3 h-3 text-ui-textMuted" />
             <span>Location</span>
           </div>
           <div class="grid grid-cols-3 gap-1">
@@ -299,9 +302,9 @@ function removeMirrorModifier() {
         </div>
 
         <!-- Rotation -->
-        <div class="space-y-1 pt-1">
-          <div class="flex items-center text-[10px] text-ui-textMuted uppercase font-bold gap-1">
-            <RotateCw class="w-3 h-3 text-emerald-400" />
+        <div class="space-y-1 pt-1.5">
+          <div class="flex items-center text-[10px] text-ui-textSecondary font-medium gap-1">
+            <RotateCw class="w-3 h-3 text-ui-textMuted" />
             <span>Rotation (°)</span>
           </div>
           <div class="grid grid-cols-3 gap-1">
@@ -312,9 +315,9 @@ function removeMirrorModifier() {
         </div>
 
         <!-- Scale -->
-        <div class="space-y-1 pt-1">
-          <div class="flex items-center text-[10px] text-ui-textMuted uppercase font-bold gap-1">
-            <Maximize2 class="w-3 h-3 text-sky-400" />
+        <div class="space-y-1 pt-1.5">
+          <div class="flex items-center text-[10px] text-ui-textSecondary font-medium gap-1">
+            <Maximize2 class="w-3 h-3 text-ui-textMuted" />
             <span>Scale</span>
           </div>
           <div class="grid grid-cols-3 gap-1">

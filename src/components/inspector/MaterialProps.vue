@@ -7,11 +7,11 @@ const toolStore = useToolStore()
 </script>
 
 <template>
-  <div class="flex flex-col select-none text-xs font-mono">
+  <div class="flex flex-col select-none text-xs font-sans">
     <UiSection title="Retro PSX Shading" :default-open="true">
-      <div class="space-y-2">
+      <div class="space-y-1.5">
         <!-- Vertex Jitter -->
-        <label class="flex items-center justify-between cursor-pointer bg-ui-input p-1.5 rounded-xs border border-ui-borderSubtle">
+        <label class="flex items-center justify-between cursor-pointer bg-ui-input p-1.5 rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault transition">
           <span class="text-ui-textSecondary">PS1 Vertex Jitter</span>
           <input 
             type="checkbox" 
@@ -21,7 +21,7 @@ const toolStore = useToolStore()
         </label>
 
         <!-- Affine Texture Warping -->
-        <label class="flex items-center justify-between cursor-pointer bg-ui-input p-1.5 rounded-xs border border-ui-borderSubtle">
+        <label class="flex items-center justify-between cursor-pointer bg-ui-input p-1.5 rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault transition">
           <span class="text-ui-textSecondary">Affine Texture Distortion</span>
           <input 
             type="checkbox" 
@@ -31,7 +31,7 @@ const toolStore = useToolStore()
         </label>
 
         <!-- Bayer Dithering -->
-        <label class="flex items-center justify-between cursor-pointer bg-ui-input p-1.5 rounded-xs border border-ui-borderSubtle">
+        <label class="flex items-center justify-between cursor-pointer bg-ui-input p-1.5 rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault transition">
           <span class="text-ui-textSecondary">15-Bit Bayer Dithering</span>
           <input 
             type="checkbox" 
@@ -41,9 +41,9 @@ const toolStore = useToolStore()
         </label>
 
         <!-- CRT Filter Overlay -->
-        <label class="flex items-center justify-between cursor-pointer bg-ui-input p-1.5 rounded-xs border border-ui-borderSubtle">
+        <label class="flex items-center justify-between cursor-pointer bg-ui-input p-1.5 rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault transition">
           <span class="text-ui-textSecondary flex items-center gap-1.5">
-            <Tv class="w-3.5 h-3.5 text-indigo-400" />
+            <Tv class="w-3.5 h-3.5 text-ui-textMuted" />
             <span>CRT Scanlines</span>
           </span>
           <input 
