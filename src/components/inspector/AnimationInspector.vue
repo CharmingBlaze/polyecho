@@ -14,7 +14,10 @@ import {
   Wand2, 
   Settings,
   Eye,
-  ExternalLink
+  ExternalLink,
+  Key,
+  RotateCcw,
+  Clipboard
 } from 'lucide-vue-next'
 
 const animationStore = useAnimationStore()
@@ -206,25 +209,25 @@ function setClipFps(fps: number) {
     <!-- TAB 1: BONE PROPERTIES & POSE MODE -->
     <div v-show="activeTab === 'bone'" class="space-y-3">
       <!-- Pose Actions Toolbar -->
-      <div class="bg-ui-surface p-2 rounded-xs border border-ui-borderSubtle space-y-1.5">
+      <div class="bg-ui-surface p-2 rounded-xs border border-ui-borderSubtle space-y-1.5 font-sans">
         <div class="flex items-center justify-between text-[10px]">
-          <span class="text-ui-textMuted font-bold uppercase">Pose & Keying</span>
-          <span class="text-amber-400 font-bold">Pose Mode Active</span>
+          <span class="text-ui-textMuted font-semibold uppercase tracking-wider">Pose & Keying</span>
+          <span class="text-amber-400 font-medium text-[10px]">Pose Mode Active</span>
         </div>
         <div class="grid grid-cols-3 gap-1">
           <button 
             @click="animationStore.recordCurrentKeyframe()"
             :disabled="!selectedBone"
-            class="py-1 px-1.5 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-bold text-[10px] flex items-center justify-center gap-1 shadow-xs transition disabled:opacity-40"
+            class="h-6 px-1.5 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-medium text-[10px] flex items-center justify-center gap-1 shadow-xs transition cursor-pointer disabled:opacity-40"
             title="Insert keyframe for selected bone (K)"
           >
-            <Plus class="w-3 h-3" />
+            <Key class="w-2.5 h-2.5" />
             <span>Key (K)</span>
           </button>
 
           <button 
             @click="animationStore.recordAllBonesKeyframe()"
-            class="py-1 px-1.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textPrimary rounded-xs font-bold text-[10px] flex items-center justify-center gap-1 transition"
+            class="h-6 px-1.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textPrimary rounded-xs font-medium text-[10px] flex items-center justify-center gap-1 transition cursor-pointer"
             title="Insert keyframe for all bones in skeleton"
           >
             <span>Key All</span>
@@ -232,9 +235,10 @@ function setClipFps(fps: number) {
 
           <button 
             @click="animationStore.resetPose()"
-            class="py-1 px-1.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary rounded-xs font-bold text-[10px] flex items-center justify-center gap-1 transition"
+            class="h-6 px-1.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary hover:text-ui-textPrimary rounded-xs font-medium text-[10px] flex items-center justify-center gap-1 transition cursor-pointer"
             title="Reset active bone pose (Alt+R)"
           >
+            <RotateCcw class="w-2.5 h-2.5 text-amber-400" />
             <span>Reset (Alt+R)</span>
           </button>
         </div>
@@ -242,15 +246,17 @@ function setClipFps(fps: number) {
         <div class="grid grid-cols-2 gap-1 pt-1 border-t border-ui-borderSubtle">
           <button 
             @click="animationStore.copyPose()"
-            class="py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary rounded-xs text-[9px] font-bold"
+            class="h-5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary hover:text-ui-textPrimary rounded-xs text-[10px] font-medium flex items-center justify-center gap-1 transition cursor-pointer"
           >
-            Copy Pose
+            <Copy class="w-2.5 h-2.5" />
+            <span>Copy Pose</span>
           </button>
           <button 
             @click="animationStore.pastePose()"
-            class="py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary rounded-xs text-[9px] font-bold"
+            class="h-5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary hover:text-ui-textPrimary rounded-xs text-[10px] font-medium flex items-center justify-center gap-1 transition cursor-pointer"
           >
-            Paste Pose
+            <Clipboard class="w-2.5 h-2.5" />
+            <span>Paste Pose</span>
           </button>
         </div>
       </div>
