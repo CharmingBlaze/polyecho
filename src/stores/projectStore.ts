@@ -124,34 +124,7 @@ export const useProjectStore = defineStore('project', () => {
 
   // History Helper
   function recordState(desc: string) {
-    const prevMeshes = JSON.parse(JSON.stringify(meshes.value))
-    const prevActiveId = activeMeshId.value
-    const prevSelectedVerts = [...selectedVertexIds.value]
-    const prevSelectedFaces = [...selectedFaceIds.value]
-
-    setTimeout(() => {
-      const nextMeshes = JSON.parse(JSON.stringify(meshes.value))
-      const nextActiveId = activeMeshId.value
-      const nextSelectedVerts = [...selectedVertexIds.value]
-      const nextSelectedFaces = [...selectedFaceIds.value]
-
-      historyStore.pushAction({
-        description: desc,
-        timestamp: Date.now(),
-        undo: () => {
-          meshes.value = JSON.parse(JSON.stringify(prevMeshes))
-          activeMeshId.value = prevActiveId
-          selectedVertexIds.value = [...prevSelectedVerts]
-          selectedFaceIds.value = [...prevSelectedFaces]
-        },
-        redo: () => {
-          meshes.value = JSON.parse(JSON.stringify(nextMeshes))
-          activeMeshId.value = nextActiveId
-          selectedVertexIds.value = [...nextSelectedVerts]
-          selectedFaceIds.value = [...nextSelectedFaces]
-        }
-      })
-    }, 0)
+    historyStore.recordState(desc)
   }
 
   // Primitive adding

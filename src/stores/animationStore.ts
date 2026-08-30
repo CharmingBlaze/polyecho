@@ -146,6 +146,7 @@ export const useAnimationStore = defineStore('animation', () => {
   // CLIP MANAGEMENT (Multiple Animations For Games)
   // ----------------------------------------------------
   function addClip(name = 'New_Action', durationFrames = 24, fps = 12): AnimationClip {
+    projectStore.recordState('Add Animation Clip')
     const newClip: AnimationClip = {
       id: genId('clip'),
       name,
@@ -163,6 +164,7 @@ export const useAnimationStore = defineStore('animation', () => {
   function duplicateClip(clipId: string): AnimationClip | null {
     const src = armature.value.clips.find(c => c.id === clipId)
     if (!src) return null
+    projectStore.recordState('Duplicate Animation Clip')
     const cloned: AnimationClip = JSON.parse(JSON.stringify(src))
     cloned.id = genId('clip')
     cloned.name = `${src.name}_Copy`
@@ -173,6 +175,7 @@ export const useAnimationStore = defineStore('animation', () => {
 
   function deleteClip(clipId: string) {
     if (armature.value.clips.length <= 1) return
+    projectStore.recordState('Delete Animation Clip')
     armature.value.clips = armature.value.clips.filter(c => c.id !== clipId)
     if (armature.value.activeClipId === clipId) {
       armature.value.activeClipId = armature.value.clips[0].id
@@ -183,6 +186,7 @@ export const useAnimationStore = defineStore('animation', () => {
   function renameClip(clipId: string, newName: string) {
     const clip = armature.value.clips.find(c => c.id === clipId)
     if (clip && newName.trim()) {
+      projectStore.recordState('Rename Animation Clip')
       clip.name = newName.trim()
     }
   }
@@ -197,6 +201,7 @@ export const useAnimationStore = defineStore('animation', () => {
   // BONE MANAGEMENT
   // ----------------------------------------------------
   function addRootBone(name = 'Bone_Root'): Bone {
+    projectStore.recordState('Add Root Bone')
     const newBone: Bone = {
       id: genId('bone'),
       name,
@@ -218,6 +223,7 @@ export const useAnimationStore = defineStore('animation', () => {
     const parent = armature.value.bones.find(b => b.id === parentId)
     if (!parent) return null
 
+    projectStore.recordState('Add Child Bone')
     const newBone: Bone = {
       id: genId('bone'),
       name,
@@ -239,6 +245,7 @@ export const useAnimationStore = defineStore('animation', () => {
   function deleteBone(boneId: string) {
     const boneIndex = armature.value.bones.findIndex(b => b.id === boneId)
     if (boneIndex === -1) return
+    projectStore.recordState('Delete Bone')
     const bone = armature.value.bones[boneIndex]
 
     if (bone.parentId) {
@@ -269,6 +276,7 @@ export const useAnimationStore = defineStore('animation', () => {
   function renameBone(boneId: string, newName: string) {
     const bone = armature.value.bones.find(b => b.id === boneId)
     if (bone && newName.trim()) {
+      projectStore.recordState('Rename Bone')
       bone.name = newName.trim()
     }
   }
@@ -549,6 +557,7 @@ export const useAnimationStore = defineStore('animation', () => {
       mode?: 'replace' | 'add'
     }
   ) {
+    projectStore.recordState('Bind Geometry to Bone')
     const boneId = targetBoneId || selectedBoneId.value
     if (!boneId) return { success: false, message: 'No target bone selected' }
     const bone = armature.value.bones.find(b => b.id === boneId)
@@ -810,6 +819,7 @@ export const useAnimationStore = defineStore('animation', () => {
       xMirror?: boolean
     }
   ) {
+    projectStore.recordState('Paint Weight')
     const mesh = projectStore.meshes.find(m => m.id === meshId)
     if (!mesh) return
     mesh.armatureId = armature.value.id

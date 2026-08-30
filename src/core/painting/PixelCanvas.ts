@@ -434,6 +434,13 @@ export class PixelBuffer {
     return this.canvas.toDataURL('image/png')
   }
 
+  clone(): PixelBuffer {
+    const copy = new PixelBuffer(this.width, this.height)
+    copy.ctx.clearRect(0, 0, this.width, this.height)
+    copy.ctx.drawImage(this.canvas, 0, 0)
+    return copy
+  }
+
   loadFromDataURL(url: string, autoResize = true): Promise<void> {
     return new Promise((resolve) => {
       const img = new Image()
