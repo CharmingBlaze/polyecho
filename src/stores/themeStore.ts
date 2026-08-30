@@ -62,8 +62,8 @@ export const THEME_PRESETS: ThemePreset[] = [
       viewportBg: '#121418',
       gridMajor: '#6366f1',
       gridMinor: '#222631',
-      gizmoX: '#f43f5e',
-      gizmoY: '#10b981',
+      gizmoX: '#fb7185',
+      gizmoY: '#34d399',
       gizmoZ: '#38bdf8',
       gizmoAccent: '#f59e0b'
     }
@@ -74,28 +74,28 @@ export const THEME_PRESETS: ThemePreset[] = [
     category: 'DCC & Pro Studios',
     description: 'Autodesk Maya technical matte dark grey with electric cyan wireframes and technical grid.',
     colors: {
-      bgBase: '#1c1c1c',
-      bgPanel: '#282828',
-      bgHeader: '#222222',
-      bgInput: '#181818',
-      bgHover: '#363636',
-      bgActive: '#444444',
-      borderSubtle: '#333333',
-      borderDefault: '#444444',
-      borderStrong: '#5c5c5c',
-      textPrimary: '#f0f0f0',
-      textSecondary: '#cccccc',
-      textMuted: '#7a7a7a',
+      bgBase: '#222222',
+      bgPanel: '#2e2e2e',
+      bgHeader: '#262626',
+      bgInput: '#1a1a1a',
+      bgHover: '#3c3c3c',
+      bgActive: '#484848',
+      borderSubtle: '#383838',
+      borderDefault: '#4a4a4a',
+      borderStrong: '#00c0ff',
+      textPrimary: '#f5f5f5',
+      textSecondary: '#d4d4d4',
+      textMuted: '#888888',
       textAccent: '#00c0ff',
       accentColor: '#00c0ff',
-      selectionColor: '#00e5ff',
-      viewportBg: '#181818',
-      gridMajor: '#00c0ff',
+      selectionColor: '#26c6da',
+      viewportBg: '#1e1e1e',
+      gridMajor: '#525252',
       gridMinor: '#2c2c2c',
-      gizmoX: '#d63031',
-      gizmoY: '#00b894',
-      gizmoZ: '#0984e3',
-      gizmoAccent: '#00e5ff'
+      gizmoX: '#e53935',
+      gizmoY: '#43a047',
+      gizmoZ: '#1e88e5',
+      gizmoAccent: '#26c6da'
     }
   },
   {
@@ -112,7 +112,7 @@ export const THEME_PRESETS: ThemePreset[] = [
       bgActive: '#44475a',
       borderSubtle: '#3a3c4e',
       borderDefault: '#4d5069',
-      borderStrong: '#6272a4',
+      borderStrong: '#bd93f9',
       textPrimary: '#f8f8f2',
       textSecondary: '#e2e8f0',
       textMuted: '#7988b8',
@@ -182,8 +182,8 @@ export const THEME_PRESETS: ThemePreset[] = [
       viewportBg: '#14161a',
       gridMajor: '#4b5568',
       gridMinor: '#20242c',
-      gizmoX: '#e74c3c',
-      gizmoY: '#2ecc71',
+      gizmoX: '#f97316',
+      gizmoY: '#10b981',
       gizmoZ: '#00c4cc',
       gizmoAccent: '#d9822b'
     }
@@ -213,9 +213,9 @@ export const THEME_PRESETS: ThemePreset[] = [
       gridMajor: '#00d2d3',
       gridMinor: '#2c333d',
       gizmoX: '#e74c3c',
-      gizmoY: '#10ac84',
-      gizmoZ: '#2e86de',
-      gizmoAccent: '#feca57'
+      gizmoY: '#a6e22e',
+      gizmoZ: '#00d2d3',
+      gizmoAccent: '#f39c12'
     }
   },
   {
@@ -239,7 +239,7 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#ffd866',
       accentColor: '#ffd866',
       selectionColor: '#fc9867',
-      viewportBg: '#181719',
+      viewportBg: '#141416',
       gridMajor: '#ffd866',
       gridMinor: '#2a2a2f',
       gizmoX: '#ff6188',
@@ -274,7 +274,7 @@ export const THEME_PRESETS: ThemePreset[] = [
       gridMinor: '#353c4a',
       gizmoX: '#bf616a',
       gizmoY: '#a3be8c',
-      gizmoZ: '#88c0d0',
+      gizmoZ: '#81a1c1',
       gizmoAccent: '#ebcb8b'
     }
   },
@@ -299,13 +299,13 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#7aa2f7',
       accentColor: '#7aa2f7',
       selectionColor: '#bb9af7',
-      viewportBg: '#161720',
+      viewportBg: '#13141c',
       gridMajor: '#7aa2f7',
-      gridMinor: '#292e42',
+      gridMinor: '#222538',
       gizmoX: '#f7768e',
       gizmoY: '#9ece6a',
       gizmoZ: '#7dcfff',
-      gizmoAccent: '#e0af68'
+      gizmoAccent: '#bb9af7'
     }
   },
   {
@@ -366,9 +366,9 @@ export const THEME_PRESETS: ThemePreset[] = [
       viewportBg: '#008080',
       gridMajor: '#ffffff',
       gridMinor: '#005e5e',
-      gizmoX: '#ff0000',
+      gizmoX: '#e00000',
       gizmoY: '#00aa00',
-      gizmoZ: '#0055ff',
+      gizmoZ: '#0000e0',
       gizmoAccent: '#ffff00'
     }
   },
@@ -452,12 +452,12 @@ export const THEME_PRESETS: ThemePreset[] = [
       textMuted: '#444444',
       textAccent: '#ff8800',
       accentColor: '#0055aa',
-      selectionColor: '#ff8800',
+      selectionColor: '#ffaa00',
       viewportBg: '#004488',
       gridMajor: '#ff8800',
       gridMinor: '#003366',
-      gizmoX: '#ff4444',
-      gizmoY: '#44ff44',
+      gizmoX: '#ff3333',
+      gizmoY: '#33ff33',
       gizmoZ: '#ffffff',
       gizmoAccent: '#ffaa00'
     }
@@ -498,14 +498,14 @@ export const THEME_PRESETS: ThemePreset[] = [
     category: 'Operating Systems',
     description: 'Steve Jobs NeXT Computer sleek monolithic black and textured charcoal aesthetic.',
     colors: {
-      bgBase: '#262626',
-      bgPanel: '#404040',
+      bgBase: '#1c1c1c',
+      bgPanel: '#383838',
       bgHeader: '#1a1a1a',
-      bgInput: '#2b2b2b',
-      bgHover: '#505050',
-      bgActive: '#606060',
+      bgInput: '#262626',
+      bgHover: '#4a4a4a',
+      bgActive: '#5a5a5a',
       borderSubtle: '#333333',
-      borderDefault: '#595959',
+      borderDefault: '#505050',
       borderStrong: '#7f7f7f',
       textPrimary: '#ffffff',
       textSecondary: '#cccccc',
@@ -513,12 +513,12 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#d4af37',
       accentColor: '#999999',
       selectionColor: '#d4af37',
-      viewportBg: '#1a1a1a',
+      viewportBg: '#101010',
       gridMajor: '#555555',
-      gridMinor: '#2d2d2d',
-      gizmoX: '#cccccc',
+      gridMinor: '#222222',
+      gizmoX: '#f0f0f0',
       gizmoY: '#999999',
-      gizmoZ: '#666666',
+      gizmoZ: '#555555',
       gizmoAccent: '#d4af37'
     }
   },
@@ -547,13 +547,13 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#00dfa2',
       accentColor: '#ff0055',
       selectionColor: '#00dfa2',
-      viewportBg: '#16161c',
+      viewportBg: '#14141c',
       gridMajor: '#ff0055',
       gridMinor: '#2a2a38',
       gizmoX: '#ff0055',
       gizmoY: '#00dfa2',
-      gizmoZ: '#0088ff',
-      gizmoAccent: '#ffe600'
+      gizmoZ: '#2979ff',
+      gizmoAccent: '#ff4081'
     }
   },
   {
@@ -612,7 +612,7 @@ export const THEME_PRESETS: ThemePreset[] = [
       gridMinor: '#306230',
       gizmoX: '#0f380f',
       gizmoY: '#306230',
-      gizmoZ: '#0f380f',
+      gizmoZ: '#4e7a4e',
       gizmoAccent: '#0f380f'
     }
   },
@@ -642,7 +642,7 @@ export const THEME_PRESETS: ThemePreset[] = [
       gridMinor: '#252044',
       gizmoX: '#f43f5e',
       gizmoY: '#10b981',
-      gizmoZ: '#a78bfa',
+      gizmoZ: '#8b5cf6',
       gizmoAccent: '#38bdf8'
     }
   },
@@ -701,9 +701,9 @@ export const THEME_PRESETS: ThemePreset[] = [
       gridMajor: '#ff5900',
       gridMinor: '#262d3a',
       gizmoX: '#ff5900',
-      gizmoY: '#00ccff',
-      gizmoZ: '#ffcc00',
-      gizmoAccent: '#ff5900'
+      gizmoY: '#00cc88',
+      gizmoZ: '#0088ff',
+      gizmoAccent: '#ffcc00'
     }
   },
   {
@@ -763,7 +763,7 @@ export const THEME_PRESETS: ThemePreset[] = [
       gizmoX: '#f43f5e',
       gizmoY: '#2dd4bf',
       gizmoZ: '#38bdf8',
-      gizmoAccent: '#38bdf8'
+      gizmoAccent: '#cbd5e1'
     }
   },
   {
@@ -790,10 +790,10 @@ export const THEME_PRESETS: ThemePreset[] = [
       viewportBg: '#1c1e24',
       gridMajor: '#3b82f6',
       gridMinor: '#2a2d36',
-      gizmoX: '#ef4444',
-      gizmoY: '#10b981',
-      gizmoZ: '#3b82f6',
-      gizmoAccent: '#f59e0b'
+      gizmoX: '#dc2626',
+      gizmoY: '#059669',
+      gizmoZ: '#2563eb',
+      gizmoAccent: '#d97706'
     }
   },
   {
@@ -821,9 +821,9 @@ export const THEME_PRESETS: ThemePreset[] = [
       gridMajor: '#ff007f',
       gridMinor: '#161a30',
       gizmoX: '#ff007f',
-      gizmoY: '#00f0ff',
-      gizmoZ: '#ffe600',
-      gizmoAccent: '#00f0ff'
+      gizmoY: '#ffe600',
+      gizmoZ: '#00f0ff',
+      gizmoAccent: '#d946ef'
     }
   }
 ]
