@@ -455,9 +455,13 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function bindSelectedGeometry(
-    bindingType: 'object' | 'rigid_vertex' | 'smooth_vertex', 
+    targetType: 'object' | 'vertices' | 'edges' | 'faces' | 'all_vertices' | 'smooth_auto' | 'rigid_vertex' | 'smooth_vertex', 
     targetBoneId?: string,
-    options?: { splitBoundary?: boolean }
+    options?: { 
+      weight?: number
+      splitBoundary?: boolean
+      mode?: 'replace' | 'add'
+    }
   ) {
     const boneId = targetBoneId || selectedBoneId.value
     if (!boneId) return { success: false, message: 'No target bone selected' }
@@ -467,14 +471,63 @@ export const useAnimationStore = defineStore('animation', () => {
     const activeMesh = projectStore.activeMesh
     if (!activeMesh) return { success: false, message: 'No mesh selected' }
 
-    if (bindingType === 'object') {
+    const weightVal = typeof options?.weight === 'number' ? Math.max(0, Math.min(1, options.weight)) : 1.0
+    const mode = options?.mode || 'replace'
+
+    // 1. Direct Object Node Parenting
+    if (targetType === 'object') {
       activeMesh.parentId = boneId
       activeMesh.armatureId = armature.value.id
-      return { success: true, message: `Bound ${activeMesh.name} to ${bone.name} (Object)` }
+      return { success: true, message: `Parented ${activeMesh.name} to ${bone.name} (Object Node)` }
     }
 
-    if (bindingType === 'rigid_vertex') {
-      let targetVertexIds: string[] = []
+    // 2. Smooth Proximity Falloff Skinning
+    if (targetType === 'smooth_auto' || targetType === 'smooth_vertex') {
+      autoWeightMeshToBones(activeMesh)
+      return { success: true, message: `Auto-calculated smooth weights for ${activeMesh.name}` }
+    }
+
+    // 3. Collect Target Vertices based on targetType
+    let targetVertexIds: string[] = []
+
+    if (targetType === 'faces') {
+      const vertSet = new Set<string>()
+      for (const face of activeMesh.faces) {
+        if (projectStore.selectedFaceIds.includes(face.id)) {
+          face.vertexIds.forEach(id => vertSet.add(id))
+        }
+      }
+      targetVertexIds = Array.from(vertSet)
+    } else if (targetType === 'edges') {
+      const vertSet = new Set<string>()
+      for (const edgeId of projectStore.selectedEdgeIds) {
+        const parts = edgeId.split('_')
+        if (parts.length >= 2) {
+          vertSet.add(parts[0])
+          vertSet.add(parts[1])
+        }
+      }
+      if (vertSet.size === 0 && projectStore.selectedEdgeIds.length > 0) {
+        for (const f of activeMesh.faces) {
+          for (let i = 0; i < f.vertexIds.length; i++) {
+            const v1 = f.vertexIds[i]
+            const v2 = f.vertexIds[(i + 1) % f.vertexIds.length]
+            const eKey = `${v1}_${v2}`
+            const eKeyRev = `${v2}_${v1}`
+            if (projectStore.selectedEdgeIds.includes(eKey) || projectStore.selectedEdgeIds.includes(eKeyRev)) {
+              vertSet.add(v1)
+              vertSet.add(v2)
+            }
+          }
+        }
+      }
+      targetVertexIds = Array.from(vertSet)
+    } else if (targetType === 'vertices') {
+      targetVertexIds = [...projectStore.selectedVertexIds]
+    } else if (targetType === 'all_vertices') {
+      targetVertexIds = activeMesh.vertices.map(v => v.id)
+    } else {
+      // Default / rigid_vertex fallback
       if (projectStore.selectedFaceIds.length > 0) {
         const vertSet = new Set<string>()
         for (const face of activeMesh.faces) {
@@ -483,22 +536,77 @@ export const useAnimationStore = defineStore('animation', () => {
           }
         }
         targetVertexIds = Array.from(vertSet)
+      } else if (projectStore.selectedEdgeIds.length > 0) {
+        const vertSet = new Set<string>()
+        for (const edgeId of projectStore.selectedEdgeIds) {
+          const parts = edgeId.split('_')
+          if (parts.length >= 2) {
+            vertSet.add(parts[0])
+            vertSet.add(parts[1])
+          }
+        }
+        targetVertexIds = Array.from(vertSet)
       } else if (projectStore.selectedVertexIds.length > 0) {
         targetVertexIds = [...projectStore.selectedVertexIds]
       } else {
         targetVertexIds = activeMesh.vertices.map(v => v.id)
       }
-
-      assignRigidVertices(activeMesh.id, targetVertexIds, boneId, options?.splitBoundary)
-      return { success: true, message: `Bound ${targetVertexIds.length} vertices to ${bone.name} (100% Rigid)` }
     }
 
-    if (bindingType === 'smooth_vertex') {
-      autoWeightMeshToBones(activeMesh)
-      return { success: true, message: `Calculated smooth weights for ${activeMesh.name}` }
+    if (targetVertexIds.length === 0) {
+      targetVertexIds = activeMesh.vertices.map(v => v.id)
     }
 
-    return { success: false, message: 'Unknown binding type' }
+    activeMesh.armatureId = armature.value.id
+    const vertIdSet = new Set(targetVertexIds)
+
+    // Optional boundary vertex splitting for sharp low-poly mechanical hinges
+    if (options?.splitBoundary && projectStore.selectedFaceIds.length > 0) {
+      const selectedFaces = activeMesh.faces.filter(f => projectStore.selectedFaceIds.includes(f.id))
+      const unselectedFaces = activeMesh.faces.filter(f => !projectStore.selectedFaceIds.includes(f.id))
+      
+      const unselectedVertIds = new Set<string>()
+      unselectedFaces.forEach(f => f.vertexIds.forEach(id => unselectedVertIds.add(id)))
+
+      const boundaryVerts = targetVertexIds.filter(id => unselectedVertIds.has(id))
+      const splitMap = new Map<string, string>()
+
+      for (const bId of boundaryVerts) {
+        const origVert = activeMesh.vertices.find(v => v.id === bId)
+        if (!origVert) continue
+        const newVertId = genId('v_split')
+        const newVert = {
+          id: newVertId,
+          position: { ...origVert.position },
+          color: origVert.color,
+          boneWeights: { [boneId]: weightVal }
+        }
+        activeMesh.vertices.push(newVert)
+        splitMap.set(bId, newVertId)
+        vertIdSet.delete(bId)
+        vertIdSet.add(newVertId)
+      }
+
+      for (const face of selectedFaces) {
+        face.vertexIds = face.vertexIds.map(vid => splitMap.get(vid) || vid)
+      }
+    }
+
+    for (const v of activeMesh.vertices) {
+      if (vertIdSet.has(v.id)) {
+        if (mode === 'replace') {
+          v.boneWeights = { [boneId]: weightVal }
+        } else {
+          if (!v.boneWeights) v.boneWeights = {}
+          v.boneWeights[boneId] = weightVal
+        }
+      }
+    }
+
+    return { 
+      success: true, 
+      message: `Bound ${targetVertexIds.length} vertices to ${bone.name} (${Math.round(weightVal * 100)}%)` 
+    }
   }
 
   function assignRigidVertices(meshId: string, vertexIds: string[], boneId: string, splitBoundary = false) {

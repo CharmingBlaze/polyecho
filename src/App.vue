@@ -166,11 +166,29 @@ function handleKeyDown(e: KeyboardEvent) {
     return
   }
 
-  // Bevel Shortcut (Ctrl+B / Ctrl+Shift+B)
+  // Bevel (Model) / Bind to Bone (Rig/Animate) Shortcut (Ctrl+B)
   if ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'B')) {
     e.preventDefault()
     if (toolStore.appMode === 'model') {
       window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'bevel' }))
+    } else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
+      const mode = toolStore.selectMode === 'object' ? 'object' : (toolStore.selectMode === 'edge' ? 'edges' : (toolStore.selectMode === 'vertex' ? 'vertices' : 'faces'))
+      animationStore.bindSelectedGeometry(mode)
+    }
+    return
+  }
+
+  // Parent to Bone (Ctrl+P) / Unbind (Alt+P) (Blender)
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
+    e.preventDefault()
+    const mode = toolStore.selectMode === 'object' ? 'object' : (toolStore.selectMode === 'edge' ? 'edges' : (toolStore.selectMode === 'vertex' ? 'vertices' : 'faces'))
+    animationStore.bindSelectedGeometry(mode)
+    return
+  }
+  if (e.altKey && (e.key === 'p' || e.key === 'P') && !e.ctrlKey && !e.metaKey) {
+    e.preventDefault()
+    if (projectStore.activeMesh) {
+      animationStore.unbindGeometry(projectStore.activeMesh.id)
     }
     return
   }

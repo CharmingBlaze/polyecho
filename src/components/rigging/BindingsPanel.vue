@@ -12,38 +12,53 @@ import {
   Layers, 
   Box, 
   Activity,
-  GitCommitVertical
+  GitCommitVertical,
+  Dot,
+  Minus,
+  Maximize2
 } from 'lucide-vue-next'
 
 const animationStore = useAnimationStore()
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
 
-const bindingType = ref<'rigid_vertex' | 'object' | 'smooth_vertex'>('rigid_vertex')
+// Target Selection Mode
+const targetMode = ref<'object' | 'vertices' | 'edges' | 'faces' | 'all_vertices'>('faces')
+
+// Binding Algorithm & Weight
+const bindingAlgorithm = ref<'rigid' | 'smooth'>('rigid')
+const customWeight = ref<number>(1.0)
+const weightMode = ref<'replace' | 'add'>('replace')
 const splitBoundary = ref<boolean>(false)
 const lastActionMessage = ref<string>('')
 
 const activeMesh = computed(() => projectStore.activeMesh)
 const selectedBone = computed(() => animationStore.selectedBone)
 
-const selectionDescription = computed(() => {
+// Sync targetMode with current toolStore.selectMode
+function syncTargetWithMode() {
+  if (toolStore.selectMode === 'object') targetMode.value = 'object'
+  else if (toolStore.selectMode === 'vertex') targetMode.value = 'vertices'
+  else if (toolStore.selectMode === 'edge') targetMode.value = 'edges'
+  else if (toolStore.selectMode === 'face') targetMode.value = 'faces'
+}
+syncTargetWithMode()
+
+const selectionCountDescription = computed(() => {
   if (!activeMesh.value) return 'No mesh selected'
-  if (toolStore.selectMode === 'face' && projectStore.selectedFaceIds.length > 0) {
-    const vertSet = new Set<string>()
-    for (const f of activeMesh.value.faces) {
-      if (projectStore.selectedFaceIds.includes(f.id)) {
-        f.vertexIds.forEach(id => vertSet.add(id))
-      }
-    }
-    return `${projectStore.selectedFaceIds.length} faces (${vertSet.size} verts)`
+  if (targetMode.value === 'object') {
+    return `${activeMesh.value.name} (Object)`
   }
-  if (toolStore.selectMode === 'vertex' && projectStore.selectedVertexIds.length > 0) {
-    return `${projectStore.selectedVertexIds.length} vertices`
+  if (targetMode.value === 'faces') {
+    return `${projectStore.selectedFaceIds.length} Faces selected`
   }
-  if (toolStore.selectMode === 'edge' && projectStore.selectedEdgeIds.length > 0) {
-    return `${projectStore.selectedEdgeIds.length} edges`
+  if (targetMode.value === 'edges') {
+    return `${projectStore.selectedEdgeIds.length} Edges selected`
   }
-  return `${activeMesh.value.name} (Object)`
+  if (targetMode.value === 'vertices') {
+    return `${projectStore.selectedVertexIds.length} Vertices selected`
+  }
+  return `All ${activeMesh.value.vertices.length} Vertices`
 })
 
 const boundMeshes = computed(() => {
@@ -62,12 +77,21 @@ function handleBind() {
     lastActionMessage.value = 'Select a target bone first'
     return
   }
-  projectStore.recordState('Bind Selected Geometry')
-  const res = animationStore.bindSelectedGeometry(bindingType.value, selectedBone.value.id, {
-    splitBoundary: splitBoundary.value
+  projectStore.recordState('Bind Geometry to Bone')
+  
+  let targetType: any = targetMode.value
+  if (bindingAlgorithm.value === 'smooth') {
+    targetType = 'smooth_auto'
+  }
+
+  const res = animationStore.bindSelectedGeometry(targetType, selectedBone.value.id, {
+    weight: customWeight.value,
+    splitBoundary: splitBoundary.value,
+    mode: weightMode.value
   })
+
   lastActionMessage.value = res.message
-  setTimeout(() => { lastActionMessage.value = '' }, 3000)
+  setTimeout(() => { lastActionMessage.value = '' }, 3500)
 }
 
 function handleUnbind() {
@@ -75,7 +99,15 @@ function handleUnbind() {
   projectStore.recordState('Unbind Geometry')
   animationStore.unbindGeometry(activeMesh.value.id, selectedBone.value?.id)
   lastActionMessage.value = `Unbound ${activeMesh.value.name}`
-  setTimeout(() => { lastActionMessage.value = '' }, 3000)
+  setTimeout(() => { lastActionMessage.value = '' }, 3500)
+}
+
+function handleAutoSmoothAll() {
+  if (!activeMesh.value) return
+  projectStore.recordState('Auto-Calculate Smooth Skinning')
+  animationStore.autoWeightMeshToBones(activeMesh.value)
+  lastActionMessage.value = `Skinning computed for ${activeMesh.value.name}`
+  setTimeout(() => { lastActionMessage.value = '' }, 3500)
 }
 </script>
 
@@ -85,14 +117,14 @@ function handleUnbind() {
     <div class="flex items-center justify-between border-b border-ui-borderSubtle pb-2">
       <div class="flex items-center gap-1.5 text-ui-textPrimary font-semibold">
         <Link class="w-3.5 h-3.5 text-ui-accent" />
-        <span class="text-[11px] uppercase tracking-wider text-ui-textMuted font-bold">Geometry Bindings</span>
+        <span class="text-[11px] uppercase tracking-wider text-ui-textMuted font-bold">Geometry Bindings & Parenting</span>
       </div>
-      <span v-if="lastActionMessage" class="text-[11px] text-emerald-400 font-medium truncate max-w-[170px]">
+      <span v-if="lastActionMessage" class="text-[10px] text-emerald-400 font-medium truncate max-w-[180px]">
         {{ lastActionMessage }}
       </span>
     </div>
 
-    <!-- Target & Selection Summary -->
+    <!-- Active Bone & Mesh Status -->
     <div class="grid grid-cols-2 gap-2 text-[11px]">
       <div class="bg-ui-surface/60 p-2 rounded-xs border border-ui-borderSubtle space-y-1">
         <div class="text-[10px] uppercase font-semibold text-ui-textMuted">Target Bone</div>
@@ -106,87 +138,192 @@ function handleUnbind() {
       </div>
 
       <div class="bg-ui-surface/60 p-2 rounded-xs border border-ui-borderSubtle space-y-1">
-        <div class="text-[10px] uppercase font-semibold text-ui-textMuted">Geometry Selection</div>
+        <div class="text-[10px] uppercase font-semibold text-ui-textMuted">Selected Mesh</div>
         <div class="font-medium text-ui-textPrimary truncate">
-          {{ selectionDescription }}
+          {{ activeMesh ? activeMesh.name : 'No mesh selected' }}
         </div>
       </div>
     </div>
 
-    <!-- Binding Mode Selection -->
+    <!-- 1. Geometry Target Selection Mode (Objects, Vertices, Edges, Faces) -->
     <div class="bg-ui-surface/60 p-2.5 rounded-xs border border-ui-borderSubtle space-y-2">
-      <div class="text-[10px] uppercase font-semibold text-ui-textMuted tracking-wider">Binding Mode</div>
-      <div class="grid grid-cols-3 gap-1.5">
+      <div class="flex items-center justify-between text-[10px]">
+        <span class="uppercase font-semibold text-ui-textMuted tracking-wider">1. Parent / Bind Target</span>
+        <span class="text-ui-textAccent font-medium">{{ selectionCountDescription }}</span>
+      </div>
+
+      <div class="grid grid-cols-5 gap-1 text-[10px]">
         <button 
-          @click="bindingType = 'rigid_vertex'"
+          @click="targetMode = 'object'"
+          class="py-1.5 px-1 rounded-xs border font-medium flex flex-col items-center gap-1 transition cursor-pointer"
+          :class="targetMode === 'object' ? 'bg-ui-active border-ui-accent text-ui-textAccent shadow-xs' : 'bg-ui-input/70 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
+          title="Parent entire mesh object as a rigid node"
+        >
+          <Box class="w-3.5 h-3.5 text-sky-400" />
+          <span>Object</span>
+        </button>
+
+        <button 
+          @click="targetMode = 'faces'"
+          class="py-1.5 px-1 rounded-xs border font-medium flex flex-col items-center gap-1 transition cursor-pointer"
+          :class="targetMode === 'faces' ? 'bg-ui-active border-ui-accent text-ui-textAccent shadow-xs' : 'bg-ui-input/70 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
+          title="Bind vertices belonging to selected faces"
+        >
+          <Layers class="w-3.5 h-3.5 text-amber-400" />
+          <span>Faces</span>
+        </button>
+
+        <button 
+          @click="targetMode = 'edges'"
+          class="py-1.5 px-1 rounded-xs border font-medium flex flex-col items-center gap-1 transition cursor-pointer"
+          :class="targetMode === 'edges' ? 'bg-ui-active border-ui-accent text-ui-textAccent shadow-xs' : 'bg-ui-input/70 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
+          title="Bind vertices belonging to selected edges"
+        >
+          <Minus class="w-3.5 h-3.5 text-emerald-400" />
+          <span>Edges</span>
+        </button>
+
+        <button 
+          @click="targetMode = 'vertices'"
+          class="py-1.5 px-1 rounded-xs border font-medium flex flex-col items-center gap-1 transition cursor-pointer"
+          :class="targetMode === 'vertices' ? 'bg-ui-active border-ui-accent text-ui-textAccent shadow-xs' : 'bg-ui-input/70 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
+          title="Bind selected individual vertices"
+        >
+          <Dot class="w-3.5 h-3.5 text-rose-400" />
+          <span>Vertices</span>
+        </button>
+
+        <button 
+          @click="targetMode = 'all_vertices'"
+          class="py-1.5 px-1 rounded-xs border font-medium flex flex-col items-center gap-1 transition cursor-pointer"
+          :class="targetMode === 'all_vertices' ? 'bg-ui-active border-ui-accent text-ui-textAccent shadow-xs' : 'bg-ui-input/70 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
+          title="Bind every vertex in this mesh to the target bone"
+        >
+          <Maximize2 class="w-3.5 h-3.5 text-purple-400" />
+          <span>All Verts</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 2. Binding Algorithm & Influence Weight -->
+    <div class="bg-ui-surface/60 p-2.5 rounded-xs border border-ui-borderSubtle space-y-2">
+      <div class="text-[10px] uppercase font-semibold text-ui-textMuted tracking-wider">2. Binding Algorithm & Options</div>
+
+      <div class="grid grid-cols-2 gap-1.5">
+        <button 
+          @click="bindingAlgorithm = 'rigid'"
           class="p-2 rounded-xs border text-left flex flex-col gap-1 transition cursor-pointer"
-          :class="bindingType === 'rigid_vertex' ? 'bg-ui-active border-ui-accent text-ui-textAccent shadow-xs' : 'bg-ui-input/60 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
+          :class="bindingAlgorithm === 'rigid' ? 'bg-ui-active border-ui-accent text-ui-textAccent shadow-xs' : 'bg-ui-input/60 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
         >
           <div class="flex items-center gap-1.5 font-semibold text-[11px]">
             <Layers class="w-3.5 h-3.5 text-amber-400" />
-            <span>Rigid (100%)</span>
+            <span>Rigid Weight</span>
           </div>
           <span class="text-[9px] text-ui-textMuted leading-snug">Low-poly vertex lock</span>
         </button>
 
         <button 
-          @click="bindingType = 'object'"
+          @click="bindingAlgorithm = 'smooth'"
           class="p-2 rounded-xs border text-left flex flex-col gap-1 transition cursor-pointer"
-          :class="bindingType === 'object' ? 'bg-ui-active border-ui-accent text-ui-textAccent shadow-xs' : 'bg-ui-input/60 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
-        >
-          <div class="flex items-center gap-1.5 font-semibold text-[11px]">
-            <Box class="w-3.5 h-3.5 text-sky-400" />
-            <span>Object</span>
-          </div>
-          <span class="text-[9px] text-ui-textMuted leading-snug">Direct node parent</span>
-        </button>
-
-        <button 
-          @click="bindingType = 'smooth_vertex'"
-          class="p-2 rounded-xs border text-left flex flex-col gap-1 transition cursor-pointer"
-          :class="bindingType === 'smooth_vertex' ? 'bg-ui-active border-ui-accent text-ui-textAccent shadow-xs' : 'bg-ui-input/60 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
+          :class="bindingAlgorithm === 'smooth' ? 'bg-ui-active border-ui-accent text-ui-textAccent shadow-xs' : 'bg-ui-input/60 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
         >
           <div class="flex items-center gap-1.5 font-semibold text-[11px]">
             <Sparkles class="w-3.5 h-3.5 text-purple-400" />
-            <span>Smooth</span>
+            <span>Smooth Skinning</span>
           </div>
-          <span class="text-[9px] text-ui-textMuted leading-snug">Proximity weights</span>
+          <span class="text-[9px] text-ui-textMuted leading-snug">Distance falloff</span>
         </button>
       </div>
 
-      <!-- Boundary Split Option -->
-      <label v-if="bindingType === 'rigid_vertex'" class="flex items-center gap-2 pt-2 border-t border-ui-borderSubtle/60 cursor-pointer text-[11px] text-ui-textSecondary hover:text-ui-textPrimary transition">
-        <input type="checkbox" v-model="splitBoundary" class="rounded-xs bg-ui-input border-ui-borderDefault text-ui-accent focus:ring-0 cursor-pointer" />
-        <span class="flex items-center gap-1.5">
-          <Scissors class="w-3.5 h-3.5 text-amber-400" />
-          <span>Split boundary vertices (for mechanical joints)</span>
-        </span>
-      </label>
+      <!-- Weight & Options Controls -->
+      <div v-if="bindingAlgorithm === 'rigid' && targetMode !== 'object'" class="space-y-2 pt-1">
+        <!-- Weight Percentage Presets -->
+        <div class="space-y-1">
+          <div class="flex items-center justify-between text-[10px] text-ui-textMuted">
+            <span>Influence Weight:</span>
+            <span class="text-ui-textAccent font-bold font-mono">{{ Math.round(customWeight * 100) }}%</span>
+          </div>
+          <div class="grid grid-cols-4 gap-1">
+            <button 
+              v-for="w in [1.0, 0.75, 0.5, 0.25]" 
+              :key="w"
+              @click="customWeight = w"
+              class="py-1 rounded-xs border text-[10px] font-medium transition cursor-pointer"
+              :class="customWeight === w ? 'bg-ui-active border-ui-accent text-ui-textAccent font-bold' : 'bg-ui-input/70 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
+            >
+              {{ Math.round(w * 100) }}%
+            </button>
+          </div>
+        </div>
+
+        <!-- Mode: Replace vs Add -->
+        <div class="flex items-center justify-between text-[10px] pt-1">
+          <span class="text-ui-textMuted">Weight Application:</span>
+          <div class="flex items-center gap-1">
+            <button 
+              @click="weightMode = 'replace'"
+              class="px-2 py-0.5 rounded-xs border text-[10px] transition cursor-pointer"
+              :class="weightMode === 'replace' ? 'bg-ui-active border-ui-accent text-ui-textAccent font-bold' : 'bg-ui-input border-ui-borderSubtle text-ui-textMuted'"
+            >
+              Replace
+            </button>
+            <button 
+              @click="weightMode = 'add'"
+              class="px-2 py-0.5 rounded-xs border text-[10px] transition cursor-pointer"
+              :class="weightMode === 'add' ? 'bg-ui-active border-ui-accent text-ui-textAccent font-bold' : 'bg-ui-input border-ui-borderSubtle text-ui-textMuted'"
+            >
+              Additive
+            </button>
+          </div>
+        </div>
+
+        <!-- Mechanical Hinge Seam Split Option -->
+        <label class="flex items-center gap-2 pt-1 border-t border-ui-borderSubtle/60 cursor-pointer text-[11px] text-ui-textSecondary hover:text-ui-textPrimary transition">
+          <input type="checkbox" v-model="splitBoundary" class="rounded-xs bg-ui-input border-ui-borderDefault text-ui-accent focus:ring-0 cursor-pointer" />
+          <span class="flex items-center gap-1.5">
+            <Scissors class="w-3.5 h-3.5 text-amber-400" />
+            <span>Split boundary seam vertices (for mechanical joints)</span>
+          </span>
+        </label>
+      </div>
     </div>
 
-    <!-- Action Buttons -->
-    <div class="flex items-center gap-2 pt-1">
-      <button 
-        @click="handleBind"
-        class="flex-1 py-2 px-3 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold text-xs flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-        :disabled="!selectedBone"
-      >
-        <Check class="w-3.5 h-3.5" />
-        <span>Bind Selected</span>
-        <span class="text-[10px] opacity-75 font-mono">(Ctrl+B)</span>
-      </button>
+    <!-- 3. Action Buttons -->
+    <div class="space-y-1.5 pt-1">
+      <div class="flex items-center gap-2">
+        <button 
+          @click="handleBind"
+          class="flex-1 py-2 px-3 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold text-xs flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          :disabled="!selectedBone || !activeMesh"
+        >
+          <Check class="w-3.5 h-3.5" />
+          <span>Bind to {{ selectedBone ? selectedBone.name : 'Bone' }}</span>
+          <span class="text-[10px] opacity-75 font-mono">(Ctrl+B)</span>
+        </button>
+
+        <button 
+          @click="handleUnbind"
+          class="py-2 px-3 bg-ui-input hover:bg-rose-950/40 hover:text-rose-300 text-ui-textSecondary border border-ui-borderSubtle rounded-xs font-medium text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+          title="Unbind selected geometry / mesh from bone"
+          :disabled="!activeMesh"
+        >
+          <Unlink class="w-3.5 h-3.5" />
+          <span>Unbind</span>
+        </button>
+      </div>
 
       <button 
-        @click="handleUnbind"
-        class="py-2 px-3 bg-ui-input hover:bg-rose-950/40 hover:text-rose-300 text-ui-textSecondary border border-ui-borderSubtle rounded-xs font-medium text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
-        title="Unbind selected geometry from bone"
+        v-if="bindingAlgorithm === 'smooth'"
+        @click="handleAutoSmoothAll"
+        class="w-full py-1.5 px-3 bg-purple-950/40 hover:bg-purple-900/50 text-purple-300 border border-purple-500/40 rounded-xs font-semibold text-[11px] flex items-center justify-center gap-1.5 shadow-xs transition cursor-pointer"
+        :disabled="!activeMesh"
       >
-        <Unlink class="w-3.5 h-3.5" />
-        <span>Unbind</span>
+        <Sparkles class="w-3.5 h-3.5 text-purple-400" />
+        <span>Auto-Calculate Smooth Weights for All Bones</span>
       </button>
     </div>
 
-    <!-- Active Bone Current Bindings Outliner -->
+    <!-- 4. Active Bone Current Bindings Outliner -->
     <div v-if="selectedBone" class="bg-ui-surface/60 p-2.5 rounded-xs border border-ui-borderSubtle space-y-1.5">
       <div class="text-[10px] text-ui-textMuted font-semibold uppercase flex items-center justify-between">
         <span>Active Bindings: {{ selectedBone.name }}</span>
@@ -199,7 +336,7 @@ function handleUnbind() {
             <Activity class="w-3 h-3" />
             <span>{{ boundVerticesCount }} Skinned Vertices</span>
           </span>
-          <span class="text-[9px] text-ui-textMuted font-mono font-semibold">100% Rigid</span>
+          <span class="text-[9px] text-ui-textMuted font-mono font-semibold">Vertex Weights</span>
         </div>
 
         <div v-for="m in boundMeshes" :key="m.id" class="flex items-center justify-between px-2 py-1 bg-ui-input/70 rounded-xs border border-ui-borderSubtle text-sky-300">
@@ -207,7 +344,7 @@ function handleUnbind() {
             <Box class="w-3 h-3" />
             <span class="truncate">{{ m.name }}</span>
           </span>
-          <span class="text-[9px] text-ui-textMuted font-semibold">Object</span>
+          <span class="text-[9px] text-ui-textMuted font-semibold">Object Node</span>
         </div>
 
         <div v-if="boundVerticesCount === 0 && boundMeshes.length === 0" class="py-2 text-center text-ui-textMuted italic text-[11px]">
