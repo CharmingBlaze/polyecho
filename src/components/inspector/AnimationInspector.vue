@@ -182,55 +182,55 @@ function setClipFps(fps: number) {
         </span>
       </div>
 
-      <div class="grid grid-cols-5 gap-1 bg-ui-input/70 p-0.5 rounded-xs border border-ui-borderSubtle text-[10px]">
+      <div class="grid grid-cols-5 gap-0.5 bg-ui-input/70 p-0.5 rounded-xs border border-ui-borderSubtle text-[9.5px]">
         <button 
           @click="activeTab = 'bone'"
-          class="py-1.5 px-1 rounded-xs transition flex flex-col items-center justify-center gap-1 cursor-pointer"
+          class="h-6 px-1 rounded-xs transition flex items-center justify-center gap-1 cursor-pointer font-medium"
           :class="activeTab === 'bone' ? 'bg-ui-active text-ui-textAccent font-bold border border-ui-accent/40 shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Active Bone & Joint Properties"
         >
-          <GitCommitVertical class="w-3.5 h-3.5 text-purple-400" />
-          <span>Bone</span>
+          <GitCommitVertical class="w-3 h-3 text-purple-400 shrink-0" />
+          <span class="truncate">Bone</span>
         </button>
 
         <button 
           @click="activeTab = 'anims'"
-          class="py-1.5 px-1 rounded-xs transition flex flex-col items-center justify-center gap-1 cursor-pointer"
+          class="h-6 px-1 rounded-xs transition flex items-center justify-center gap-1 cursor-pointer font-medium"
           :class="activeTab === 'anims' ? 'bg-ui-active text-ui-textAccent font-bold border border-ui-accent/40 shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Animation Clips & Actions"
         >
-          <Film class="w-3.5 h-3.5 text-sky-400" />
-          <span>Clips</span>
+          <Film class="w-3 h-3 text-sky-400 shrink-0" />
+          <span class="truncate">Clips</span>
         </button>
 
         <button 
           @click="activeTab = 'proc'"
-          class="py-1.5 px-1 rounded-xs transition flex flex-col items-center justify-center gap-1 cursor-pointer"
+          class="h-6 px-1 rounded-xs transition flex items-center justify-center gap-1 cursor-pointer font-medium"
           :class="activeTab === 'proc' || activeTab === 'blend' ? 'bg-ui-active text-ui-textAccent font-bold border border-ui-accent/40 shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Procedural Animation Generators & Blending"
         >
-          <Sparkles class="w-3.5 h-3.5 text-amber-400" />
-          <span>Generators</span>
+          <Sparkles class="w-3 h-3 text-amber-400 shrink-0" />
+          <span class="truncate">Gen</span>
         </button>
 
         <button 
           @click="activeTab = 'mesh'"
-          class="py-1.5 px-1 rounded-xs transition flex flex-col items-center justify-center gap-1 cursor-pointer"
+          class="h-6 px-1 rounded-xs transition flex items-center justify-center gap-1 cursor-pointer font-medium"
           :class="activeTab === 'mesh' ? 'bg-ui-active text-ui-textAccent font-bold border border-ui-accent/40 shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Mesh Rigid Parenting & Skinning"
         >
-          <Box class="w-3.5 h-3.5 text-emerald-400" />
-          <span>Mesh</span>
+          <Box class="w-3 h-3 text-emerald-400 shrink-0" />
+          <span class="truncate">Mesh</span>
         </button>
 
         <button 
           @click="activeTab = 'settings'"
-          class="py-1.5 px-1 rounded-xs transition flex flex-col items-center justify-center gap-1 cursor-pointer"
+          class="h-6 px-1 rounded-xs transition flex items-center justify-center gap-1 cursor-pointer font-medium"
           :class="activeTab === 'settings' ? 'bg-ui-active text-ui-textAccent font-bold border border-ui-accent/40 shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Armature Settings & Global Config"
         >
-          <Sliders class="w-3.5 h-3.5 text-ui-textMuted" />
-          <span>Config</span>
+          <Sliders class="w-3 h-3 text-ui-textMuted shrink-0" />
+          <span class="truncate">Config</span>
         </button>
       </div>
     </div>
