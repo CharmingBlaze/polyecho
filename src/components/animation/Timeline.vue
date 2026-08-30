@@ -241,6 +241,36 @@ const timeMarkers = computed(() => {
   return markers
 })
 
+const rulerContainerRef = ref<HTMLElement | null>(null)
+
+function startRulerScrub(e: MouseEvent) {
+  e.preventDefault()
+  
+  const updateScrub = (event: MouseEvent) => {
+    if (!rulerContainerRef.value) return
+    const rect = rulerContainerRef.value.getBoundingClientRect()
+    const scrollLeft = rulerContainerRef.value.parentElement?.scrollLeft || 0
+    const clientX = event.clientX
+    const offsetX = clientX - rect.left + scrollLeft - 176
+    const frame = Math.max(0, Math.min(maxFrames.value, Math.round(offsetX / 28)))
+    animationStore.setFrame(frame)
+  }
+
+  updateScrub(e)
+
+  const onMouseMove = (moveEvent: MouseEvent) => {
+    updateScrub(moveEvent)
+  }
+
+  const onMouseUp = () => {
+    window.removeEventListener('mousemove', onMouseMove)
+    window.removeEventListener('mouseup', onMouseUp)
+  }
+
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('mouseup', onMouseUp)
+}
+
 // ----------------------------------------------------
 // GRAPH EDITOR COMPUTATIONS
 // ----------------------------------------------------
@@ -582,60 +612,64 @@ function handleGraphSvgClick(e: MouseEvent) {
       </div>
     </div>
 
-    <!-- GLB Animator / Blockbench Control Bar -->
-    <div class="h-9 bg-ui-panel border-b border-ui-borderSubtle px-3 flex items-center justify-between gap-3 shrink-0 overflow-x-auto text-[11px]">
-      <!-- Left: Frame & Time Controls -->
+    <!-- Studio Control & Transport Bar -->
+    <div class="h-9 bg-ui-surface/90 border-b border-ui-borderDefault px-3 flex items-center justify-between gap-3 shrink-0 overflow-x-auto text-[11px] select-none font-sans">
+      <!-- Left: Frame & Time Transport -->
       <div class="flex items-center space-x-2 shrink-0">
         <!-- Frame Navigation Steppers -->
-        <div class="flex items-center space-x-0.5 bg-ui-input border border-ui-borderSubtle rounded-xs p-0.5">
-          <button @click="animationStore.setFrame(0)" class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary" title="First Frame">
+        <div class="flex items-center space-x-0.5 bg-ui-input border border-ui-borderSubtle rounded-xs p-0.5 shadow-xs">
+          <button @click="animationStore.setFrame(0)" class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary transition" title="First Frame (Home)">
             <SkipBack class="w-3 h-3" />
           </button>
-          <button @click="stepFrame(-1)" class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary" title="Prev Frame">
+          <button @click="stepFrame(-1)" class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary transition" title="Prev Frame (Left Arrow)">
             <ChevronLeft class="w-3 h-3" />
           </button>
           <button 
             @click="animationStore.togglePlay"
-            class="px-2 py-0.5 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white flex items-center justify-center shadow-xs transition"
+            class="px-2.5 py-0.5 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white flex items-center justify-center shadow-xs transition active:scale-95"
             title="Play / Pause (Space)"
           >
             <Pause v-if="animationStore.isPlaying" class="w-3 h-3" />
             <Play v-else class="w-3 h-3 fill-current ml-0.5" />
           </button>
-          <button @click="stepFrame(1)" class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary" title="Next Frame">
+          <button @click="stepFrame(1)" class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary transition" title="Next Frame (Right Arrow)">
             <ChevronRight class="w-3 h-3" />
           </button>
-          <button @click="animationStore.setFrame(maxFrames)" class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary" title="Last Frame">
+          <button @click="animationStore.setFrame(maxFrames)" class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary transition" title="Last Frame (End)">
             <SkipForward class="w-3 h-3" />
           </button>
         </div>
 
-        <!-- Time input scrubber -->
-        <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-0.5 text-ui-textPrimary">
-          <span class="text-ui-textMuted mr-1 text-[10px]">Time:</span>
+        <!-- Frame / Time Monospace Scrubber -->
+        <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-0.5 text-ui-textPrimary shadow-xs">
+          <span class="text-ui-textMuted mr-1.5 text-[10px] font-semibold">Time</span>
           <input 
             type="text" 
             :value="timeSecondsFormatted"
             @change="timeSecondsFormatted = ($event.target as HTMLInputElement).value"
-            class="w-14 bg-transparent font-bold text-center focus:outline-none text-ui-textAccent font-mono"
+            class="w-12 bg-transparent font-bold text-center focus:outline-none text-ui-textAccent font-mono text-xs"
           />
-          <div class="flex flex-col ml-1 border-l border-ui-borderSubtle pl-1 space-y-0.5">
+          <span class="text-ui-textMuted text-[10px] pr-1">s</span>
+          <span class="text-ui-borderDefault px-1">|</span>
+          <span class="text-ui-textMuted text-[10px] mr-1">f:</span>
+          <span class="font-mono font-bold text-ui-textPrimary text-xs">{{ animationStore.currentFrame }}</span>
+          <div class="flex flex-col ml-1.5 border-l border-ui-borderSubtle pl-1 space-y-0.5">
             <button @click="stepTime(1)" class="text-[8px] text-ui-textMuted hover:text-ui-textPrimary leading-none">▲</button>
             <button @click="stepTime(-1)" class="text-[8px] text-ui-textMuted hover:text-ui-textPrimary leading-none">▼</button>
           </div>
         </div>
       </div>
 
-      <!-- Clip Duration / Length Scrubber & Presets -->
+      <!-- Center: Clip Duration / Length Scrubber & Presets -->
       <div class="flex items-center space-x-1.5 shrink-0 border-l border-ui-borderSubtle pl-3">
-        <span class="text-ui-textMuted font-bold">Len:</span>
-        <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-ui-textPrimary">
+        <span class="text-ui-textMuted font-semibold text-[10px]">Len:</span>
+        <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-ui-textPrimary shadow-xs">
           <input 
             type="number" 
             step="0.5"
             min="0.5"
             v-model.number="clipDurationSeconds"
-            class="w-10 bg-transparent font-bold text-center focus:outline-none text-ui-textAccent text-xs font-mono"
+            class="w-9 bg-transparent font-bold text-center focus:outline-none text-ui-textAccent text-xs font-mono"
           />
           <span class="text-ui-textMuted text-[10px] pr-1">s</span>
           <div class="flex flex-col border-l border-ui-borderSubtle pl-1 space-y-0.5">
@@ -649,8 +683,8 @@ function handleGraphSvgClick(e: MouseEvent) {
             v-for="sec in [1.0, 2.0, 3.0, 5.0]" 
             :key="sec"
             @click="setPresetClipDuration(sec)"
-            class="px-1.5 py-0.5 rounded-xs text-[9px] border transition"
-            :class="Math.abs(clipDurationSeconds - sec) < 0.1 ? 'bg-ui-active border-ui-accent/40 text-ui-textAccent font-bold' : 'bg-ui-input border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+            class="px-1.5 py-0.5 rounded-xs text-[9px] border transition cursor-pointer"
+            :class="Math.abs(clipDurationSeconds - sec) < 0.1 ? 'bg-ui-active border-ui-accent/50 text-ui-textAccent font-bold shadow-xs' : 'bg-ui-input border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
           >
             {{ sec }}s
           </button>
@@ -661,38 +695,38 @@ function handleGraphSvgClick(e: MouseEvent) {
       <div class="flex items-center space-x-1 shrink-0 border-l border-ui-borderSubtle pl-3">
         <button 
           @click="animationStore.interpolationMode = 'cubic'"
-          class="flex items-center space-x-1 px-2 py-1 rounded-xs transition border text-[10px]"
-          :class="animationStore.interpolationMode === 'cubic' ? 'bg-ui-active text-ui-textAccent font-bold border-ui-accent/40 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
+          class="flex items-center space-x-1 px-2 py-0.5 rounded-xs transition border text-[10px] cursor-pointer"
+          :class="animationStore.interpolationMode === 'cubic' ? 'bg-ui-active text-ui-textAccent font-bold border-ui-accent/50 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
         >
-          <Circle class="w-2.5 h-2.5 fill-current" />
+          <Circle class="w-2.5 h-2.5 fill-current text-sky-400" />
           <span>Smooth</span>
         </button>
 
         <button 
           @click="animationStore.interpolationMode = 'linear'"
-          class="flex items-center space-x-1 px-2 py-1 rounded-xs transition border text-[10px]"
-          :class="animationStore.interpolationMode === 'linear' ? 'bg-ui-active text-ui-textAccent font-bold border-ui-accent/40 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
+          class="flex items-center space-x-1 px-2 py-0.5 rounded-xs transition border text-[10px] cursor-pointer"
+          :class="animationStore.interpolationMode === 'linear' ? 'bg-ui-active text-ui-textAccent font-bold border-ui-accent/50 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
         >
-          <Diamond class="w-2.5 h-2.5 fill-current" />
+          <Diamond class="w-2.5 h-2.5 fill-current text-amber-400" />
           <span>Linear</span>
         </button>
 
         <button 
           @click="animationStore.interpolationMode = 'step'"
-          class="flex items-center space-x-1 px-2 py-1 rounded-xs transition border text-[10px]"
-          :class="animationStore.interpolationMode === 'step' ? 'bg-ui-active text-ui-textAccent font-bold border-ui-accent/40 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
+          class="flex items-center space-x-1 px-2 py-0.5 rounded-xs transition border text-[10px] cursor-pointer"
+          :class="animationStore.interpolationMode === 'step' ? 'bg-ui-active text-ui-textAccent font-bold border-ui-accent/50 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
         >
-          <Square class="w-2.5 h-2.5 fill-current" />
+          <Square class="w-2.5 h-2.5 fill-current text-purple-400" />
           <span>Step</span>
         </button>
       </div>
 
-      <!-- Auto Key Toggle -->
-      <div class="flex items-center space-x-1 shrink-0 border-l border-ui-borderSubtle pl-3">
+      <!-- Right: Auto Key & Recording -->
+      <div class="flex items-center space-x-1.5 shrink-0 border-l border-ui-borderSubtle pl-3">
         <button 
           @click="animationStore.autoKey = !animationStore.autoKey" 
-          class="flex items-center space-x-1 px-2 py-1 rounded-xs transition text-[10px] border"
-          :class="animationStore.autoKey ? 'bg-rose-500/20 text-rose-500 border-rose-500/50 shadow-xs font-bold' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
+          class="flex items-center space-x-1.5 px-2 py-0.5 rounded-xs transition text-[10px] border cursor-pointer"
+          :class="animationStore.autoKey ? 'bg-rose-500/20 text-rose-400 border-rose-500/50 shadow-xs font-bold' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Auto Keyframing (Automatically records keyframes upon transform)"
         >
           <span class="w-1.5 h-1.5 rounded-full" :class="animationStore.autoKey ? 'bg-rose-500 animate-pulse' : 'bg-ui-textMuted'"></span>
@@ -703,7 +737,7 @@ function handleGraphSvgClick(e: MouseEvent) {
         <div class="relative">
           <button 
             @click="showMarkerInput = !showMarkerInput"
-            class="flex items-center space-x-1 px-2 py-1 rounded-xs bg-ui-input hover:bg-ui-hover text-ui-textAccent border border-ui-borderSubtle transition text-[10px]"
+            class="flex items-center space-x-1 px-2 py-0.5 rounded-xs bg-ui-input hover:bg-ui-hover text-ui-textAccent border border-ui-borderSubtle transition text-[10px] cursor-pointer"
             title="Add Game Event Marker at Active Frame"
           >
             <Flag class="w-2.5 h-2.5" />
@@ -723,22 +757,20 @@ function handleGraphSvgClick(e: MouseEvent) {
             </button>
           </div>
         </div>
-      </div>
 
-      <!-- Keyframe REC & Clear Buttons -->
-      <div class="flex items-center space-x-1.5 shrink-0 border-l border-ui-borderSubtle pl-3">
+        <!-- Keyframe REC & Clear Buttons -->
         <button 
           @click="animationStore.recordAllBonesKeyframe()"
-          class="flex items-center space-x-1.5 px-3 py-1 rounded-xs bg-rose-600 hover:bg-rose-500 text-white font-bold shadow-xs transition border border-rose-400/30 active:scale-95 text-[10px]"
+          class="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-xs bg-rose-600 hover:bg-rose-500 text-white font-bold shadow-xs transition border border-rose-400/40 active:scale-95 text-[10px] cursor-pointer"
           title="Record Keyframe for All Bones at Active Time"
         >
-          <span class="w-2 h-2 rounded-full bg-white animate-pulse"></span>
+          <span class="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
           <span>REC</span>
         </button>
 
         <button 
           @click="animationStore.clearKeyframeAtCurrentTime()"
-          class="px-2 py-1 rounded-xs bg-ui-input hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary border border-ui-borderSubtle transition text-[10px]"
+          class="px-2 py-0.5 rounded-xs bg-ui-input hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary border border-ui-borderSubtle transition text-[10px] cursor-pointer"
           title="Clear Keyframes at Active Time"
         >
           Clear
@@ -751,18 +783,42 @@ function handleGraphSvgClick(e: MouseEvent) {
       </div>
     </div>
 
-    <!-- VIEW 1: KEYFRAME EDITOR (Blockbench Expandable Dope Sheet Matrix) -->
+    <!-- VIEW 1: KEYFRAME EDITOR (Expandable Dope Sheet Matrix) -->
     <div v-show="activeTab === 'keyframe'" class="flex-1 overflow-x-auto overflow-y-auto bg-ui-root relative min-h-0 flex flex-col">
-      <!-- Time Ruler Row -->
-      <div class="h-6 bg-ui-header border-b border-ui-borderSubtle flex items-center pl-44 sticky top-0 z-20 shrink-0">
+      <!-- Time Ruler Row with Interactive Scrubbing -->
+      <div 
+        ref="rulerContainerRef"
+        @mousedown="startRulerScrub"
+        class="h-7 bg-ui-surface/95 backdrop-blur-xs border-b border-ui-borderDefault flex items-center pl-44 sticky top-0 z-20 shrink-0 select-none cursor-ew-resize overflow-visible group/ruler"
+      >
+        <!-- Sticky left corner header -->
+        <div class="w-44 px-2 h-full bg-ui-panel border-r border-ui-borderDefault absolute left-0 top-0 flex items-center justify-between z-30 font-semibold text-[10px] text-ui-textMuted uppercase tracking-wider">
+          <span class="flex items-center gap-1 text-ui-textPrimary">
+            <Film class="w-3 h-3 text-ui-accent" />
+            <span>Channels</span>
+          </span>
+          <span class="font-mono text-[9px] text-ui-textAccent font-bold">{{ maxFrames }}f / {{ (maxFrames / fps).toFixed(1) }}s</span>
+        </div>
+
+        <!-- Frame Ticks and Time Labels -->
         <div 
           v-for="marker in timeMarkers" 
           :key="marker.frame"
-          @click="animationStore.setFrame(marker.frame)"
-          class="w-7 text-center font-mono text-[9px] cursor-pointer shrink-0 border-r border-ui-borderSubtle relative"
-          :class="animationStore.currentFrame === marker.frame ? 'text-ui-textAccent font-bold bg-ui-active' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          class="w-7 h-full flex flex-col justify-end items-center font-mono text-[9px] shrink-0 border-r border-ui-borderSubtle/60 relative hover:bg-ui-hover/30 transition-colors"
+          :class="animationStore.currentFrame === marker.frame ? 'bg-ui-active/50 text-ui-textAccent font-bold' : 'text-ui-textMuted'"
         >
-          <span>{{ marker.label }}</span>
+          <!-- Major Time / Frame Label -->
+          <span v-if="marker.label" class="text-[9px] font-semibold tracking-tight absolute top-0.5 pointer-events-none" :class="marker.frame % fps === 0 ? 'text-ui-textPrimary font-bold' : 'text-ui-textMuted'">
+            {{ marker.label }}
+          </span>
+          <span v-else class="text-[8px] opacity-40 absolute top-1 pointer-events-none">{{ marker.frame }}</span>
+
+          <!-- Minor / Major tick marks -->
+          <div 
+            class="w-[1px] bg-ui-borderDefault mb-0 pointer-events-none"
+            :class="marker.isMajor ? 'h-2.5 bg-ui-textMuted/70' : 'h-1.5 bg-ui-borderSubtle'"
+          ></div>
+
           <!-- Event Marker Tag indicator -->
           <div 
             v-for="ev in getMarkersAtFrame(marker.frame)" 
@@ -774,11 +830,25 @@ function handleGraphSvgClick(e: MouseEvent) {
         </div>
       </div>
 
-      <!-- Vertical Red Playhead Indicator -->
+      <!-- Professional Studio Playhead Needle & Scrubber Head -->
       <div 
-        class="absolute top-0 bottom-0 w-0.5 bg-rose-500 pointer-events-none z-10 shadow-[0_0_8px_rgba(244,63,94,0.8)]"
+        class="absolute top-0 bottom-0 pointer-events-none z-30 transition-[left] duration-75 ease-out"
         :style="{ left: `${176 + animationStore.currentFrame * 28 + 14}px` }"
-      ></div>
+      >
+        <!-- Top Scrubber Badge / Needle Head -->
+        <div 
+          class="relative -left-2 top-0 w-4 h-7 flex flex-col items-center pointer-events-auto cursor-ew-resize group select-none" 
+          @mousedown="startRulerScrub"
+          :title="`Frame ${animationStore.currentFrame} (${timeSecondsFormatted}s)`"
+        >
+          <div class="w-3.5 h-3.5 bg-rose-500 rounded-xs shadow-[0_0_8px_rgba(244,63,94,0.9)] flex items-center justify-center border border-rose-300 group-hover:scale-110 transition-transform">
+            <span class="text-[7px] font-bold text-white font-mono leading-none">{{ animationStore.currentFrame }}</span>
+          </div>
+          <div class="w-0 h-0 border-l-[3px] border-l-transparent border-r-[3px] border-r-transparent border-t-[4px] border-t-rose-500"></div>
+        </div>
+        <!-- Laser-sharp Vertical Playhead Line -->
+        <div class="w-[1.5px] -ml-[0.75px] h-full bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.8)]"></div>
+      </div>
 
       <!-- Dope Sheet Rows (Expandable Blockbench Channel Tracks) -->
       <div class="divide-y divide-ui-borderSubtle">
