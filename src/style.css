@@ -117,3 +117,109 @@
   font-family: inherit;
   font-size: 11px;
 }
+
+/* ==========================================================================
+   AUTHENTIC RETRO 3D THEMES (Windows 95 Classic)
+   ========================================================================== */
+
+[data-theme="win95_classic"] {
+  font-family: "Segoe UI", Tahoma, "MS Sans Serif", Arial, sans-serif;
+  --ui-radius-xs: 0px;
+  --ui-radius-sm: 0px;
+  --ui-radius-md: 0px;
+}
+
+/* Classic Windows 95 3D Raised/Beveled Panels */
+[data-theme="win95_classic"] aside,
+[data-theme="win95_classic"] .bg-ui-panel {
+  border: 2px solid !important;
+  border-color: #dfdfdf #808080 #808080 #dfdfdf !important;
+  box-shadow: inset 1px 1px 0px #ffffff, inset -1px -1px 0px #000000 !important;
+}
+
+/* Classic Windows 95 Window Header / Titlebar Gradient */
+[data-theme="win95_classic"] aside > div:first-child,
+[data-theme="win95_classic"] .modal-header {
+  background: linear-gradient(90deg, #000080 0%, #1084d0 100%) !important;
+  color: #ffffff !important;
+  font-weight: bold !important;
+  padding-left: 6px;
+  padding-right: 6px;
+  border-bottom: 2px solid #808080 !important;
+}
+
+[data-theme="win95_classic"] aside > div:first-child *,
+[data-theme="win95_classic"] .modal-header * {
+  color: #ffffff !important;
+}
+
+/* Classic Windows 95 3D Raised Buttons */
+[data-theme="win95_classic"] button:not(.bg-ui-active) {
+  border: 1px solid !important;
+  border-color: #ffffff #808080 #808080 #ffffff !important;
+  box-shadow: inset 1px 1px 0px #dfdfdf, inset -1px -1px 0px #000000 !important;
+}
+
+/* Classic Windows 95 Sunken Pressed / Selected Button State */
+[data-theme="win95_classic"] button:active,
+[data-theme="win95_classic"] .bg-ui-active,
+[data-theme="win95_classic"] button.bg-ui-active {
+  background-color: #000080 !important;
+  color: #ffffff !important;
+  border: 1px solid !important;
+  border-color: #000000 #ffffff #ffffff #000000 !important;
+  box-shadow: inset 1px 1px 0px #808080 !important;
+}
+
+/* Classic Windows 95 Sunken Inset Tree & Input Fields */
+[data-theme="win95_classic"] input,
+[data-theme="win95_classic"] select,
+[data-theme="win95_classic"] .bg-ui-input {
+  border: 2px solid !important;
+  border-color: #808080 #ffffff #ffffff #808080 !important;
+  box-shadow: inset 1px 1px 0px #000000 !important;
+  background-color: #ffffff !important;
+  color: #000000 !important;
+}
+
+/* Classic Windows 95 Property Sheet Tabs in Header */
+[data-theme="win95_classic"] header .bg-ui-input {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+[data-theme="win95_classic"] header .bg-ui-input button {
+  background-color: #c0c0c0 !important;
+  color: #000000 !important;
+  border: 2px solid !important;
+  border-color: #ffffff #808080 #c0c0c0 #ffffff !important;
+  border-bottom: none !important;
+  border-radius: 3px 3px 0 0 !important;
+  box-shadow: inset 1px 1px 0px #dfdfdf !important;
+  margin-top: 2px;
+}
+
+[data-theme="win95_classic"] header .bg-ui-input button.bg-ui-accent {
+  background-color: #c0c0c0 !important;
+  color: #000000 !important;
+  font-weight: bold !important;
+  border-color: #ffffff #808080 #c0c0c0 #ffffff !important;
+  margin-top: 0px;
+  padding-bottom: 3px;
+  box-shadow: inset 1px 1px 0px #ffffff !important;
+}
+
+/* Classic Windows 95 Status Bar Sunken Segments */
+[data-theme="win95_classic"] footer {
+  border-top: 2px solid #dfdfdf !important;
+  background-color: #c0c0c0 !important;
+}
+
+[data-theme="win95_classic"] footer > div {
+  border: 1px solid !important;
+  border-color: #808080 #ffffff #ffffff #808080 !important;
+  padding: 1px 6px !important;
+  margin-right: 4px;
+}
+

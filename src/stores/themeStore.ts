@@ -696,6 +696,8 @@ export const useThemeStore = defineStore('theme', () => {
     const active = activeColors.value
 
     const root = document.documentElement
+    root.setAttribute('data-theme', currentThemeId.value)
+
     // Standard Tailwind UI Tokens
     root.style.setProperty('--ui-bg-root', active.bgBase)
     root.style.setProperty('--ui-bg-panel', active.bgPanel)
