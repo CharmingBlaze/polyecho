@@ -10,6 +10,8 @@ import {
   Sparkles, 
   ChevronDown, 
   Link, 
+  Unlink,
+  Film,
   Wand2, 
   Settings,
   Eye
@@ -622,12 +624,12 @@ function setClipFps(fps: number) {
       </div>
     </div>
 
-    <!-- TAB 4: MESH PROPERTIES & BONE PARENTING -->
+    <!-- TAB 4: MESH PROPERTIES & BONE PARENTING / SKINNING -->
     <div v-show="activeTab === 'mesh'" class="space-y-2.5">
       <div v-if="activeMesh" class="space-y-2">
         <div class="bg-ui-surface p-2.5 rounded-xs border border-ui-borderSubtle space-y-1.5">
           <div class="flex justify-between text-ui-textMuted">
-            <span>Name:</span>
+            <span>Mesh:</span>
             <span class="text-ui-textPrimary font-bold">{{ activeMesh.name }}</span>
           </div>
           <div class="flex justify-between text-ui-textMuted">
@@ -638,29 +640,70 @@ function setClipFps(fps: number) {
             <span>Faces:</span>
             <span class="text-ui-textPrimary">{{ activeMesh.faces.length }}</span>
           </div>
+          <div class="flex justify-between text-ui-textMuted">
+            <span>Skinning:</span>
+            <span :class="activeMesh.vertices.some(v => v.boneWeights && Object.keys(v.boneWeights).length > 0) ? 'text-emerald-400 font-bold' : 'text-ui-textMuted'">
+              {{ activeMesh.vertices.filter(v => v.boneWeights && Object.keys(v.boneWeights).length > 0).length }} / {{ activeMesh.vertices.length }} Verts Weighted
+            </span>
+          </div>
         </div>
 
         <!-- Rigid Bone Parenting -->
-        <div class="bg-ui-surface p-2.5 rounded-xs border border-ui-borderSubtle space-y-1.5">
-          <span class="text-[10px] text-ui-textMuted font-bold flex items-center gap-1">
-            <Link class="w-3 h-3 text-ui-textAccent" />
-            <span>Parent Bone:</span>
-          </span>
+        <div class="bg-ui-surface p-2.5 rounded-xs border border-ui-borderSubtle space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-[10px] text-ui-textMuted font-bold flex items-center gap-1">
+              <Link class="w-3 h-3 text-ui-textAccent" />
+              <span>Rigid Parent:</span>
+            </span>
+            <button 
+              v-if="activeMesh.parentId"
+              @click="animationStore.parentMeshToBone(activeMesh.id, null)"
+              class="text-[9px] text-rose-400 hover:underline flex items-center gap-0.5"
+            >
+              <Unlink class="w-2.5 h-2.5" />
+              <span>Unlink</span>
+            </button>
+          </div>
           <select 
             :value="activeMesh.parentId || 'none'"
             @change="animationStore.parentMeshToBone(activeMesh.id, ($event.target as HTMLSelectElement).value === 'none' ? null : ($event.target as HTMLSelectElement).value)"
             class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-ui-textPrimary text-xs focus:outline-none focus:border-ui-accent cursor-pointer"
           >
-            <option value="none" class="bg-ui-panel text-ui-textMuted">-- Unparented (World) --</option>
-            <option v-for="b in animationStore.armature.bones" :key="b.id" :value="b.id" class="bg-ui-panel text-ui-textPrimary">
-              {{ b.name }}
-            </option>
+            <option value="none" class="bg-ui-panel text-ui-textMuted">-- Unparented (World Space) --</option>
+            <optgroup label="Skeletal Bones">
+              <option v-for="b in animationStore.armature.bones" :key="b.id" :value="b.id" class="bg-ui-panel text-ui-textPrimary">
+                Bone: {{ b.name }}
+              </option>
+            </optgroup>
+            <optgroup label="Other Mesh Objects">
+              <option v-for="m in projectStore.meshes.filter(m => m.id !== activeMesh?.id)" :key="m.id" :value="m.id" class="bg-ui-panel text-ui-textPrimary">
+                Mesh: {{ m.name }}
+              </option>
+            </optgroup>
           </select>
+        </div>
+
+        <!-- 1-Click Smooth Skinning & Auto Weighting -->
+        <div class="bg-ui-surface p-2.5 rounded-xs border border-ui-borderSubtle space-y-2">
+          <span class="text-[10px] text-ui-textMuted font-bold flex items-center gap-1">
+            <Sparkles class="w-3 h-3 text-amber-400" />
+            <span>Organic Linear Blend Skinning:</span>
+          </span>
+          <button 
+            @click="animationStore.autoWeightMeshToBones(activeMesh)"
+            class="w-full py-1.5 px-2 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition"
+          >
+            <Wand2 class="w-3 h-3" />
+            <span>Auto-Calculate Vertex Weights</span>
+          </button>
+          <p class="text-[9px] text-ui-textMuted leading-tight">
+            Computes proximity bone weights for each vertex so rotating joints smoothly deforms organic shapes (limbs, tails, bodies).
+          </p>
         </div>
       </div>
 
       <div v-else class="text-ui-textMuted text-center py-6 italic text-[11px]">
-        No mesh currently selected.
+        No mesh currently selected. Click a model in the viewport.
       </div>
     </div>
 

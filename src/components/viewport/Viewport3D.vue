@@ -7,7 +7,7 @@ import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useThemeStore, type ThemeColors } from '../../stores/themeStore'
-import { meshToThreeGeometry } from '../../core/geometry/Converters'
+import { meshToThreeGeometry, computeBoneWorldMatrix } from '../../core/geometry/Converters'
 import { createPSXMaterial } from '../../core/shaders/PSXShader'
 import { computeCentroid } from '../../utils/math'
 import { getMeshEdges } from '../../core/geometry/EdgeUtils'
@@ -361,6 +361,9 @@ function rebuildMeshes() {
     const selectedFaces = (isSelectedMesh && toolStore.selectMode === 'face') ? projectStore.selectedFaceIds : []
     const selectedEdges = (isSelectedMesh && toolStore.selectMode === 'edge') ? projectStore.selectedEdgeIds : []
 
+    const isPoseMode = toolStore.appMode === 'animate' || (toolStore.appMode === 'rig' && animationStore.isTestPoseActive)
+    const skeletalContext = isPoseMode ? { isPoseMode: true, bones: animationStore.armature.bones } : undefined
+
     const { 
       geometry, 
       wireframeGeometry, 
@@ -370,7 +373,7 @@ function rebuildMeshes() {
       edgeLinesGeometry, 
       faceIndexMap, 
       vertexIndexMap 
-    } = meshToThreeGeometry(meshObj, selectedFaces, selectedEdges, toolStore.viewport.shadeMode)
+    } = meshToThreeGeometry(meshObj, selectedFaces, selectedEdges, toolStore.viewport.shadeMode, skeletalContext)
 
     const isSmooth = (meshObj.shadeMode || toolStore.viewport.shadeMode) === 'smooth'
 
@@ -425,13 +428,44 @@ function rebuildMeshes() {
     threeMesh.name = meshObj.id
     threeMesh.castShadow = true
     threeMesh.receiveShadow = true
-    threeMesh.position.set(meshObj.position.x, meshObj.position.y, meshObj.position.z)
-    threeMesh.rotation.set(
+
+    let finalPos = new THREE.Vector3(meshObj.position.x, meshObj.position.y, meshObj.position.z)
+    let finalEuler = new THREE.Euler(
       THREE.MathUtils.degToRad(meshObj.rotation.x),
       THREE.MathUtils.degToRad(meshObj.rotation.y),
       THREE.MathUtils.degToRad(meshObj.rotation.z)
     )
-    threeMesh.scale.set(meshObj.scale.x, meshObj.scale.y, meshObj.scale.z)
+    let finalScale = new THREE.Vector3(meshObj.scale.x, meshObj.scale.y, meshObj.scale.z)
+
+    if (meshObj.parentId && isPoseMode) {
+      const parentBone = animationStore.armature.bones.find(b => b.id === meshObj.parentId)
+      if (parentBone) {
+        const boneMat = computeBoneWorldMatrix(parentBone, animationStore.armature.bones)
+        finalPos = finalPos.clone().applyMatrix4(boneMat)
+        const bRot = new THREE.Euler(
+          THREE.MathUtils.degToRad(parentBone.rotation.x),
+          THREE.MathUtils.degToRad(parentBone.rotation.y),
+          THREE.MathUtils.degToRad(parentBone.rotation.z)
+        )
+        finalEuler.x += bRot.x
+        finalEuler.y += bRot.y
+        finalEuler.z += bRot.z
+        finalScale.multiply(new THREE.Vector3(parentBone.scale.x, parentBone.scale.y, parentBone.scale.z))
+      } else {
+        const parentMesh = projectStore.meshes.find(m => m.id === meshObj.parentId)
+        if (parentMesh) {
+          finalPos.add(new THREE.Vector3(parentMesh.position.x, parentMesh.position.y, parentMesh.position.z))
+          finalEuler.x += THREE.MathUtils.degToRad(parentMesh.rotation.x)
+          finalEuler.y += THREE.MathUtils.degToRad(parentMesh.rotation.y)
+          finalEuler.z += THREE.MathUtils.degToRad(parentMesh.rotation.z)
+          finalScale.multiply(new THREE.Vector3(parentMesh.scale.x, parentMesh.scale.y, parentMesh.scale.z))
+        }
+      }
+    }
+
+    threeMesh.position.copy(finalPos)
+    threeMesh.rotation.copy(finalEuler)
+    threeMesh.scale.copy(finalScale)
     threeMesh.userData = { meshId: meshObj.id, faceIndexMap }
     layers.modelGroup.add(threeMesh)
 

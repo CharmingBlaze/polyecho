@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { MeshObject, Vertex } from '../../types/mesh'
+import { Bone } from '../../types/animation'
 import { computeFaceNormal } from '../../utils/math'
 import { getMeshEdges } from './EdgeUtils'
 import { evaluateModifiers } from './Modifiers'
@@ -15,13 +16,88 @@ export interface GeometryBundle {
   vertexIndexMap: string[]
 }
 
+export function computeBoneWorldMatrix(bone: Bone, allBones: Bone[]): THREE.Matrix4 {
+  const pivot = new THREE.Vector3(bone.head.x, bone.head.y, bone.head.z)
+  const translation = new THREE.Vector3(bone.position.x, bone.position.y, bone.position.z)
+  const euler = new THREE.Euler(
+    THREE.MathUtils.degToRad(bone.rotation.x),
+    THREE.MathUtils.degToRad(bone.rotation.y),
+    THREE.MathUtils.degToRad(bone.rotation.z)
+  )
+  const scale = new THREE.Vector3(bone.scale.x, bone.scale.y, bone.scale.z)
+
+  const toPivot = new THREE.Matrix4().makeTranslation(-pivot.x, -pivot.y, -pivot.z)
+  const trs = new THREE.Matrix4().compose(pivot.clone().add(translation), new THREE.Quaternion().setFromEuler(euler), scale)
+  const localMat = new THREE.Matrix4().multiplyMatrices(trs, toPivot)
+
+  if (bone.parentId) {
+    const parent = allBones.find(b => b.id === bone.parentId)
+    if (parent) {
+      const parentMat = computeBoneWorldMatrix(parent, allBones)
+      return new THREE.Matrix4().multiplyMatrices(parentMat, localMat)
+    }
+  }
+  return localMat
+}
+
+export function evaluateSkinning(mesh: MeshObject, vertices: Vertex[], bones: Bone[]): Vertex[] {
+  if (!bones || bones.length === 0) return vertices
+
+  const boneMatrixMap = new Map<string, THREE.Matrix4>()
+  for (const b of bones) {
+    boneMatrixMap.set(b.id, computeBoneWorldMatrix(b, bones))
+  }
+
+  const deformed: Vertex[] = []
+  const meshPos = new THREE.Vector3(mesh.position.x, mesh.position.y, mesh.position.z)
+
+  for (const v of vertices) {
+    if (!v.boneWeights || Object.keys(v.boneWeights).length === 0) {
+      deformed.push(v)
+      continue
+    }
+
+    const worldPos = new THREE.Vector3(meshPos.x + v.position.x, meshPos.y + v.position.y, meshPos.z + v.position.z)
+    const accumPos = new THREE.Vector3(0, 0, 0)
+    let totalWeight = 0
+
+    for (const [bId, weight] of Object.entries(v.boneWeights)) {
+      const mat = boneMatrixMap.get(bId)
+      if (mat && weight > 0.001) {
+        const transformed = worldPos.clone().applyMatrix4(mat)
+        accumPos.addScaledVector(transformed, weight)
+        totalWeight += weight
+      }
+    }
+
+    if (totalWeight > 0) {
+      if (totalWeight < 0.999) {
+        accumPos.addScaledVector(worldPos, 1 - totalWeight)
+      }
+      const localPos = accumPos.sub(meshPos)
+      deformed.push({
+        ...v,
+        position: { x: Number(localPos.x.toFixed(4)), y: Number(localPos.y.toFixed(4)), z: Number(localPos.z.toFixed(4)) }
+      })
+    } else {
+      deformed.push(v)
+    }
+  }
+  return deformed
+}
+
 export function meshToThreeGeometry(
   mesh: MeshObject, 
   selectedFaceIds: string[] = [],
   selectedEdgeIds: string[] = [],
-  globalShadeMode: 'flat' | 'smooth' = 'flat'
+  globalShadeMode: 'flat' | 'smooth' = 'flat',
+  skeletalDeformContext?: { isPoseMode: boolean; bones: Bone[] }
 ): GeometryBundle {
-  const { vertices: evalVertices, faces: evalFaces } = evaluateModifiers(mesh)
+  let { vertices: evalVertices, faces: evalFaces } = evaluateModifiers(mesh)
+
+  if (skeletalDeformContext && skeletalDeformContext.isPoseMode && skeletalDeformContext.bones.length > 0) {
+    evalVertices = evaluateSkinning(mesh, evalVertices, skeletalDeformContext.bones)
+  }
 
   const vertMap = new Map<string, Vertex>()
   for (const v of evalVertices) {
