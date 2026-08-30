@@ -13,7 +13,8 @@ import {
   gridifyQuadIslands,
   equalizeTexelDensity,
   calculateUVDistortion,
-  generateUVCheckerboardDataURL
+  generateUVCheckerboardDataURL,
+  ensureMeshUVs
 } from '../../core/geometry/UVUnwrap'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import { 
@@ -248,6 +249,9 @@ function renderCanvas() {
   }
 
   const pb = projectStore.pixelBuffer
+  if (activeMesh.value) {
+    ensureMeshUVs(activeMesh.value)
+  }
 
   // If panOffset hasn't been initialized
   if (panOffset.value.x === 0 && panOffset.value.y === 0) {
@@ -1634,6 +1638,19 @@ defineExpose({
     <div class="h-7 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between gap-1 text-ui-textSecondary shrink-0 font-mono text-xs">
       <!-- Left: Selection Modes, Unwrap & Island Tools -->
       <div class="flex items-center gap-1.5 shrink-0">
+        <!-- Active 3D Object Selector -->
+        <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle px-1.5 py-0.5 text-[10px] space-x-1">
+          <span class="text-ui-textMuted font-semibold text-[9px]">OBJ:</span>
+          <select 
+            v-model="projectStore.activeMeshId" 
+            class="bg-transparent text-ui-textPrimary font-bold focus:outline-none cursor-pointer max-w-[100px] truncate"
+          >
+            <option v-for="m in projectStore.meshes" :key="m.id" :value="m.id" class="bg-ui-panel text-ui-textPrimary">
+              {{ m.name }} ({{ m.faces.length }}f)
+            </option>
+          </select>
+        </div>
+
         <!-- Selection Mode Switcher -->
         <div class="flex items-center bg-ui-input rounded-xs p-0.5 border border-ui-borderSubtle">
           <button 

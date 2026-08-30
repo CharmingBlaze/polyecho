@@ -4,6 +4,7 @@ import { Bone } from '../../types/animation'
 import { computeFaceNormal } from '../../utils/math'
 import { getMeshEdges } from './EdgeUtils'
 import { evaluateModifiers } from './Modifiers'
+import { ensureMeshUVs } from './UVUnwrap'
 
 export interface GeometryBundle {
   geometry: THREE.BufferGeometry
@@ -136,6 +137,7 @@ export function meshToThreeGeometry(
   skeletalDeformContext?: { isPoseMode: boolean; bones: Bone[] },
   weightPaintContext?: { isWeightPaint: boolean; activeBoneId?: string }
 ): GeometryBundle {
+  ensureMeshUVs(mesh)
   let { vertices: evalVertices, faces: evalFaces } = evaluateModifiers(mesh)
 
   if (skeletalDeformContext && skeletalDeformContext.isPoseMode && skeletalDeformContext.bones.length > 0) {
@@ -217,9 +219,10 @@ export function meshToThreeGeometry(
       const v1 = faceVerts[i]
       const v2 = faceVerts[i + 1]
 
-      const uv0 = face.uvs[0] || { u: 0, v: 0 }
-      const uv1 = face.uvs[i] || { u: 0, v: 0 }
-      const uv2 = face.uvs[i + 1] || { u: 0, v: 0 }
+      const faceUvs = face.uvs || []
+      const uv0 = faceUvs[0] || { u: 0, v: 0 }
+      const uv1 = faceUvs[i] || { u: 0, v: 0 }
+      const uv2 = faceUvs[i + 1] || { u: 0, v: 0 }
 
       const triVerts = [v0, v1, v2]
       const triUVs = [uv0, uv1, uv2]
@@ -237,7 +240,9 @@ export function meshToThreeGeometry(
           normals.push(faceNormal.x, faceNormal.y, faceNormal.z)
         }
 
-        uvs.push(uv.u, uv.v)
+        const safeU = (uv && Number.isFinite(uv.u)) ? uv.u : 0
+        const safeV = (uv && Number.isFinite(uv.v)) ? uv.v : 0
+        uvs.push(safeU, safeV)
 
         let c: THREE.Color
         if (weightPaintContext?.isWeightPaint && weightPaintContext?.activeBoneId) {

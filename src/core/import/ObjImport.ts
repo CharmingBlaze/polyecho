@@ -1,5 +1,6 @@
 import { MeshObject, Vertex, Face, Vector3D } from '../../types/mesh'
 import { computeFaceNormal } from '../../utils/math'
+import { ensureMeshUVs, boxUnwrap } from '../geometry/UVUnwrap'
 
 export interface ObjImportResult {
   meshes: MeshObject[]
@@ -84,7 +85,7 @@ export class ObjImport {
       }
 
       if (meshVertices.length > 0 && meshFaces.length > 0) {
-        meshes.push({
+        const objMesh: MeshObject = {
           id: `mesh_obj_${Date.now()}_${meshes.length + 1}`,
           name: currentMeshName,
           visible: true,
@@ -96,7 +97,17 @@ export class ObjImport {
           shadeMode: 'flat',
           vertices: meshVertices,
           faces: meshFaces
-        })
+        }
+
+        // Check if all UVs are (0,0) or missing -> auto unwrap with Smart Box Unwrap
+        const hasCustomUVs = meshFaces.some(f => f.uvs && f.uvs.some(u => u.u !== 0 || u.v !== 0))
+        if (!hasCustomUVs) {
+          const unwrapped = boxUnwrap(objMesh)
+          objMesh.faces = unwrapped.faces
+        }
+        ensureMeshUVs(objMesh)
+
+        meshes.push(objMesh)
       }
 
       currentFaces = []

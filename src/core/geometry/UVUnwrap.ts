@@ -581,3 +581,53 @@ export function generateUVCheckerboardDataURL(size = 512): string {
 export function autoPackIslands(mesh: MeshObject, margin = 0.02): MeshObject {
   return packUVIslands(mesh, Math.round(margin * 64), 64)
 }
+
+/**
+ * Validates and ensures complete, valid UV coordinates for all face vertices on any 3D object.
+ */
+export function ensureMeshUVs(mesh: MeshObject): boolean {
+  if (!mesh || !mesh.faces || !mesh.vertices) return false
+  let changed = false
+  const vertMap = new Map<string, Vertex>()
+  for (const v of mesh.vertices) {
+    vertMap.set(v.id, v)
+  }
+
+  for (const face of mesh.faces) {
+    if (!face.uvs || face.uvs.length !== face.vertexIds.length || face.uvs.some(uv => !uv || !Number.isFinite(uv.u) || !Number.isFinite(uv.v))) {
+      changed = true
+      const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
+      const normal = face.normal || computeFaceNormal(faceVerts.map(v => v.position))
+      const absX = Math.abs(normal.x)
+      const absY = Math.abs(normal.y)
+      const absZ = Math.abs(normal.z)
+
+      face.uvs = faceVerts.map(v => {
+        if (absX >= absY && absX >= absZ) {
+          const sign = normal.x >= 0 ? 1 : -1
+          return { u: (v.position.z * sign + 1.0) / 2.0, v: (v.position.y + 1.0) / 2.0 }
+        } else if (absY >= absX && absY >= absZ) {
+          const sign = normal.y >= 0 ? 1 : -1
+          return { u: (v.position.x + 1.0) / 2.0, v: (v.position.z * sign + 1.0) / 2.0 }
+        } else {
+          const sign = normal.z >= 0 ? 1 : -1
+          return { u: (v.position.x * sign + 1.0) / 2.0, v: (v.position.y + 1.0) / 2.0 }
+        }
+      })
+
+      if (face.uvs.length < face.vertexIds.length) {
+        face.uvs = face.vertexIds.map((_, i) => {
+          if (face.vertexIds.length === 3) {
+            return i === 0 ? { u: 0.5, v: 1 } : (i === 1 ? { u: 0, v: 0 } : { u: 1, v: 0 })
+          }
+          if (face.vertexIds.length === 4) {
+            return i === 0 ? { u: 0, v: 0 } : (i === 1 ? { u: 1, v: 0 } : (i === 2 ? { u: 1, v: 1 } : { u: 0, v: 1 }))
+          }
+          const ang = (i / face.vertexIds.length) * Math.PI * 2
+          return { u: 0.5 + 0.5 * Math.cos(ang), v: 0.5 + 0.5 * Math.sin(ang) }
+        })
+      }
+    }
+  }
+  return changed
+}

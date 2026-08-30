@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { MeshObject, Vertex, Face } from '../../types/mesh'
 import { Armature, Bone, AnimationClip, AnimationTrack } from '../../types/animation'
 import { computeFaceNormal } from '../../utils/math'
+import { ensureMeshUVs, boxUnwrap } from '../geometry/UVUnwrap'
 
 export interface GltfImportResult {
   meshes: MeshObject[]
@@ -161,7 +162,7 @@ export class GltfImport {
         }
 
         if (meshVertices.length > 0 && meshFaces.length > 0) {
-          meshes.push({
+          const gltfMesh: MeshObject = {
             id: `mesh_gltf_${Date.now()}_${meshes.length + 1}`,
             name: threeMesh.name || `${fileName}_Mesh_${meshes.length + 1}`,
             visible: true,
@@ -173,7 +174,17 @@ export class GltfImport {
             shadeMode: 'flat',
             vertices: meshVertices,
             faces: meshFaces
-          })
+          }
+
+          // Check if UVs exist or need Smart Box Unwrap
+          const hasValidUVs = meshFaces.some(f => f.uvs && f.uvs.some(u => u.u !== 0 || u.v !== 0))
+          if (!hasValidUVs) {
+            const unwrapped = boxUnwrap(gltfMesh)
+            gltfMesh.faces = unwrapped.faces
+          }
+          ensureMeshUVs(gltfMesh)
+
+          meshes.push(gltfMesh)
         }
       }
     })
