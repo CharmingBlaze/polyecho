@@ -32,6 +32,7 @@ export const useToolStore = defineStore('tool', () => {
   const brushShape = ref<'square' | 'circle'>('square')
   const brushFilled = ref<boolean>(false)
   const ditherPattern = ref<string>('bayer4x4')
+  const paletteSnapEnabled = ref<boolean>(false)
 
   // Stylus & Touch Settings
   const stylusPressureEnabled = ref<boolean>(true)
@@ -125,6 +126,7 @@ export const useToolStore = defineStore('tool', () => {
     brushShape,
     brushFilled,
     ditherPattern,
+    paletteSnapEnabled,
     stylusPressureEnabled,
     currentPressure,
     currentPointerType,

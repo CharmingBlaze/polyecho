@@ -336,3 +336,79 @@ export function meshToThreeGeometry(
     vertexIndexMap
   }
 }
+
+/**
+ * High-performance in-place GPU BufferAttribute updater.
+ * Mutates existing position/color buffer attributes directly for 60+ FPS animation scrubbing and weight painting.
+ */
+export function updateThreeGeometryAttributes(
+  meshObj: MeshObject,
+  geometry: THREE.BufferGeometry,
+  skeletalContext?: { isPoseMode?: boolean; bones?: Bone[] },
+  weightPaintContext?: { isWeightPaint?: boolean; activeBoneId?: string }
+): boolean {
+  const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute
+  const colAttr = geometry.getAttribute('color') as THREE.BufferAttribute | undefined
+  if (!posAttr) return false
+
+  let { vertices: evalVertices, faces: evalFaces } = evaluateModifiers(meshObj)
+
+  if (skeletalContext?.isPoseMode && skeletalContext.bones && skeletalContext.bones.length > 0) {
+    evalVertices = evaluateSkinning(meshObj, evalVertices, skeletalContext.bones)
+  }
+
+  const vertMap = new Map<string, Vertex>()
+  for (const v of evalVertices) {
+    vertMap.set(v.id, v)
+  }
+
+  const posArray = posAttr.array as Float32Array
+  const colArray = colAttr ? (colAttr.array as Float32Array) : null
+  let pIdx = 0
+  let cIdx = 0
+
+  for (let fIdx = 0; fIdx < evalFaces.length; fIdx++) {
+    const face = evalFaces[fIdx]
+    if (face.vertexIds.length < 3) continue
+
+    const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
+    if (faceVerts.length < 3) continue
+
+    for (let i = 1; i < faceVerts.length - 1; i++) {
+      const v0 = faceVerts[0]
+      const v1 = faceVerts[i]
+      const v2 = faceVerts[i + 1]
+
+      const tri = [v0, v1, v2]
+      for (const v of tri) {
+        if (pIdx + 2 < posArray.length) {
+          posArray[pIdx] = v.position.x
+          posArray[pIdx + 1] = v.position.y
+          posArray[pIdx + 2] = v.position.z
+          pIdx += 3
+        }
+
+        if (colArray && cIdx + 2 < colArray.length) {
+          if (weightPaintContext?.isWeightPaint && weightPaintContext.activeBoneId) {
+            const w = v.boneWeights?.[weightPaintContext.activeBoneId] || 0
+            const c = weightToHeatmapColor(w)
+            colArray[cIdx] = c.r
+            colArray[cIdx + 1] = c.g
+            colArray[cIdx + 2] = c.b
+          } else {
+            const c = new THREE.Color(v.color || '#ffffff')
+            colArray[cIdx] = c.r
+            colArray[cIdx + 1] = c.g
+            colArray[cIdx + 2] = c.b
+          }
+          cIdx += 3
+        }
+      }
+    }
+  }
+
+  posAttr.needsUpdate = true
+  if (colAttr) colAttr.needsUpdate = true
+  geometry.computeVertexNormals()
+  return true
+}

@@ -97,6 +97,25 @@ export function findClosestPaletteColor(rgb: RGB, paletteHexList: string[]): str
   return closestHex
 }
 
+export function snapColorToPalette(hex: string, paletteHexList: string[]): string {
+  if (!paletteHexList || paletteHexList.length === 0) return hex
+  return findClosestPaletteColor(hexToRgb(hex), paletteHexList)
+}
+
+/**
+ * Quantizes standard 24-bit RGB888 color to retro 15-bit PS1/SNES RGB555 (32 levels per channel)
+ */
+export function snapToPSXColor(hex: string): string {
+  const rgb = hexToRgb(hex)
+  const r5 = Math.round((rgb.r / 255) * 31)
+  const g5 = Math.round((rgb.g / 255) * 31)
+  const b5 = Math.round((rgb.b / 255) * 31)
+  const r8 = Math.round((r5 / 31) * 255)
+  const g8 = Math.round((g5 / 31) * 255)
+  const b8 = Math.round((b5 / 31) * 255)
+  return rgbToHex(r8, g8, b8)
+}
+
 // 4x4 Bayer Dithering Matrix
 export const BAYER_MATRIX_4x4 = [
   [ 0,  8,  2, 10],

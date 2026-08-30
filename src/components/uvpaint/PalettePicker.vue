@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useToolStore } from '../../stores/toolStore'
 import { useProjectStore } from '../../stores/projectStore'
-import { DEFAULT_PALETTES } from '../../utils/color'
+import { DEFAULT_PALETTES, snapColorToPalette } from '../../utils/color'
 import { Palette } from '../../types/texture'
 import UiSection from '../ui/UiSection.vue'
 import { ChevronDown, Pipette } from 'lucide-vue-next'
@@ -20,6 +20,21 @@ function setColor(hex: string) {
 function setSecondaryColor(e: MouseEvent, hex: string) {
   e.preventDefault()
   toolStore.secondaryColor = hex
+}
+
+function quantizeActiveTexture() {
+  const pb = projectStore.pixelBuffer
+  const paletteColors = projectStore.activePalette.colors
+  if (!pb || !paletteColors || paletteColors.length === 0) return
+
+  for (let y = 0; y < pb.height; y++) {
+    for (let x = 0; x < pb.width; x++) {
+      const curHex = pb.getPixelHex(x, y)
+      const closest = snapColorToPalette(curHex, paletteColors)
+      pb.setPixel(x, y, closest)
+    }
+  }
+  projectStore.markTextureUpdated()
 }
 </script>
 
@@ -93,6 +108,25 @@ function setSecondaryColor(e: MouseEvent, hex: string) {
           @click="setColor(color)"
           @contextmenu="setSecondaryColor($event, color)"
         ></button>
+      </div>
+
+      <!-- Palette Snapping & Utility Controls -->
+      <div class="flex items-center justify-between pt-1 border-t border-ui-borderSubtle/60 text-[10px] text-ui-textSecondary font-mono">
+        <label class="flex items-center gap-1.5 cursor-pointer select-none">
+          <input 
+            type="checkbox" 
+            v-model="toolStore.paletteSnapEnabled" 
+            class="rounded-xs text-amber-500 focus:ring-0 focus:ring-offset-0 bg-[#14161a] border-ui-borderStrong w-3 h-3 cursor-pointer" 
+          />
+          <span>Lock to Palette</span>
+        </label>
+        <button 
+          @click="quantizeActiveTexture" 
+          class="px-1.5 py-0.5 rounded-xs bg-ui-panel hover:bg-ui-hover border border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary transition"
+          title="Quantize all pixels in the active texture to this palette"
+        >
+          Quantize Map
+        </button>
       </div>
     </UiSection>
   </div>

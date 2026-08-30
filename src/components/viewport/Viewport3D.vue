@@ -7,12 +7,13 @@ import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useThemeStore, type ThemeColors } from '../../stores/themeStore'
-import { meshToThreeGeometry, computeBoneWorldMatrix } from '../../core/geometry/Converters'
+import { meshToThreeGeometry, computeBoneWorldMatrix, updateThreeGeometryAttributes } from '../../core/geometry/Converters'
 import { solveCCDIK } from '../../core/animation/IKSolver'
 import { sampleTrack } from '../../core/animation/Armature'
 import { SpringPhysicsSolver } from '../../core/animation/SpringPhysics'
 import { createPSXMaterial } from '../../core/shaders/PSXShader'
 import { computeCentroid } from '../../utils/math'
+import { snapColorToPalette } from '../../utils/color'
 import { getMeshEdges } from '../../core/geometry/EdgeUtils'
 import { Vector3D, Edge, Vertex, MeshObject } from '../../types/mesh'
 import { operatorManager } from '../../core/operators/OperatorManager'
@@ -477,6 +478,36 @@ function initTexture() {
   if (!psxMaterial) {
     psxMaterial = createPSXMaterial(threeTexture, new THREE.Vector2(320, 240))
   }
+}
+
+function updateMeshTransformsAndAttributes(): boolean {
+  if (!layers || layers.modelGroup.children.length === 0) return false
+
+  const isPoseMode = toolStore.appMode === 'animate' || (toolStore.appMode === 'rig' && animationStore.isTestPoseActive)
+  const skeletalContext = isPoseMode ? { isPoseMode: true, bones: animationStore.armature.bones } : undefined
+  const isWeightPaint = toolStore.appMode === 'rig' && animationStore.isWeightPaintActive
+  const weightPaintContext = isWeightPaint ? { isWeightPaint: true, activeBoneId: animationStore.selectedBoneId || '' } : undefined
+
+  let allSuccess = true
+  for (const child of layers.modelGroup.children) {
+    if (child instanceof THREE.Mesh) {
+      const meshObj = projectStore.meshes.find(m => m.id === child.name)
+      if (meshObj) {
+        child.position.set(meshObj.position.x, meshObj.position.y, meshObj.position.z)
+        child.rotation.set(
+          THREE.MathUtils.degToRad(meshObj.rotation.x),
+          THREE.MathUtils.degToRad(meshObj.rotation.y),
+          THREE.MathUtils.degToRad(meshObj.rotation.z)
+        )
+        child.scale.set(meshObj.scale.x, meshObj.scale.y, meshObj.scale.z)
+
+        const ok = updateThreeGeometryAttributes(meshObj, child.geometry, skeletalContext, weightPaintContext)
+        if (!ok) allSuccess = false
+      }
+    }
+  }
+
+  return allSuccess
 }
 
 function rebuildMeshes() {
@@ -2962,24 +2993,28 @@ function paintRaycastHit() {
     const isPen = toolStore.currentPointerType === 'pen' && toolStore.stylusPressureEnabled
     const effectiveSize = isPen ? Math.max(1, Math.round(toolStore.brushSize * toolStore.currentPressure * 1.5)) : toolStore.brushSize
 
+    const activeDrawColor = toolStore.paletteSnapEnabled
+      ? snapColorToPalette(toolStore.primaryColor, projectStore.activePalette.colors)
+      : toolStore.primaryColor
+
     if (toolStore.paintTool === 'brush') {
       if (lastPaintUV) {
-        pb.paintLineAtUV(lastPaintUV.u, lastPaintUV.v, uv.x, uv.y, toolStore.primaryColor, effectiveSize, 'brush', toolStore.brushOpacity)
+        pb.paintLineAtUV(lastPaintUV.u, lastPaintUV.v, uv.x, uv.y, activeDrawColor, effectiveSize, 'brush', toolStore.brushOpacity)
       } else {
-        pb.drawBrush(px, py, toolStore.primaryColor, effectiveSize, toolStore.brushOpacity)
+        pb.drawBrush(px, py, activeDrawColor, effectiveSize, toolStore.brushOpacity)
       }
       lastPaintUV = { u: uv.x, v: uv.y }
     } else if (toolStore.paintTool === 'eraser') {
       if (lastPaintUV) {
-        pb.paintLineAtUV(lastPaintUV.u, lastPaintUV.v, uv.x, uv.y, toolStore.primaryColor, effectiveSize, 'eraser')
+        pb.paintLineAtUV(lastPaintUV.u, lastPaintUV.v, uv.x, uv.y, activeDrawColor, effectiveSize, 'eraser')
       } else {
         pb.erase(px, py, effectiveSize)
       }
       lastPaintUV = { u: uv.x, v: uv.y }
     } else if (toolStore.paintTool === 'bucket') {
-      pb.floodFill(px, py, toolStore.primaryColor)
+      pb.floodFill(px, py, activeDrawColor)
     } else if (toolStore.paintTool === 'dither') {
-      pb.drawDither(px, py, toolStore.primaryColor, effectiveSize)
+      pb.drawDither(px, py, activeDrawColor, effectiveSize)
     } else if (toolStore.paintTool === 'picker') {
       toolStore.primaryColor = pb.getPixelHex(px, py)
     }
@@ -3300,7 +3335,11 @@ watch(() => animationStore.isTestPoseActive, () => {
   rebuildMeshes()
   updateTransformGizmo()
 })
-watch(() => animationStore.currentFrame, rebuildMeshes)
+watch(() => animationStore.currentFrame, () => {
+  if (!updateMeshTransformsAndAttributes()) {
+    rebuildMeshes()
+  }
+})
 watch(() => toolStore.isBoxSelectActive, (active) => {
   if (orbitControls) {
     orbitControls.enabled = !active

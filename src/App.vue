@@ -366,10 +366,24 @@ function handleKeyDown(e: KeyboardEvent) {
   }
 }
 
-onMounted(() => {
+const showRecoveryPrompt = ref(false)
+
+async function handleRestoreSession() {
+  const ok = await projectStore.restoreAutosaveSession()
+  if (ok) {
+    showRecoveryPrompt.value = false
+  }
+}
+
+onMounted(async () => {
   themeStore.initTheme()
   keymapStore.initKeymaps()
   window.addEventListener('keydown', handleKeyDown)
+
+  const hasAutosave = await projectStore.checkAutosaveSession()
+  if (hasAutosave) {
+    showRecoveryPrompt.value = true
+  }
 })
 
 onUnmounted(() => {
@@ -394,6 +408,30 @@ onUnmounted(() => {
 
       <!-- Center Work Area -->
       <main class="flex-1 flex flex-col overflow-hidden bg-ui-root relative">
+        <!-- Session Recovery Notification Banner -->
+        <div 
+          v-if="showRecoveryPrompt"
+          class="bg-amber-950/80 border-b border-amber-500/40 px-3 py-1.5 flex items-center justify-between text-xs text-amber-200 z-50 shrink-0 font-mono shadow-md backdrop-blur-xs"
+        >
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+            <span>Unsaved session found in local browser storage.</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button 
+              @click="handleRestoreSession"
+              class="px-2.5 py-0.5 rounded-xs bg-amber-500 hover:bg-amber-400 text-black font-semibold text-[11px] transition shadow-xs cursor-pointer"
+            >
+              Restore Session
+            </button>
+            <button 
+              @click="showRecoveryPrompt = false"
+              class="px-2 py-0.5 rounded-xs bg-black/40 hover:bg-black/60 text-amber-300 text-[11px] transition cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
         <!-- 3D Viewport / UV Paint Viewport Split -->
         <div class="flex-1 flex overflow-hidden relative">
           <!-- 3D Viewport Pane (Left in UV mode, Full in Model/Rig/Animate mode) -->

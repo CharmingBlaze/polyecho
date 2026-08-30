@@ -34,6 +34,8 @@ import { AtlasBaker } from '../core/uv/AtlasBaker'
 import { computeFaceNormal } from '../utils/math'
 import { Vector3D } from '../types/mesh'
 import { useHistoryStore } from './historyStore'
+import { useAnimationStore } from './animationStore'
+import { ProjectStorage } from '../core/storage/ProjectStorage'
 
 export const useProjectStore = defineStore('project', () => {
   const historyStore = useHistoryStore()
@@ -605,8 +607,96 @@ export const useProjectStore = defineStore('project', () => {
     return false
   }
 
+  const hasAutosaveSession = ref<boolean>(false)
+  let autosaveTimer: any = null
+
+  function triggerAutosave() {
+    if (typeof window === 'undefined') return
+    if (autosaveTimer) clearTimeout(autosaveTimer)
+    autosaveTimer = setTimeout(async () => {
+      try {
+        const animationStore = useAnimationStore()
+        const textureData = textures.value.map(t => ({
+          id: t.id,
+          name: t.name,
+          width: t.width,
+          height: t.height,
+          dataUrl: t.pixelBuffer ? t.pixelBuffer.canvas.toDataURL() : ''
+        }))
+
+        await ProjectStorage.saveProject({
+          name: projectName.value,
+          meshes: JSON.parse(JSON.stringify(meshes.value)),
+          materials: JSON.parse(JSON.stringify(materials.value)),
+          activePalette: JSON.parse(JSON.stringify(activePalette.value)),
+          textures: textureData,
+          armature: JSON.parse(JSON.stringify(animationStore.armature))
+        })
+        hasAutosaveSession.value = true
+      } catch (e) {
+        console.warn('Autosave error:', e)
+      }
+    }, 1200)
+  }
+
+  async function checkAutosaveSession() {
+    const hasData = await ProjectStorage.hasAutosave()
+    hasAutosaveSession.value = hasData
+    return hasData
+  }
+
+  async function restoreAutosaveSession(): Promise<boolean> {
+    const data = await ProjectStorage.loadProject()
+    if (!data || !Array.isArray(data.meshes) || data.meshes.length === 0) return false
+
+    projectName.value = data.name || 'Restored_Project'
+    meshes.value = data.meshes
+    activeMeshId.value = data.meshes[0]?.id || ''
+    selectedMeshIds.value = [data.meshes[0]?.id || '']
+
+    if (Array.isArray(data.materials) && data.materials.length > 0) {
+      materials.value = data.materials
+    }
+
+    if (data.activePalette) {
+      activePalette.value = data.activePalette
+    }
+
+    if (Array.isArray(data.textures) && data.textures.length > 0) {
+      textures.value = data.textures.map(t => {
+        const buf = new PixelBuffer(t.width || 64, t.height || 64)
+        if (t.dataUrl) {
+          const img = new Image()
+          img.onload = () => {
+            buf.ctx.drawImage(img, 0, 0)
+            markTextureUpdated()
+          }
+          img.src = t.dataUrl
+        }
+        return {
+          id: t.id,
+          name: t.name,
+          width: t.width,
+          height: t.height,
+          pixelBuffer: buf
+        }
+      })
+      activeTextureId.value = data.textures[0]?.id || 'tex_default'
+    }
+
+    if (data.armature) {
+      const animationStore = useAnimationStore()
+      animationStore.armature = data.armature
+    }
+
+    markGeometryUpdated()
+    markTextureUpdated()
+    return true
+  }
+
   function markGeometryUpdated() {
     geometryRevision.value++
+    triggerAutosave()
   }
 
   function markTextureUpdated(targetTexId?: string) {
@@ -616,6 +706,7 @@ export const useProjectStore = defineStore('project', () => {
       tex.width = tex.pixelBuffer.width
       tex.height = tex.pixelBuffer.height
     }
+    triggerAutosave()
   }
 
   function addTexture(name?: string, width = 64, height = 64, dataUrl?: string): TextureMap {
@@ -892,5 +983,9 @@ export const useProjectStore = defineStore('project', () => {
     generateBoxUVs,
     bakeSceneAtlas,
     recordState,
+    hasAutosaveSession,
+    checkAutosaveSession,
+    restoreAutosaveSession,
+    triggerAutosave,
   }
 })
