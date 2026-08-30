@@ -615,23 +615,18 @@ function rebuildBones() {
   const isXRay = animationStore.xrayBones !== false
 
   for (const bone of animationStore.armature.bones) {
-    const start = new THREE.Vector3(
-      bone.head.x + (isPoseMode ? bone.position.x : 0),
-      bone.head.y + (isPoseMode ? bone.position.y : 0),
-      bone.head.z + (isPoseMode ? bone.position.z : 0)
-    )
+    let start: THREE.Vector3
+    let end: THREE.Vector3
 
-    const baseVec = new THREE.Vector3(bone.tail.x - bone.head.x, bone.tail.y - bone.head.y, bone.tail.z - bone.head.z)
     if (isPoseMode) {
-      const rotEuler = new THREE.Euler(
-        THREE.MathUtils.degToRad(bone.rotation.x),
-        THREE.MathUtils.degToRad(bone.rotation.y),
-        THREE.MathUtils.degToRad(bone.rotation.z)
-      )
-      baseVec.applyEuler(rotEuler)
-      baseVec.multiply(new THREE.Vector3(bone.scale.x, bone.scale.y, bone.scale.z))
+      const boneMat = computeBoneWorldMatrix(bone, animationStore.armature.bones)
+      start = new THREE.Vector3(bone.head.x, bone.head.y, bone.head.z).applyMatrix4(boneMat)
+      end = new THREE.Vector3(bone.tail.x, bone.tail.y, bone.tail.z).applyMatrix4(boneMat)
+    } else {
+      start = new THREE.Vector3(bone.head.x, bone.head.y, bone.head.z)
+      end = new THREE.Vector3(bone.tail.x, bone.tail.y, bone.tail.z)
     }
-    const end = start.clone().add(baseVec)
+
     const boneVec = new THREE.Vector3().subVectors(end, start)
     const length = boneVec.length()
     if (length < 0.001) continue
@@ -999,8 +994,6 @@ function onGizmoDragStart() {
 
 function onGizmoObjectChange() {
   const activeMesh = projectStore.activeMesh
-  if (!activeMesh) return
-
   transformProxy.updateMatrixWorld()
 
   if (toolStore.appMode === 'rig') {
@@ -1045,6 +1038,7 @@ function onGizmoObjectChange() {
         bone.tail.z += deltaZ
       }
       rebuildBones()
+      rebuildMeshes()
       return
     }
   }
@@ -1066,6 +1060,7 @@ function onGizmoObjectChange() {
         bone.position.z = Number((transformProxy.position.z - bone.head.z).toFixed(3))
       }
       rebuildBones()
+      rebuildMeshes()
       if (animationStore.autoKey) {
         animationStore.recordCurrentKeyframe()
       }
@@ -1098,6 +1093,8 @@ function onGizmoObjectChange() {
       return
     }
   }
+
+  if (!activeMesh) return
 
   if (toolStore.selectMode === 'origin') {
     const dx = transformProxy.position.x - activeMesh.position.x
