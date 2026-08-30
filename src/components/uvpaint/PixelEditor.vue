@@ -651,6 +651,46 @@ function zoomIn() {
   renderCanvas()
 }
 
+function startLightWavePan(e: MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  isPanning.value = true
+  panStart = { x: e.clientX - panOffset.value.x, y: e.clientY - panOffset.value.y }
+  const onMove = (moveEvt: MouseEvent) => {
+    panOffset.value = {
+      x: moveEvt.clientX - panStart.x,
+      y: moveEvt.clientY - panStart.y
+    }
+    renderCanvas()
+  }
+  const onUp = () => {
+    isPanning.value = false
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+  }
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
+}
+
+function startLightWaveZoom(e: MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  let prevY = e.clientY
+  const onMove = (moveEvt: MouseEvent) => {
+    const dy = moveEvt.clientY - prevY
+    prevY = moveEvt.clientY
+    const zoomFactor = Math.pow(0.985, dy)
+    zoom.value = Math.max(0.1, Math.min(64, Math.round(zoom.value * zoomFactor * 100) / 100))
+    renderCanvas()
+  }
+  const onUp = () => {
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+  }
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
+}
+
 function resetPanZoom() {
   if (!containerRef.value) return
   const w = containerRef.value.clientWidth
@@ -992,29 +1032,41 @@ defineExpose({
         @pointercancel="onPointerUp"
       >
         <!-- Top Right Floating View Controls -->
-        <div class="pixel-view-group" aria-label="Canvas View Controls">
+        <!-- Top Right Floating LightWave View Controls (Move, Search, Crosshair, X-Ray, Grid, Fit) -->
+        <div class="uv-view-group" aria-label="Canvas View Controls">
+          <button
+            @mousedown="startLightWavePan"
+            class="uv-view-icon cursor-move"
+            title="LightWave Pan (Drag to pan canvas)"
+          ><Move class="w-3.5 h-3.5" /></button>
+          <button
+            @mousedown="startLightWaveZoom"
+            class="uv-view-icon cursor-ns-resize"
+            title="LightWave Zoom (Drag up/down to zoom)"
+          ><Search class="w-3.5 h-3.5" /></button>
+          <button
+            @click="resetPanZoom"
+            class="uv-view-icon"
+            title="Center View on Canvas (Crosshair)"
+          ><Crosshair class="w-3.5 h-3.5" /></button>
           <button
             @click="showUvOverlay = !showUvOverlay"
-            class="pixel-view-toggle"
+            class="uv-view-icon"
             :class="{ 'is-active': showUvOverlay }"
-            title="Toggle UV Wireframe Overlay"
-          >
-            <span>UV</span>
-          </button>
+            title="Toggle UV Wireframe Overlay (Alt+Z)"
+          ><BlenderIcon name="xray" :size="14" /></button>
           <button
             @click="showPixelGrid = !showPixelGrid"
-            class="pixel-view-icon"
+            class="uv-view-icon"
             :class="{ 'is-active': showPixelGrid }"
-            title="Toggle Pixel Grid Lines"
-          >
-            <Grid class="w-3.5 h-3.5" />
-          </button>
-          <div class="pixel-zoom-control">
-            <button @click="zoomOut" title="Zoom out"><ZoomOut class="w-3 h-3" /></button>
+            title="Toggle Pixel Grid"
+          ><Grid class="w-3.5 h-3.5" /></button>
+          <div class="uv-zoom-control">
+            <button @click="zoomOut" title="Zoom out"><ZoomOut class="w-3.5 h-3.5" /></button>
             <span @dblclick="resetPanZoom" title="Double-click to fit">{{ Math.round(zoom * 100) }}%</span>
-            <button @click="zoomIn" title="Zoom in"><ZoomIn class="w-3 h-3" /></button>
+            <button @click="zoomIn" title="Zoom in"><ZoomIn class="w-3.5 h-3.5" /></button>
           </div>
-          <button @click="resetPanZoom" class="pixel-view-icon" title="Fit to screen">
+          <button @click="resetPanZoom" class="uv-view-icon" title="Fit Canvas to View">
             <Maximize class="w-3.5 h-3.5" />
           </button>
         </div>
