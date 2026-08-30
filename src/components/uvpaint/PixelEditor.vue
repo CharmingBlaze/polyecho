@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, nextTick } from 'vue'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import { generateRetroAtlas } from '../../core/painting/DefaultTextures'
@@ -10,7 +10,8 @@ import {
   Grid, 
   Upload, 
   Download, 
-  ArrowLeftRight
+  ArrowLeftRight,
+  Maximize
 } from 'lucide-vue-next'
 
 const projectStore = useProjectStore()
@@ -96,22 +97,30 @@ function handleTextureUpload(event: Event) {
   if (!input.files || input.files.length === 0) return
   const file = input.files[0]
   const reader = new FileReader()
-  reader.onload = (e) => {
+  reader.onload = async (e) => {
     const url = e.target?.result as string
-    projectStore.pixelBuffer.loadFromDataURL(url, true).then(() => {
-      // Auto-fit zoom to texture size
-      const maxDim = Math.max(projectStore.pixelBuffer.width, projectStore.pixelBuffer.height)
-      if (maxDim >= 1024) zoom.value = 1
-      else if (maxDim >= 512) zoom.value = 2
-      else if (maxDim >= 256) zoom.value = 3
-      else if (maxDim >= 128) zoom.value = 4
-      else zoom.value = 6
-
-      projectStore.markTextureUpdated()
+    await projectStore.pixelBuffer.loadFromDataURL(url, true)
+    if (projectStore.activeTexture) {
+      projectStore.activeTexture.name = file.name.replace(/\.[^/.]+$/, '')
+      projectStore.activeTexture.width = projectStore.pixelBuffer.width
+      projectStore.activeTexture.height = projectStore.pixelBuffer.height
+      projectStore.activeTexture.dataUrl = projectStore.pixelBuffer.toDataURL()
+    }
+    projectStore.markTextureUpdated()
+    nextTick(() => {
+      resetPanZoom()
       renderCanvas()
     })
   }
   reader.readAsDataURL(file)
+}
+
+function onTextureChanged() {
+  projectStore.markTextureUpdated()
+  nextTick(() => {
+    resetPanZoom()
+    renderCanvas()
+  })
 }
 
 function downloadTexturePng() {
@@ -454,7 +463,12 @@ function onWheel(e: WheelEvent) {
 
   const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85
   const oldZoom = zoom.value
-  const newZoom = Math.max(0.25, Math.min(32, Math.round(oldZoom * zoomFactor * 10) / 10))
+  let newZoom = oldZoom * zoomFactor
+  if (newZoom < 1) {
+    newZoom = Math.max(0.02, Math.round(newZoom * 100) / 100)
+  } else {
+    newZoom = Math.min(64, Math.round(newZoom * 10) / 10)
+  }
 
   if (newZoom !== oldZoom) {
     panOffset.value.x = mouseX - (mouseX - panOffset.value.x) * (newZoom / oldZoom)
@@ -463,13 +477,45 @@ function onWheel(e: WheelEvent) {
   }
 }
 
+function zoomOut() {
+  const oldZoom = zoom.value
+  let newZoom = oldZoom * 0.8
+  if (newZoom < 1) {
+    newZoom = Math.max(0.02, Math.round(newZoom * 100) / 100)
+  } else {
+    newZoom = Math.max(0.02, Math.round(newZoom * 10) / 10)
+  }
+  zoom.value = newZoom
+}
+
+function zoomIn() {
+  const oldZoom = zoom.value
+  let newZoom = oldZoom * 1.25
+  if (newZoom < 1) {
+    newZoom = Math.round(newZoom * 100) / 100
+  } else {
+    newZoom = Math.min(64, Math.round(newZoom * 10) / 10)
+  }
+  zoom.value = newZoom
+}
+
 function resetPanZoom() {
-  const maxDim = Math.max(projectStore.pixelBuffer.width, projectStore.pixelBuffer.height)
-  if (maxDim >= 1024) zoom.value = 1
-  else if (maxDim >= 512) zoom.value = 2
-  else if (maxDim >= 256) zoom.value = 3
-  else if (maxDim >= 128) zoom.value = 4
-  else zoom.value = 6
+  if (!containerRef.value) {
+    panOffset.value = { x: 0, y: 0 }
+    return
+  }
+  const w = containerRef.value.clientWidth
+  const h = containerRef.value.clientHeight
+  const targetW = w * 0.78
+  const targetH = h * 0.78
+  const pb = projectStore.pixelBuffer
+  let fitZoom = Math.min(targetW / pb.width, targetH / pb.height)
+  if (fitZoom >= 1) {
+    fitZoom = Math.min(32, Math.floor(fitZoom))
+  } else {
+    fitZoom = Math.max(0.02, Math.round(fitZoom * 100) / 100)
+  }
+  zoom.value = fitZoom
   panOffset.value = { x: 0, y: 0 }
   renderCanvas()
 }
@@ -676,9 +722,23 @@ defineExpose({
 
         <div class="h-3.5 w-px bg-ui-borderSubtle mx-0.5"></div>
 
+        <!-- Texture Selector Dropdown -->
+        <div class="flex items-center space-x-1">
+          <span class="text-[10px] text-ui-textMuted font-semibold">Tex:</span>
+          <select 
+            v-model="projectStore.activeTextureId" 
+            @change="onTextureChanged"
+            class="bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-ui-textPrimary text-[10px] font-mono focus:outline-none focus:border-ui-accent cursor-pointer"
+          >
+            <option v-for="t in projectStore.textures" :key="t.id" :value="t.id">
+              {{ t.name }} ({{ t.width }}x{{ t.height }})
+            </option>
+          </select>
+        </div>
+
         <button 
           @click="showUvOverlay = !showUvOverlay" 
-          class="px-1.5 py-0.5 rounded-xs text-[10px] border transition font-bold"
+          class="px-1.5 py-0.5 rounded-xs text-[10px] border transition font-bold cursor-pointer"
           :class="showUvOverlay ? 'bg-ui-active text-ui-textAccent border-ui-accent/40 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:bg-ui-hover'"
           title="Toggle 3D UV Wireframe Overlay"
         >
@@ -687,7 +747,7 @@ defineExpose({
 
         <button 
           @click="showPixelGrid = !showPixelGrid" 
-          class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary border border-ui-borderSubtle bg-ui-input"
+          class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary border border-ui-borderSubtle bg-ui-input cursor-pointer"
           :class="{ 'text-ui-textAccent bg-ui-active border-ui-accent/40': showPixelGrid }"
           title="Toggle Pixel Grid"
         >
@@ -695,16 +755,24 @@ defineExpose({
         </button>
 
         <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs">
-          <button @click="zoom = Math.max(0.25, zoom / 1.5)" class="p-1 hover:bg-ui-hover rounded-l-xs text-ui-textMuted hover:text-ui-textPrimary" title="Zoom Out">
+          <button @click="zoomOut" class="p-1 hover:bg-ui-hover rounded-l-xs text-ui-textMuted hover:text-ui-textPrimary cursor-pointer" title="Zoom Out (-)">
             <ZoomOut class="w-3 h-3" />
           </button>
-          <span @dblclick="resetPanZoom" class="px-1.5 font-mono text-[9px] text-ui-textPrimary cursor-pointer font-mono" title="Double click to reset zoom">
-            {{ zoom }}x
+          <span @dblclick="resetPanZoom" class="px-1.5 font-mono text-[9px] text-ui-textPrimary cursor-pointer font-mono select-none" title="Double click to fit zoom (F)">
+            {{ Math.round(zoom * 100) }}%
           </span>
-          <button @click="zoom = Math.min(32, zoom * 1.5)" class="p-1 hover:bg-ui-hover rounded-r-xs text-ui-textMuted hover:text-ui-textPrimary" title="Zoom In">
+          <button @click="zoomIn" class="p-1 hover:bg-ui-hover rounded-r-xs text-ui-textMuted hover:text-ui-textPrimary cursor-pointer" title="Zoom In (+)">
             <ZoomIn class="w-3 h-3" />
           </button>
         </div>
+
+        <button 
+          @click="resetPanZoom" 
+          class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary border border-ui-borderSubtle bg-ui-input cursor-pointer"
+          title="Frame / Fit to Viewport (F)"
+        >
+          <Maximize class="w-3 h-3" />
+        </button>
       </div>
     </div>
 

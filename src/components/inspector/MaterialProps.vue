@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import BlenderIcon from '../icons/BlenderIcon.vue'
@@ -9,9 +9,12 @@ import {
   Trash2, 
   Copy, 
   ExternalLink,
-  Tv,
-  Check,
-  Zap
+  Tv, 
+  Check, 
+  Zap,
+  Upload,
+  Download,
+  CheckCheck
 } from 'lucide-vue-next'
 
 const projectStore = useProjectStore()
@@ -19,19 +22,87 @@ const toolStore = useToolStore()
 
 // Active Material Management
 const activeMesh = computed(() => projectStore.activeMesh)
+const selectedMaterialId = ref<string>(activeMesh.value?.materialId || projectStore.materials[0]?.id || 'default_material')
 
-const activeMaterialId = computed({
-  get: () => activeMesh.value?.materialId || projectStore.materials[0]?.id || 'default_material',
-  set: (val: string) => {
-    if (activeMesh.value) {
-      projectStore.assignMaterialToActiveMesh(val)
-    }
+watch(() => activeMesh.value?.materialId, (newMatId) => {
+  if (newMatId) {
+    selectedMaterialId.value = newMatId
   }
-})
+}, { immediate: true })
 
 const activeMaterial = computed(() => {
-  return projectStore.materials.find(m => m.id === activeMaterialId.value) || projectStore.materials[0]
+  return projectStore.materials.find(m => m.id === selectedMaterialId.value) || projectStore.materials[0]
 })
+
+const activeTextureForMaterial = computed(() => {
+  if (!activeMaterial.value) return projectStore.textures[0]
+  return projectStore.getTextureForMaterial(activeMaterial.value.id) || projectStore.textures[0]
+})
+
+const isAssignedToActiveMesh = computed(() => {
+  return activeMesh.value?.materialId === activeMaterial.value?.id
+})
+
+function assignToActiveMesh() {
+  if (activeMaterial.value && activeMesh.value) {
+    projectStore.assignMaterialToActiveMesh(activeMaterial.value.id)
+  }
+}
+
+function assignToSelectedMeshes() {
+  if (activeMaterial.value) {
+    projectStore.assignMaterialToSelectedMeshes(activeMaterial.value.id)
+  }
+}
+
+const textureUploadInput = ref<HTMLInputElement | null>(null)
+
+function triggerTextureUpload() {
+  textureUploadInput.value?.click()
+}
+
+function handleTextureImageUpload(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file || !activeMaterial.value) return
+  const reader = new FileReader()
+  reader.onload = async (event) => {
+    const url = event.target?.result as string
+    let currentTex = projectStore.getTextureForMaterial(activeMaterial.value.id)
+    if (!currentTex || currentTex.id === 'tex_default') {
+      currentTex = projectStore.addTexture(`${activeMaterial.value.name}_Texture`, 64, 64)
+      projectStore.assignTextureToMaterial(activeMaterial.value.id, currentTex.id)
+    }
+    await currentTex.pixelBuffer.loadFromDataURL(url, true)
+    currentTex.name = file.name.replace(/\.[^/.]+$/, '')
+    currentTex.width = currentTex.pixelBuffer.width
+    currentTex.height = currentTex.pixelBuffer.height
+    currentTex.dataUrl = currentTex.pixelBuffer.toDataURL()
+    projectStore.markTextureUpdated(currentTex.id)
+  }
+  reader.readAsDataURL(file)
+}
+
+function openUvWorkspace() {
+  if (activeTextureForMaterial.value) {
+    projectStore.activeTextureId = activeTextureForMaterial.value.id
+  }
+  toolStore.appMode = 'uvpaint'
+}
+
+function downloadTexturePng() {
+  const tex = activeTextureForMaterial.value
+  if (!tex || !tex.pixelBuffer) return
+  tex.pixelBuffer.canvas.toBlob((blob: Blob | null) => {
+    if (blob) {
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${tex.name}_${tex.width}x${tex.height}.png`
+      a.click()
+      URL.revokeObjectURL(url)
+    }
+  })
+}
 
 const editingName = ref(false)
 const matNameInput = ref('')
@@ -52,6 +123,7 @@ function commitRename() {
 
 function handleAddMaterial() {
   const newMat = projectStore.addMaterial()
+  selectedMaterialId.value = newMat.id
   if (activeMesh.value) {
     projectStore.assignMaterialToActiveMesh(newMat.id)
   }
@@ -59,12 +131,15 @@ function handleAddMaterial() {
 
 function handleDuplicateMaterial() {
   if (!activeMaterial.value) return
-  const cloned = projectStore.addMaterial(`${activeMaterial.value.name}_Copy`)
+  const cloned = projectStore.addMaterial(`${activeMaterial.value.name}_Copy`, activeMaterial.value.textureId)
   cloned.color = activeMaterial.value.color
   cloned.shading = activeMaterial.value.shading
+  cloned.roughness = activeMaterial.value.roughness
+  cloned.metalness = activeMaterial.value.metalness
   cloned.psxJitter = activeMaterial.value.psxJitter
   cloned.psxAffine = activeMaterial.value.psxAffine
   cloned.dither = activeMaterial.value.dither
+  selectedMaterialId.value = cloned.id
   if (activeMesh.value) {
     projectStore.assignMaterialToActiveMesh(cloned.id)
   }
@@ -72,7 +147,9 @@ function handleDuplicateMaterial() {
 
 function handleDeleteMaterial() {
   if (activeMaterial.value && projectStore.materials.length > 1) {
-    projectStore.deleteMaterial(activeMaterial.value.id)
+    const toDeleteId = activeMaterial.value.id
+    projectStore.deleteMaterial(toDeleteId)
+    selectedMaterialId.value = projectStore.materials[0]?.id || 'default_material'
   }
 }
 
@@ -407,11 +484,6 @@ function rgbToHex(r: number, g: number, b: number): string {
     return hex.length === 1 ? '0' + hex : hex
   }).join('')
 }
-
-function openUvWorkspace() {
-  toolStore.appMode = 'uvpaint'
-  toolStore.uvWorkspaceTab = 'paint'
-}
 </script>
 
 <template>
@@ -452,13 +524,35 @@ function openUvWorkspace() {
       <!-- Material Slot Selector Dropdown -->
       <div class="flex items-center gap-1.5">
         <select 
-          v-model="activeMaterialId"
+          v-model="selectedMaterialId"
           class="flex-1 bg-ui-surface border border-ui-borderDefault rounded-xs px-2 py-1 text-ui-textPrimary font-mono text-[11px] focus:outline-none focus:border-ui-accent cursor-pointer"
         >
           <option v-for="mat in projectStore.materials" :key="mat.id" :value="mat.id">
             {{ mat.name }} {{ activeMesh?.materialId === mat.id ? '(Active Mesh)' : '' }}
           </option>
         </select>
+      </div>
+
+      <!-- Material Assignment Actions -->
+      <div class="grid grid-cols-2 gap-1 pt-0.5">
+        <button 
+          @click="assignToActiveMesh"
+          :disabled="isAssignedToActiveMesh"
+          class="py-1 px-1.5 rounded-xs text-[10px] font-bold border transition flex items-center justify-center gap-1 cursor-pointer"
+          :class="isAssignedToActiveMesh ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50' : 'bg-ui-surface hover:bg-ui-hover text-ui-textPrimary border-ui-borderSubtle'"
+          :title="isAssignedToActiveMesh ? 'Currently assigned to active object' : 'Apply this material to active object'"
+        >
+          <Check v-if="isAssignedToActiveMesh" class="w-3 h-3 text-emerald-400" />
+          <span>{{ isAssignedToActiveMesh ? 'Applied' : 'Apply to Active' }}</span>
+        </button>
+        <button 
+          @click="assignToSelectedMeshes"
+          class="py-1 px-1.5 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary hover:text-ui-textPrimary rounded-xs text-[10px] font-medium flex items-center justify-center gap-1 transition cursor-pointer"
+          :title="`Apply this material to all ${projectStore.selectedMeshIds.length} selected objects`"
+        >
+          <CheckCheck class="w-3 h-3 text-ui-accent" />
+          <span>Apply to Sel ({{ projectStore.selectedMeshIds.length }})</span>
+        </button>
       </div>
 
       <!-- Rename Material Field -->
@@ -806,31 +900,77 @@ function openUvWorkspace() {
     </UiSection>
 
     <!-- 4. TEXTURE MAP & ATLAS SAMPLING -->
-    <UiSection title="Texture Map" :default-open="true">
-      <div class="space-y-2">
-        <div class="flex items-center justify-between bg-ui-input p-1.5 rounded-xs border border-ui-borderSubtle">
-          <div class="flex items-center gap-2">
-            <div class="w-8 h-8 rounded-xs border border-ui-borderDefault overflow-hidden bg-black/40 flex items-center justify-center shrink-0">
+    <UiSection title="Texture Map & Image" :default-open="true">
+      <div v-if="activeMaterial" class="space-y-2">
+        <input ref="textureUploadInput" type="file" accept="image/*" class="hidden" @change="handleTextureImageUpload" />
+
+        <!-- Texture Slot Selector -->
+        <div class="space-y-1">
+          <div class="flex items-center justify-between text-[10px] text-ui-textMuted font-semibold uppercase">
+            <span>Assigned Texture</span>
+            <button 
+              @click="projectStore.addTexture(`${activeMaterial.name}_Tex`, 64, 64)"
+              class="text-ui-accent hover:underline flex items-center gap-0.5 lowercase font-normal cursor-pointer"
+            >
+              <Plus class="w-2.5 h-2.5" />
+              <span>new</span>
+            </button>
+          </div>
+          <select 
+            v-model="activeMaterial.textureId"
+            @change="projectStore.markTextureUpdated(activeMaterial.textureId || undefined)"
+            class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-1 text-ui-textPrimary text-[11px] focus:outline-none focus:border-ui-accent cursor-pointer font-mono"
+          >
+            <option :value="null">No Texture (Solid Tint Only)</option>
+            <option v-for="tex in projectStore.textures" :key="tex.id" :value="tex.id">
+              {{ tex.name }} ({{ tex.width }}x{{ tex.height }}px)
+            </option>
+          </select>
+        </div>
+
+        <!-- Active Texture Preview Card -->
+        <div v-if="activeTextureForMaterial" class="bg-ui-input p-2 rounded-xs border border-ui-borderSubtle space-y-2">
+          <div class="flex items-center gap-2.5">
+            <div class="w-10 h-10 rounded-xs border border-ui-borderDefault overflow-hidden bg-black/60 flex items-center justify-center shrink-0 shadow-xs">
               <img 
-                :src="projectStore.textures[0]?.dataUrl || projectStore.pixelBuffer.toDataURL()" 
+                :src="activeTextureForMaterial.dataUrl || activeTextureForMaterial.pixelBuffer?.toDataURL()" 
                 class="w-full h-full object-contain [image-rendering:pixelated]" 
-                alt="Texture Atlas"
+                alt="Texture"
               />
             </div>
-            <div class="flex flex-col">
-              <span class="text-[11px] font-bold text-ui-textPrimary">Pixel Buffer Atlas</span>
-              <span class="text-[9px] text-slate-500 font-mono">{{ projectStore.pixelBuffer.width }}x{{ projectStore.pixelBuffer.height }} px</span>
+            <div class="flex flex-col min-w-0 flex-1">
+              <span class="text-[11px] font-bold text-ui-textPrimary truncate">{{ activeTextureForMaterial.name }}</span>
+              <span class="text-[9.5px] text-slate-400 font-mono">{{ activeTextureForMaterial.width }} × {{ activeTextureForMaterial.height }} px</span>
             </div>
           </div>
 
-          <button 
-            @click="openUvWorkspace"
-            class="px-2 py-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary hover:text-ui-textPrimary rounded-xs text-[10px] font-medium flex items-center gap-1 transition"
-            title="Switch to UV/Paint Workspace"
-          >
-            <span>Edit</span>
-            <ExternalLink class="w-3 h-3" />
-          </button>
+          <!-- Actions: Upload/Replace, Edit in UV, Download -->
+          <div class="grid grid-cols-3 gap-1 pt-0.5">
+            <button 
+              @click="triggerTextureUpload"
+              class="py-1 px-1.5 bg-ui-surface hover:bg-ui-hover text-ui-textPrimary border border-ui-borderSubtle rounded-xs text-[10px] font-medium flex items-center justify-center gap-1 transition cursor-pointer"
+              title="Upload image or sprite sheet to replace texture"
+            >
+              <Upload class="w-3 h-3 text-ui-accent" />
+              <span>Load Image</span>
+            </button>
+            <button 
+              @click="openUvWorkspace"
+              class="py-1 px-1.5 bg-ui-surface hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary border border-ui-borderSubtle rounded-xs text-[10px] font-medium flex items-center justify-center gap-1 transition cursor-pointer"
+              title="Open texture in UV Editor & Pixel Painter"
+            >
+              <ExternalLink class="w-3 h-3 text-sky-400" />
+              <span>UV Edit</span>
+            </button>
+            <button 
+              @click="downloadTexturePng"
+              class="py-1 px-1.5 bg-ui-surface hover:bg-ui-hover text-ui-textSecondary hover:text-emerald-400 border border-ui-borderSubtle rounded-xs text-[10px] font-medium flex items-center justify-center gap-1 transition cursor-pointer"
+              title="Export texture as PNG"
+            >
+              <Download class="w-3 h-3 text-emerald-400" />
+              <span>PNG</span>
+            </button>
+          </div>
         </div>
       </div>
     </UiSection>

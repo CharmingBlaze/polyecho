@@ -31,7 +31,8 @@ import {
   RotateCcw,
   LayoutGrid,
   Palette,
-  Sliders
+  Sliders,
+  GitCommitVertical
 } from 'lucide-vue-next'
 
 import { PrimitiveType } from '../../core/primitives/PrimitiveTypes'
@@ -131,7 +132,8 @@ function saveProject() {
     animationStore.armature.clips,
     animationStore.armature.activeClipId,
     animationStore.currentFrame,
-    toolStore.viewport
+    toolStore.viewport,
+    projectStore.textures
   )
   ProjectSerializer.downloadProject(json, projectStore.projectName)
   closeDropdowns()
@@ -158,15 +160,15 @@ async function handleLoadProject(e: Event) {
     if (data.materials) projectStore.materials = data.materials
     if (data.activePalette) projectStore.activePalette = data.activePalette
 
-    if (data.textureDataUrl) {
-      const img = new Image()
-      img.onload = () => {
-        projectStore.pixelBuffer.canvas.width = img.width
-        projectStore.pixelBuffer.canvas.height = img.height
-        projectStore.pixelBuffer.ctx.drawImage(img, 0, 0)
-        projectStore.markTextureUpdated()
+    if (data.textures && data.textures.length > 0) {
+      projectStore.textures = []
+      for (const t of data.textures) {
+        projectStore.addTexture(t.name, t.width, t.height, t.dataUrl)
       }
-      img.src = data.textureDataUrl
+      projectStore.activeTextureId = projectStore.textures[0]?.id || 'tex_default'
+    } else if (data.textureDataUrl) {
+      await projectStore.pixelBuffer.loadFromDataURL(data.textureDataUrl, true)
+      projectStore.markTextureUpdated()
     }
 
     if (data.armature) {
@@ -227,15 +229,9 @@ async function handleImportTexture(e: Event) {
     const buffer = await file.arrayBuffer()
     const blob = new Blob([buffer], { type: file.type })
     const url = URL.createObjectURL(blob)
-    const img = new Image()
-    img.onload = () => {
-      projectStore.pixelBuffer.canvas.width = img.width
-      projectStore.pixelBuffer.canvas.height = img.height
-      projectStore.pixelBuffer.ctx.drawImage(img, 0, 0)
-      projectStore.markTextureUpdated()
-      URL.revokeObjectURL(url)
-    }
-    img.src = url
+    await projectStore.pixelBuffer.loadFromDataURL(url, true)
+    projectStore.markTextureUpdated()
+    URL.revokeObjectURL(url)
   } catch (err) {
     console.error('Failed to import texture:', err)
     alert('Failed to import texture image')
@@ -571,6 +567,11 @@ function handleExitProject() {
           <button @click="toolStore.viewport.xray = !toolStore.viewport.xray; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2"><Eye class="w-3.5 h-3.5 text-ui-textMuted" /> X-Ray Transparent</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Alt+Z</span>
+          </button>
+
+          <button @click="toolStore.viewport.showBones = !toolStore.viewport.showBones; animationStore.showBones = toolStore.viewport.showBones; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span class="flex items-center gap-2"><GitCommitVertical class="w-3.5 h-3.5 text-amber-400" /> Skeleton Bones</span>
+            <span class="text-ui-textAccent font-medium text-[10px]">{{ toolStore.viewport.showBones ? 'VISIBLE' : 'HIDDEN' }}</span>
           </button>
 
           <div class="h-px bg-ui-borderSubtle my-1"></div>

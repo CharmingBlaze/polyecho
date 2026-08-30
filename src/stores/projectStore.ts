@@ -46,15 +46,12 @@ export const useProjectStore = defineStore('project', () => {
 
   // Textures & Materials
   const activePalette = ref<Palette>(DEFAULT_PALETTES[0])
-  const pixelBuffer = ref<PixelBuffer>(new PixelBuffer(64, 64))
   const textureRevision = ref<number>(0)
+  const activeTextureId = ref<string>('tex_default')
 
-  // Initialize high quality 64x64 Texture Atlas
-  function initDefaultTexture() {
-    generateRetroAtlas(pixelBuffer.value)
-    textureRevision.value++
-  }
-  initDefaultTexture()
+  // Create default 64x64 pixel buffer atlas
+  const defaultBuffer = new PixelBuffer(64, 64)
+  generateRetroAtlas(defaultBuffer)
 
   const textures = ref<TextureMap[]>([
     {
@@ -62,9 +59,25 @@ export const useProjectStore = defineStore('project', () => {
       name: 'Texture_Atlas_64x64',
       width: 64,
       height: 64,
-      dataUrl: pixelBuffer.value.toDataURL()
+      dataUrl: defaultBuffer.toDataURL(),
+      pixelBuffer: defaultBuffer
     }
   ])
+
+  const activeTexture = computed<TextureMap>(() => {
+    return textures.value.find(t => t.id === activeTextureId.value) || textures.value[0]
+  })
+
+  // Backward compatibility: projectStore.pixelBuffer transparently accesses active texture's pixel buffer
+  const pixelBuffer = computed<PixelBuffer>({
+    get: () => activeTexture.value.pixelBuffer || defaultBuffer,
+    set: (buf: PixelBuffer) => {
+      activeTexture.value.pixelBuffer = buf
+      activeTexture.value.width = buf.width
+      activeTexture.value.height = buf.height
+      activeTexture.value.dataUrl = buf.toDataURL()
+    }
+  })
 
   const materials = ref<Material[]>([
     {
@@ -614,19 +627,80 @@ export const useProjectStore = defineStore('project', () => {
     return false
   }
 
-  function markTextureUpdated() {
+  function markTextureUpdated(targetTexId?: string) {
     textureRevision.value++
-    if (textures.value[0]) {
-      textures.value[0].dataUrl = pixelBuffer.value.toDataURL()
+    const tex = targetTexId ? textures.value.find(t => t.id === targetTexId) : activeTexture.value
+    if (tex && tex.pixelBuffer) {
+      tex.width = tex.pixelBuffer.width
+      tex.height = tex.pixelBuffer.height
+      tex.dataUrl = tex.pixelBuffer.toDataURL()
     }
   }
 
-  function addMaterial(name?: string): Material {
+  function addTexture(name?: string, width = 64, height = 64, dataUrl?: string): TextureMap {
+    const count = textures.value.length + 1
+    const buffer = new PixelBuffer(width, height)
+    if (dataUrl) {
+      buffer.loadFromDataURL(dataUrl, true)
+    } else {
+      buffer.clear('#333842')
+    }
+    const newTex: TextureMap = {
+      id: `tex_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      name: name || `Texture.${String(count).padStart(3, '0')}`,
+      width,
+      height,
+      dataUrl: buffer.toDataURL(),
+      pixelBuffer: buffer
+    }
+    textures.value.push(newTex)
+    activeTextureId.value = newTex.id
+    recordState('Add Texture Map')
+    markTextureUpdated(newTex.id)
+    return newTex
+  }
+
+  function deleteTexture(id: string) {
+    if (textures.value.length <= 1) return
+    recordState('Delete Texture Map')
+    textures.value = textures.value.filter(t => t.id !== id)
+    const fallback = textures.value[0]
+    if (activeTextureId.value === id) {
+      activeTextureId.value = fallback.id
+    }
+    for (const mat of materials.value) {
+      if (mat.textureId === id) {
+        mat.textureId = fallback.id
+      }
+    }
+    markTextureUpdated()
+  }
+
+  function getTextureForMaterial(materialId: string): TextureMap | undefined {
+    const mat = materials.value.find(m => m.id === materialId)
+    if (!mat || !mat.textureId) return undefined
+    return textures.value.find(t => t.id === mat.textureId) || textures.value[0]
+  }
+
+  function getTextureById(textureId: string): TextureMap | undefined {
+    return textures.value.find(t => t.id === textureId)
+  }
+
+  function assignTextureToMaterial(materialId: string, textureId: string | null) {
+    const mat = materials.value.find(m => m.id === materialId)
+    if (mat) {
+      recordState('Assign Texture to Material')
+      mat.textureId = textureId
+      markTextureUpdated(textureId || undefined)
+    }
+  }
+
+  function addMaterial(name?: string, textureId?: string | null): Material {
     const count = materials.value.length + 1
     const newMat: Material = {
       id: `mat_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       name: name || `Material.${String(count).padStart(3, '0')}`,
-      textureId: 'tex_default',
+      textureId: textureId !== undefined ? textureId : (activeTextureId.value || 'tex_default'),
       color: '#ffffff',
       shading: 'textured',
       psxJitter: false,
@@ -663,6 +737,17 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
+  function assignMaterialToSelectedMeshes(matId: string) {
+    recordState('Assign Material to Selected Objects')
+    for (const mId of selectedMeshIds.value) {
+      const m = meshes.value.find(item => item.id === mId)
+      if (m) m.materialId = matId
+    }
+    if (activeMesh.value) {
+      activeMesh.value.materialId = matId
+    }
+  }
+
   function setShadeMode(mode: 'flat' | 'smooth') {
     for (const mesh of meshes.value) {
       if (selectedMeshIds.value.includes(mesh.id) || mesh.id === activeMeshId.value) {
@@ -688,6 +773,8 @@ export const useProjectStore = defineStore('project', () => {
     selectedFaceIds,
     activePalette,
     pixelBuffer,
+    activeTextureId,
+    activeTexture,
     textureRevision,
     textures,
     materials,
@@ -725,9 +812,15 @@ export const useProjectStore = defineStore('project', () => {
     setShadeMode,
     toggleShadeMode,
     markTextureUpdated,
+    addTexture,
+    deleteTexture,
+    getTextureForMaterial,
+    getTextureById,
+    assignTextureToMaterial,
     addMaterial,
     deleteMaterial,
     assignMaterialToActiveMesh,
+    assignMaterialToSelectedMeshes,
     recordState,
   }
 })

@@ -37,7 +37,9 @@ import {
   Crosshair,
   Check,
   X,
-  GripHorizontal
+  GripHorizontal,
+  GitCommitVertical,
+  EyeOff
 } from 'lucide-vue-next'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 
@@ -345,13 +347,65 @@ function initHoverVisuals() {
   layers.hoverGroup.add(hoverWeightBrushRing)
 }
 
-function initTexture() {
-  threeTexture = new THREE.CanvasTexture(projectStore.pixelBuffer.canvas)
-  threeTexture.magFilter = THREE.NearestFilter
-  threeTexture.minFilter = THREE.NearestFilter
-  threeTexture.generateMipmaps = false
+const textureCache = new Map<string, THREE.CanvasTexture>()
 
-  psxMaterial = createPSXMaterial(threeTexture, new THREE.Vector2(320, 240))
+function getThreeTexture(textureId?: string | null): THREE.CanvasTexture {
+  const targetTex = (textureId ? projectStore.textures.find(t => t.id === textureId) : null) || projectStore.activeTexture || projectStore.textures[0]
+  if (!targetTex || !targetTex.pixelBuffer) {
+    if (!threeTexture) {
+      threeTexture = new THREE.CanvasTexture(projectStore.pixelBuffer.canvas)
+      threeTexture.magFilter = THREE.NearestFilter
+      threeTexture.minFilter = THREE.NearestFilter
+      threeTexture.generateMipmaps = false
+    }
+    return threeTexture
+  }
+
+  let tex = textureCache.get(targetTex.id)
+  if (!tex) {
+    tex = new THREE.CanvasTexture(targetTex.pixelBuffer.canvas)
+    tex.magFilter = THREE.NearestFilter
+    tex.minFilter = THREE.NearestFilter
+    tex.generateMipmaps = false
+    textureCache.set(targetTex.id, tex)
+  } else {
+    tex.image = targetTex.pixelBuffer.canvas
+    tex.needsUpdate = true
+  }
+  return tex
+}
+
+function updateThreeTextures() {
+  for (const t of projectStore.textures) {
+    if (t.pixelBuffer) {
+      let tex = textureCache.get(t.id)
+      if (!tex) {
+        tex = new THREE.CanvasTexture(t.pixelBuffer.canvas)
+        tex.magFilter = THREE.NearestFilter
+        tex.minFilter = THREE.NearestFilter
+        tex.generateMipmaps = false
+        textureCache.set(t.id, tex)
+      } else {
+        tex.image = t.pixelBuffer.canvas
+        tex.needsUpdate = true
+      }
+    }
+  }
+  threeTexture = getThreeTexture(projectStore.activeTextureId)
+  if (psxMaterial && psxMaterial.uniforms && psxMaterial.uniforms.uTexture) {
+    psxMaterial.uniforms.uTexture.value = threeTexture
+  }
+}
+
+function updateThreeTexture() {
+  updateThreeTextures()
+}
+
+function initTexture() {
+  updateThreeTextures()
+  if (!psxMaterial) {
+    psxMaterial = createPSXMaterial(threeTexture, new THREE.Vector2(320, 240))
+  }
 }
 
 function rebuildMeshes() {
@@ -400,6 +454,9 @@ function rebuildMeshes() {
     } = meshToThreeGeometry(meshObj, selectedFaces, selectedEdges, toolStore.viewport.shadeMode, skeletalContext, weightPaintContext)
 
     const isSmooth = (meshObj.shadeMode || toolStore.viewport.shadeMode) === 'smooth'
+    const meshMatObj = projectStore.materials.find(m => m.id === meshObj.materialId) || projectStore.materials[0]
+    const meshTex = getThreeTexture(meshMatObj?.textureId)
+    const baseColor = new THREE.Color(meshMatObj?.color || '#ffffff')
 
     let mat: THREE.Material
     if (isWeightPaint) {
@@ -417,12 +474,14 @@ function rebuildMeshes() {
       psxMaterial.uniforms.uJitterAmount.value = toolStore.viewport.psxJitter ? 1.0 : 0.0
       psxMaterial.uniforms.uAffineEnabled.value = toolStore.viewport.psxAffine
       psxMaterial.uniforms.uDitherEnabled.value = toolStore.viewport.dither
+      psxMaterial.uniforms.uTexture.value = meshTex
       mat = psxMaterial
-    } else if (toolStore.viewport.shading === 'textured' && threeTexture) {
+    } else if (toolStore.viewport.shading === 'textured' || meshMatObj?.shading === 'textured') {
       mat = new THREE.MeshStandardMaterial({
-        map: threeTexture,
-        roughness: 0.8,
-        metalness: 0.05,
+        map: meshTex,
+        color: baseColor,
+        roughness: meshMatObj?.roughness !== undefined ? meshMatObj.roughness : 0.8,
+        metalness: meshMatObj?.metalness !== undefined ? meshMatObj.metalness : 0.05,
         vertexColors: true,
         side: THREE.DoubleSide,
         flatShading: !isSmooth,
@@ -446,9 +505,9 @@ function rebuildMeshes() {
       })
     } else {
       mat = new THREE.MeshStandardMaterial({
-        color: 0x94a3b8,
-        roughness: 0.75,
-        metalness: 0.1,
+        color: baseColor,
+        roughness: meshMatObj?.roughness !== undefined ? meshMatObj.roughness : 0.75,
+        metalness: meshMatObj?.metalness !== undefined ? meshMatObj.metalness : 0.1,
         vertexColors: true,
         side: THREE.DoubleSide,
         flatShading: !isSmooth,
@@ -3232,6 +3291,24 @@ watch(() => toolStore.viewport.wireframeOpacity, () => {
   rebuildMeshes()
 })
 
+watch(() => toolStore.viewport.shading, () => {
+  updateThreeTexture()
+  rebuildMeshes()
+})
+
+watch(() => projectStore.textureRevision, () => {
+  updateThreeTexture()
+  rebuildMeshes()
+})
+
+watch(() => projectStore.materials, () => {
+  rebuildMeshes()
+}, { deep: true })
+
+watch(() => projectStore.meshes, () => {
+  rebuildMeshes()
+}, { deep: true })
+
 watch(() => [
   animationStore.isWeightPaintActive,
   animationStore.selectedBoneId,
@@ -3240,6 +3317,16 @@ watch(() => [
   animationStore.weightPaintTool
 ], () => {
   rebuildMeshes()
+})
+
+function toggleBoneVisibility() {
+  toolStore.viewport.showBones = !toolStore.viewport.showBones
+  animationStore.showBones = toolStore.viewport.showBones
+  rebuildBones()
+}
+
+watch(() => [toolStore.viewport.showBones, animationStore.showBones], () => {
+  rebuildBones()
 })
 
 function handleThemeChangedEvent(e: any) {
@@ -3334,15 +3421,25 @@ onUnmounted(() => {
           <!-- In-Viewport See-Through Glassmorphic X-Ray Button -->
           <button 
             @click="toolStore.viewport.xray = !toolStore.viewport.xray" 
-            class="p-1.5 transition flex items-center justify-center"
+            class="p-1.5 transition flex items-center justify-center cursor-pointer"
             :class="toolStore.viewport.xray ? 'bg-ui-active text-ui-textAccent font-bold shadow-inner' : 'hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent'"
             title="Toggle X-Ray Mode (Alt+Z)"
           >
             <BlenderIcon name="xray" :size="14" :color="toolStore.viewport.xray ? 'var(--ui-accent)' : 'currentColor'" />
           </button>
+          <!-- In-Viewport Bone Visibility Toggle Button -->
+          <button 
+            @click="toggleBoneVisibility()" 
+            class="p-1.5 transition flex items-center justify-center cursor-pointer"
+            :class="toolStore.viewport.showBones ? 'text-amber-400 hover:bg-ui-hover' : 'text-ui-textMuted/60 hover:text-ui-textSecondary hover:bg-ui-hover'"
+            :title="toolStore.viewport.showBones ? 'Hide Skeleton Bones' : 'Show Skeleton Bones'"
+          >
+            <GitCommitVertical v-if="toolStore.viewport.showBones" class="w-3.5 h-3.5 text-amber-400" />
+            <EyeOff v-else class="w-3.5 h-3.5 text-ui-textMuted" />
+          </button>
           <button 
             @click="toolStore.viewport.quadView = true" 
-            class="p-1.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition"
+            class="p-1.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition cursor-pointer"
             title="Split to Quad View (Ctrl+Alt+Q)"
           >
             <Maximize2 class="w-3.5 h-3.5 text-ui-textAccent" />

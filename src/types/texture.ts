@@ -10,6 +10,7 @@ export interface TextureMap {
   width: number
   height: number
   dataUrl: string
+  pixelBuffer?: any
 }
 
 export interface Material {
@@ -17,7 +18,9 @@ export interface Material {
   name: string
   textureId: string | null
   color: string
-  shading: 'unlit' | 'gouraud' | 'flat' | 'textured' | 'psx'
+  shading: 'unlit' | 'gouraud' | 'flat' | 'textured' | 'psx' | 'solid' | 'wireframe'
+  roughness?: number
+  metalness?: number
   psxJitter: boolean
   psxJitterResolution: number // e.g. 240 or 120
   psxAffine: boolean
@@ -25,3 +28,4 @@ export interface Material {
   ditherLevel: number
   wireframe: boolean
 }
+

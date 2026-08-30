@@ -1,5 +1,5 @@
 import { MeshObject } from '../../types/mesh'
-import { Material, Palette } from '../../types/texture'
+import { Material, Palette, TextureMap } from '../../types/texture'
 import { Armature, AnimationClip } from '../../types/animation'
 import { ViewportSettings } from '../../types/tools'
 
@@ -10,6 +10,7 @@ export interface PsxProjectFile {
   savedAt: string
   meshes: MeshObject[]
   textureDataUrl: string
+  textures?: { id: string; name: string; width: number; height: number; dataUrl: string }[]
   activePalette: Palette
   materials: Material[]
   armature: Armature
@@ -33,9 +34,18 @@ export class ProjectSerializer {
     animations: AnimationClip[],
     activeAnimationId: string | null,
     currentFrame: number,
-    viewportSettings: ViewportSettings
+    viewportSettings: ViewportSettings,
+    textures?: TextureMap[]
   ): string {
     const textureDataUrl = pixelBufferCanvas.toDataURL('image/png')
+
+    const serializedTextures = (textures || []).map(t => ({
+      id: t.id,
+      name: t.name,
+      width: t.width,
+      height: t.height,
+      dataUrl: t.pixelBuffer ? t.pixelBuffer.toDataURL() : (t.dataUrl || textureDataUrl)
+    }))
 
     const projectData: PsxProjectFile = {
       version: '1.0',
@@ -44,6 +54,7 @@ export class ProjectSerializer {
       savedAt: new Date().toISOString(),
       meshes: JSON.parse(JSON.stringify(meshes)),
       textureDataUrl,
+      textures: serializedTextures,
       activePalette: JSON.parse(JSON.stringify(activePalette)),
       materials: JSON.parse(JSON.stringify(materials)),
       armature: JSON.parse(JSON.stringify(armature)),
