@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import HeaderMenu from './components/layout/HeaderMenu.vue'
 import LeftToolbar from './components/layout/LeftToolbar.vue'
 import RightSidebar from './components/layout/RightSidebar.vue'
@@ -363,8 +363,22 @@ function handleKeyDown(e: KeyboardEvent) {
         animationStore.deleteBone(animationStore.selectedBoneId)
       }
       break
+    case 'n':
+    case 'N':
+      e.preventDefault()
+      layoutStore.toggleRightSidebar()
+      break
   }
 }
+
+// In the UV/Paint workspace, do not display the right panel by default to maximize canvas drawing area
+watch(() => toolStore.appMode, (newMode, oldMode) => {
+  if (newMode === 'uvpaint') {
+    layoutStore.showRightSidebar = false
+  } else if (oldMode === 'uvpaint') {
+    layoutStore.showRightSidebar = true
+  }
+})
 
 const showRecoveryPrompt = ref(false)
 
@@ -379,6 +393,10 @@ onMounted(async () => {
   themeStore.initTheme()
   keymapStore.initKeymaps()
   window.addEventListener('keydown', handleKeyDown)
+
+  if (toolStore.appMode === 'uvpaint') {
+    layoutStore.showRightSidebar = false
+  }
 
   const hasAutosave = await projectStore.checkAutosaveSession()
   if (hasAutosave) {
