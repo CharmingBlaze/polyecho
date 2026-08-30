@@ -92,6 +92,8 @@ let hoverFaceMesh: THREE.Mesh
 let hoverEdgeMesh: THREE.Line
 let hoverVertexMesh: THREE.Points
 let hoverBoneMesh: THREE.Mesh
+let hoverWeightBrushRing: THREE.LineLoop | null = null
+let isWeightPainting = false
 
 // Transform helper proxy object & initial drag transforms
 const transformProxy = new THREE.Object3D()
@@ -323,6 +325,24 @@ function initHoverVisuals() {
   hoverBoneMesh = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 8), boneMat)
   hoverBoneMesh.visible = false
   layers.hoverGroup.add(hoverBoneMesh)
+
+  const ringGeom = new THREE.BufferGeometry()
+  const ringPts: number[] = []
+  const segments = 32
+  for (let i = 0; i <= segments; i++) {
+    const theta = (i / segments) * Math.PI * 2
+    ringPts.push(Math.cos(theta), 0, Math.sin(theta))
+  }
+  ringGeom.setAttribute('position', new THREE.Float32BufferAttribute(ringPts, 3))
+  const ringMat = new THREE.LineBasicMaterial({
+    color: 0xffffff,
+    linewidth: 2,
+    depthTest: false
+  })
+  hoverWeightBrushRing = new THREE.LineLoop(ringGeom, ringMat)
+  hoverWeightBrushRing.visible = false
+  hoverWeightBrushRing.renderOrder = 9999
+  layers.hoverGroup.add(hoverWeightBrushRing)
 }
 
 function initTexture() {
@@ -365,6 +385,9 @@ function rebuildMeshes() {
     const isPoseMode = toolStore.appMode === 'animate' || (toolStore.appMode === 'rig' && animationStore.isTestPoseActive)
     const skeletalContext = isPoseMode ? { isPoseMode: true, bones: animationStore.armature.bones } : undefined
 
+    const isWeightPaint = toolStore.appMode === 'rig' && animationStore.isWeightPaintActive
+    const weightPaintContext = isWeightPaint ? { isWeightPaint: true, activeBoneId: animationStore.selectedBoneId || '' } : undefined
+
     const { 
       geometry, 
       wireframeGeometry, 
@@ -374,12 +397,23 @@ function rebuildMeshes() {
       edgeLinesGeometry, 
       faceIndexMap, 
       vertexIndexMap 
-    } = meshToThreeGeometry(meshObj, selectedFaces, selectedEdges, toolStore.viewport.shadeMode, skeletalContext)
+    } = meshToThreeGeometry(meshObj, selectedFaces, selectedEdges, toolStore.viewport.shadeMode, skeletalContext, weightPaintContext)
 
     const isSmooth = (meshObj.shadeMode || toolStore.viewport.shadeMode) === 'smooth'
 
     let mat: THREE.Material
-    if (toolStore.viewport.shading === 'psx' && psxMaterial) {
+    if (isWeightPaint) {
+      mat = new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.65,
+        metalness: 0.05,
+        side: THREE.DoubleSide,
+        flatShading: !isSmooth,
+        transparent: isXRay,
+        opacity: isXRay ? 0.65 : 1.0,
+        depthWrite: !isXRay
+      })
+    } else if (toolStore.viewport.shading === 'psx' && psxMaterial) {
       psxMaterial.uniforms.uJitterAmount.value = toolStore.viewport.psxJitter ? 1.0 : 0.0
       psxMaterial.uniforms.uAffineEnabled.value = toolStore.viewport.psxAffine
       psxMaterial.uniforms.uDitherEnabled.value = toolStore.viewport.dither
@@ -1932,6 +1966,27 @@ function onPointerDown(event: PointerEvent) {
     }
   }
 
+  // Weight Paint Click / Drag Start
+  if (event.button === 0 && toolStore.appMode === 'rig' && animationStore.isWeightPaintActive) {
+    const activeMesh = projectStore.activeMesh || projectStore.meshes[0]
+    if (activeMesh) {
+      const intersects = raycaster.intersectObjects(layers.modelGroup.children, true)
+      if (intersects.length > 0 && intersects[0].point) {
+        isWeightPainting = true
+        pointerDownHitMesh = true
+        orbitControls.enabled = false
+        event.stopImmediatePropagation()
+        event.preventDefault()
+        const bId = animationStore.selectedBoneId || (animationStore.armature.bones[0]?.id ?? '')
+        if (bId) {
+          animationStore.paintVertexWeightAtPoint(activeMesh.id, intersects[0].point, bId, animationStore.weightPaintTool)
+          rebuildMeshes()
+        }
+        return
+      }
+    }
+  }
+
   const isSelectionAllowed = toolStore.appMode === 'model' || (toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'uv')
   const activeMesh = projectStore.activeMesh
 
@@ -2037,6 +2092,24 @@ function onPointerMove(event: PointerEvent) {
 
   updateActiveCameraAndQuadrant(event)
   raycaster.setFromCamera(mouse, activeCamera)
+
+  if (isWeightPainting && event.buttons === 1 && toolStore.appMode === 'rig' && animationStore.isWeightPaintActive) {
+    orbitControls.enabled = false
+    event.stopImmediatePropagation()
+    event.preventDefault()
+    const activeMesh = projectStore.activeMesh || projectStore.meshes[0]
+    if (activeMesh) {
+      const intersects = raycaster.intersectObjects(layers.modelGroup.children, true)
+      if (intersects.length > 0 && intersects[0].point) {
+        const bId = animationStore.selectedBoneId || (animationStore.armature.bones[0]?.id ?? '')
+        if (bId) {
+          animationStore.paintVertexWeightAtPoint(activeMesh.id, intersects[0].point, bId, animationStore.weightPaintTool)
+          rebuildMeshes()
+        }
+      }
+    }
+    return
+  }
 
   if (isPaintingOn3D && toolStore.appMode === 'uvpaint' && (toolStore.uvWorkspaceTab === 'paint' || toolStore.uvWorkspaceTab === 'vertex')) {
     orbitControls.enabled = false
@@ -2250,6 +2323,15 @@ function onPointerUp(event?: PointerEvent) {
       toolStore.isBoxSelectActive = false
       isBoxSelectArmed.value = false
       if (orbitControls) orbitControls.enabled = true
+    }
+  }
+
+  if (isWeightPainting) {
+    isWeightPainting = false
+    orbitControls.enabled = true
+    projectStore.recordState('Weight Paint Stroke')
+    if (event) {
+      event.stopImmediatePropagation()
     }
   }
 
@@ -2548,6 +2630,26 @@ function updateHoverState() {
     }
   } else {
     hoverBoneMesh.visible = false
+  }
+
+  // Weight Paint 3D Projector Ring
+  if (toolStore.appMode === 'rig' && animationStore.isWeightPaintActive && hoverWeightBrushRing) {
+    const intersects = raycaster.intersectObjects(layers.modelGroup.children, true)
+    if (intersects.length > 0 && intersects[0].point) {
+      const hit = intersects[0]
+      hoverWeightBrushRing.position.copy(hit.point)
+      if (hit.face) {
+        hoverWeightBrushRing.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), hit.face.normal)
+      }
+      const r = animationStore.weightBrushRadius || 0.5
+      hoverWeightBrushRing.scale.set(r, r, r)
+      hoverWeightBrushRing.visible = true
+      hasHover = true
+    } else {
+      hoverWeightBrushRing.visible = false
+    }
+  } else if (hoverWeightBrushRing) {
+    hoverWeightBrushRing.visible = false
   }
 
   if (renderer && renderer.domElement) {
@@ -3130,6 +3232,16 @@ watch(() => toolStore.viewport.wireframeOpacity, () => {
   rebuildMeshes()
 })
 
+watch(() => [
+  animationStore.isWeightPaintActive,
+  animationStore.selectedBoneId,
+  animationStore.weightBrushRadius,
+  animationStore.weightBrushWeight,
+  animationStore.weightPaintTool
+], () => {
+  rebuildMeshes()
+})
+
 function handleThemeChangedEvent(e: any) {
   if (e && e.detail) {
     applyTheme(e.detail)
@@ -3242,9 +3354,14 @@ onUnmounted(() => {
           v-if="toolStore.appMode === 'rig'"
           class="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1 bg-ui-panel/90 backdrop-blur-xs border border-ui-borderStrong rounded-full shadow-lg font-sans text-[11px]"
         >
-          <div class="w-2 h-2 rounded-full" :class="animationStore.clickToPlaceMode ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'"></div>
+          <div class="w-2 h-2 rounded-full" :class="animationStore.clickToPlaceMode ? 'bg-amber-400 animate-pulse' : animationStore.isWeightPaintActive ? 'bg-sky-400 animate-pulse' : 'bg-emerald-400'"></div>
           <span v-if="animationStore.clickToPlaceMode" class="text-amber-300 font-semibold">
             Draw Bone Active: Click Head, then Click Tail in 3D (Press B or Esc to exit)
+          </span>
+          <span v-else-if="animationStore.isWeightPaintActive" class="text-sky-300 font-semibold flex items-center gap-1.5">
+            <span>Weight Paint Mode:</span>
+            <strong class="text-amber-400 font-mono">{{ animationStore.selectedBone ? animationStore.selectedBone.name : 'Select Bone' }}</strong>
+            <span class="text-ui-textMuted text-[10px]">({{ animationStore.weightPaintTool.toUpperCase() }} · Radius: {{ animationStore.weightBrushRadius }}m · W: {{ Number(animationStore.weightBrushWeight).toFixed(2) }})</span>
           </span>
           <span v-else-if="animationStore.armature.bones.length === 0" class="text-ui-textPrimary">
             Rig Mode: Press <strong class="text-ui-textAccent">B</strong> or click <strong class="text-ui-textAccent">+ Add Bone</strong>
@@ -3259,6 +3376,25 @@ onUnmounted(() => {
           >
             Tree (H)
           </button>
+        </div>
+
+        <!-- In-Viewport Floating Heatmap Legend Overlay -->
+        <div 
+          v-if="toolStore.appMode === 'rig' && animationStore.isWeightPaintActive && animationStore.showHeatmapLegend"
+          class="absolute bottom-3 left-3 z-20 bg-ui-panel/90 backdrop-blur-xs border border-ui-borderStrong rounded-xs p-2 shadow-xl font-sans text-xs flex flex-col gap-1 min-w-[210px] select-none pointer-events-none"
+        >
+          <div class="flex items-center justify-between text-[10px] text-ui-textMuted font-bold uppercase tracking-wider">
+            <span>Heatmap Influence</span>
+            <span class="text-amber-400 font-mono">{{ animationStore.selectedBone ? animationStore.selectedBone.name : 'No Bone' }}</span>
+          </div>
+          <div class="h-2.5 w-full rounded-xs shadow-inner" style="background: linear-gradient(to right, #0a188f 0%, #00e5ff 25%, #00e676 50%, #ffd600 75%, #ff1744 100%);"></div>
+          <div class="flex justify-between text-[9px] font-mono text-ui-textSecondary">
+            <span>0% Blue</span>
+            <span>25%</span>
+            <span>50%</span>
+            <span>75%</span>
+            <span>100% Red</span>
+          </div>
         </div>
       </template>
 

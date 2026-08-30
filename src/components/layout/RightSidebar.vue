@@ -17,7 +17,7 @@ import {
   Sliders, 
   Wrench,
   Link,
-  Percent,
+  Paintbrush,
   FolderTree,
   GripHorizontal, 
   Pin, 
@@ -246,9 +246,9 @@ function startResizeCorner(e: MouseEvent) {
           @click="activeTab = 'weights'"
           class="flex items-center justify-center p-1 transition border-b-2"
           :class="activeTab === 'weights' ? 'bg-ui-panel text-sky-400 font-semibold border-sky-500' : 'border-transparent text-ui-textMuted hover:text-sky-300 hover:bg-ui-hover'"
-          title="Vertex Weights"
+          title="Weight Paint & Vertex Weights"
         >
-          <Percent class="w-3.5 h-3.5" />
+          <Paintbrush class="w-3.5 h-3.5" />
         </button>
       </div>
 

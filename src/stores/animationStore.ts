@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { Armature, Bone, BoneSocket, Keyframe, AnimationClip, AnimationTrack, InterpolationType } from '../types/animation'
-import { Vector3D, MeshObject } from '../types/mesh'
+import { Vector3D, MeshObject, Vertex } from '../types/mesh'
 import { sampleTrack } from '../core/animation/Armature'
 import { useProjectStore } from './projectStore'
 
@@ -57,6 +57,29 @@ export const useAnimationStore = defineStore('animation', () => {
   const onionOpacity = ref<number>(0.35)
   const showMotionTrail = ref<boolean>(false)
   const recordedStatusMessage = ref<string>('Ready')
+
+  // Weight Painting Suite State
+  const isWeightPaintActive = ref<boolean>(false)
+  const weightPaintTool = ref<'draw' | 'subtract' | 'smooth' | 'fill' | 'sample'>('draw')
+  const weightBrushWeight = ref<number>(1.0)
+  const weightBrushRadius = ref<number>(0.5)
+  const weightBrushStrength = ref<number>(0.8)
+  const weightBrushFalloff = ref<'smooth' | 'linear' | 'constant'>('smooth')
+  const weightAutoNormalize = ref<boolean>(true)
+  const weightXMirror = ref<boolean>(false)
+  const showHeatmapLegend = ref<boolean>(true)
+
+  function toggleWeightPaint(active?: boolean) {
+    if (typeof active === 'boolean') {
+      isWeightPaintActive.value = active
+    } else {
+      isWeightPaintActive.value = !isWeightPaintActive.value
+    }
+    if (isWeightPaintActive.value) {
+      isTestPoseActive.value = false
+      resetAllBonesToRest()
+    }
+  }
 
   function toggleBoneHierarchyPopout(force?: boolean) {
     if (typeof force === 'boolean') {
@@ -703,6 +726,256 @@ export const useAnimationStore = defineStore('animation', () => {
             v.boneWeights[bId] = Number((v.boneWeights[bId] / total).toFixed(3))
           }
         }
+      }
+    }
+  }
+
+  // ----------------------------------------------------
+  // WEIGHT PAINTING ENGINE & 3D BRUSH CALCULATIONS
+  // ----------------------------------------------------
+  function paintVertexWeightAtPoint(
+    meshId: string,
+    worldHitPoint: Vector3D,
+    boneId: string,
+    tool: 'draw' | 'subtract' | 'smooth' | 'fill' | 'sample' = weightPaintTool.value,
+    options?: {
+      radius?: number
+      weight?: number
+      strength?: number
+      falloff?: 'smooth' | 'linear' | 'constant'
+      autoNormalize?: boolean
+      xMirror?: boolean
+    }
+  ) {
+    const mesh = projectStore.meshes.find(m => m.id === meshId)
+    if (!mesh) return
+    mesh.armatureId = armature.value.id
+
+    const radius = options?.radius ?? weightBrushRadius.value
+    const targetWeight = options?.weight ?? weightBrushWeight.value
+    const strength = options?.strength ?? weightBrushStrength.value
+    const falloff = options?.falloff ?? weightBrushFalloff.value
+    const autoNorm = options?.autoNormalize ?? weightAutoNormalize.value
+    const mirrorX = options?.xMirror ?? weightXMirror.value
+
+    const meshWorldX = mesh.position.x
+    const meshWorldY = mesh.position.y
+    const meshWorldZ = mesh.position.z
+
+    const affectedVerts: { vert: Vertex; dist: number; factor: number }[] = []
+
+    for (const v of mesh.vertices) {
+      const vx = meshWorldX + v.position.x
+      const vy = meshWorldY + v.position.y
+      const vz = meshWorldZ + v.position.z
+
+      const dx = vx - worldHitPoint.x
+      const dy = vy - worldHitPoint.y
+      const dz = vz - worldHitPoint.z
+      const dist = Math.hypot(dx, dy, dz)
+
+      if (dist <= radius) {
+        const ratio = Math.max(0, Math.min(1, dist / radius))
+        let factor = 1.0
+        if (falloff === 'smooth') {
+          factor = 0.5 * (1 + Math.cos(ratio * Math.PI))
+        } else if (falloff === 'linear') {
+          factor = 1.0 - ratio
+        } else {
+          factor = 1.0
+        }
+        affectedVerts.push({ vert: v, dist, factor })
+      }
+    }
+
+    if (affectedVerts.length === 0) return
+
+    if (tool === 'sample') {
+      affectedVerts.sort((a, b) => a.dist - b.dist)
+      const closest = affectedVerts[0].vert
+      const sampledW = closest.boneWeights?.[boneId] ?? 0.0
+      weightBrushWeight.value = Number(sampledW.toFixed(2))
+      return
+    }
+
+    if (tool === 'fill') {
+      for (const item of affectedVerts) {
+        if (!item.vert.boneWeights) item.vert.boneWeights = {}
+        item.vert.boneWeights[boneId] = targetWeight
+        if (autoNorm) {
+          normalizeSingleVertex(item.vert)
+        }
+      }
+      return
+    }
+
+    for (const item of affectedVerts) {
+      const v = item.vert
+      if (!v.boneWeights) v.boneWeights = {}
+      const curW = v.boneWeights[boneId] ?? 0.0
+      const delta = item.factor * strength
+
+      if (tool === 'draw') {
+        const newW = curW + (targetWeight - curW) * delta
+        v.boneWeights[boneId] = Number(Math.max(0, Math.min(1, newW)).toFixed(4))
+      } else if (tool === 'subtract') {
+        const newW = curW - targetWeight * delta
+        v.boneWeights[boneId] = Number(Math.max(0, newW).toFixed(4))
+      } else if (tool === 'smooth') {
+        let sumW = curW
+        let count = 1
+        for (const f of mesh.faces) {
+          if (f.vertexIds.includes(v.id)) {
+            for (const nId of f.vertexIds) {
+              if (nId !== v.id) {
+                const nVert = mesh.vertices.find(nv => nv.id === nId)
+                if (nVert && nVert.boneWeights) {
+                  sumW += nVert.boneWeights[boneId] ?? 0.0
+                  count++
+                }
+              }
+            }
+          }
+        }
+        const avg = sumW / count
+        v.boneWeights[boneId] = Number((curW + (avg - curW) * delta).toFixed(4))
+      }
+
+      if (autoNorm) {
+        normalizeSingleVertex(v)
+      }
+
+      // X-Mirroring support
+      if (mirrorX) {
+        const mirrorVert = mesh.vertices.find(mv => 
+          mv.id !== v.id &&
+          Math.abs(mv.position.x + v.position.x) < 0.08 &&
+          Math.abs(mv.position.y - v.position.y) < 0.08 &&
+          Math.abs(mv.position.z - v.position.z) < 0.08
+        )
+        if (mirrorVert) {
+          if (!mirrorVert.boneWeights) mirrorVert.boneWeights = {}
+          const targetBone = armature.value.bones.find(b => b.id === boneId)
+          let mirrorBoneId = boneId
+          if (targetBone) {
+            let mirrorName = ''
+            if (targetBone.name.endsWith('.L') || targetBone.name.endsWith('_L')) {
+              mirrorName = targetBone.name.replace(/([._])L$/, '$1R')
+            } else if (targetBone.name.endsWith('.R') || targetBone.name.endsWith('_R')) {
+              mirrorName = targetBone.name.replace(/([._])R$/, '$1L')
+            }
+            if (mirrorName) {
+              const oppBone = armature.value.bones.find(b => b.name === mirrorName)
+              if (oppBone) mirrorBoneId = oppBone.id
+            }
+          }
+          mirrorVert.boneWeights[mirrorBoneId] = v.boneWeights[boneId]
+          if (autoNorm) {
+            normalizeSingleVertex(mirrorVert)
+          }
+        }
+      }
+    }
+  }
+
+  function normalizeSingleVertex(v: Vertex) {
+    if (!v.boneWeights) return
+    let total = 0
+    for (const bId in v.boneWeights) {
+      if (v.boneWeights[bId] < 0.0001) {
+        delete v.boneWeights[bId]
+      } else {
+        total += v.boneWeights[bId]
+      }
+    }
+    if (total > 0.0001) {
+      for (const bId in v.boneWeights) {
+        v.boneWeights[bId] = Number((v.boneWeights[bId] / total).toFixed(4))
+      }
+    }
+  }
+
+  function floodFillBoneWeight(meshId: string, boneId: string, weight: number, selectedVertsOnly = false) {
+    const mesh = projectStore.meshes.find(m => m.id === meshId)
+    if (!mesh) return
+    mesh.armatureId = armature.value.id
+
+    const targetVerts = (selectedVertsOnly && projectStore.selectedVertexIds.length > 0)
+      ? mesh.vertices.filter(v => projectStore.selectedVertexIds.includes(v.id))
+      : mesh.vertices
+
+    for (const v of targetVerts) {
+      if (!v.boneWeights) v.boneWeights = {}
+      if (weight <= 0) {
+        delete v.boneWeights[boneId]
+      } else {
+        v.boneWeights[boneId] = Math.max(0, Math.min(1, weight))
+      }
+      if (weightAutoNormalize.value) {
+        normalizeSingleVertex(v)
+      }
+    }
+  }
+
+  function normalizeAllMeshWeights(meshId: string) {
+    const mesh = projectStore.meshes.find(m => m.id === meshId)
+    if (!mesh) return
+    for (const v of mesh.vertices) {
+      normalizeSingleVertex(v)
+    }
+  }
+
+  function smoothMeshBoneWeights(meshId: string, boneId?: string) {
+    const mesh = projectStore.meshes.find(m => m.id === meshId)
+    if (!mesh) return
+    const targetBoneId = boneId || selectedBoneId.value
+    if (!targetBoneId) return
+
+    const originalWeights = new Map<string, number>()
+    for (const v of mesh.vertices) {
+      originalWeights.set(v.id, v.boneWeights?.[targetBoneId] ?? 0.0)
+    }
+
+    for (const v of mesh.vertices) {
+      let sum = originalWeights.get(v.id) ?? 0.0
+      let count = 1
+      for (const f of mesh.faces) {
+        if (f.vertexIds.includes(v.id)) {
+          for (const nId of f.vertexIds) {
+            if (nId !== v.id && originalWeights.has(nId)) {
+              sum += originalWeights.get(nId)!
+              count++
+            }
+          }
+        }
+      }
+      if (!v.boneWeights) v.boneWeights = {}
+      v.boneWeights[targetBoneId] = Number((sum / count).toFixed(4))
+      if (weightAutoNormalize.value) {
+        normalizeSingleVertex(v)
+      }
+    }
+  }
+
+  function clearBoneWeights(meshId: string, boneId: string) {
+    const mesh = projectStore.meshes.find(m => m.id === meshId)
+    if (!mesh) return
+    for (const v of mesh.vertices) {
+      if (v.boneWeights && v.boneWeights[boneId]) {
+        delete v.boneWeights[boneId]
+      }
+    }
+  }
+
+  function invertBoneWeights(meshId: string, boneId: string) {
+    const mesh = projectStore.meshes.find(m => m.id === meshId)
+    if (!mesh) return
+    for (const v of mesh.vertices) {
+      if (!v.boneWeights) v.boneWeights = {}
+      const cur = v.boneWeights[boneId] ?? 0.0
+      v.boneWeights[boneId] = Number((1.0 - cur).toFixed(4))
+      if (weightAutoNormalize.value) {
+        normalizeSingleVertex(v)
       }
     }
   }
@@ -1489,6 +1762,22 @@ export const useAnimationStore = defineStore('animation', () => {
     unbindGeometry,
     assignVertexWeight,
     normalizeVertexWeights,
+    isWeightPaintActive,
+    weightPaintTool,
+    weightBrushWeight,
+    weightBrushRadius,
+    weightBrushStrength,
+    weightBrushFalloff,
+    weightAutoNormalize,
+    weightXMirror,
+    showHeatmapLegend,
+    toggleWeightPaint,
+    paintVertexWeightAtPoint,
+    floodFillBoneWeight,
+    normalizeAllMeshWeights,
+    smoothMeshBoneWeights,
+    clearBoneWeights,
+    invertBoneWeights,
     addSocket,
     removeSocket,
     splitBone,

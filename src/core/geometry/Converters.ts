@@ -86,12 +86,55 @@ export function evaluateSkinning(mesh: MeshObject, vertices: Vertex[], bones: Bo
   return deformed
 }
 
+export function weightToHeatmapColor(weight: number): THREE.Color {
+  const w = Math.max(0, Math.min(1, weight))
+  const color = new THREE.Color()
+  if (w <= 0.0001) {
+    // 0.0: Deep Navy/Blue (unweighted)
+    color.setRGB(0.04, 0.12, 0.65)
+  } else if (w <= 0.25) {
+    // 0.0 -> 0.25: Deep Blue -> Cyan
+    const t = w / 0.25
+    color.setRGB(
+      0.04 * (1 - t) + 0.0 * t,
+      0.12 * (1 - t) + 0.9 * t,
+      0.65 * (1 - t) + 0.95 * t
+    )
+  } else if (w <= 0.5) {
+    // 0.25 -> 0.5: Cyan -> Green
+    const t = (w - 0.25) / 0.25
+    color.setRGB(
+      0.0,
+      0.9 * (1 - t) + 0.95 * t,
+      0.95 * (1 - t) + 0.05 * t
+    )
+  } else if (w <= 0.75) {
+    // 0.5 -> 0.75: Green -> Yellow
+    const t = (w - 0.5) / 0.25
+    color.setRGB(
+      1.0 * t,
+      0.95 * (1 - t) + 0.9 * t,
+      0.05 * (1 - t) + 0.0 * t
+    )
+  } else {
+    // 0.75 -> 1.0: Yellow -> Crimson Red
+    const t = (w - 0.75) / 0.25
+    color.setRGB(
+      1.0,
+      0.9 * (1 - t) + 0.05 * t,
+      0.0
+    )
+  }
+  return color
+}
+
 export function meshToThreeGeometry(
   mesh: MeshObject, 
   selectedFaceIds: string[] = [],
   selectedEdgeIds: string[] = [],
   globalShadeMode: 'flat' | 'smooth' = 'flat',
-  skeletalDeformContext?: { isPoseMode: boolean; bones: Bone[] }
+  skeletalDeformContext?: { isPoseMode: boolean; bones: Bone[] },
+  weightPaintContext?: { isWeightPaint: boolean; activeBoneId?: string }
 ): GeometryBundle {
   let { vertices: evalVertices, faces: evalFaces } = evaluateModifiers(mesh)
 
@@ -196,7 +239,13 @@ export function meshToThreeGeometry(
 
         uvs.push(uv.u, uv.v)
 
-        const c = new THREE.Color(v.color || '#ffffff')
+        let c: THREE.Color
+        if (weightPaintContext?.isWeightPaint && weightPaintContext?.activeBoneId) {
+          const w = v.boneWeights?.[weightPaintContext.activeBoneId] ?? 0.0
+          c = weightToHeatmapColor(w)
+        } else {
+          c = new THREE.Color(v.color || '#ffffff')
+        }
         colors.push(c.r, c.g, c.b)
 
         if (isFaceSelected) {
