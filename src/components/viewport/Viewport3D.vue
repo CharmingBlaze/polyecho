@@ -840,16 +840,27 @@ function applyThemeToTransformGizmo(tc: TransformControls, customColors?: ThemeC
       const mat = child.material
       const name = (child.name || '').toUpperCase()
 
-      if (name.includes('X') && !name.includes('Y') && !name.includes('Z')) {
+      if (name.includes('XY')) {
+        mat.color.set(colors.gizmoZ)
+        mat.opacity = 0.5
+      } else if (name.includes('YZ')) {
         mat.color.set(colors.gizmoX)
+        mat.opacity = 0.5
+      } else if (name.includes('XZ')) {
+        mat.color.set(colors.gizmoY)
+        mat.opacity = 0.5
+      } else if (name.includes('X') && !name.includes('Y') && !name.includes('Z')) {
+        mat.color.set(colors.gizmoX)
+        mat.opacity = 1.0
       } else if (name.includes('Y') && !name.includes('X') && !name.includes('Z')) {
         mat.color.set(colors.gizmoY)
+        mat.opacity = 1.0
       } else if (name.includes('Z') && !name.includes('X') && !name.includes('Y')) {
         mat.color.set(colors.gizmoZ)
-      } else if (name.includes('XY') || name.includes('YZ') || name.includes('XZ')) {
-        mat.color.set(colors.selectionColor)
+        mat.opacity = 1.0
       } else if (name === 'XYZ' || name === 'E' || name === 'START' || name === 'END' || name === 'DELTA') {
         mat.color.set(colors.gizmoAccent)
+        mat.opacity = 1.0
       }
     }
   })

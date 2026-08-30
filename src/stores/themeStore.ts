@@ -62,9 +62,9 @@ export const THEME_PRESETS: ThemePreset[] = [
       viewportBg: '#121418',
       gridMajor: '#6366f1',
       gridMinor: '#222631',
-      gizmoX: '#fb7185',
-      gizmoY: '#34d399',
-      gizmoZ: '#38bdf8',
+      gizmoX: '#ef4444',
+      gizmoY: '#22c55e',
+      gizmoZ: '#3b82f6',
       gizmoAccent: '#f59e0b'
     }
   },
