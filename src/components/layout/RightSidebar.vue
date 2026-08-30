@@ -6,6 +6,9 @@ import TransformProps from '../inspector/TransformProps.vue'
 import MaterialProps from '../inspector/MaterialProps.vue'
 import ModifiersProps from '../inspector/ModifiersProps.vue'
 import RiggingPanel from '../rigging/RiggingPanel.vue'
+import BindingsPanel from '../rigging/BindingsPanel.vue'
+import WeightsPanel from '../rigging/WeightsPanel.vue'
+import SkeletonPanel from '../rigging/SkeletonPanel.vue'
 import AnimationInspector from '../inspector/AnimationInspector.vue'
 import UVPaintProps from '../uvpaint/UVPaintProps.vue'
 import BlenderIcon from '../icons/BlenderIcon.vue'
@@ -13,6 +16,9 @@ import {
   Layers, 
   Sliders, 
   Wrench,
+  Link,
+  Percent,
+  FolderTree,
   GripHorizontal, 
   Pin, 
   PinOff, 
@@ -21,7 +27,7 @@ import {
 } from 'lucide-vue-next'
 
 const toolStore = useToolStore()
-const activeTab = ref<'outliner' | 'props' | 'modifiers' | 'material'>('outliner')
+const activeTab = ref<'outliner' | 'props' | 'modifiers' | 'material' | 'bindings' | 'weights' | 'skeleton'>('outliner')
 
 // Photoshop / DCC Floating & Resizable Panel States
 const isFloating = ref(false)
@@ -205,9 +211,48 @@ function startResizeCorner(e: MouseEvent) {
 
     <!-- Body Content (Hidden when minimized) -->
     <div v-show="!isMinimized" class="flex-1 flex flex-col min-h-0 overflow-hidden">
-      <!-- Blender Properties Tab Strip (4 Tabs: Outliner, Object, Modifiers, Material) -->
-      <div class="h-7 bg-ui-header border-b border-ui-borderSubtle grid grid-cols-4 text-xs shrink-0 font-sans">
-        <!-- 1. Outliner Tab -->
+      <!-- 1. Rigging Tab Strip (Skeleton, Bone Properties, Bindings, Weights) -->
+      <div v-if="toolStore.appMode === 'rig'" class="h-7 bg-ui-header border-b border-ui-borderSubtle grid grid-cols-4 text-xs shrink-0 font-sans">
+        <button 
+          @click="activeTab = 'skeleton'"
+          class="flex items-center justify-center p-1 transition border-b-2"
+          :class="activeTab === 'skeleton' ? 'bg-ui-panel text-ui-textPrimary font-semibold border-ui-accent' : 'border-transparent text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
+          title="Skeleton Hierarchy Tree"
+        >
+          <FolderTree class="w-3.5 h-3.5" />
+        </button>
+
+        <button 
+          @click="activeTab = 'props'"
+          class="flex items-center justify-center p-1 transition border-b-2"
+          :class="activeTab === 'props' ? 'bg-ui-panel text-ui-textPrimary font-semibold border-ui-accent' : 'border-transparent text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
+          title="Bone Properties"
+        >
+          <Sliders class="w-3.5 h-3.5" />
+        </button>
+
+        <button 
+          @click="activeTab = 'bindings'"
+          class="flex items-center justify-center p-1 transition border-b-2"
+          :class="activeTab === 'bindings' ? 'bg-ui-panel text-amber-400 font-semibold border-amber-500' : 'border-transparent text-ui-textMuted hover:text-amber-300 hover:bg-ui-hover'"
+          title="Geometry Bindings (Ctrl+B)"
+        >
+          <Link class="w-3.5 h-3.5" />
+        </button>
+
+        <button 
+          @click="activeTab = 'weights'"
+          class="flex items-center justify-center p-1 transition border-b-2"
+          :class="activeTab === 'weights' ? 'bg-ui-panel text-sky-400 font-semibold border-sky-500' : 'border-transparent text-ui-textMuted hover:text-sky-300 hover:bg-ui-hover'"
+          title="Vertex Weights"
+        >
+          <Percent class="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      <!-- 2. Standard Tab Strip (Outliner, Object, Modifiers, Material) -->
+      <div v-else class="h-7 bg-ui-header border-b border-ui-borderSubtle grid grid-cols-4 text-xs shrink-0 font-sans">
+        <!-- Outliner Tab -->
         <button 
           @click="activeTab = 'outliner'"
           class="flex items-center justify-center p-1 transition border-b-2"
@@ -217,17 +262,17 @@ function startResizeCorner(e: MouseEvent) {
           <Layers class="w-3.5 h-3.5" />
         </button>
 
-        <!-- 2. Properties Tab -->
+        <!-- Properties Tab -->
         <button 
           @click="activeTab = 'props'"
           class="flex items-center justify-center p-1 transition border-b-2"
           :class="activeTab === 'props' ? 'bg-ui-panel text-ui-textPrimary font-semibold border-ui-accent' : 'border-transparent text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
-          :title="toolStore.appMode === 'rig' ? 'Rig Properties' : toolStore.appMode === 'animate' ? 'Animation Properties' : 'Object Properties'"
+          :title="toolStore.appMode === 'animate' ? 'Animation Properties' : 'Object Properties'"
         >
           <Sliders class="w-3.5 h-3.5" />
         </button>
 
-        <!-- 3. Modifiers Tab -->
+        <!-- Modifiers Tab -->
         <button 
           @click="activeTab = 'modifiers'"
           class="flex items-center justify-center p-1 transition border-b-2"
@@ -237,7 +282,7 @@ function startResizeCorner(e: MouseEvent) {
           <Wrench class="w-3.5 h-3.5" />
         </button>
 
-        <!-- 4. Material Properties Tab -->
+        <!-- Material Properties Tab -->
         <button 
           @click="activeTab = 'material'"
           class="flex items-center justify-center p-1 transition border-b-2"
@@ -250,11 +295,16 @@ function startResizeCorner(e: MouseEvent) {
 
       <!-- Content panels -->
       <div class="flex-1 min-h-0 relative flex flex-col overflow-y-auto custom-scrollbar">
+        <!-- Rigging Panels -->
+        <SkeletonPanel v-if="toolStore.appMode === 'rig' && activeTab === 'skeleton'" />
+        <BindingsPanel v-else-if="toolStore.appMode === 'rig' && activeTab === 'bindings'" />
+        <WeightsPanel v-else-if="toolStore.appMode === 'rig' && activeTab === 'weights'" />
+
         <!-- Outliner Tab -->
-        <OutlinerTree v-show="activeTab === 'outliner'" />
+        <OutlinerTree v-else-if="activeTab === 'outliner'" />
 
         <!-- Props Tab -->
-        <div v-show="activeTab === 'props'" class="h-full overflow-y-auto flex flex-col">
+        <div v-else-if="activeTab === 'props'" class="h-full overflow-y-auto flex flex-col">
           <RiggingPanel v-if="toolStore.appMode === 'rig'" />
           <AnimationInspector v-else-if="toolStore.appMode === 'animate'" />
           <UVPaintProps v-else-if="toolStore.appMode === 'uvpaint'" />
@@ -262,12 +312,12 @@ function startResizeCorner(e: MouseEvent) {
         </div>
 
         <!-- Modifiers Tab -->
-        <div v-show="activeTab === 'modifiers'" class="h-full overflow-y-auto flex flex-col">
+        <div v-else-if="activeTab === 'modifiers'" class="h-full overflow-y-auto flex flex-col">
           <ModifiersProps />
         </div>
 
         <!-- Material Properties Tab -->
-        <div v-show="activeTab === 'material'" class="h-full overflow-y-auto flex flex-col">
+        <div v-else-if="activeTab === 'material'" class="h-full overflow-y-auto flex flex-col">
           <MaterialProps />
         </div>
       </div>

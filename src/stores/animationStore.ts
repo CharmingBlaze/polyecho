@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { Armature, Bone, Keyframe, AnimationClip, AnimationTrack, InterpolationType } from '../types/animation'
+import { Armature, Bone, BoneSocket, Keyframe, AnimationClip, AnimationTrack, InterpolationType } from '../types/animation'
 import { Vector3D, MeshObject } from '../types/mesh'
 import { sampleTrack } from '../core/animation/Armature'
 import { useProjectStore } from './projectStore'
@@ -398,36 +398,6 @@ export const useAnimationStore = defineStore('animation', () => {
     return Math.hypot(p.x - (v1.x + t * dx), p.y - (v1.y + t * dy), p.z - (v1.z + t * dz))
   }
 
-  function getMeshBoundingBox(mesh: MeshObject) {
-    if (!mesh.vertices.length) {
-      return {
-        min: { x: mesh.position.x - 0.5, y: mesh.position.y - 0.5, z: mesh.position.z - 0.5 },
-        max: { x: mesh.position.x + 0.5, y: mesh.position.y + 0.5, z: mesh.position.z + 0.5 },
-        center: { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z },
-        size: { x: 1, y: 1, z: 1 }
-      }
-    }
-    let minX = Infinity, minY = Infinity, minZ = Infinity
-    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
-    for (const v of mesh.vertices) {
-      const wx = mesh.position.x + v.position.x
-      const wy = mesh.position.y + v.position.y
-      const wz = mesh.position.z + v.position.z
-      if (wx < minX) minX = wx
-      if (wy < minY) minY = wy
-      if (wz < minZ) minZ = wz
-      if (wx > maxX) maxX = wx
-      if (wy > maxY) maxY = wy
-      if (wz > maxZ) maxZ = wz
-    }
-    return {
-      min: { x: minX, y: minY, z: minZ },
-      max: { x: maxX, y: maxY, z: maxZ },
-      center: { x: (minX + maxX) / 2, y: (minY + maxY) / 2, z: (minZ + maxZ) / 2 },
-      size: { x: Math.max(0.1, maxX - minX), y: Math.max(0.1, maxY - minY), z: Math.max(0.1, maxZ - minZ) }
-    }
-  }
-
   function addBoneFromPoints(head: Vector3D, tail: Vector3D, parentId?: string | null, name = 'Bone'): Bone {
     const newBone: Bone = {
       id: genId('bone'),
@@ -453,128 +423,175 @@ export const useAnimationStore = defineStore('animation', () => {
     return newBone
   }
 
-  function autoRigProp(meshId?: string): Bone | null {
-    const targetMesh = meshId ? projectStore.meshes.find(m => m.id === meshId) : projectStore.activeMesh || projectStore.meshes[0]
-    if (!targetMesh) return null
+  function bindSelectedGeometry(
+    bindingType: 'object' | 'rigid_vertex' | 'smooth_vertex', 
+    targetBoneId?: string,
+    options?: { splitBoundary?: boolean }
+  ) {
+    const boneId = targetBoneId || selectedBoneId.value
+    if (!boneId) return { success: false, message: 'No target bone selected' }
+    const bone = armature.value.bones.find(b => b.id === boneId)
+    if (!bone) return { success: false, message: 'Bone not found' }
 
-    clearArmature()
-    const bbox = getMeshBoundingBox(targetMesh)
-    const height = Math.max(0.4, bbox.size.y)
-    
-    const rootBone = addBoneFromPoints(
-      { x: Number(bbox.center.x.toFixed(3)), y: Number(bbox.min.y.toFixed(3)), z: Number(bbox.center.z.toFixed(3)) },
-      { x: Number(bbox.center.x.toFixed(3)), y: Number((bbox.min.y + height).toFixed(3)), z: Number(bbox.center.z.toFixed(3)) },
-      null,
-      `${targetMesh.name}_Root`
-    )
+    const activeMesh = projectStore.activeMesh
+    if (!activeMesh) return { success: false, message: 'No mesh selected' }
 
-    parentMeshToBone(targetMesh.id, rootBone.id)
-    autoWeightMeshToBones(targetMesh)
-    return rootBone
-  }
-
-  function autoRigChain(meshId?: string, segments = 3): Bone[] {
-    const targetMesh = meshId ? projectStore.meshes.find(m => m.id === meshId) : projectStore.activeMesh || projectStore.meshes[0]
-    if (!targetMesh) return []
-
-    clearArmature()
-    const bbox = getMeshBoundingBox(targetMesh)
-    const segCount = Math.max(2, Math.min(6, segments))
-    const totalHeight = Math.max(0.6, bbox.size.y)
-    const segHeight = totalHeight / segCount
-
-    const createdBones: Bone[] = []
-    let prevBoneId: string | null = null
-
-    for (let i = 0; i < segCount; i++) {
-      const y0 = bbox.min.y + i * segHeight
-      const y1 = bbox.min.y + (i + 1) * segHeight
-      const boneName = i === 0 ? `${targetMesh.name}_Base` : `${targetMesh.name}_Seg_${i + 1}`
-
-      const bone = addBoneFromPoints(
-        { x: Number(bbox.center.x.toFixed(3)), y: Number(y0.toFixed(3)), z: Number(bbox.center.z.toFixed(3)) },
-        { x: Number(bbox.center.x.toFixed(3)), y: Number(y1.toFixed(3)), z: Number(bbox.center.z.toFixed(3)) },
-        prevBoneId,
-        boneName
-      )
-      createdBones.push(bone)
-      prevBoneId = bone.id
+    if (bindingType === 'object') {
+      activeMesh.parentId = boneId
+      activeMesh.armatureId = armature.value.id
+      return { success: true, message: `Bound ${activeMesh.name} to ${bone.name} (Object)` }
     }
 
-    if (createdBones.length > 0) {
-      parentMeshToBone(targetMesh.id, createdBones[0].id)
-      autoWeightMeshToBones(targetMesh)
-      selectedBoneId.value = createdBones[0].id
+    if (bindingType === 'rigid_vertex') {
+      let targetVertexIds: string[] = []
+      if (projectStore.selectedFaceIds.length > 0) {
+        const vertSet = new Set<string>()
+        for (const face of activeMesh.faces) {
+          if (projectStore.selectedFaceIds.includes(face.id)) {
+            face.vertexIds.forEach(id => vertSet.add(id))
+          }
+        }
+        targetVertexIds = Array.from(vertSet)
+      } else if (projectStore.selectedVertexIds.length > 0) {
+        targetVertexIds = [...projectStore.selectedVertexIds]
+      } else {
+        targetVertexIds = activeMesh.vertices.map(v => v.id)
+      }
+
+      assignRigidVertices(activeMesh.id, targetVertexIds, boneId, options?.splitBoundary)
+      return { success: true, message: `Bound ${targetVertexIds.length} vertices to ${bone.name} (100% Rigid)` }
     }
-    return createdBones
+
+    if (bindingType === 'smooth_vertex') {
+      autoWeightMeshToBones(activeMesh)
+      return { success: true, message: `Calculated smooth weights for ${activeMesh.name}` }
+    }
+
+    return { success: false, message: 'Unknown binding type' }
   }
 
-  function autoRigHinge(meshId?: string, edge: 'bottom-back' | 'left' | 'bottom' = 'bottom-back'): Bone | null {
-    const targetMesh = meshId ? projectStore.meshes.find(m => m.id === meshId) : projectStore.activeMesh || projectStore.meshes[0]
-    if (!targetMesh) return null
+  function assignRigidVertices(meshId: string, vertexIds: string[], boneId: string, splitBoundary = false) {
+    const mesh = projectStore.meshes.find(m => m.id === meshId)
+    if (!mesh) return
+    mesh.armatureId = armature.value.id
 
-    clearArmature()
-    const bbox = getMeshBoundingBox(targetMesh)
-    let head: Vector3D
-    let tail: Vector3D
+    const vertIdSet = new Set(vertexIds)
 
-    if (edge === 'bottom-back') {
-      head = { x: Number(bbox.min.x.toFixed(3)), y: Number(bbox.min.y.toFixed(3)), z: Number(bbox.min.z.toFixed(3)) }
-      tail = { x: Number(bbox.max.x.toFixed(3)), y: Number(bbox.min.y.toFixed(3)), z: Number(bbox.min.z.toFixed(3)) }
-    } else if (edge === 'left') {
-      head = { x: Number(bbox.min.x.toFixed(3)), y: Number(bbox.min.y.toFixed(3)), z: Number(bbox.center.z.toFixed(3)) }
-      tail = { x: Number(bbox.min.x.toFixed(3)), y: Number(bbox.max.y.toFixed(3)), z: Number(bbox.center.z.toFixed(3)) }
+    // Optional boundary vertex splitting for sharp low-poly mechanical hinges
+    if (splitBoundary && projectStore.selectedFaceIds.length > 0) {
+      const selectedFaces = mesh.faces.filter(f => projectStore.selectedFaceIds.includes(f.id))
+      const unselectedFaces = mesh.faces.filter(f => !projectStore.selectedFaceIds.includes(f.id))
+      
+      const unselectedVertIds = new Set<string>()
+      unselectedFaces.forEach(f => f.vertexIds.forEach(id => unselectedVertIds.add(id)))
+
+      const boundaryVerts = vertexIds.filter(id => unselectedVertIds.has(id))
+      const splitMap = new Map<string, string>()
+
+      for (const bId of boundaryVerts) {
+        const origVert = mesh.vertices.find(v => v.id === bId)
+        if (!origVert) continue
+        const newVertId = genId('v_split')
+        const newVert = {
+          id: newVertId,
+          position: { ...origVert.position },
+          color: origVert.color,
+          boneWeights: { [boneId]: 1.0 }
+        }
+        mesh.vertices.push(newVert)
+        splitMap.set(bId, newVertId)
+        vertIdSet.delete(bId)
+        vertIdSet.add(newVertId)
+      }
+
+      for (const face of selectedFaces) {
+        face.vertexIds = face.vertexIds.map(vid => splitMap.get(vid) || vid)
+      }
+    }
+
+    for (const v of mesh.vertices) {
+      if (vertIdSet.has(v.id)) {
+        v.boneWeights = { [boneId]: 1.0 }
+      }
+    }
+  }
+
+  function unbindGeometry(meshId: string, boneId?: string) {
+    const mesh = projectStore.meshes.find(m => m.id === meshId)
+    if (!mesh) return
+    if (boneId) {
+      if (mesh.parentId === boneId) mesh.parentId = undefined
+      for (const v of mesh.vertices) {
+        if (v.boneWeights && v.boneWeights[boneId]) {
+          delete v.boneWeights[boneId]
+        }
+      }
     } else {
-      head = { x: Number(bbox.min.x.toFixed(3)), y: Number(bbox.min.y.toFixed(3)), z: Number(bbox.center.z.toFixed(3)) }
-      tail = { x: Number(bbox.max.x.toFixed(3)), y: Number(bbox.min.y.toFixed(3)), z: Number(bbox.center.z.toFixed(3)) }
+      mesh.parentId = undefined
+      for (const v of mesh.vertices) {
+        v.boneWeights = {}
+      }
     }
-
-    const hingeBone = addBoneFromPoints(head, tail, null, `${targetMesh.name}_Hinge`)
-    parentMeshToBone(targetMesh.id, hingeBone.id)
-    autoWeightMeshToBones(targetMesh)
-    return hingeBone
   }
 
-  function autoRigMultiPart(): Bone[] {
-    const meshes = projectStore.meshes
-    if (meshes.length === 0) return []
-
-    clearArmature()
-    const sortedMeshes = [...meshes].sort((a, b) => {
-      const boxA = getMeshBoundingBox(a)
-      const boxB = getMeshBoundingBox(b)
-      const volA = boxA.size.x * boxA.size.y * boxA.size.z
-      const volB = boxB.size.x * boxB.size.y * boxB.size.z
-      return volB - volA // Largest volume first (main torso / root)
-    })
-
-    const rootMesh = sortedMeshes[0]
-    const rootBbox = getMeshBoundingBox(rootMesh)
-    const rootBone = addBoneFromPoints(
-      { x: Number(rootBbox.center.x.toFixed(3)), y: Number(rootBbox.min.y.toFixed(3)), z: Number(rootBbox.center.z.toFixed(3)) },
-      { x: Number(rootBbox.center.x.toFixed(3)), y: Number(rootBbox.max.y.toFixed(3)), z: Number(rootBbox.center.z.toFixed(3)) },
-      null,
-      `${rootMesh.name}_Root`
-    )
-    parentMeshToBone(rootMesh.id, rootBone.id)
-
-    const createdBones: Bone[] = [rootBone]
-
-    for (let i = 1; i < sortedMeshes.length; i++) {
-      const m = sortedMeshes[i]
-      const mBbox = getMeshBoundingBox(m)
-      const bone = addBoneFromPoints(
-        { x: Number(mBbox.center.x.toFixed(3)), y: Number(mBbox.min.y.toFixed(3)), z: Number(mBbox.center.z.toFixed(3)) },
-        { x: Number(mBbox.center.x.toFixed(3)), y: Number(mBbox.max.y.toFixed(3)), z: Number(mBbox.center.z.toFixed(3)) },
-        rootBone.id,
-        `${m.name}_Bone`
-      )
-      parentMeshToBone(m.id, bone.id)
-      createdBones.push(bone)
+  function assignVertexWeight(meshId: string, vertexIds: string[], boneId: string, weight: number) {
+    const mesh = projectStore.meshes.find(m => m.id === meshId)
+    if (!mesh) return
+    mesh.armatureId = armature.value.id
+    const idSet = new Set(vertexIds)
+    for (const v of mesh.vertices) {
+      if (idSet.has(v.id)) {
+        if (!v.boneWeights) v.boneWeights = {}
+        if (weight <= 0) {
+          delete v.boneWeights[boneId]
+        } else {
+          v.boneWeights[boneId] = Math.min(1.0, Math.max(0.0, weight))
+        }
+      }
     }
+  }
 
-    selectedBoneId.value = rootBone.id
-    return createdBones
+  function normalizeVertexWeights(meshId: string, vertexIds: string[]) {
+    const mesh = projectStore.meshes.find(m => m.id === meshId)
+    if (!mesh) return
+    const idSet = new Set(vertexIds)
+    for (const v of mesh.vertices) {
+      if (idSet.has(v.id) && v.boneWeights) {
+        let total = 0
+        for (const bId in v.boneWeights) total += v.boneWeights[bId]
+        if (total > 0) {
+          for (const bId in v.boneWeights) {
+            v.boneWeights[bId] = Number((v.boneWeights[bId] / total).toFixed(3))
+          }
+        }
+      }
+    }
+  }
+
+  function addSocket(boneId: string, name = 'Socket'): BoneSocket | null {
+    const bone = armature.value.bones.find(b => b.id === boneId)
+    if (!bone) return null
+    if (!bone.sockets) bone.sockets = []
+    const socket: BoneSocket = {
+      id: genId('socket'),
+      name,
+      boneId,
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 }
+    }
+    bone.sockets.push(socket)
+    return socket
+  }
+
+  function removeSocket(boneId: string, socketId: string) {
+    const bone = armature.value.bones.find(b => b.id === boneId)
+    if (!bone || !bone.sockets) return
+    bone.sockets = bone.sockets.filter(s => s.id !== socketId)
+  }
+
+  function splitBone(boneId: string): Bone[] | null {
+    return subdivideBone(boneId)
   }
 
   function resetAllBonesToRest() {
@@ -1323,10 +1340,14 @@ export const useAnimationStore = defineStore('animation', () => {
     clickToPlaceMode,
     toggleTestPose,
     resetAllBonesToRest,
-    autoRigProp,
-    autoRigChain,
-    autoRigHinge,
-    autoRigMultiPart,
+    bindSelectedGeometry,
+    assignRigidVertices,
+    unbindGeometry,
+    assignVertexWeight,
+    normalizeVertexWeights,
+    addSocket,
+    removeSocket,
+    splitBone,
     addBoneFromPoints,
     setClipDuration,
     togglePlay,

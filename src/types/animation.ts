@@ -1,16 +1,45 @@
 import { Vector3D } from './mesh'
 
+export interface BoneSocket {
+  id: string
+  name: string
+  boneId: string
+  position: Vector3D
+  rotation: Vector3D
+  scale: Vector3D
+}
+
 export interface Bone {
   id: string
   name: string
   parentId: string | null
+  connectedToParent?: boolean
   head: Vector3D // Joint pivot in world/local space
   tail: Vector3D // Bone end
-  position: Vector3D // Local translation offset
-  rotation: Vector3D // Euler angles in degrees
+  position: Vector3D // Local translation offset (Pose)
+  rotation: Vector3D // Euler angles in degrees (Pose)
   scale: Vector3D
   childrenIds: string[]
+  sockets?: BoneSocket[]
 }
+
+export type BindingType = 'object' | 'rigid_vertex' | 'smooth_vertex'
+
+export interface ObjectBoneBinding {
+  id: string
+  type: 'object'
+  meshId: string
+  boneId: string
+}
+
+export interface SkinBinding {
+  id: string
+  type: 'skin'
+  meshId: string
+  skeletonId: string
+}
+
+export type Binding = ObjectBoneBinding | SkinBinding
 
 export type InterpolationType = 'step' | 'linear' | 'cubic'
 

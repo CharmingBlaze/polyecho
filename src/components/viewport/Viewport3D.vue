@@ -184,7 +184,7 @@ function initThree() {
 
   // Transform Controls
   transformControls = new TransformControls(cameraPersp, renderer.domElement)
-  transformControls.size = 0.8
+  transformControls.size = 0.55
   scene.add(transformControls.getHelper())
   scene.add(transformProxy)
 
@@ -2769,9 +2769,44 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
     }
   }
 
-  // Blender Box Select shortcut (B)
-  if ((e.key === 'b' || e.key === 'B') && !e.ctrlKey && !e.metaKey && !e.altKey && toolStore.appMode === 'model') {
-    toolStore.isBoxSelectActive = !toolStore.isBoxSelectActive
+  // Blender Box Select shortcut (B) or Add Bone in Rig Mode
+  if ((e.key === 'b' || e.key === 'B') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (toolStore.appMode === 'model') {
+      toolStore.isBoxSelectActive = !toolStore.isBoxSelectActive
+      return
+    } else if (toolStore.appMode === 'rig') {
+      animationStore.clickToPlaceMode = !animationStore.clickToPlaceMode
+      return
+    }
+  }
+
+  // Rigging Quick Extrude (E)
+  if ((e.key === 'e' || e.key === 'E') && !e.ctrlKey && !e.metaKey && !e.altKey && toolStore.appMode === 'rig') {
+    if (animationStore.selectedBoneId) {
+      projectStore.recordState('Extrude Bone')
+      animationStore.extrudeBone(animationStore.selectedBoneId)
+      rebuildBones()
+      return
+    }
+  }
+
+  // Quick Bind Shortcut (Ctrl+B)
+  if ((e.key === 'b' || e.key === 'B') && (e.ctrlKey || e.metaKey) && toolStore.appMode === 'rig') {
+    e.preventDefault()
+    if (animationStore.selectedBoneId) {
+      projectStore.recordState('Quick Bind Geometry')
+      animationStore.bindSelectedGeometry('rigid_vertex', animationStore.selectedBoneId)
+      rebuildMeshes()
+      return
+    }
+  }
+
+  // Reset Pose (Alt+R)
+  if ((e.key === 'r' || e.key === 'R') && e.altKey) {
+    e.preventDefault()
+    animationStore.resetAllBonesToRest()
+    rebuildBones()
+    rebuildMeshes()
     return
   }
 
