@@ -15,6 +15,8 @@ import {
   dissolveElements,
   connectTwoVertices,
   cleanupMeshGeometry,
+  bridgeEdgeLoops,
+  gridFill,
   flipNormals, 
   deleteElements 
 } from '../core/geometry/Operations'
@@ -321,6 +323,22 @@ export const useProjectStore = defineStore('project', () => {
     replaceMesh(result.mesh)
   }
 
+  function performBridgeEdges() {
+    if (!activeMesh.value || selectedEdgeIds.value.length < 2) return
+    recordState('Bridge Edge Loops')
+    const result = bridgeEdgeLoops(activeMesh.value, selectedEdgeIds.value)
+    replaceMesh(result.mesh)
+    selectedFaceIds.value = result.selectedFaceIds
+  }
+
+  function performGridFill() {
+    if (!activeMesh.value || selectedVertexIds.value.length < 4) return
+    recordState('Grid Fill')
+    const result = gridFill(activeMesh.value, selectedVertexIds.value)
+    replaceMesh(result.mesh)
+    selectedFaceIds.value = result.selectedFaceIds
+  }
+
   function deleteMesh(id: string) {
     recordState('Delete Object')
     meshes.value = meshes.value.filter(m => m.id !== id)
@@ -603,6 +621,48 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
+  function addMaterial(name?: string): Material {
+    const count = materials.value.length + 1
+    const newMat: Material = {
+      id: `mat_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      name: name || `Material.${String(count).padStart(3, '0')}`,
+      textureId: 'tex_default',
+      color: '#ffffff',
+      shading: 'textured',
+      psxJitter: false,
+      psxJitterResolution: 240,
+      psxAffine: false,
+      dither: false,
+      ditherLevel: 32,
+      wireframe: false
+    }
+    materials.value.push(newMat)
+    recordState('Add Material')
+    return newMat
+  }
+
+  function deleteMaterial(id: string) {
+    if (materials.value.length <= 1) return
+    recordState('Delete Material')
+    materials.value = materials.value.filter(m => m.id !== id)
+    const fallbackId = materials.value[0]?.id || 'default_material'
+    for (const mesh of meshes.value) {
+      if (mesh.materialId === id) {
+        mesh.materialId = fallbackId
+      }
+    }
+  }
+
+  function assignMaterialToActiveMesh(matId: string) {
+    if (!activeMesh.value) return
+    recordState('Assign Material')
+    activeMesh.value.materialId = matId
+    for (const mId of selectedMeshIds.value) {
+      const m = meshes.value.find(item => item.id === mId)
+      if (m) m.materialId = matId
+    }
+  }
+
   function setShadeMode(mode: 'flat' | 'smooth') {
     for (const mesh of meshes.value) {
       if (selectedMeshIds.value.includes(mesh.id) || mesh.id === activeMeshId.value) {
@@ -650,6 +710,8 @@ export const useProjectStore = defineStore('project', () => {
     performSeparateMesh,
     performJoinMeshes,
     performFlipNormals,
+    performBridgeEdges,
+    performGridFill,
     performDelete,
     deleteMesh,
     deleteSelectedMeshes,
@@ -663,6 +725,9 @@ export const useProjectStore = defineStore('project', () => {
     setShadeMode,
     toggleShadeMode,
     markTextureUpdated,
+    addMaterial,
+    deleteMaterial,
+    assignMaterialToActiveMesh,
     recordState,
   }
 })

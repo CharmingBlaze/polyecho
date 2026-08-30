@@ -18,6 +18,8 @@ const shortcuts = [
   { key: 'M', desc: 'Merge selected Vertices to center' },
   { key: 'Delete / X', desc: 'Delete selected Vertices / Faces' },
   { key: 'B', desc: 'Pixel Pencil / Brush Tool' },
+  { key: 'Z', desc: 'Shading Pie Menu (Solid, Tex, Wire, PSX)' },
+  { key: 'Alt + Z', desc: 'Toggle X-Ray Mode (Translucent Mesh)' },
   { key: 'Space', desc: 'Play / Pause Animation timeline' },
   { key: 'Ctrl + Z', desc: 'Undo last action' },
   { key: 'Ctrl + Y', desc: 'Redo last action' },

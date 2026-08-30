@@ -303,16 +303,14 @@ defineExpose({
           v-for="item in filteredPrimitives" 
           :key="item.type"
           @click="selectPrimitive(item.type)"
-          class="p-2 rounded-xs bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle hover:border-ui-accent/50 flex items-center space-x-2.5 transition active:scale-[0.98] text-left group"
+          class="px-2.5 py-1.5 rounded bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle hover:border-amber-500/50 flex items-center space-x-2.5 transition active:scale-[0.98] text-left group shadow-xs"
         >
-          <div 
-            class="w-7 h-7 rounded-xs bg-ui-input border border-ui-borderSubtle flex items-center justify-center shrink-0 group-hover:border-ui-borderDefault transition"
-          >
-            <BlenderIcon :name="(item.icon as any)" :size="16" :color="item.color" />
+          <div class="flex items-center justify-center shrink-0">
+            <BlenderIcon :name="(item.icon as any)" :size="18" :color="item.color" />
           </div>
 
           <div class="flex flex-col min-w-0 flex-1">
-            <span class="font-medium text-ui-textPrimary group-hover:text-ui-accent text-xs truncate">{{ item.label }}</span>
+            <span class="font-semibold text-ui-textPrimary group-hover:text-amber-300 text-xs truncate transition">{{ item.label }}</span>
             <span class="text-[10px] text-ui-textMuted truncate">{{ item.desc }}</span>
           </div>
         </button>

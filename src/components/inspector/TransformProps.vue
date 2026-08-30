@@ -5,7 +5,6 @@ import { useAnimationStore } from '../../stores/animationStore'
 import { useToolStore } from '../../stores/toolStore'
 import { computeCentroid } from '../../utils/math'
 import { getMeshEdges } from '../../core/geometry/EdgeUtils'
-import { applyMirror } from '../../core/geometry/MirrorModifier'
 import { Vector3D } from '../../types/mesh'
 import UiSection from '../ui/UiSection.vue'
 import UiNumberField from '../ui/UiNumberField.vue'
@@ -16,9 +15,7 @@ import {
   Crosshair, 
   Move,
   RotateCw,
-  Maximize2,
-  Check,
-  Trash2
+  Maximize2
 } from 'lucide-vue-next'
 
 const projectStore = useProjectStore()
@@ -221,45 +218,6 @@ function handleGeometryToOrigin() {
     v.position.z -= cz
   }
 }
-
-// ---------------------------------------------
-// MIRROR MODIFIER CONTROLS
-// ---------------------------------------------
-function enableMirrorModifier() {
-  const mesh = activeMesh.value
-  if (!mesh) return
-  projectStore.recordState('Add Mirror Modifier')
-
-  if (!mesh.mirror) {
-    mesh.mirror = {
-      enabled: true,
-      axisX: true,
-      axisY: false,
-      axisZ: false,
-      clipping: true,
-      merge: true,
-      mergeThreshold: 0.01,
-      flipU: false,
-      flipV: false
-    }
-  } else {
-    mesh.mirror.enabled = true
-  }
-}
-
-function handleApplyMirrorModifier() {
-  const mesh = activeMesh.value
-  if (!mesh || !mesh.mirror) return
-  projectStore.recordState('Apply Mirror Modifier')
-  applyMirror(mesh)
-}
-
-function removeMirrorModifier() {
-  const mesh = activeMesh.value
-  if (!mesh || !mesh.mirror) return
-  projectStore.recordState('Remove Mirror Modifier')
-  mesh.mirror.enabled = false
-}
 </script>
 
 <template>
@@ -350,73 +308,6 @@ function removeMirrorModifier() {
           <UiButton @click="setOriginToWorldZero" size="xs">World 0,0</UiButton>
           <UiButton @click="setOriginToSelection" size="xs">To Selection</UiButton>
           <UiButton @click="handleGeometryToOrigin" size="xs">Geo to Orig</UiButton>
-        </div>
-      </UiSection>
-
-      <!-- 3. Mirror Modifier Section -->
-      <UiSection v-if="toolStore.appMode === 'model' && activeMesh" title="Mirror Modifier" :default-open="false">
-        <template #actions>
-          <UiButton 
-            v-if="!activeMesh.mirror?.enabled"
-            @click="enableMirrorModifier" 
-            size="xs" 
-            variant="accent"
-          >
-            + Add Mirror
-          </UiButton>
-        </template>
-
-        <div v-if="activeMesh.mirror?.enabled" class="space-y-2">
-          <!-- Mirror Axis Toggles -->
-          <div class="flex items-center justify-between text-[11px]">
-            <span class="text-ui-textSecondary font-bold">Axis:</span>
-            <div class="flex items-center space-x-1">
-              <button 
-                @click="activeMesh.mirror.axisX = !activeMesh.mirror.axisX"
-                class="px-2 py-0.5 rounded-xs border text-[10px] font-bold"
-                :class="activeMesh.mirror.axisX ? 'bg-rose-500/20 text-rose-300 border-rose-500/50' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault'"
-              >
-                X
-              </button>
-              <button 
-                @click="activeMesh.mirror.axisY = !activeMesh.mirror.axisY"
-                class="px-2 py-0.5 rounded-xs border text-[10px] font-bold"
-                :class="activeMesh.mirror.axisY ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault'"
-              >
-                Y
-              </button>
-              <button 
-                @click="activeMesh.mirror.axisZ = !activeMesh.mirror.axisZ"
-                class="px-2 py-0.5 rounded-xs border text-[10px] font-bold"
-                :class="activeMesh.mirror.axisZ ? 'bg-sky-500/20 text-sky-300 border-sky-500/50' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault'"
-              >
-                Z
-              </button>
-            </div>
-          </div>
-
-          <!-- Clipping & Merge Toggles -->
-          <div class="grid grid-cols-2 gap-1 text-[10px]">
-            <label class="flex items-center space-x-1.5 cursor-pointer bg-ui-input p-1.5 rounded-xs border border-ui-borderSubtle">
-              <input type="checkbox" v-model="activeMesh.mirror.clipping" class="rounded-xs bg-ui-panel border-ui-borderDefault text-ui-accent" />
-              <span>Clipping</span>
-            </label>
-            <label class="flex items-center space-x-1.5 cursor-pointer bg-ui-input p-1.5 rounded-xs border border-ui-borderSubtle">
-              <input type="checkbox" v-model="activeMesh.mirror.merge" class="rounded-xs bg-ui-panel border-ui-borderDefault text-ui-accent" />
-              <span>Merge</span>
-            </label>
-          </div>
-
-          <!-- Actions -->
-          <div class="flex items-center space-x-1 pt-1">
-            <UiButton @click="handleApplyMirrorModifier" size="xs" variant="primary" class="w-full">
-              <Check class="w-3 h-3" />
-              <span>Apply</span>
-            </UiButton>
-            <UiButton @click="removeMirrorModifier" size="xs" variant="danger">
-              <Trash2 class="w-3 h-3" />
-            </UiButton>
-          </div>
         </div>
       </UiSection>
     </div>

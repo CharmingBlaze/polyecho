@@ -23,7 +23,11 @@ export type PaintToolType =
   | 'bucket'
   | 'picker'
   | 'line'
+  | 'rect'
+  | 'circle'
   | 'dither'
+  | 'shade'
+  | 'select'
 
 export type RigToolType =
   | 'select_bone'

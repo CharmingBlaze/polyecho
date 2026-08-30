@@ -9,11 +9,15 @@ export const useToolStore = defineStore('tool', () => {
   const paintTool = ref<PaintToolType>('brush')
   const rigTool = ref<RigToolType>('select_bone')
   const animateTool = ref<AnimateToolType>('select_bone')
+  const isBoxSelectActive = ref<boolean>(false)
 
   // Painting settings
   const primaryColor = ref<string>('#ffffff')
   const secondaryColor = ref<string>('#181425')
   const brushSize = ref<number>(1)
+  const brushOpacity = ref<number>(1.0)
+  const brushShape = ref<'square' | 'circle'>('square')
+  const brushFilled = ref<boolean>(false)
   const ditherPattern = ref<string>('bayer4x4')
 
   // Stylus & Touch Settings
@@ -37,6 +41,9 @@ export const useToolStore = defineStore('tool', () => {
     angle: 15,
   })
 
+  // Blender 3D Cursor
+  const cursor3D = ref<{ x: number; y: number; z: number }>({ x: 0, y: 0, z: 0 })
+
   // Viewport display - Clean, standard 3D modeling viewport by default
   const viewport = ref<ViewportSettings>({
     shading: 'textured', // Standard clean textured shading by default
@@ -52,7 +59,7 @@ export const useToolStore = defineStore('tool', () => {
     quadView: false,
     xray: false,
     shadeMode: 'flat',
-    invertZoom: true,
+    invertZoom: false,
   })
 
   function setAppMode(mode: AppMode) {
@@ -84,12 +91,16 @@ export const useToolStore = defineStore('tool', () => {
     appMode,
     selectMode,
     modelTool,
+    isBoxSelectActive,
     paintTool,
     rigTool,
     animateTool,
     primaryColor,
     secondaryColor,
     brushSize,
+    brushOpacity,
+    brushShape,
+    brushFilled,
     ditherPattern,
     stylusPressureEnabled,
     currentPressure,
@@ -101,6 +112,7 @@ export const useToolStore = defineStore('tool', () => {
     paintTarget,
     uvWorkspaceTab,
     snapping,
+    cursor3D,
     viewport,
     setAppMode,
     setSelectMode,

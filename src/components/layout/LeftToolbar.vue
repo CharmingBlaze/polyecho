@@ -155,10 +155,21 @@ function handleStartKnife() {
 
     <!-- Body Content (Hidden when minimized) -->
     <div v-show="!isMinimized" class="w-full flex flex-col items-center">
-      <!-- 1. SELECTION MODES -->
+      <!-- 1. SELECTION MODES & MARQUEE TOOL -->
       <div class="w-full px-1.5 border-b border-ui-borderSubtle pb-1.5 mb-1.5">
         <div v-if="columns === 2" class="text-[11px] font-medium text-ui-textMuted mb-1 px-1">Select</div>
         <div class="grid gap-1.5 w-full" :class="columns === 1 ? 'grid-cols-1' : 'grid-cols-2'">
+          <!-- Select Box / Marquee Tool (Blender One-Shot Box Select 'B') -->
+          <button 
+            @click="toolStore.isBoxSelectActive = !toolStore.isBoxSelectActive"
+            class="w-full h-9 flex items-center justify-center rounded-xs transition relative"
+            :class="toolStore.isBoxSelectActive ? 'bg-amber-500/20 text-amber-300 border border-amber-500/60 font-bold shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+            title="Box Select Marquee (B / Ctrl+LMB Drag - One-Shot)"
+          >
+            <BlenderIcon name="marquee" :size="19" :color="toolStore.isBoxSelectActive ? '#f59e0b' : 'currentColor'" />
+            <span v-if="columns === 2" class="absolute bottom-0.5 right-1 text-[9px] font-mono opacity-60">B</span>
+          </button>
+
           <!-- Object Mode (4) -->
           <button 
             @click="toolStore.selectMode = 'object'"
@@ -212,6 +223,17 @@ function handleStartKnife() {
           >
             <BlenderIcon name="face-select" :size="20" />
             <span v-if="columns === 2" class="absolute bottom-0.5 right-1 text-[9px] font-mono opacity-60">3</span>
+          </button>
+
+          <!-- Bone Mode (6) -->
+          <button 
+            @click="toolStore.selectMode = 'bone'; toolStore.setAppMode('rig')"
+            class="w-full h-9 flex items-center justify-center rounded-xs transition relative"
+            :class="toolStore.selectMode === 'bone' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+            title="Bone Selection Mode (6 / Rigging)"
+          >
+            <BlenderIcon name="bone" :size="19" />
+            <span v-if="columns === 2" class="absolute bottom-0.5 right-1 text-[9px] font-mono opacity-60">6</span>
           </button>
 
           <!-- Snapping Quick Toggle -->
@@ -361,6 +383,10 @@ function handleStartKnife() {
             <BlenderIcon name="tool-extrude" :size="20" />
           </button>
 
+          <button @click="projectStore.performBridgeEdges()" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition" title="Bridge Edge Loops">
+            <BlenderIcon name="bridge-edges" :size="20" />
+          </button>
+
           <button @click="projectStore.performSubdivide()" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition" title="Subdivide / Divide Edges">
             <BlenderIcon name="tool-subdivide" :size="20" />
           </button>
@@ -369,7 +395,7 @@ function handleStartKnife() {
             <BlenderIcon name="dissolve" :size="20" />
           </button>
 
-          <button @click="projectStore.performFillFace()" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition" title="Fill / Bridge Loop (F)">
+          <button @click="projectStore.performFillFace()" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition" title="Fill Face / Loop (F)">
             <BlenderIcon name="fill-face" :size="20" />
           </button>
 
@@ -405,6 +431,10 @@ function handleStartKnife() {
 
           <button @click="projectStore.performSubdivide()" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition" title="Subdivide Faces">
             <BlenderIcon name="tool-subdivide" :size="20" />
+          </button>
+
+          <button @click="projectStore.performGridFill()" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition" title="Grid Fill Quad Patch">
+            <BlenderIcon name="fill-face" :size="20" />
           </button>
 
           <button @click="projectStore.performFlipNormals()" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition" title="Flip Face Normals">
@@ -448,7 +478,7 @@ function handleStartKnife() {
       </div>
 
       <!-- (F) RIGGING TOOLS -->
-      <div v-else-if="toolStore.appMode === 'rig'" class="w-full px-1.5 flex-1">
+      <div v-else-if="toolStore.selectMode === 'bone' || toolStore.appMode === 'rig'" class="w-full px-1.5 flex-1">
         <div v-if="columns === 2" class="text-[11px] font-medium text-ui-textMuted mb-1 px-1">Rig</div>
         <div class="grid gap-1.5 w-full" :class="columns === 1 ? 'grid-cols-1' : 'grid-cols-2'">
           <button @click="handleAddBone" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition" title="Add Root Bone">

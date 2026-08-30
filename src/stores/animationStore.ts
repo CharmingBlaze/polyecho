@@ -540,6 +540,32 @@ export const useAnimationStore = defineStore('animation', () => {
     }
   }
 
+  function setKeyframeInterpolation(targetId: string, channel: 'position' | 'rotation' | 'scale', frame: number, interpolation: InterpolationType) {
+    if (!activeClip.value) return
+    const track = activeClip.value.tracks.find(t => t.targetId === targetId)
+    if (!track) return
+
+    const keyList = channel === 'position' ? track.positionKeys : channel === 'rotation' ? track.rotationKeys : track.scaleKeys
+    const key = keyList.find(k => k.frame === frame)
+    if (key) {
+      key.interpolation = interpolation
+      evaluatePose()
+    }
+  }
+
+  function updateKeyframeValue(targetId: string, channel: 'position' | 'rotation' | 'scale', frame: number, axis: 'x' | 'y' | 'z', value: number) {
+    if (!activeClip.value) return
+    const track = activeClip.value.tracks.find(t => t.targetId === targetId)
+    if (!track) return
+
+    const keyList = channel === 'position' ? track.positionKeys : channel === 'rotation' ? track.rotationKeys : track.scaleKeys
+    const key = keyList.find(k => k.frame === frame)
+    if (key) {
+      key.value[axis] = value
+      evaluatePose()
+    }
+  }
+
   // ----------------------------------------------------
   // BLOCKBENCH POSE CONTROLS (COPY / PASTE / RESET POSE)
   // ----------------------------------------------------
@@ -1073,6 +1099,8 @@ export const useAnimationStore = defineStore('animation', () => {
     totalDurationSeconds,
     addKeyframeForSelected,
     deleteKeyframeAt,
+    setKeyframeInterpolation,
+    updateKeyframeValue,
     resetPose,
     copyPose,
     pastePose,

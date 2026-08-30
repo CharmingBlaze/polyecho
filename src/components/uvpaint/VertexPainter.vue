@@ -347,295 +347,299 @@ defineExpose({
 </script>
 
 <template>
-  <div class="h-full w-full bg-dcc-900 flex flex-col select-none overflow-y-auto p-2 text-slate-200 space-y-2 font-mono text-xs">
-    <!-- Header Studio Bar -->
-    <div class="bg-dcc-850 p-2 rounded border border-dcc-750 flex items-center justify-between">
-      <div class="flex items-center space-x-2">
-        <div class="p-1 rounded bg-indigo-600/30 text-indigo-400 border border-indigo-500/40">
-          <BlenderIcon name="vertex-select" :size="13" />
-        </div>
-        <div>
-          <div class="text-[11px] font-bold text-slate-200">Vertex Color Studio</div>
-          <div class="text-[9px] text-slate-400">3D Gouraud tinting & procedural gradient lighting</div>
-        </div>
-      </div>
-
-      <button 
-        @click="resetVertexColors" 
-        class="px-2 py-0.5 rounded bg-dcc-900 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-dcc-700 text-[9px] transition"
-        title="Reset all vertices to default white"
-      >
-        Reset White
-      </button>
-    </div>
-
-    <!-- 1. MULTI-AXIS VERTEX GRADIENT ENGINE -->
-    <div class="bg-dcc-850 p-2 rounded border border-dcc-750 space-y-2">
-      <div class="flex items-center justify-between">
-        <span class="text-[10px] font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
-          <Wand2 class="w-3 h-3 text-indigo-400" />
-          <span>Procedural Gradient Engine</span>
-        </span>
-        <span class="text-[9px] text-slate-400">Axis & Shading Bakes</span>
-      </div>
-
-      <!-- Axis Mode Selector Tabs -->
-      <div class="grid grid-cols-6 gap-1 bg-dcc-900 p-0.5 rounded border border-dcc-750 text-[9px]">
-        <button 
-          @click="gradAxis = 'y'"
-          class="py-1 rounded text-center transition"
-          :class="gradAxis === 'y' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-400 hover:text-slate-200'"
-          title="Height Gradient (Y-Axis)"
-        >
-          Height Y
-        </button>
-        <button 
-          @click="gradAxis = 'x'"
-          class="py-1 rounded text-center transition"
-          :class="gradAxis === 'x' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-400 hover:text-slate-200'"
-          title="Horizontal Gradient (X-Axis)"
-        >
-          Horiz X
-        </button>
-        <button 
-          @click="gradAxis = 'z'"
-          class="py-1 rounded text-center transition"
-          :class="gradAxis === 'z' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-400 hover:text-slate-200'"
-          title="Depth Gradient (Z-Axis)"
-        >
-          Depth Z
-        </button>
-        <button 
-          @click="gradAxis = 'radial'"
-          class="py-1 rounded text-center transition"
-          :class="gradAxis === 'radial' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-400 hover:text-slate-200'"
-          title="Radial Distance Gradient"
-        >
-          Radial
-        </button>
-        <button 
-          @click="gradAxis = 'sun'"
-          class="py-1 rounded text-center transition"
-          :class="gradAxis === 'sun' ? 'bg-amber-600 text-white font-bold' : 'text-slate-400 hover:text-slate-200'"
-          title="Sun Directional Lighting Bake"
-        >
-          Sun Light
-        </button>
-        <button 
-          @click="gradAxis = 'ao'"
-          class="py-1 rounded text-center transition"
-          :class="gradAxis === 'ao' ? 'bg-cyan-600 text-white font-bold' : 'text-slate-400 hover:text-slate-200'"
-          title="Fake Ambient Occlusion (Cavity Shading)"
-        >
-          Fake AO
-        </button>
-      </div>
-
-      <!-- Gradient Stop Color Swatches (Start -> End) -->
-      <div class="grid grid-cols-2 gap-2 pt-0.5">
-        <div class="space-y-0.5">
-          <div class="flex items-center justify-between text-[9px] text-slate-400">
-            <span>Shadow / Start:</span>
-            <span class="font-mono text-slate-200">{{ gradStartColor }}</span>
-          </div>
-          <div class="flex items-center space-x-1.5">
-            <input type="color" v-model="gradStartColor" class="w-6 h-6 rounded border border-dcc-700 bg-transparent cursor-pointer" />
-            <input type="text" v-model="gradStartColor" class="flex-1 bg-dcc-900 border border-dcc-700 rounded px-1.5 py-0.5 text-slate-200 text-[10px] focus:outline-none" />
-          </div>
-        </div>
-
-        <div class="space-y-0.5">
-          <div class="flex items-center justify-between text-[9px] text-slate-400">
-            <span>Peak / Highlight:</span>
-            <span class="font-mono text-slate-200">{{ gradEndColor }}</span>
-          </div>
-          <div class="flex items-center space-x-1.5">
-            <input type="color" v-model="gradEndColor" class="w-6 h-6 rounded border border-dcc-700 bg-transparent cursor-pointer" />
-            <input type="text" v-model="gradEndColor" class="flex-1 bg-dcc-900 border border-dcc-700 rounded px-1.5 py-0.5 text-slate-200 text-[10px] focus:outline-none" />
-          </div>
-        </div>
-      </div>
-
-      <!-- Sun Controls (if Sun Light axis selected) -->
-      <div v-if="gradAxis === 'sun'" class="space-y-1.5 pt-1 border-t border-dcc-750">
-        <div class="grid grid-cols-2 gap-2 text-[9px] text-slate-400">
-          <div>
-            <div class="flex justify-between">
-              <span>Elevation:</span>
-              <span class="text-amber-400">{{ sunElevation }}°</span>
-            </div>
-            <input type="range" min="0" max="90" v-model.number="sunElevation" class="w-full accent-amber-500 bg-dcc-900 h-1 rounded cursor-pointer" />
+  <div class="h-full w-full bg-dcc-950 flex flex-col select-none overflow-y-auto p-3 text-slate-200 font-mono text-xs custom-scrollbar">
+    <div class="max-w-2xl w-full mx-auto space-y-2.5">
+      <!-- 1. Header Studio Bar -->
+      <div class="bg-dcc-850 px-3 py-2 rounded-xs border border-dcc-750 flex items-center justify-between shadow-xs">
+        <div class="flex items-center space-x-2">
+          <div class="p-1 rounded bg-indigo-600/20 text-indigo-400 border border-indigo-500/30">
+            <BlenderIcon name="vertex-select" :size="14" />
           </div>
           <div>
-            <div class="flex justify-between">
-              <span>Azimuth:</span>
-              <span class="text-amber-400">{{ sunAzimuth }}°</span>
-            </div>
-            <input type="range" min="0" max="360" v-model.number="sunAzimuth" class="w-full accent-amber-500 bg-dcc-900 h-1 rounded cursor-pointer" />
+            <div class="text-[11px] font-bold text-slate-200 uppercase tracking-wide">3D Vertex Color Studio</div>
+            <div class="text-[9px] text-slate-400">Gouraud vertex tinting & procedural gradient bakes</div>
           </div>
         </div>
+
+        <button 
+          @click="resetVertexColors" 
+          class="px-2 py-1 rounded bg-dcc-900 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-dcc-700 text-[10px] font-semibold transition"
+          title="Reset all vertices to default white"
+        >
+          Reset White
+        </button>
       </div>
 
-      <!-- Gradient Options (Blend Mode & Curve) -->
-      <div class="flex items-center justify-between gap-2 pt-1 border-t border-dcc-750 text-[10px]">
-        <div class="flex items-center space-x-1.5">
-          <span class="text-slate-400 text-[9px]">Blend:</span>
-          <select v-model="gradBlendMode" class="bg-dcc-900 text-slate-200 border border-dcc-700 rounded px-1.5 py-0.5 text-[9px] focus:outline-none">
-            <option value="replace">Replace</option>
-            <option value="multiply">Multiply</option>
-            <option value="add">Add</option>
-          </select>
+      <!-- 2. ACTIVE PAINT COLOR & PALETTE -->
+      <div class="bg-dcc-850 p-2.5 rounded-xs border border-dcc-750 space-y-2 shadow-xs">
+        <div class="flex items-center justify-between">
+          <span class="text-[10px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+            <Pipette class="w-3.5 h-3.5 text-indigo-400" />
+            <span>Active Color & Fill</span>
+          </span>
+          <div class="flex items-center space-x-1.5 bg-dcc-900 px-2 py-0.5 rounded border border-dcc-750">
+            <div class="w-3.5 h-3.5 rounded-full border border-white/60 shadow-xs" :style="{ backgroundColor: toolStore.vertexPaintColor }"></div>
+            <span class="text-[10px] font-mono text-slate-200 font-bold uppercase">{{ toolStore.vertexPaintColor }}</span>
+          </div>
         </div>
 
-        <div class="flex items-center space-x-1.5">
-          <span class="text-slate-400 text-[9px]">Curve:</span>
-          <select v-model="gradCurve" class="bg-dcc-900 text-slate-200 border border-dcc-700 rounded px-1.5 py-0.5 text-[9px] focus:outline-none">
-            <option value="linear">Linear</option>
-            <option value="ease">Smoothstep</option>
-            <option value="contrast">High Contrast</option>
-          </select>
+        <!-- Quick Action Fill Buttons -->
+        <div class="grid grid-cols-2 gap-1.5">
+          <button 
+            @click="fillSelectedVertices"
+            class="py-1.5 px-2 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[10px] flex items-center justify-center space-x-1 shadow-xs transition active:scale-98"
+            title="Fill selected vertices or faces with current color"
+          >
+            <Check class="w-3 h-3" />
+            <span>Fill Selected</span>
+          </button>
+
+          <button 
+            @click="fillEntireMesh"
+            class="py-1.5 px-2 rounded bg-dcc-900 hover:bg-dcc-750 border border-dcc-750 text-slate-300 font-bold text-[10px] transition active:scale-98"
+            title="Fill entire mesh with current color"
+          >
+            Fill Entire Mesh
+          </button>
+        </div>
+
+        <!-- Compact 24-Color PSX Shading Swatches Grid -->
+        <div class="grid grid-cols-12 gap-1 pt-1 p-1 bg-dcc-900/60 rounded-xs border border-dcc-750">
+          <button 
+            v-for="c in retroPalette" 
+            :key="c"
+            @click="toolStore.vertexPaintColor = c"
+            class="w-full h-5 rounded-xs border transition-all hover:scale-105 active:scale-95 shadow-2xs cursor-pointer"
+            :class="toolStore.vertexPaintColor.toLowerCase() === c.toLowerCase() ? 'border-white ring-1.5 ring-amber-400 ring-offset-1 ring-offset-dcc-900 z-10' : 'border-black/40 hover:border-white/70'"
+            :style="{ backgroundColor: c }"
+            :title="c"
+          ></button>
         </div>
       </div>
 
-      <!-- Execute Bake Button -->
-      <button 
-        @click="executeGradientBake"
-        class="w-full py-1.5 px-3 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[10px] shadow-xs flex items-center justify-center space-x-1.5 transition active:scale-98"
-      >
-        <Zap class="w-3 h-3" />
-        <span>Bake {{ gradAxis.toUpperCase() }} Gradient to Vertices</span>
-      </button>
-    </div>
+      <!-- 3. MULTI-AXIS VERTEX GRADIENT ENGINE -->
+      <div class="bg-dcc-850 p-2.5 rounded-xs border border-dcc-750 space-y-2 shadow-xs">
+        <div class="flex items-center justify-between">
+          <span class="text-[10px] font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
+            <Wand2 class="w-3.5 h-3.5 text-indigo-400" />
+            <span>Procedural Gradient Engine</span>
+          </span>
+          <span class="text-[9px] text-slate-400 font-mono">Axis Bakes</span>
+        </div>
 
-    <!-- 2. QUICK PALETTE & COLOR HARMONIES -->
-    <div class="bg-dcc-850 p-2 rounded border border-dcc-750 space-y-1.5">
-      <div class="flex items-center justify-between">
+        <!-- Axis Mode Selector Tabs -->
+        <div class="grid grid-cols-6 gap-1 bg-dcc-900 p-0.5 rounded border border-dcc-750 text-[10px]">
+          <button 
+            @click="gradAxis = 'y'"
+            class="py-1 rounded text-center transition"
+            :class="gradAxis === 'y' ? 'bg-indigo-600 text-white font-bold shadow-xs' : 'text-slate-400 hover:text-slate-200'"
+            title="Height Gradient (Y-Axis)"
+          >
+            Height Y
+          </button>
+          <button 
+            @click="gradAxis = 'x'"
+            class="py-1 rounded text-center transition"
+            :class="gradAxis === 'x' ? 'bg-indigo-600 text-white font-bold shadow-xs' : 'text-slate-400 hover:text-slate-200'"
+            title="Horizontal Gradient (X-Axis)"
+          >
+            Horiz X
+          </button>
+          <button 
+            @click="gradAxis = 'z'"
+            class="py-1 rounded text-center transition"
+            :class="gradAxis === 'z' ? 'bg-indigo-600 text-white font-bold shadow-xs' : 'text-slate-400 hover:text-slate-200'"
+            title="Depth Gradient (Z-Axis)"
+          >
+            Depth Z
+          </button>
+          <button 
+            @click="gradAxis = 'radial'"
+            class="py-1 rounded text-center transition"
+            :class="gradAxis === 'radial' ? 'bg-indigo-600 text-white font-bold shadow-xs' : 'text-slate-400 hover:text-slate-200'"
+            title="Radial Distance Gradient"
+          >
+            Radial
+          </button>
+          <button 
+            @click="gradAxis = 'sun'"
+            class="py-1 rounded text-center transition"
+            :class="gradAxis === 'sun' ? 'bg-amber-600 text-white font-bold shadow-xs' : 'text-slate-400 hover:text-slate-200'"
+            title="Sun Directional Lighting Bake"
+          >
+            Sun Light
+          </button>
+          <button 
+            @click="gradAxis = 'ao'"
+            class="py-1 rounded text-center transition"
+            :class="gradAxis === 'ao' ? 'bg-cyan-600 text-white font-bold shadow-xs' : 'text-slate-400 hover:text-slate-200'"
+            title="Fake Ambient Occlusion (Cavity Shading)"
+          >
+            Fake AO
+          </button>
+        </div>
+
+        <!-- Gradient Stop Color Swatches (Start -> End) -->
+        <div class="grid grid-cols-2 gap-2 pt-0.5">
+          <div class="space-y-1">
+            <div class="flex items-center justify-between text-[9px] text-slate-400">
+              <span>Shadow / Start:</span>
+              <span class="font-mono text-slate-200 uppercase">{{ gradStartColor }}</span>
+            </div>
+            <div class="flex items-center space-x-1.5 bg-dcc-900 p-1 rounded border border-dcc-700">
+              <input type="color" v-model="gradStartColor" class="w-6 h-6 rounded border border-dcc-700 bg-transparent cursor-pointer p-0 shrink-0" />
+              <input type="text" v-model="gradStartColor" class="flex-1 bg-transparent text-slate-200 text-[10px] font-mono focus:outline-none uppercase" />
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            <div class="flex items-center justify-between text-[9px] text-slate-400">
+              <span>Peak / Highlight:</span>
+              <span class="font-mono text-slate-200 uppercase">{{ gradEndColor }}</span>
+            </div>
+            <div class="flex items-center space-x-1.5 bg-dcc-900 p-1 rounded border border-dcc-700">
+              <input type="color" v-model="gradEndColor" class="w-6 h-6 rounded border border-dcc-700 bg-transparent cursor-pointer p-0 shrink-0" />
+              <input type="text" v-model="gradEndColor" class="flex-1 bg-transparent text-slate-200 text-[10px] font-mono focus:outline-none uppercase" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Sun Controls (if Sun Light axis selected) -->
+        <div v-if="gradAxis === 'sun'" class="space-y-1.5 pt-1 border-t border-dcc-750">
+          <div class="grid grid-cols-2 gap-2 text-[9px] text-slate-400">
+            <div>
+              <div class="flex justify-between">
+                <span>Elevation:</span>
+                <span class="text-amber-400 font-bold">{{ sunElevation }}°</span>
+              </div>
+              <input type="range" min="0" max="90" v-model.number="sunElevation" class="w-full accent-amber-500 bg-dcc-900 h-1 rounded cursor-pointer" />
+            </div>
+            <div>
+              <div class="flex justify-between">
+                <span>Azimuth:</span>
+                <span class="text-amber-400 font-bold">{{ sunAzimuth }}°</span>
+              </div>
+              <input type="range" min="0" max="360" v-model.number="sunAzimuth" class="w-full accent-amber-500 bg-dcc-900 h-1 rounded cursor-pointer" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Gradient Options (Blend Mode & Curve) -->
+        <div class="flex items-center justify-between gap-2 pt-1 border-t border-dcc-750 text-[10px]">
+          <div class="flex items-center space-x-1.5">
+            <span class="text-slate-400 text-[9px]">Blend:</span>
+            <select v-model="gradBlendMode" class="bg-dcc-900 text-slate-200 border border-dcc-700 rounded px-2 py-0.5 text-[10px] focus:outline-none cursor-pointer">
+              <option value="replace">Replace</option>
+              <option value="multiply">Multiply</option>
+              <option value="add">Add</option>
+            </select>
+          </div>
+
+          <div class="flex items-center space-x-1.5">
+            <span class="text-slate-400 text-[9px]">Curve:</span>
+            <select v-model="gradCurve" class="bg-dcc-900 text-slate-200 border border-dcc-700 rounded px-2 py-0.5 text-[10px] focus:outline-none cursor-pointer">
+              <option value="linear">Linear</option>
+              <option value="ease">Smoothstep</option>
+              <option value="contrast">High Contrast</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Execute Bake Button -->
+        <button 
+          @click="executeGradientBake"
+          class="w-full py-2 px-3 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[10px] shadow-xs flex items-center justify-center space-x-1.5 transition active:scale-98"
+        >
+          <Zap class="w-3.5 h-3.5" />
+          <span>Bake {{ gradAxis.toUpperCase() }} Gradient to Vertices</span>
+        </button>
+      </div>
+
+      <!-- 4. POST-PROCESSING & ADJUSTMENT TOOLS -->
+      <div class="bg-dcc-850 p-2.5 rounded-xs border border-dcc-750 space-y-1.5 shadow-xs">
         <span class="text-[10px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-          <Pipette class="w-3 h-3 text-indigo-400" />
-          <span>Active Paint Color</span>
-        </span>
-        <div class="flex items-center space-x-1.5">
-          <div class="w-3 h-3 rounded-full border border-white/60 shadow-xs" :style="{ backgroundColor: toolStore.vertexPaintColor }"></div>
-          <span class="text-[9px] font-mono text-slate-400">{{ toolStore.vertexPaintColor.toUpperCase() }}</span>
-        </div>
-      </div>
-
-      <!-- Quick Action Buttons -->
-      <div class="grid grid-cols-2 gap-1.5">
-        <button 
-          @click="fillSelectedVertices"
-          class="py-1 px-2 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[10px] flex items-center justify-center space-x-1 shadow-xs transition"
-          title="Fill selected vertices or active faces with current color"
-        >
-          <Check class="w-3 h-3" />
-          <span>Fill Selected</span>
-        </button>
-
-        <button 
-          @click="fillEntireMesh"
-          class="py-1 px-2 rounded bg-dcc-900 hover:bg-dcc-750 border border-dcc-750 text-slate-300 font-bold text-[10px] transition"
-          title="Fill entire mesh with current color"
-        >
-          Fill Entire Mesh
-        </button>
-      </div>
-
-      <!-- Compact 24-Color PSX Shading Swatches Grid -->
-      <div class="grid grid-cols-12 gap-1 pt-1">
-        <button 
-          v-for="c in retroPalette" 
-          :key="c"
-          @click="toolStore.vertexPaintColor = c"
-          class="w-full aspect-square rounded border border-dcc-750 hover:border-white hover:scale-110 transition shadow-xs"
-          :style="{ backgroundColor: c }"
-          :title="c"
-        ></button>
-      </div>
-    </div>
-
-    <!-- 3. POST-PROCESSING & ADJUSTMENT TOOLS -->
-    <div class="bg-dcc-850 p-2 rounded border border-dcc-750 space-y-1.5">
-      <span class="text-[10px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-        <Sparkles class="w-3 h-3 text-indigo-400" />
-        <span>Vertex Adjustments & PSX FX</span>
-      </span>
-
-      <div class="grid grid-cols-3 gap-1.5 pt-0.5">
-        <button 
-          @click="smoothVertexColors"
-          class="py-1 px-1.5 rounded bg-dcc-900 hover:bg-dcc-750 border border-dcc-750 text-indigo-300 text-[9px] font-bold transition flex items-center justify-center gap-1"
-          title="Smooth / Blur colors across adjacent connected vertices"
-        >
-          <span>Smooth / Blur</span>
-        </button>
-
-        <button 
-          @click="clampPSX5Bit"
-          class="py-1 px-1.5 rounded bg-dcc-900 hover:bg-dcc-750 border border-dcc-750 text-amber-300 text-[9px] font-bold transition flex items-center justify-center gap-1"
-          title="Quantize vertex colors to authentic PSX 5-bit RGB555"
-        >
-          <span>PSX 5-Bit</span>
-        </button>
-
-        <button 
-          @click="invertVertexColors"
-          class="py-1 px-1.5 rounded bg-dcc-900 hover:bg-dcc-750 border border-dcc-750 text-slate-300 text-[9px] font-bold transition flex items-center justify-center gap-1"
-          title="Invert RGB colors"
-        >
-          <span>Invert</span>
-        </button>
-      </div>
-    </div>
-
-    <!-- 4. 3D BRUSH & STYLUS SETTINGS -->
-    <div class="bg-dcc-850 p-2 rounded border border-dcc-750 space-y-1.5">
-      <div class="flex items-center justify-between">
-        <span class="text-[10px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-          <Sliders class="w-3 h-3 text-slate-400" />
-          <span>3D Brush Parameters</span>
+          <Sparkles class="w-3.5 h-3.5 text-indigo-400" />
+          <span>Vertex Adjustments & PSX FX</span>
         </span>
 
-        <!-- Stylus Pressure Status -->
-        <button 
-          @click="toolStore.stylusPressureEnabled = !toolStore.stylusPressureEnabled"
-          class="flex items-center gap-1 text-[9px] font-bold transition"
-          :class="toolStore.stylusPressureEnabled ? 'text-amber-400' : 'text-slate-500'"
-        >
-          <PenTool class="w-2.5 h-2.5" />
-          <span>Stylus: {{ toolStore.stylusPressureEnabled ? 'ON' : 'OFF' }}</span>
-        </button>
+        <div class="grid grid-cols-3 gap-1.5 pt-0.5">
+          <button 
+            @click="smoothVertexColors"
+            class="py-1.5 px-2 rounded bg-dcc-900 hover:bg-dcc-750 border border-dcc-750 text-indigo-300 text-[10px] font-bold transition flex items-center justify-center gap-1"
+            title="Smooth colors across adjacent connected vertices"
+          >
+            <span>Smooth / Blur</span>
+          </button>
+
+          <button 
+            @click="clampPSX5Bit"
+            class="py-1.5 px-2 rounded bg-dcc-900 hover:bg-dcc-750 border border-dcc-750 text-amber-300 text-[10px] font-bold transition flex items-center justify-center gap-1"
+            title="Quantize vertex colors to authentic PSX 5-bit RGB555"
+          >
+            <span>PSX 5-Bit</span>
+          </button>
+
+          <button 
+            @click="invertVertexColors"
+            class="py-1.5 px-2 rounded bg-dcc-900 hover:bg-dcc-750 border border-dcc-750 text-slate-300 text-[10px] font-bold transition flex items-center justify-center gap-1"
+            title="Invert RGB colors"
+          >
+            <span>Invert</span>
+          </button>
+        </div>
       </div>
 
-      <!-- Brush Radius Slider -->
-      <div class="space-y-0.5">
-        <div class="flex items-center justify-between text-[9px] text-slate-400">
-          <span>Brush Radius:</span>
-          <span class="text-indigo-400 font-bold">{{ toolStore.vertexBrushRadius }}m</span>
-        </div>
-        <input 
-          type="range" 
-          min="0.1" 
-          max="3.0" 
-          step="0.05" 
-          v-model.number="toolStore.vertexBrushRadius" 
-          class="w-full accent-indigo-500 bg-dcc-900 h-1 rounded cursor-pointer" 
-        />
-      </div>
+      <!-- 5. 3D BRUSH PARAMETERS -->
+      <div class="bg-dcc-850 p-2.5 rounded-xs border border-dcc-750 space-y-2 shadow-xs">
+        <div class="flex items-center justify-between">
+          <span class="text-[10px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+            <Sliders class="w-3.5 h-3.5 text-slate-400" />
+            <span>3D Brush Parameters</span>
+          </span>
 
-      <!-- Falloff Softness Slider -->
-      <div class="space-y-0.5">
-        <div class="flex items-center justify-between text-[9px] text-slate-400">
-          <span>Falloff Softness:</span>
-          <span class="text-indigo-400 font-bold">{{ Math.round(toolStore.vertexBrushFalloff * 100) }}%</span>
+          <button 
+            @click="toolStore.stylusPressureEnabled = !toolStore.stylusPressureEnabled"
+            class="flex items-center gap-1 text-[9px] font-bold transition"
+            :class="toolStore.stylusPressureEnabled ? 'text-amber-400' : 'text-slate-500'"
+          >
+            <PenTool class="w-3 h-3" />
+            <span>Stylus: {{ toolStore.stylusPressureEnabled ? 'ON' : 'OFF' }}</span>
+          </button>
         </div>
-        <input 
-          type="range" 
-          min="0" 
-          max="1" 
-          step="0.05" 
-          v-model.number="toolStore.vertexBrushFalloff" 
-          class="w-full accent-indigo-500 bg-dcc-900 h-1 rounded cursor-pointer" 
-        />
+
+        <div class="grid grid-cols-2 gap-3">
+          <!-- Brush Radius Slider -->
+          <div class="space-y-1">
+            <div class="flex items-center justify-between text-[9px] text-slate-400">
+              <span>Radius:</span>
+              <span class="text-indigo-400 font-bold font-mono">{{ toolStore.vertexBrushRadius }}m</span>
+            </div>
+            <input 
+              type="range" 
+              min="0.1" 
+              max="3.0" 
+              step="0.05" 
+              v-model.number="toolStore.vertexBrushRadius" 
+              class="w-full accent-indigo-500 bg-dcc-900 h-1.5 rounded cursor-pointer" 
+            />
+          </div>
+
+          <!-- Falloff Softness Slider -->
+          <div class="space-y-1">
+            <div class="flex items-center justify-between text-[9px] text-slate-400">
+              <span>Softness:</span>
+              <span class="text-indigo-400 font-bold font-mono">{{ Math.round(toolStore.vertexBrushFalloff * 100) }}%</span>
+            </div>
+            <input 
+              type="range" 
+              min="0" 
+              max="1" 
+              step="0.05" 
+              v-model.number="toolStore.vertexBrushFalloff" 
+              class="w-full accent-indigo-500 bg-dcc-900 h-1.5 rounded cursor-pointer" 
+            />
+          </div>
+        </div>
       </div>
     </div>
   </div>

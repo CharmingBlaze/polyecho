@@ -90,6 +90,14 @@ function handleOpenAddDialog() {
   closeDropdowns()
 }
 
+function handleStartLoopCut() {
+  window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'loopcut' }))
+}
+
+function handleStartKnife() {
+  window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'knife' }))
+}
+
 function onDocumentClick(e: MouseEvent) {
   const target = e.target as HTMLElement
   if (!target.closest('.header-menu-container')) {
@@ -446,6 +454,65 @@ function handleExitProject() {
         </div>
       </div>
 
+      <!-- Mesh Topology & Modeling Menu -->
+      <div class="relative" @click.stop>
+        <button 
+          class="px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
+          :class="{ 'bg-ui-hover text-ui-textPrimary': activeDropdown === 'mesh' }"
+          @click="toggleDropdown('mesh')"
+          @mouseenter="activeDropdown && (activeDropdown = 'mesh')"
+        >
+          Mesh
+        </button>
+        <div v-if="activeDropdown === 'mesh'" class="absolute left-0 top-full mt-0.5 w-60 bg-[#181a1f] opacity-100 border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+          <div class="px-3 py-1 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">Transform & Extrude</div>
+          <button @click="projectStore.performExtrude(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Extrude Region</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">E</span>
+          </button>
+          <button @click="projectStore.performInset(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Inset Faces</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">I</span>
+          </button>
+          <button @click="projectStore.performBevel(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Bevel / Chamfer</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+B</span>
+          </button>
+
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+
+          <div class="px-3 py-1 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">Topology & Cut</div>
+          <button @click="handleStartLoopCut(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Loop Cut and Slide</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+R</span>
+          </button>
+          <button @click="handleStartKnife(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Knife Tool</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">K</span>
+          </button>
+          <button @click="projectStore.performSubdivide(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Subdivide</span>
+          </button>
+          <button @click="projectStore.performBridgeEdges(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Bridge Edge Loops</span>
+          </button>
+          <button @click="projectStore.performGridFill(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Grid Fill</span>
+          </button>
+
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+
+          <div class="px-3 py-1 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">Normals & Cleanup</div>
+          <button @click="projectStore.performFlipNormals(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Recalculate Outside Normals</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Shift+N</span>
+          </button>
+          <button @click="projectStore.performCleanupMesh(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Clean Degenerate Geometry</span>
+          </button>
+        </div>
+      </div>
+
       <!-- View & Window Menu (Panels, Layout, Cameras) -->
       <div class="relative" @click.stop>
         <button 
@@ -498,6 +565,31 @@ function handleExitProject() {
 
           <div class="h-px bg-ui-borderSubtle my-1"></div>
 
+          <!-- Camera Viewpoints -->
+          <div class="px-3 py-1 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">Camera Viewpoint</div>
+          <button @click="setCameraView('top'); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center justify-between">
+            <span>Top Ortho</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Num 7</span>
+          </button>
+          <button @click="setCameraView('front'); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center justify-between">
+            <span>Front Ortho</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Num 1</span>
+          </button>
+          <button @click="setCameraView('right'); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center justify-between">
+            <span>Right Ortho</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Num 3</span>
+          </button>
+          <button @click="setCameraView('iso'); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center justify-between">
+            <span>Isometric</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Num 0</span>
+          </button>
+          <button @click="setCameraView('persp'); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center justify-between">
+            <span>Perspective</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Home</span>
+          </button>
+
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+
           <!-- Reset Layout -->
           <button @click="layoutStore.resetLayout(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2 text-amber-400 font-medium">
             <RotateCcw class="w-3.5 h-3.5" /> Reset Default Panel Layout
@@ -506,15 +598,22 @@ function handleExitProject() {
       </div>
     </div>
 
-    <!-- 2. CENTER: Application Workspace Tabs (MODEL, UV/PAINT, RIG, ANIMATE) -->
-    <div class="flex items-center bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle shrink-0">
+    <!-- 2. CENTER: Blender Workspace Tabs (Layout, Modeling, UV/Paint, Rigging, Animation) -->
+    <div class="flex items-center space-x-0.5 bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle shrink-0 font-sans">
       <button 
-        @click="toolStore.setAppMode('model')"
+        @click="toolStore.setAppMode('model'); toolStore.selectMode = 'object'"
         class="flex items-center gap-1.5 px-2.5 h-6 rounded-xs text-xs font-semibold transition"
-        :class="toolStore.appMode === 'model' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
+        :class="toolStore.appMode === 'model' && toolStore.selectMode === 'object' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
       >
-        <BlenderIcon name="mesh-cube" :size="13" />
-        <span>MODEL</span>
+        <span>Layout</span>
+      </button>
+
+      <button 
+        @click="toolStore.setAppMode('model'); if (toolStore.selectMode === 'object') toolStore.selectMode = 'face'"
+        class="flex items-center gap-1.5 px-2.5 h-6 rounded-xs text-xs font-semibold transition"
+        :class="toolStore.appMode === 'model' && toolStore.selectMode !== 'object' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
+      >
+        <span>Modeling</span>
       </button>
 
       <button 
@@ -522,18 +621,16 @@ function handleExitProject() {
         class="flex items-center gap-1.5 px-2.5 h-6 rounded-xs text-xs font-semibold transition"
         :class="toolStore.appMode === 'uvpaint' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
       >
-        <BlenderIcon name="uv" :size="13" />
-        <span>UV / PAINT</span>
+        <span>UV / Paint</span>
       </button>
 
       <button 
         @click="toolStore.setAppMode('rig')"
         class="flex items-center gap-1.5 px-2.5 h-6 rounded-xs text-xs font-semibold transition"
         :class="toolStore.appMode === 'rig' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
-        title="Custom Skeletal Rigging Workspace"
+        title="Skeletal Armature Rigging"
       >
-        <BlenderIcon name="bone" :size="13" />
-        <span>RIG</span>
+        <span>Rigging</span>
       </button>
 
       <button 
@@ -541,119 +638,26 @@ function handleExitProject() {
         class="flex items-center gap-1.5 px-2.5 h-6 rounded-xs text-xs font-semibold transition"
         :class="toolStore.appMode === 'animate' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
       >
-        <BlenderIcon name="keyframe" :size="13" />
-        <span>ANIMATE</span>
+        <span>Animation</span>
       </button>
     </div>
 
-    <!-- 3. RIGHT: In-Viewport Camera & Shading Ribbon + Panel Toggles + Export -->
-    <div class="flex items-center space-x-1.5 shrink-0">
-      <!-- Quick Camera View Dropdown -->
-      <div class="flex items-center bg-ui-input rounded-xs px-1.5 py-0.5 border border-ui-borderDefault text-[10px]">
-        <select 
-          @change="setCameraView(($event.target as HTMLSelectElement).value as any)"
-          class="bg-transparent text-ui-textAccent font-bold focus:outline-none cursor-pointer"
-        >
-          <option value="persp" class="bg-ui-panel text-ui-textPrimary">Perspective</option>
-          <option value="top" class="bg-ui-panel text-ui-textPrimary">Top Ortho (Num 7)</option>
-          <option value="front" class="bg-ui-panel text-ui-textPrimary">Front Ortho (Num 1)</option>
-          <option value="right" class="bg-ui-panel text-ui-textPrimary">Right Ortho (Num 3)</option>
-          <option value="iso" class="bg-ui-panel text-ui-textPrimary">Isometric (Num 0)</option>
-        </select>
-      </div>
-
-      <!-- Shading Modes (Tex / Solid / Wire / PSX) -->
-      <div class="flex items-center bg-ui-input rounded-xs p-0.5 border border-ui-borderDefault">
-        <button 
-          @click="toolStore.viewport.shading = 'textured'" 
-          class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="toolStore.viewport.shading === 'textured' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
-          title="Textured Shading"
-        >
-          <BlenderIcon name="shading-textured" :size="11" />
-          <span>Tex</span>
-        </button>
-
-        <button 
-          @click="toolStore.viewport.shading = 'solid'" 
-          class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="toolStore.viewport.shading === 'solid' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
-          title="Solid Shading"
-        >
-          <BlenderIcon name="shading-solid" :size="11" />
-          <span>Solid</span>
-        </button>
-
-        <button 
-          @click="toolStore.viewport.shading = 'wireframe'" 
-          class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="toolStore.viewport.shading === 'wireframe' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
-          title="Wireframe Mode"
-        >
-          <BlenderIcon name="shading-wire" :size="11" />
-          <span>Wire</span>
-        </button>
-
-        <button 
-          @click="toolStore.viewport.shading = 'psx'" 
-          class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="toolStore.viewport.shading === 'psx' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
-          title="PSX Retro Preview"
-        >
-          <BlenderIcon name="shading-rendered" :size="11" />
-          <span>PSX</span>
-        </button>
-      </div>
-
-      <!-- Quick Toggles: X-Ray & Quad View -->
-      <div class="flex items-center bg-ui-input rounded-xs p-0.5 border border-ui-borderDefault">
-        <button 
-          @click="toolStore.viewport.xray = !toolStore.viewport.xray" 
-          class="px-1.5 py-0.5 rounded-xs text-[10px] font-bold transition"
-          :class="toolStore.viewport.xray ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'text-ui-textMuted hover:text-ui-textPrimary'"
-          title="Toggle X-Ray Transparency (Alt+Z)"
-        >
-          X-Ray
-        </button>
-
-        <button 
-          @click="toolStore.viewport.quadView = !toolStore.viewport.quadView" 
-          class="px-1.5 py-0.5 rounded-xs text-[10px] font-bold transition"
-          :class="toolStore.viewport.quadView ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'text-ui-textMuted hover:text-ui-textPrimary'"
-          title="Toggle Quad Ortho View (Ctrl+Alt+Q)"
-        >
-          Quad
-        </button>
-      </div>
-
-      <!-- Panel Visibility Quick Toggles -->
-      <div class="flex items-center bg-ui-input rounded-xs p-0.5 border border-ui-borderDefault">
-        <!-- Toggle Left Toolbar -->
-        <button 
-          @click="layoutStore.toggleLeftToolbar()"
-          class="p-1 rounded-xs transition"
-          :class="layoutStore.showLeftToolbar ? 'text-ui-accent bg-ui-active' : 'text-ui-textMuted hover:text-ui-textPrimary'"
-          :title="layoutStore.showLeftToolbar ? 'Hide Left Toolbar' : 'Show Left Toolbar'"
-        >
-          <PanelLeft class="w-3.5 h-3.5" />
-        </button>
-
-        <!-- Toggle Right Sidebar -->
-        <button 
-          @click="layoutStore.toggleRightSidebar()"
-          class="p-1 rounded-xs transition"
-          :class="layoutStore.showRightSidebar ? 'text-ui-accent bg-ui-active' : 'text-ui-textMuted hover:text-ui-textPrimary'"
-          :title="layoutStore.showRightSidebar ? 'Hide Right Inspector' : 'Show Right Inspector'"
-        >
-          <PanelRight class="w-3.5 h-3.5" />
-        </button>
+    <!-- 3. RIGHT: Scene Stats + Export -->
+    <div class="flex items-center space-x-2 shrink-0">
+      <!-- Blender Scene Statistics -->
+      <div class="flex items-center space-x-2 px-2 py-0.5 bg-ui-input rounded-xs border border-ui-borderSubtle text-[10px] text-ui-textMuted font-mono">
+        <span>Verts: <strong class="text-ui-textPrimary">{{ projectStore.stats.verts }}</strong></span>
+        <span class="text-ui-borderStrong">|</span>
+        <span>Faces: <strong class="text-ui-textPrimary">{{ projectStore.stats.faces }}</strong></span>
+        <span class="text-ui-borderStrong">|</span>
+        <span>Tris: <strong class="text-ui-textPrimary">{{ projectStore.stats.tris }}</strong></span>
       </div>
 
       <!-- Hotkeys Button -->
       <button 
         @click="$emit('open-hotkeys')"
         title="Keyboard Shortcuts"
-        class="p-1.5 text-ui-textSecondary hover:text-ui-textPrimary rounded-xs hover:bg-ui-hover transition"
+        class="p-1 text-ui-textSecondary hover:text-ui-textPrimary rounded-xs hover:bg-ui-hover transition"
       >
         <Keyboard class="w-3.5 h-3.5" />
       </button>

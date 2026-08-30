@@ -46,6 +46,22 @@ export interface MirrorModifier {
   flipV: boolean
 }
 
+export interface SubdivisionModifier {
+  enabled: boolean
+  level: number // 1 or 2
+}
+
+export interface SolidifyModifier {
+  enabled: boolean
+  thickness: number
+  offset: number
+}
+
+export interface BevelModifierConfig {
+  enabled: boolean
+  offset: number
+}
+
 export interface MeshObject {
   id: string
   name: string
@@ -60,5 +76,8 @@ export interface MeshObject {
   materialId: string
   armatureId?: string
   mirror?: MirrorModifier
+  subdivision?: SubdivisionModifier
+  solidify?: SolidifyModifier
+  bevelModifier?: BevelModifierConfig
   shadeMode?: 'flat' | 'smooth'
 }

@@ -4,14 +4,15 @@ import { useToolStore } from '../../stores/toolStore'
 import OutlinerTree from '../outliner/OutlinerTree.vue'
 import TransformProps from '../inspector/TransformProps.vue'
 import MaterialProps from '../inspector/MaterialProps.vue'
-import PalettePicker from '../uvpaint/PalettePicker.vue'
+import ModifiersProps from '../inspector/ModifiersProps.vue'
 import RiggingPanel from '../rigging/RiggingPanel.vue'
 import AnimationInspector from '../inspector/AnimationInspector.vue'
 import UVPaintProps from '../uvpaint/UVPaintProps.vue'
+import BlenderIcon from '../icons/BlenderIcon.vue'
 import { 
   Layers, 
   Sliders, 
-  Sparkles, 
+  Wrench,
   GripHorizontal, 
   Pin, 
   PinOff, 
@@ -20,10 +21,10 @@ import {
 } from 'lucide-vue-next'
 
 const toolStore = useToolStore()
-const activeTab = ref<'outliner' | 'props' | 'material'>('props')
+const activeTab = ref<'outliner' | 'props' | 'modifiers' | 'material'>('outliner')
 
 // Photoshop / DCC Floating & Resizable Panel States
-const isFloating = ref(true)
+const isFloating = ref(false)
 const isMinimized = ref(false)
 const width = ref(320)
 const height = ref(560)
@@ -42,9 +43,21 @@ let resizeStartY = 0
 let startW = 320
 let startH = 560
 
-watch(() => toolStore.appMode, () => {
-  activeTab.value = 'props'
-})
+function updateWorkspaceDefaultTab() {
+  if (toolStore.appMode === 'uvpaint') {
+    activeTab.value = 'material'
+  } else if (toolStore.appMode === 'model') {
+    if (toolStore.selectMode === 'object') {
+      activeTab.value = 'outliner'
+    } else {
+      activeTab.value = 'props'
+    }
+  } else {
+    activeTab.value = 'props'
+  }
+}
+
+watch(() => [toolStore.appMode, toolStore.selectMode], updateWorkspaceDefaultTab, { immediate: true })
 
 function toggleFloating() {
   isFloating.value = !isFloating.value
@@ -114,8 +127,8 @@ function startResizeCorner(e: MouseEvent) {
 
   const onMouseMove = (moveEvent: MouseEvent) => {
     if (!isResizingHeight.value) return
-    const delta = moveEvent.clientY - resizeStartY
-    height.value = Math.max(200, Math.min(window.innerHeight - 100, startH + delta))
+    const deltaY = moveEvent.clientY - resizeStartY
+    height.value = Math.max(200, Math.min(window.innerHeight - 100, startH + deltaY))
   }
 
   const onMouseUp = () => {
@@ -163,7 +176,7 @@ function startResizeCorner(e: MouseEvent) {
     >
       <div class="flex items-center space-x-1 text-ui-textSecondary font-bold text-[10px] uppercase">
         <GripHorizontal class="w-3 h-3 text-ui-textMuted" />
-        <span>Inspector</span>
+        <span>Properties</span>
       </div>
 
       <div class="flex items-center space-x-1" @mousedown.stop>
@@ -192,36 +205,46 @@ function startResizeCorner(e: MouseEvent) {
 
     <!-- Body Content (Hidden when minimized) -->
     <div v-show="!isMinimized" class="flex-1 flex flex-col min-h-0 overflow-hidden">
-      <!-- Dense Inspector Tab Navigation -->
-      <div class="h-7 bg-ui-header border-b border-ui-borderSubtle grid grid-cols-3 text-xs shrink-0 font-sans">
+      <!-- Blender Properties Tab Strip (4 Tabs: Outliner, Object, Modifiers, Material) -->
+      <div class="h-7 bg-ui-header border-b border-ui-borderSubtle grid grid-cols-4 text-xs shrink-0 font-sans">
         <!-- 1. Outliner Tab -->
         <button 
           @click="activeTab = 'outliner'"
-          class="flex items-center justify-center gap-1.5 transition text-[11px] border-b-2"
+          class="flex items-center justify-center p-1 transition border-b-2"
           :class="activeTab === 'outliner' ? 'bg-ui-panel text-ui-textPrimary font-semibold border-ui-accent' : 'border-transparent text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
+          title="Outliner / Collections"
         >
-          <Layers class="w-3 h-3 text-ui-textMuted" />
-          <span>Outliner</span>
+          <Layers class="w-3.5 h-3.5" />
         </button>
 
         <!-- 2. Properties Tab -->
         <button 
           @click="activeTab = 'props'"
-          class="flex items-center justify-center gap-1.5 transition text-[11px] border-b-2"
+          class="flex items-center justify-center p-1 transition border-b-2"
           :class="activeTab === 'props' ? 'bg-ui-panel text-ui-textPrimary font-semibold border-ui-accent' : 'border-transparent text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
+          :title="toolStore.appMode === 'rig' ? 'Rig Properties' : toolStore.appMode === 'animate' ? 'Animation Properties' : 'Object Properties'"
         >
-          <Sliders class="w-3 h-3 text-ui-textMuted" />
-          <span>{{ toolStore.appMode === 'rig' ? 'Rig' : toolStore.appMode === 'animate' ? 'Animate' : toolStore.appMode === 'uvpaint' ? 'Paint' : 'Properties' }}</span>
+          <Sliders class="w-3.5 h-3.5" />
         </button>
 
-        <!-- 3. Shading / Material Tab -->
+        <!-- 3. Modifiers Tab -->
+        <button 
+          @click="activeTab = 'modifiers'"
+          class="flex items-center justify-center p-1 transition border-b-2"
+          :class="activeTab === 'modifiers' ? 'bg-ui-panel text-sky-400 font-semibold border-sky-500' : 'border-transparent text-ui-textMuted hover:text-sky-300 hover:bg-ui-hover'"
+          title="Modifiers (Wrench)"
+        >
+          <Wrench class="w-3.5 h-3.5" />
+        </button>
+
+        <!-- 4. Material Properties Tab -->
         <button 
           @click="activeTab = 'material'"
-          class="flex items-center justify-center gap-1.5 transition text-[11px] border-b-2"
-          :class="activeTab === 'material' ? 'bg-ui-panel text-ui-textPrimary font-semibold border-ui-accent' : 'border-transparent text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
+          class="flex items-center justify-center p-1 transition border-b-2"
+          :class="activeTab === 'material' ? 'bg-ui-panel text-amber-400 font-semibold border-amber-500' : 'border-transparent text-ui-textMuted hover:text-amber-300 hover:bg-ui-hover'"
+          title="Material Properties"
         >
-          <Sparkles class="w-3 h-3 text-ui-textMuted" />
-          <span>Shading</span>
+          <BlenderIcon name="material" :size="14" />
         </button>
       </div>
 
@@ -235,20 +258,17 @@ function startResizeCorner(e: MouseEvent) {
           <RiggingPanel v-if="toolStore.appMode === 'rig'" />
           <AnimationInspector v-else-if="toolStore.appMode === 'animate'" />
           <UVPaintProps v-else-if="toolStore.appMode === 'uvpaint'" />
-          <div v-else class="flex flex-col">
-            <TransformProps />
-            <div class="p-2 border-t border-ui-borderSubtle">
-              <PalettePicker />
-            </div>
-          </div>
+          <TransformProps v-else />
         </div>
 
-        <!-- Shading Tab -->
+        <!-- Modifiers Tab -->
+        <div v-show="activeTab === 'modifiers'" class="h-full overflow-y-auto flex flex-col">
+          <ModifiersProps />
+        </div>
+
+        <!-- Material Properties Tab -->
         <div v-show="activeTab === 'material'" class="h-full overflow-y-auto flex flex-col">
           <MaterialProps />
-          <div class="p-2 border-t border-ui-borderSubtle">
-            <PalettePicker />
-          </div>
         </div>
       </div>
 

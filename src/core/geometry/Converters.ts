@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { MeshObject, Vertex } from '../../types/mesh'
 import { computeFaceNormal } from '../../utils/math'
 import { getMeshEdges } from './EdgeUtils'
-import { evaluateMirror } from './MirrorModifier'
+import { evaluateModifiers } from './Modifiers'
 
 export interface GeometryBundle {
   geometry: THREE.BufferGeometry
@@ -21,7 +21,7 @@ export function meshToThreeGeometry(
   selectedEdgeIds: string[] = [],
   globalShadeMode: 'flat' | 'smooth' = 'flat'
 ): GeometryBundle {
-  const { vertices: evalVertices, faces: evalFaces } = evaluateMirror(mesh)
+  const { vertices: evalVertices, faces: evalFaces } = evaluateModifiers(mesh)
 
   const vertMap = new Map<string, Vertex>()
   for (const v of evalVertices) {

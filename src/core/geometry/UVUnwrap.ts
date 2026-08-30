@@ -236,33 +236,348 @@ export function cubemapCrossUnwrap(mesh: MeshObject): MeshObject {
 }
 
 /**
- * Auto-pack all UV face islands into non-overlapping grid with margin padding.
+ * Advanced Disconnected UV Island Segmentation & 2D Shelf Packing
+ * Packs all UV islands inside [0..1] with customizable pixel padding.
  */
-export function autoPackIslands(mesh: MeshObject, margin = 0.02): MeshObject {
+export function packUVIslands(mesh: MeshObject, marginPixels = 2, textureSize = 64): MeshObject {
   const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
+  if (newMesh.faces.length === 0) return newMesh
+
+  const margin = Math.max(0.001, marginPixels / textureSize)
+
+  // 1. Group faces into connected 2D UV islands
   const faceCount = newMesh.faces.length
-  if (faceCount === 0) return newMesh
+  const faceVisited = new Array(faceCount).fill(false)
+  const islands: number[][] = []
 
-  const cols = Math.ceil(Math.sqrt(faceCount))
-  const rows = Math.ceil(faceCount / cols)
+  // Helper to check if two faces share a UV edge
+  function shareUvEdge(fAIdx: number, fBIdx: number): boolean {
+    const fA = newMesh.faces[fAIdx]
+    const fB = newMesh.faces[fBIdx]
+    if (!fA.uvs || !fB.uvs) return false
 
-  const cellW = (1.0 - margin * (cols + 1)) / cols
-  const cellH = (1.0 - margin * (rows + 1)) / rows
+    let shared = 0
+    for (const uvA of fA.uvs) {
+      for (const uvB of fB.uvs) {
+        if (Math.abs(uvA.u - uvB.u) < 0.002 && Math.abs(uvA.v - uvB.v) < 0.002) {
+          shared++
+          break
+        }
+      }
+    }
+    return shared >= 2
+  }
 
-  newMesh.faces.forEach((face, idx) => {
-    const col = idx % cols
-    const row = Math.floor(idx / cols)
+  for (let i = 0; i < faceCount; i++) {
+    if (faceVisited[i]) continue
+    const island: number[] = [i]
+    faceVisited[i] = true
+    const queue = [i]
 
-    const u0 = margin + col * (cellW + margin)
-    const v0 = 1.0 - (margin + (row + 1) * (cellH + margin))
+    while (queue.length > 0) {
+      const curr = queue.shift()!
+      for (let j = 0; j < faceCount; j++) {
+        if (!faceVisited[j] && shareUvEdge(curr, j)) {
+          faceVisited[j] = true
+          island.push(j)
+          queue.push(j)
+        }
+      }
+    }
+    islands.push(island)
+  }
 
-    face.uvs = [
-      { u: u0, v: v0 + cellH },
-      { u: u0 + cellW, v: v0 + cellH },
-      { u: u0 + cellW, v: v0 },
-      { u: u0, v: v0 }
-    ].slice(0, face.vertexIds.length)
+  // 2. Measure Island Bounding Boxes
+  interface IslandBox {
+    indices: number[]
+    minU: number
+    maxU: number
+    minV: number
+    maxV: number
+    w: number
+    h: number
+  }
+
+  const boxes: IslandBox[] = islands.map(island => {
+    let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity
+    for (const fIdx of island) {
+      for (const uv of newMesh.faces[fIdx].uvs) {
+        if (uv.u < minU) minU = uv.u
+        if (uv.u > maxU) maxU = uv.u
+        if (uv.v < minV) minV = uv.v
+        if (uv.v > maxV) maxV = uv.v
+      }
+    }
+    return {
+      indices: island,
+      minU,
+      maxU,
+      minV,
+      maxV,
+      w: Math.max(0.001, maxU - minU),
+      h: Math.max(0.001, maxV - minV)
+    }
   })
 
+  // Sort islands descending by height
+  boxes.sort((a, b) => b.h - a.h)
+
+  // 3. 2D Shelf Bin Packing
+  let shelfX = margin
+  let shelfY = margin
+  let shelfHeight = 0
+  let totalScale = 1.0
+
+  // Calculate required area to estimate downscaling if needed
+  let totalIslandArea = 0
+  for (const b of boxes) {
+    totalIslandArea += (b.w + margin * 2) * (b.h + margin * 2)
+  }
+
+  if (totalIslandArea > 0.85) {
+    totalScale = Math.min(1.0, Math.sqrt(0.85 / totalIslandArea))
+  }
+
+  for (const b of boxes) {
+    const bw = b.w * totalScale
+    const bh = b.h * totalScale
+
+    // If rectangle exceeds shelf width, start new shelf
+    if (shelfX + bw + margin > 1.0) {
+      shelfX = margin
+      shelfY += shelfHeight + margin
+      shelfHeight = 0
+    }
+
+    // If exceeds vertical space, apply uniform compression
+    const targetU0 = shelfX
+    const targetV0 = 1.0 - (shelfY + bh)
+
+    for (const fIdx of b.indices) {
+      for (const uv of newMesh.faces[fIdx].uvs) {
+        const normU = (uv.u - b.minU) / b.w
+        const normV = (uv.v - b.minV) / b.h
+        uv.u = Math.max(0, Math.min(1, targetU0 + normU * bw))
+        uv.v = Math.max(0, Math.min(1, targetV0 + normV * bh))
+      }
+    }
+
+    shelfX += bw + margin
+    shelfHeight = Math.max(shelfHeight, bh)
+  }
+
   return newMesh
+}
+
+/**
+ * Gridify / Straighten Quad UV Islands into an orthogonal grid.
+ */
+export function gridifyQuadIslands(mesh: MeshObject, targetFaceIndices?: number[]): MeshObject {
+  const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
+  const facesToProcess = targetFaceIndices && targetFaceIndices.length > 0 
+    ? targetFaceIndices 
+    : newMesh.faces.map((_, i) => i)
+
+  for (const fIdx of facesToProcess) {
+    const face = newMesh.faces[fIdx]
+    if (!face || face.uvs.length !== 4) continue // Only quads
+
+    // Bounding box of quad
+    let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity
+    for (const uv of face.uvs) {
+      if (uv.u < minU) minU = uv.u
+      if (uv.u > maxU) maxU = uv.u
+      if (uv.v < minV) minV = uv.v
+      if (uv.v > maxV) maxV = uv.v
+    }
+
+    // Straighten 4 corners
+    face.uvs = [
+      { u: minU, v: maxV },
+      { u: maxU, v: maxV },
+      { u: maxU, v: minV },
+      { u: minU, v: minV }
+    ]
+  }
+
+  return newMesh
+}
+
+/**
+ * Equalize Texel Density across all UV islands to ensure uniform pixels/meter.
+ */
+export function equalizeTexelDensity(mesh: MeshObject): MeshObject {
+  const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
+  const vertMap = new Map<string, Vertex>()
+  for (const v of newMesh.vertices) {
+    vertMap.set(v.id, v)
+  }
+
+  // Calculate 3D area vs 2D UV area
+  let totalWorldArea = 0
+  let totalUvArea = 0
+
+  interface FaceMetrics {
+    face: any
+    worldArea: number
+    uvArea: number
+  }
+
+  const metrics: FaceMetrics[] = []
+
+  for (const face of newMesh.faces) {
+    if (face.uvs.length < 3) continue
+    const verts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
+    if (verts.length < 3) continue
+
+    // 3D Triangle Area (cross product)
+    const p0 = verts[0].position, p1 = verts[1].position, p2 = verts[2].position
+    const e1 = { x: p1.x - p0.x, y: p1.y - p0.y, z: p1.z - p0.z }
+    const e2 = { x: p2.x - p0.x, y: p2.y - p0.y, z: p2.z - p0.z }
+    const crossX = e1.y * e2.z - e1.z * e2.y
+    const crossY = e1.z * e2.x - e1.x * e2.z
+    const crossZ = e1.x * e2.y - e1.y * e2.x
+    const wArea = 0.5 * Math.hypot(crossX, crossY, crossZ)
+
+    // 2D UV Area
+    const u0 = face.uvs[0], u1 = face.uvs[1], u2 = face.uvs[2]
+    const uvArea = 0.5 * Math.abs((u1.u - u0.u) * (u2.v - u0.v) - (u2.u - u0.u) * (u1.v - u0.v))
+
+    totalWorldArea += wArea
+    totalUvArea += uvArea
+    metrics.push({ face, worldArea: wArea, uvArea })
+  }
+
+  if (totalWorldArea === 0 || totalUvArea === 0) return newMesh
+
+  const avgRatio = totalUvArea / totalWorldArea
+
+  for (const m of metrics) {
+    if (m.worldArea === 0 || m.uvArea === 0) continue
+    const targetUvArea = m.worldArea * avgRatio
+    const scale = Math.sqrt(targetUvArea / m.uvArea)
+
+    // Center of face UVs
+    let cU = 0, cV = 0
+    for (const uv of m.face.uvs) {
+      cU += uv.u; cV += uv.v
+    }
+    cU /= m.face.uvs.length
+    cV /= m.face.uvs.length
+
+    for (const uv of m.face.uvs) {
+      uv.u = cU + (uv.u - cU) * Math.max(0.1, Math.min(3.0, scale))
+      uv.v = cV + (uv.v - cV) * Math.max(0.1, Math.min(3.0, scale))
+    }
+  }
+
+  return newMesh
+}
+
+/**
+ * Calculate UV Stretch & Distortion heatmap per face.
+ * Returns map of face ID -> { ratio, color }
+ */
+export function calculateUVDistortion(mesh: MeshObject): Map<string, { ratio: number; color: string }> {
+  const result = new Map<string, { ratio: number; color: string }>()
+  const vertMap = new Map<string, Vertex>()
+  for (const v of mesh.vertices) vertMap.set(v.id, v)
+
+  let totalWorldArea = 0
+  let totalUvArea = 0
+  const faceData: { id: string; wArea: number; uvArea: number }[] = []
+
+  for (const face of mesh.faces) {
+    if (face.uvs.length < 3) continue
+    const verts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
+    if (verts.length < 3) continue
+
+    const p0 = verts[0].position, p1 = verts[1].position, p2 = verts[2].position
+    const e1 = { x: p1.x - p0.x, y: p1.y - p0.y, z: p1.z - p0.z }
+    const e2 = { x: p2.x - p0.x, y: p2.y - p0.y, z: p2.z - p0.z }
+    const wArea = 0.5 * Math.hypot(
+      e1.y * e2.z - e1.z * e2.y,
+      e1.z * e2.x - e1.x * e2.z,
+      e1.x * e2.y - e1.y * e2.x
+    )
+
+    const u0 = face.uvs[0], u1 = face.uvs[1], u2 = face.uvs[2]
+    const uvArea = 0.5 * Math.abs((u1.u - u0.u) * (u2.v - u0.v) - (u2.u - u0.u) * (u1.v - u0.v))
+
+    totalWorldArea += wArea
+    totalUvArea += uvArea
+    faceData.push({ id: face.id, wArea, uvArea })
+  }
+
+  const meanDensity = totalWorldArea > 0 ? totalUvArea / totalWorldArea : 1.0
+
+  for (const f of faceData) {
+    const faceDensity = f.wArea > 0 ? f.uvArea / f.wArea : 1.0
+    const ratio = meanDensity > 0 ? faceDensity / meanDensity : 1.0
+
+    let color = 'rgba(34, 197, 94, 0.45)' // Optimal Green (1.0)
+    if (ratio < 0.6) {
+      color = 'rgba(59, 130, 246, 0.55)' // Compressed Blue (< 0.6)
+    } else if (ratio > 1.5) {
+      color = 'rgba(239, 68, 68, 0.55)' // Stretched Red (> 1.5)
+    } else if (ratio > 1.2) {
+      color = 'rgba(245, 158, 11, 0.45)' // Slight stretch Amber
+    } else if (ratio < 0.8) {
+      color = 'rgba(6, 182, 212, 0.45)' // Slight compression Cyan
+    }
+
+    result.set(f.id, { ratio, color })
+  }
+
+  return result
+}
+
+/**
+ * Generate high-contrast numbered calibration UV test grid (A1..H8).
+ */
+export function generateUVCheckerboardDataURL(size = 512): string {
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')!
+
+  const cells = 8
+  const cellSize = size / cells
+  const cols = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
+
+  for (let r = 0; r < cells; r++) {
+    for (let c = 0; c < cells; c++) {
+      const isEven = (r + c) % 2 === 0
+      ctx.fillStyle = isEven ? '#334155' : '#1e293b'
+      ctx.fillRect(c * cellSize, r * cellSize, cellSize, cellSize)
+
+      // Inner border
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)'
+      ctx.lineWidth = 1
+      ctx.strokeRect(c * cellSize, r * cellSize, cellSize, cellSize)
+
+      // Label (e.g. A1, D4)
+      ctx.fillStyle = isEven ? '#94a3b8' : '#cbd5e1'
+      ctx.font = `bold ${Math.round(cellSize * 0.28)}px monospace`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(`${cols[c]}${8 - r}`, c * cellSize + cellSize / 2, r * cellSize + cellSize / 2)
+    }
+  }
+
+  // Draw 2x2 colored quadrants divider
+  ctx.strokeStyle = '#f59e0b'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.moveTo(size / 2, 0)
+  ctx.lineTo(size / 2, size)
+  ctx.moveTo(0, size / 2)
+  ctx.lineTo(size, size / 2)
+  ctx.stroke()
+
+  return canvas.toDataURL('image/png')
+}
+
+export function autoPackIslands(mesh: MeshObject, margin = 0.02): MeshObject {
+  return packUVIslands(mesh, Math.round(margin * 64), 64)
 }

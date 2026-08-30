@@ -718,4 +718,148 @@ export function cleanupMeshGeometry(mesh: MeshObject): OperationResult {
   }
 }
 
+/**
+ * Bridges two opposing edge loops or two selected edges with connecting quad faces (Blender Bridge Edge Loops).
+ */
+export function bridgeEdgeLoops(mesh: MeshObject, selectedEdgeIds: string[]): OperationResult {
+  const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
+  if (selectedEdgeIds.length < 2) {
+    return { mesh: newMesh, selectedFaceIds: [], selectedVertexIds: [] }
+  }
+
+  // Parse edge vertices
+  const edgeList: Array<{ id: string; v1: string; v2: string }> = []
+  for (const eId of selectedEdgeIds) {
+    const parts = eId.split('_')
+    if (parts.length >= 3) {
+      edgeList.push({ id: eId, v1: parts[1], v2: parts[2] })
+    }
+  }
+
+  if (edgeList.length === 2) {
+    const e1 = edgeList[0]
+    const e2 = edgeList[1]
+
+    const vertMap = new Map(newMesh.vertices.map(v => [v.id, v]))
+    const p1a = vertMap.get(e1.v1)?.position
+    const p1b = vertMap.get(e1.v2)?.position
+    const p2a = vertMap.get(e2.v1)?.position
+    const p2b = vertMap.get(e2.v2)?.position
+
+    if (p1a && p1b && p2a && p2b) {
+      const distNormal = Math.hypot(p1a.x - p2a.x, p1a.y - p2a.y, p1a.z - p2a.z) + Math.hypot(p1b.x - p2b.x, p1b.y - p2b.y, p1b.z - p2b.z)
+      const distCross = Math.hypot(p1a.x - p2b.x, p1a.y - p2b.y, p1a.z - p2b.z) + Math.hypot(p1b.x - p2a.x, p1b.y - p2a.y, p1b.z - p2a.z)
+
+      const vertIds = distNormal <= distCross
+        ? [e1.v1, e1.v2, e2.v2, e2.v1]
+        : [e1.v1, e1.v2, e2.v1, e2.v2]
+
+      const newFaceId = genId('f_bridge')
+      newMesh.faces.push({
+        id: newFaceId,
+        vertexIds: vertIds,
+        uvs: [{ u: 0, v: 0 }, { u: 1, v: 0 }, { u: 1, v: 1 }, { u: 0, v: 1 }],
+        materialIndex: 0,
+        selected: true
+      })
+
+      return {
+        mesh: newMesh,
+        selectedFaceIds: [newFaceId],
+        selectedVertexIds: []
+      }
+    }
+  }
+
+  // Multi-edge loop bridge
+  const half = Math.floor(edgeList.length / 2)
+  const loop1 = edgeList.slice(0, half)
+  const loop2 = edgeList.slice(half)
+
+  const newFaceIds: string[] = []
+  const count = Math.min(loop1.length, loop2.length)
+
+  for (let i = 0; i < count; i++) {
+    const e1 = loop1[i]
+    const e2 = loop2[i]
+    const fId = genId('f_bridge')
+    newMesh.faces.push({
+      id: fId,
+      vertexIds: [e1.v1, e1.v2, e2.v2, e2.v1],
+      uvs: [{ u: 0, v: 0 }, { u: 1, v: 0 }, { u: 1, v: 1 }, { u: 0, v: 1 }],
+      materialIndex: 0,
+      selected: true
+    })
+    newFaceIds.push(fId)
+  }
+
+  return {
+    mesh: newMesh,
+    selectedFaceIds: newFaceIds,
+    selectedVertexIds: []
+  }
+}
+
+/**
+ * Generates an internal quad grid inside a closed boundary loop (Blender Grid Fill).
+ */
+export function gridFill(mesh: MeshObject, boundaryVertexIds: string[]): OperationResult {
+  const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
+  if (boundaryVertexIds.length < 4 || boundaryVertexIds.length % 2 !== 0) {
+    return { mesh: newMesh, selectedFaceIds: [], selectedVertexIds: boundaryVertexIds }
+  }
+
+  const n = boundaryVertexIds.length
+
+  if (n === 4) {
+    const newFaceId = genId('f_grid')
+    newMesh.faces.push({
+      id: newFaceId,
+      vertexIds: [...boundaryVertexIds],
+      uvs: [{ u: 0, v: 0 }, { u: 1, v: 0 }, { u: 1, v: 1 }, { u: 0, v: 1 }],
+      materialIndex: 0,
+      selected: true
+    })
+    return {
+      mesh: newMesh,
+      selectedFaceIds: [newFaceId],
+      selectedVertexIds: boundaryVertexIds
+    }
+  }
+
+  const vertMap = new Map(newMesh.vertices.map(v => [v.id, v]))
+  const boundaryPositions = boundaryVertexIds.map(id => vertMap.get(id)?.position).filter(Boolean) as Array<{ x: number; y: number; z: number }>
+  const centerPos = computeCentroid(boundaryPositions)
+
+  const centerVertId = genId('v_grid_center')
+  newMesh.vertices.push({
+    id: centerVertId,
+    position: centerPos,
+    color: '#ffffff'
+  })
+
+  const newFaceIds: string[] = []
+  for (let i = 0; i < n; i += 2) {
+    const v1 = boundaryVertexIds[i]
+    const v2 = boundaryVertexIds[(i + 1) % n]
+    const v3 = boundaryVertexIds[(i + 2) % n]
+
+    const fId = genId('f_grid')
+    newMesh.faces.push({
+      id: fId,
+      vertexIds: [v1, v2, v3, centerVertId],
+      uvs: [{ u: 0, v: 0 }, { u: 0.5, v: 0 }, { u: 1, v: 0 }, { u: 0.5, v: 0.5 }],
+      materialIndex: 0,
+      selected: true
+    })
+    newFaceIds.push(fId)
+  }
+
+  return {
+    mesh: newMesh,
+    selectedFaceIds: newFaceIds,
+    selectedVertexIds: []
+  }
+}
+
 

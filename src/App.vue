@@ -11,6 +11,7 @@ import ExportModal from './components/modals/ExportModal.vue'
 import HotkeyModal from './components/modals/HotkeyModal.vue'
 import NewProjectModal from './components/modals/NewProjectModal.vue'
 import AddPrimitivePopout from './components/modals/AddPrimitivePopout.vue'
+import BlenderPieMenu from './components/viewport/BlenderPieMenu.vue'
 
 import { useToolStore } from './stores/toolStore'
 import { useProjectStore } from './stores/projectStore'
@@ -136,6 +137,13 @@ function handleKeyDown(e: KeyboardEvent) {
     }
   }
 
+  // Alt+Z: Toggle X-Ray Mode (Blender)
+  if (e.altKey && (e.key === 'z' || e.key === 'Z') && !e.ctrlKey && !e.metaKey) {
+    e.preventDefault()
+    toolStore.viewport.xray = !toolStore.viewport.xray
+    return
+  }
+
   // Loop Cut Shortcut (Ctrl+R)
   if ((e.ctrlKey || e.metaKey) && (e.key === 'r' || e.key === 'R')) {
     e.preventDefault()
@@ -228,6 +236,11 @@ function handleKeyDown(e: KeyboardEvent) {
       toolStore.selectMode = 'origin'
       projectStore.clearSubSelections()
       break
+    case '6':
+      toolStore.selectMode = 'bone'
+      toolStore.setAppMode('rig')
+      projectStore.clearSubSelections()
+      break
     case 'g':
       if (toolStore.appMode === 'model') {
         window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'grab' }))
@@ -267,7 +280,7 @@ function handleKeyDown(e: KeyboardEvent) {
       break
     case 'b':
       if (toolStore.appMode === 'model') {
-        window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'bevel' }))
+        toolStore.setModelTool('select')
       } else if (toolStore.appMode === 'uvpaint') {
         toolStore.setPaintTool('brush')
       }
@@ -377,10 +390,11 @@ onUnmounted(() => {
     <!-- Desktop Bottom Status Bar Footer -->
     <StatusBar v-if="layoutStore.showStatusBar" />
 
-    <!-- Modals -->
+    <!-- Modals & Overlays -->
     <ExportModal v-if="showExportModal" @close="showExportModal = false" />
     <HotkeyModal v-if="showHotkeyModal" @close="showHotkeyModal = false" />
     <NewProjectModal v-if="showNewProjectModal" @close="showNewProjectModal = false" />
     <AddPrimitivePopout />
+    <BlenderPieMenu />
   </div>
 </template>

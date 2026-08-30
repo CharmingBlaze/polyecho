@@ -63,6 +63,13 @@ const props = withDefaults(defineProps<{
     | 'eraser'
     | 'picker'
     | 'dither'
+    | 'line'
+    | 'rect'
+    | 'square'
+    | 'circle'
+    | 'shade'
+    | 'marquee'
+    | 'select-box'
     | 'material'
     | 'texture'
     // Outliner & UI
@@ -456,6 +463,45 @@ const sizePx = computed(() => typeof props.size === 'number' ? `${props.size}px`
       <rect x="12" y="12" width="4" height="4" fill="currentColor" />
       <rect x="8" y="16" width="4" height="4" fill="currentColor" />
       <rect x="16" y="16" width="4" height="4" fill="currentColor" />
+    </g>
+
+    <g v-else-if="name === 'line'">
+      <line x1="4" y1="20" x2="20" y2="4" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+    </g>
+
+    <g v-else-if="name === 'rect' || name === 'square'">
+      <rect x="4" y="4" width="16" height="16" rx="1" fill="none" stroke="currentColor" stroke-width="1.8" />
+    </g>
+
+    <g v-else-if="name === 'circle'">
+      <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.8" />
+    </g>
+
+    <g v-else-if="name === 'shade'">
+      <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.5" />
+      <path d="M12 4A8 8 0 0 1 12 20Z" fill="currentColor" />
+    </g>
+
+    <g v-else-if="name === 'marquee' || name === 'select-box'">
+      <rect x="4" y="4" width="16" height="16" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 2" fill="none" />
+    </g>
+
+    <!-- MATERIAL (Official Blender Material Sphere) -->
+    <g v-else-if="name === 'material'">
+      <!-- Outer Sphere -->
+      <circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.5" />
+      <!-- Checkerboard quadrants -->
+      <path d="M12 3.5C7.3 3.5 3.5 7.3 3.5 12C3.5 12 7.5 12 12 12C12 7.5 12 3.5 12 3.5Z" fill="currentColor" fill-opacity="0.35" />
+      <path d="M12 12C12 16.5 12 20.5 12 20.5C16.7 20.5 20.5 16.7 20.5 12C20.5 12 16.5 12 12 12Z" fill="currentColor" fill-opacity="0.6" />
+      <!-- Specular Highlight -->
+      <circle cx="9" cy="9" r="1.8" fill="currentColor" />
+    </g>
+
+    <!-- TEXTURE -->
+    <g v-else-if="name === 'texture'">
+      <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.5" fill="none" />
+      <circle cx="8.5" cy="8.5" r="2" fill="currentColor" />
+      <path d="M21 15L16 10L5 21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
     </g>
 
     <!-- OUTLINER & UI -->

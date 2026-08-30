@@ -20,6 +20,8 @@ const activeTab = ref<'gltf' | 'obj' | 'spritesheet' | 'texture'>('gltf')
 const spriteSize = ref<number>(64)
 const spriteDirections = ref<number>(8)
 const spriteIsoAngle = ref<number>(30)
+const selectedClipId = ref<string>(animationStore.activeClip?.id || '')
+const frameStep = ref<number>(1)
 
 function downloadFile(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob)
@@ -70,17 +72,23 @@ function handleExportSpriteSheet() {
   const textureMap = new Map<string, THREE.Texture>()
   textureMap.set('default_material', tex)
 
+  const targetClip = selectedClipId.value ? animationStore.armature.clips.find(c => c.id === selectedClipId.value) : null
+
   const canvas = renderSpriteSheet(projectStore.meshes, textureMap, {
     frameWidth: spriteSize.value,
     frameHeight: spriteSize.value,
     directions: spriteDirections.value,
-    framesPerDir: 1,
-    isoAngle: spriteIsoAngle.value
+    framesPerDir: targetClip ? Math.floor(targetClip.durationFrames / frameStep.value) + 1 : 1,
+    isoAngle: spriteIsoAngle.value,
+    clip: targetClip,
+    armature: animationStore.armature,
+    frameStep: frameStep.value
   })
 
   canvas.toBlob((blob) => {
     if (blob) {
-      downloadFile(blob, `${projectStore.projectName}_spritesheet_${spriteDirections.value}dir.png`)
+      const clipSuffix = targetClip ? `_${targetClip.name}` : ''
+      downloadFile(blob, `${projectStore.projectName}${clipSuffix}_spritesheet_${spriteDirections.value}dir.png`)
       emit('close')
     }
   })
@@ -89,7 +97,7 @@ function handleExportSpriteSheet() {
 
 <template>
   <div class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 select-none">
-    <div class="bg-dcc-850 border border-dcc-700 rounded-xl w-[500px] shadow-2xl overflow-hidden flex flex-col">
+    <div class="bg-dcc-850 border border-dcc-700 rounded-xl w-[520px] shadow-2xl overflow-hidden flex flex-col">
       <!-- Modal Header -->
       <div class="h-12 bg-dcc-900 border-b border-dcc-750 px-4 flex items-center justify-between">
         <div class="flex items-center space-x-2">
@@ -175,33 +183,80 @@ function handleExportSpriteSheet() {
         <!-- Sprite Sheet Section -->
         <div v-else-if="activeTab === 'spritesheet'" class="flex flex-col space-y-3">
           <p class="text-slate-400 leading-relaxed">
-            Bakes your 3D low-poly model into an 8-directional or isometric 2D retro pixel-art sprite sheet ready for top-down or RPG games.
+            Bakes your 3D low-poly model or animation clip into an 8-directional or isometric 2D retro pixel-art sprite sheet ready for top-down, tactical RPG, or billboard games.
           </p>
 
-          <div class="grid grid-cols-2 gap-3 py-2">
+          <div class="grid grid-cols-2 gap-3 py-1">
+            <label class="flex flex-col space-y-1">
+              <span class="font-mono text-slate-400">Animation Clip:</span>
+              <select v-model="selectedClipId" class="bg-dcc-900 border border-dcc-700 rounded p-1.5 font-mono text-xs text-amber-300">
+                <option value="">Current Static Pose (1 frame)</option>
+                <option v-for="c in animationStore.armature.clips" :key="c.id" :value="c.id">
+                  {{ c.name }} ({{ c.durationFrames }} frames)
+                </option>
+              </select>
+            </label>
+
+            <label class="flex flex-col space-y-1">
+              <span class="font-mono text-slate-400">Frame Sampling:</span>
+              <select v-model="frameStep" class="bg-dcc-900 border border-dcc-700 rounded p-1.5 font-mono text-xs">
+                <option :value="1">Every Frame (100% full rate)</option>
+                <option :value="2">Every 2nd Frame (50% speed/retro)</option>
+                <option :value="3">Every 3rd Frame (33% compact)</option>
+              </select>
+            </label>
+
             <label class="flex flex-col space-y-1">
               <span class="font-mono text-slate-400">Frame Size:</span>
               <select v-model="spriteSize" class="bg-dcc-900 border border-dcc-700 rounded p-1.5 font-mono text-xs">
                 <option :value="32">32 x 32 px</option>
+                <option :value="48">48 x 48 px</option>
                 <option :value="64">64 x 64 px</option>
                 <option :value="128">128 x 128 px</option>
               </select>
             </label>
 
             <label class="flex flex-col space-y-1">
-              <span class="font-mono text-slate-400">Directions:</span>
+              <span class="font-mono text-slate-400">Directions & Angle:</span>
               <select v-model="spriteDirections" class="bg-dcc-900 border border-dcc-700 rounded p-1.5 font-mono text-xs">
-                <option :value="4">4 Directions</option>
+                <option :value="4">4 Directions (Cardinals)</option>
                 <option :value="8">8 Directions (Octagonal)</option>
               </select>
             </label>
+          </div>
+
+          <div class="p-2 rounded bg-dcc-900/60 border border-dcc-750 flex items-center justify-between text-[11px] font-mono text-slate-400">
+            <span>Camera Pitch Angle:</span>
+            <div class="flex items-center gap-2">
+              <button 
+                @click="spriteIsoAngle = 30" 
+                class="px-2 py-0.5 rounded text-[10px]"
+                :class="spriteIsoAngle === 30 ? 'bg-indigo-600 text-white font-bold' : 'bg-dcc-800 text-slate-400 hover:text-white'"
+              >
+                30° Iso
+              </button>
+              <button 
+                @click="spriteIsoAngle = 45" 
+                class="px-2 py-0.5 rounded text-[10px]"
+                :class="spriteIsoAngle === 45 ? 'bg-indigo-600 text-white font-bold' : 'bg-dcc-800 text-slate-400 hover:text-white'"
+              >
+                45° Dimetric
+              </button>
+              <button 
+                @click="spriteIsoAngle = 0" 
+                class="px-2 py-0.5 rounded text-[10px]"
+                :class="spriteIsoAngle === 0 ? 'bg-indigo-600 text-white font-bold' : 'bg-dcc-800 text-slate-400 hover:text-white'"
+              >
+                0° Side / Billboard
+              </button>
+            </div>
           </div>
 
           <button 
             @click="handleExportSpriteSheet"
             class="w-full py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-semibold shadow transition"
           >
-            Generate & Download Sprite Sheet
+            Generate & Download Animated Sprite Sheet
           </button>
         </div>
 

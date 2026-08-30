@@ -22,18 +22,36 @@ import {
   ChevronLeft,
   Maximize2,
   Minimize2,
-  Flag
+  Flag,
+  TrendingUp
 } from 'lucide-vue-next'
+import { InterpolationType } from '../../types/animation'
+import { sampleTrack } from '../../core/animation/Armature'
 
 const animationStore = useAnimationStore()
 const projectStore = useProjectStore()
 
-const activeTab = ref<'keyframe' | 'clip'>('keyframe')
+const activeTab = ref<'keyframe' | 'graph' | 'clip'>('keyframe')
 const showNewClipModal = ref<boolean>(false)
 const newClipName = ref<string>('New_Action')
 const expandedTracks = ref<Record<string, boolean>>({})
 const showMarkerInput = ref<boolean>(false)
 const newMarkerName = ref<string>('Event')
+
+// Graph Editor State
+const graphChannel = ref<'rotation' | 'position' | 'scale'>('rotation')
+const graphShowX = ref<boolean>(true)
+const graphShowY = ref<boolean>(true)
+const graphShowZ = ref<boolean>(true)
+const selectedGraphKey = ref<{
+  targetId: string
+  targetType: 'mesh' | 'bone'
+  channel: 'position' | 'rotation' | 'scale'
+  axis: 'x' | 'y' | 'z'
+  frame: number
+  value: number
+  interpolation: InterpolationType
+} | null>(null)
 
 function handleAddMarker() {
   const name = newMarkerName.value.trim() || 'Event'
@@ -221,6 +239,203 @@ const timeMarkers = computed(() => {
   }
   return markers
 })
+
+// ----------------------------------------------------
+// GRAPH EDITOR COMPUTATIONS
+// ----------------------------------------------------
+const activeGraphTarget = computed(() => {
+  if (animationStore.selectedBoneId) {
+    const bone = animationStore.selectedBone
+    return bone ? { id: bone.id, type: 'bone' as const, name: bone.name } : null
+  } else if (projectStore.activeMesh) {
+    const mesh = projectStore.activeMesh
+    return { id: mesh.id, type: 'mesh' as const, name: mesh.name }
+  }
+  return null
+})
+
+const activeGraphTrack = computed(() => {
+  if (!activeGraphTarget.value || !animationStore.activeClip) return null
+  return animationStore.activeClip.tracks.find(t => t.targetId === activeGraphTarget.value!.id) || null
+})
+
+const activeGraphKeyframes = computed(() => {
+  if (!activeGraphTrack.value) return []
+  if (graphChannel.value === 'position') return activeGraphTrack.value.positionKeys
+  if (graphChannel.value === 'rotation') return activeGraphTrack.value.rotationKeys
+  return activeGraphTrack.value.scaleKeys
+})
+
+const graphYRange = computed(() => {
+  const keys = activeGraphKeyframes.value
+  let min = 0
+  let max = 0
+
+  if (graphChannel.value === 'rotation') {
+    min = -45
+    max = 45
+  } else if (graphChannel.value === 'position') {
+    min = -1.5
+    max = 1.5
+  } else {
+    min = 0
+    max = 2
+  }
+
+  for (const k of keys) {
+    min = Math.min(min, k.value.x, k.value.y, k.value.z)
+    max = Math.max(max, k.value.x, k.value.y, k.value.z)
+  }
+
+  const pad = Math.max(0.5, (max - min) * 0.15)
+  return {
+    min: Number((min - pad).toFixed(2)),
+    max: Number((max + pad).toFixed(2))
+  }
+})
+
+function mapGraphCoords(frame: number, val: number, svgW = 800, svgH = 220) {
+  const padL = 45
+  const padR = 25
+  const padT = 20
+  const padB = 30
+  const plotW = svgW - padL - padR
+  const plotH = svgH - padT - padB
+
+  const duration = Math.max(1, maxFrames.value)
+  const normX = Math.max(0, Math.min(1, frame / duration))
+  const x = padL + normX * plotW
+
+  const { min, max } = graphYRange.value
+  const normY = (val - min) / Math.max(0.001, max - min)
+  const y = padT + plotH * (1 - Math.max(0, Math.min(1, normY)))
+
+  return { x, y }
+}
+
+const graphSampledCurves = computed(() => {
+  if (!activeGraphTrack.value) return { pathX: '', pathY: '', pathZ: '' }
+
+  const totalSteps = maxFrames.value * 2
+  let pathX = ''
+  let pathY = ''
+  let pathZ = ''
+
+  for (let s = 0; s <= totalSteps; s++) {
+    const f = (s / totalSteps) * maxFrames.value
+    const sample = sampleTrack(activeGraphTrack.value, f)
+    const val = sample[graphChannel.value]
+
+    const ptX = mapGraphCoords(f, val.x)
+    const ptY = mapGraphCoords(f, val.y)
+    const ptZ = mapGraphCoords(f, val.z)
+
+    if (s === 0) {
+      pathX += `M ${ptX.x.toFixed(1)} ${ptX.y.toFixed(1)}`
+      pathY += `M ${ptY.x.toFixed(1)} ${ptY.y.toFixed(1)}`
+      pathZ += `M ${ptZ.x.toFixed(1)} ${ptZ.y.toFixed(1)}`
+    } else {
+      pathX += ` L ${ptX.x.toFixed(1)} ${ptX.y.toFixed(1)}`
+      pathY += ` L ${ptY.x.toFixed(1)} ${ptY.y.toFixed(1)}`
+      pathZ += ` L ${ptZ.x.toFixed(1)} ${ptZ.y.toFixed(1)}`
+    }
+  }
+
+  return { pathX, pathY, pathZ }
+})
+
+const graphKeyNodes = computed(() => {
+  if (!activeGraphTrack.value) return []
+  const keys = activeGraphKeyframes.value
+  const target = activeGraphTarget.value
+  if (!target) return []
+
+  const nodes: {
+    axis: 'x' | 'y' | 'z'
+    frame: number
+    value: number
+    x: number
+    y: number
+    interpolation: InterpolationType
+    color: string
+  }[] = []
+
+  for (const k of keys) {
+    const interp = (k.interpolation || 'cubic') as InterpolationType
+    if (graphShowX.value) {
+      const pt = mapGraphCoords(k.frame, k.value.x)
+      nodes.push({ axis: 'x', frame: k.frame, value: k.value.x, x: pt.x, y: pt.y, interpolation: interp, color: '#f43f5e' })
+    }
+    if (graphShowY.value) {
+      const pt = mapGraphCoords(k.frame, k.value.y)
+      nodes.push({ axis: 'y', frame: k.frame, value: k.value.y, x: pt.x, y: pt.y, interpolation: interp, color: '#10b981' })
+    }
+    if (graphShowZ.value) {
+      const pt = mapGraphCoords(k.frame, k.value.z)
+      nodes.push({ axis: 'z', frame: k.frame, value: k.value.z, x: pt.x, y: pt.y, interpolation: interp, color: '#38bdf8' })
+    }
+  }
+
+  return nodes
+})
+
+function selectGraphNode(node: { axis: 'x' | 'y' | 'z'; frame: number; value: number; interpolation: InterpolationType }) {
+  if (!activeGraphTarget.value) return
+  selectedGraphKey.value = {
+    targetId: activeGraphTarget.value.id,
+    targetType: activeGraphTarget.value.type,
+    channel: graphChannel.value,
+    axis: node.axis,
+    frame: node.frame,
+    value: node.value,
+    interpolation: node.interpolation
+  }
+  animationStore.setFrame(node.frame)
+}
+
+function updateGraphKeyVal(val: number) {
+  if (!selectedGraphKey.value) return
+  selectedGraphKey.value.value = val
+  animationStore.updateKeyframeValue(
+    selectedGraphKey.value.targetId,
+    selectedGraphKey.value.channel,
+    selectedGraphKey.value.frame,
+    selectedGraphKey.value.axis,
+    val
+  )
+}
+
+function updateGraphKeyInterp(mode: InterpolationType) {
+  if (!selectedGraphKey.value) return
+  selectedGraphKey.value.interpolation = mode
+  animationStore.setKeyframeInterpolation(
+    selectedGraphKey.value.targetId,
+    selectedGraphKey.value.channel,
+    selectedGraphKey.value.frame,
+    mode
+  )
+}
+
+function deleteSelectedGraphNode() {
+  if (!selectedGraphKey.value) return
+  animationStore.deleteKeyframeAt(
+    selectedGraphKey.value.targetId,
+    selectedGraphKey.value.frame,
+    selectedGraphKey.value.channel
+  )
+  selectedGraphKey.value = null
+}
+
+function handleGraphSvgClick(e: MouseEvent) {
+  const svg = (e.currentTarget as SVGElement).getBoundingClientRect()
+  const clickX = e.clientX - svg.left
+  const padL = 45
+  const padR = 25
+  const plotW = svg.width - padL - padR
+  const ratio = Math.max(0, Math.min(1, (clickX - padL) / plotW))
+  const targetFrame = Math.round(ratio * maxFrames.value)
+  animationStore.setFrame(targetFrame)
+}
 </script>
 
 <template>
@@ -248,6 +463,15 @@ const timeMarkers = computed(() => {
           :class="activeTab === 'keyframe' ? 'bg-dcc-800 text-indigo-400 font-bold border border-indigo-500/40 shadow-xs' : 'text-slate-400 hover:text-slate-200'"
         >
           Keyframe Editor
+        </button>
+
+        <button 
+          @click="activeTab = 'graph'"
+          class="px-3 py-1 rounded transition text-[11px] flex items-center gap-1.5"
+          :class="activeTab === 'graph' ? 'bg-dcc-800 text-indigo-400 font-bold border border-indigo-500/40 shadow-xs' : 'text-slate-400 hover:text-slate-200'"
+        >
+          <TrendingUp class="w-3 h-3 text-emerald-400" />
+          <span>Graph Curves</span>
         </button>
 
         <button 
@@ -803,7 +1027,225 @@ const timeMarkers = computed(() => {
       </div>
     </div>
 
-    <!-- VIEW 2: CLIP TIMELINE (Clips Strip Manager) -->
+    <!-- VIEW 2: GRAPH EDITOR / CURVE EDITOR -->
+    <div v-show="activeTab === 'graph'" class="flex-1 flex flex-col bg-dcc-900 overflow-hidden font-mono">
+      <!-- Graph Top Controls Bar -->
+      <div class="h-8 bg-dcc-850 border-b border-dcc-750 px-3 flex items-center justify-between gap-3 shrink-0 text-xs">
+        <!-- Target & Channel Switcher -->
+        <div class="flex items-center space-x-2">
+          <span class="text-slate-400 font-bold text-[10px] uppercase">Target:</span>
+          <span class="text-indigo-300 font-bold text-[11px]">{{ activeGraphTarget?.name || 'No Target Selected' }}</span>
+
+          <div class="h-4 w-px bg-dcc-700 mx-1"></div>
+
+          <!-- Channel buttons: Rot / Pos / Scale -->
+          <div class="flex items-center space-x-0.5 bg-dcc-900 border border-dcc-750 rounded p-0.5 text-[10px]">
+            <button 
+              @click="graphChannel = 'rotation'" 
+              class="px-2 py-0.5 rounded transition"
+              :class="graphChannel === 'rotation' ? 'bg-purple-600 text-white font-bold' : 'text-slate-400 hover:text-white'"
+            >
+              Rotation (°)
+            </button>
+            <button 
+              @click="graphChannel = 'position'" 
+              class="px-2 py-0.5 rounded transition"
+              :class="graphChannel === 'position' ? 'bg-sky-600 text-white font-bold' : 'text-slate-400 hover:text-white'"
+            >
+              Position
+            </button>
+            <button 
+              @click="graphChannel = 'scale'" 
+              class="px-2 py-0.5 rounded transition"
+              :class="graphChannel === 'scale' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400 hover:text-white'"
+            >
+              Scale
+            </button>
+          </div>
+
+          <!-- Axis Visibility Toggles -->
+          <div class="flex items-center space-x-1 ml-2 text-[10px]">
+            <button 
+              @click="graphShowX = !graphShowX" 
+              class="px-1.5 py-0.5 rounded flex items-center gap-1 border transition"
+              :class="graphShowX ? 'bg-rose-500/20 text-rose-300 border-rose-500/50' : 'bg-dcc-900 text-slate-500 border-dcc-750'"
+            >
+              <span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+              <span>X</span>
+            </button>
+            <button 
+              @click="graphShowY = !graphShowY" 
+              class="px-1.5 py-0.5 rounded flex items-center gap-1 border transition"
+              :class="graphShowY ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50' : 'bg-dcc-900 text-slate-500 border-dcc-750'"
+            >
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+              <span>Y</span>
+            </button>
+            <button 
+              @click="graphShowZ = !graphShowZ" 
+              class="px-1.5 py-0.5 rounded flex items-center gap-1 border transition"
+              :class="graphShowZ ? 'bg-sky-500/20 text-sky-300 border-sky-500/50' : 'bg-dcc-900 text-slate-500 border-dcc-750'"
+            >
+              <span class="w-1.5 h-1.5 rounded-full bg-sky-500"></span>
+              <span>Z</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Selected Key Info / Controls -->
+        <div v-if="selectedGraphKey" class="flex items-center space-x-2 text-[10px] bg-dcc-900 px-2 py-0.5 rounded border border-dcc-750">
+          <span class="text-amber-400 font-bold uppercase">{{ selectedGraphKey.axis.toUpperCase() }} Frame {{ selectedGraphKey.frame }}:</span>
+          <div class="flex items-center gap-1">
+            <span class="text-slate-400">Val:</span>
+            <input 
+              type="number" 
+              step="0.1"
+              :value="selectedGraphKey.value"
+              @input="updateGraphKeyVal(parseFloat(($event.target as HTMLInputElement).value) || 0)"
+              class="w-14 bg-dcc-800 border border-dcc-700 px-1 py-0.5 rounded text-white text-[10px]"
+            />
+          </div>
+
+          <div class="flex items-center space-x-0.5 border border-dcc-700 rounded p-0.5">
+            <button 
+              @click="updateGraphKeyInterp('step')"
+              class="px-1.5 py-0.5 rounded text-[9px]"
+              :class="selectedGraphKey.interpolation === 'step' ? 'bg-amber-600 text-white font-bold' : 'text-slate-400 hover:text-white'"
+            >
+              Step
+            </button>
+            <button 
+              @click="updateGraphKeyInterp('linear')"
+              class="px-1.5 py-0.5 rounded text-[9px]"
+              :class="selectedGraphKey.interpolation === 'linear' ? 'bg-amber-600 text-white font-bold' : 'text-slate-400 hover:text-white'"
+            >
+              Linear
+            </button>
+            <button 
+              @click="updateGraphKeyInterp('cubic')"
+              class="px-1.5 py-0.5 rounded text-[9px]"
+              :class="selectedGraphKey.interpolation === 'cubic' ? 'bg-amber-600 text-white font-bold' : 'text-slate-400 hover:text-white'"
+            >
+              Cubic Smooth
+            </button>
+          </div>
+
+          <button 
+            @click="deleteSelectedGraphNode" 
+            class="text-rose-400 hover:text-white p-1 hover:bg-rose-900/40 rounded"
+            title="Delete Selected Key"
+          >
+            <Trash2 class="w-3 h-3" />
+          </button>
+        </div>
+        <div v-else class="text-[10px] text-slate-500 italic">
+          Click any key point on curve to edit value / easing
+        </div>
+      </div>
+
+      <!-- Main SVG Graph Viewport -->
+      <div class="flex-1 relative bg-dcc-950 overflow-hidden flex flex-col justify-center">
+        <svg 
+          viewBox="0 0 800 220" 
+          preserveAspectRatio="none"
+          class="w-full h-full cursor-crosshair select-none"
+          @click="handleGraphSvgClick"
+        >
+          <!-- Grid Lines (Horizontal values) -->
+          <line x1="45" y1="20" x2="775" y2="20" stroke="#282b33" stroke-dasharray="3 3" stroke-width="1" />
+          <line x1="45" y1="115" x2="775" y2="115" stroke="#333842" stroke-width="1" />
+          <line x1="45" y1="210" x2="775" y2="210" stroke="#282b33" stroke-dasharray="3 3" stroke-width="1" />
+
+          <!-- Value Axis Labels -->
+          <text x="5" y="24" fill="#64748b" font-size="9" font-family="monospace">{{ graphYRange.max }}</text>
+          <text x="5" y="118" fill="#94a3b8" font-size="9" font-family="monospace">0.0</text>
+          <text x="5" y="214" fill="#64748b" font-size="9" font-family="monospace">{{ graphYRange.min }}</text>
+
+          <!-- Frame Vertical Grid Lines & Frame Labels -->
+          <g v-for="m in timeMarkers" :key="m.frame">
+            <line 
+              v-if="m.isMajor || m.frame === 0 || m.frame === maxFrames"
+              :x1="mapGraphCoords(m.frame, 0).x" 
+              y1="10" 
+              :x2="mapGraphCoords(m.frame, 0).x" 
+              y2="215" 
+              stroke="#21242d" 
+              stroke-width="1" 
+            />
+            <text 
+              v-if="m.isMajor || m.frame === 0 || m.frame === maxFrames"
+              :x="mapGraphCoords(m.frame, 0).x" 
+              y="218" 
+              fill="#475569" 
+              font-size="8" 
+              text-anchor="middle"
+              font-family="monospace"
+            >
+              {{ m.frame }}f
+            </text>
+          </g>
+
+          <!-- Spline Curves -->
+          <path 
+            v-if="graphShowX && graphSampledCurves.pathX" 
+            :d="graphSampledCurves.pathX" 
+            stroke="#f43f5e" 
+            stroke-width="2" 
+            fill="none" 
+            class="transition-all duration-75"
+          />
+          <path 
+            v-if="graphShowY && graphSampledCurves.pathY" 
+            :d="graphSampledCurves.pathY" 
+            stroke="#10b981" 
+            stroke-width="2" 
+            fill="none" 
+            class="transition-all duration-75"
+          />
+          <path 
+            v-if="graphShowZ && graphSampledCurves.pathZ" 
+            :d="graphSampledCurves.pathZ" 
+            stroke="#38bdf8" 
+            stroke-width="2" 
+            fill="none" 
+            class="transition-all duration-75"
+          />
+
+          <!-- Keyframe Nodes / Control Points -->
+          <g v-for="(node, idx) in graphKeyNodes" :key="idx">
+            <circle 
+              :cx="node.x" 
+              :cy="node.y" 
+              r="4.5" 
+              :fill="node.color" 
+              stroke="#0f172a" 
+              stroke-width="1.5"
+              class="cursor-pointer hover:r-6 hover:stroke-white transition-all"
+              :class="{ 'stroke-white stroke-[2.5] ring-2': selectedGraphKey?.frame === node.frame && selectedGraphKey?.axis === node.axis }"
+              @click.stop="selectGraphNode(node)"
+            >
+              <title>{{ node.axis.toUpperCase() }}: {{ node.value.toFixed(2) }} at {{ node.frame }}f ({{ node.interpolation }})</title>
+            </circle>
+          </g>
+
+          <!-- Scrubber Playhead Line -->
+          <line 
+            :x1="mapGraphCoords(animationStore.currentFrame, 0).x" 
+            y1="5" 
+            :x2="mapGraphCoords(animationStore.currentFrame, 0).x" 
+            y2="215" 
+            stroke="#e11d48" 
+            stroke-width="1.5" 
+          />
+          <polygon 
+            :points="`${mapGraphCoords(animationStore.currentFrame, 0).x - 4},5 ${mapGraphCoords(animationStore.currentFrame, 0).x + 4},5 ${mapGraphCoords(animationStore.currentFrame, 0).x},12`" 
+            fill="#e11d48" 
+          />
+        </svg>
+      </div>
+    </div>
+
+    <!-- VIEW 3: CLIP TIMELINE (Clips Strip Manager) -->
     <div v-show="activeTab === 'clip'" class="flex-1 p-3 overflow-y-auto bg-dcc-900 space-y-2">
       <div class="flex items-center justify-between pb-1 border-b border-dcc-750">
         <span class="text-[11px] font-bold text-slate-300 uppercase tracking-wider">Animation Clips Strip</span>

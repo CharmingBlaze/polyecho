@@ -9,7 +9,11 @@ import {
   sphereUnwrap, 
   coneUnwrap, 
   cubemapCrossUnwrap, 
-  autoPackIslands 
+  packUVIslands,
+  gridifyQuadIslands,
+  equalizeTexelDensity,
+  calculateUVDistortion,
+  generateUVCheckerboardDataURL
 } from '../../core/geometry/UVUnwrap'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import { 
@@ -21,9 +25,11 @@ import {
   FlipVertical, 
   Grid, 
   Magnet, 
-  AlignCenter, 
+  AlignCenter,
   Upload, 
-  Download
+  Download,
+  Activity,
+  Layers
 } from 'lucide-vue-next'
 
 const projectStore = useProjectStore()
@@ -57,6 +63,14 @@ const zoom = ref<number>(5)
 const panOffset = ref<{ x: number; y: number }>({ x: 0, y: 0 })
 const showPixelGrid = ref<boolean>(true)
 const snapToPixels = ref<boolean>(true)
+const showCheckerboard = ref<boolean>(false)
+const showHeatmap = ref<boolean>(false)
+const checkerboardImage = ref<HTMLImageElement | null>(null)
+
+const distortionMap = computed(() => {
+  if (!showHeatmap.value || !activeMesh.value) return null
+  return calculateUVDistortion(activeMesh.value)
+})
 
 // Touch / Multi-touch gesture tracker (Tablet / Mobile / Stylus)
 const activePointers = new Map<number, { x: number; y: number }>()
@@ -66,6 +80,18 @@ let initialPinchPan = { x: 0, y: 0 }
 
 const isPanning = ref<boolean>(false)
 let panStart = { x: 0, y: 0 }
+
+// Marquee Box Selection State (Blender Box Select / Ctrl+LMB Drag)
+const isMarqueeSelecting = ref(false)
+const marqueeStart = ref({ x: 0, y: 0 })
+const marqueeEnd = ref({ x: 0, y: 0 })
+const marqueeRect = computed(() => {
+  const x = Math.min(marqueeStart.value.x, marqueeEnd.value.x)
+  const y = Math.min(marqueeStart.value.y, marqueeEnd.value.y)
+  const width = Math.abs(marqueeEnd.value.x - marqueeStart.value.x)
+  const height = Math.abs(marqueeEnd.value.y - marqueeStart.value.y)
+  return { x, y, width, height }
+})
 
 // Interaction state: 'none' | 'move' | 'scale_corner' | 'scale_edge' | 'rotate' | 'drag_vert' | 'drag_edge'
 type DragType = 'none' | 'move' | 'scale_corner' | 'scale_edge' | 'rotate' | 'drag_vert' | 'drag_edge'
@@ -238,11 +264,11 @@ function renderCanvas() {
   const oy = panOffset.value.y
 
   // 1. Draw Infinite Staging Yard
-  ctx.fillStyle = '#111317'
+  ctx.fillStyle = '#0b0d12'
   ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-  // Staging Grid
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)'
+  // Staging Subtle Grid
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.025)'
   ctx.lineWidth = 1
   const stageGridSize = 32
   for (let x = (ox % stageGridSize); x < canvas.width; x += stageGridSize) {
@@ -252,20 +278,40 @@ function renderCanvas() {
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke()
   }
 
-  // 2. Draw Active Central 0..1 Texture
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.8)'
-  ctx.shadowBlur = 24
-  ctx.drawImage(pb.canvas, ox, oy, texW, texH)
+  // 2. Draw Active Central 0..1 Texture (or Checkerboard Test Grid)
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.9)'
+  ctx.shadowBlur = 32
+  ctx.shadowOffsetX = 0
+  ctx.shadowOffsetY = 4
+  if (showCheckerboard.value && checkerboardImage.value) {
+    ctx.drawImage(checkerboardImage.value, ox, oy, texW, texH)
+  } else {
+    ctx.drawImage(pb.canvas, ox, oy, texW, texH)
+  }
   ctx.shadowBlur = 0
+  ctx.shadowOffsetY = 0
 
   // 0..1 Texture Frame
-  ctx.strokeStyle = '#6366f1'
+  ctx.strokeStyle = '#4f46e5'
   ctx.lineWidth = 1.5
   ctx.strokeRect(ox, oy, texW, texH)
 
+  // Quadrant 50% Subdivisions (Dashed Crosshairs)
+  ctx.save()
+  ctx.setLineDash([4, 4])
+  ctx.strokeStyle = 'rgba(99, 102, 241, 0.35)'
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(ox + texW / 2, oy)
+  ctx.lineTo(ox + texW / 2, oy + texH)
+  ctx.moveTo(ox, oy + texH / 2)
+  ctx.lineTo(ox + texW, oy + texH / 2)
+  ctx.stroke()
+  ctx.restore()
+
   // 3. Pixel Grid inside Texture
   if (showPixelGrid.value && zoom.value >= 4) {
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)'
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)'
     ctx.lineWidth = 1
     for (let x = 0; x <= pb.width; x++) {
       ctx.beginPath()
@@ -299,7 +345,11 @@ function renderCanvas() {
       }
       ctx.closePath()
 
-      if (isFaceSelected) {
+      if (showHeatmap.value && distortionMap.value?.has(face.id)) {
+        ctx.fillStyle = distortionMap.value.get(face.id)!.color
+        ctx.strokeStyle = isFaceSelected ? '#f59e0b' : '#38bdf8'
+        ctx.lineWidth = isFaceSelected ? 2 : 1
+      } else if (isFaceSelected) {
         ctx.fillStyle = 'rgba(245, 158, 11, 0.38)'
         ctx.strokeStyle = '#f59e0b'
         ctx.lineWidth = 2
@@ -452,6 +502,18 @@ function renderCanvas() {
       ctx.stroke()
       ctx.shadowBlur = 0
     }
+  }
+
+  // Draw Perforated Marquee Selection Box (Marching Ants / Dashed Outline)
+  if (isMarqueeSelecting.value && marqueeRect.value.width > 2 && marqueeRect.value.height > 2) {
+    ctx.save()
+    ctx.setLineDash([4, 3])
+    ctx.fillStyle = 'rgba(245, 158, 11, 0.14)'
+    ctx.strokeStyle = '#f59e0b'
+    ctx.lineWidth = 1.5
+    ctx.fillRect(marqueeRect.value.x, marqueeRect.value.y, marqueeRect.value.width, marqueeRect.value.height)
+    ctx.strokeRect(marqueeRect.value.x, marqueeRect.value.y, marqueeRect.value.width, marqueeRect.value.height)
+    ctx.restore()
   }
 }
 
@@ -647,7 +709,7 @@ function onPointerDown(e: PointerEvent) {
 
   // 4. Face Click Check
   const clickedFace = findClickedFace(uv.u, uv.v)
-  if (clickedFace !== null) {
+  if (clickedFace !== null && !e.ctrlKey) {
     if (e.shiftKey) {
       const idx = selectedFaceIndices.value.indexOf(clickedFace)
       if (idx >= 0) selectedFaceIndices.value.splice(idx, 1)
@@ -665,16 +727,11 @@ function onPointerDown(e: PointerEvent) {
     return
   }
 
-  // 5. Empty Canvas Click -> Deselect
-  if (!e.shiftKey) {
-    selectedFaceIndices.value = []
-    selectedUvVerts.value = []
-    selectedUvEdges.value = []
-    if (activeMesh.value) {
-      projectStore.selectedFaceIds = []
-      projectStore.selectedVertexIds = []
-      projectStore.selectedEdgeIds = []
-    }
+  // 5. Empty Canvas or Ctrl+LMB Drag -> Marquee Box Selection
+  if (e.button === 0) {
+    isMarqueeSelecting.value = true
+    marqueeStart.value = { x: sx, y: sy }
+    marqueeEnd.value = { x: sx, y: sy }
     renderCanvas()
   }
 }
@@ -714,6 +771,13 @@ function onPointerMove(e: PointerEvent) {
   const rect = canvasRef.value!.getBoundingClientRect()
   const sx = e.clientX - rect.left
   const sy = e.clientY - rect.top
+
+  if (isMarqueeSelecting.value) {
+    marqueeEnd.value = { x: sx, y: sy }
+    renderCanvas()
+    return
+  }
+
   const uv = screenToUV(sx, sy)
 
   if (activeDrag === 'none') {
@@ -854,6 +918,94 @@ function onPointerUp(e: PointerEvent) {
     isPanning.value = false
     return
   }
+
+  if (isMarqueeSelecting.value) {
+    isMarqueeSelecting.value = false
+    const minX = Math.min(marqueeStart.value.x, marqueeEnd.value.x)
+    const maxX = Math.max(marqueeStart.value.x, marqueeEnd.value.x)
+    const minY = Math.min(marqueeStart.value.y, marqueeEnd.value.y)
+    const maxY = Math.max(marqueeStart.value.y, marqueeEnd.value.y)
+
+    const isInsideBox = (x: number, y: number) => x >= minX && x <= maxX && y >= minY && y <= maxY
+
+    if (maxX - minX > 4 && maxY - minY > 4 && activeMesh.value) {
+      // UV VERTEX MODE
+      if (uvSelectMode.value === 'vertex') {
+        const newVerts: { faceIndex: number; vertIndex: number }[] = []
+        activeMesh.value.faces.forEach((face, fIdx) => {
+          face.uvs.forEach((uvCoord, vIdx) => {
+            const pt = uvToScreen(uvCoord.u, uvCoord.v)
+            if (isInsideBox(pt.x, pt.y)) {
+              newVerts.push({ faceIndex: fIdx, vertIndex: vIdx })
+            }
+          })
+        })
+        if (e.shiftKey) {
+          selectedUvVerts.value = [...selectedUvVerts.value, ...newVerts]
+        } else {
+          selectedUvVerts.value = newVerts
+        }
+        syncVerticesTo3D()
+      }
+
+      // UV EDGE MODE
+      else if (uvSelectMode.value === 'edge') {
+        const newEdges: { faceIndex: number; edgeIndex: number }[] = []
+        activeMesh.value.faces.forEach((face, fIdx) => {
+          for (let eIdx = 0; eIdx < face.uvs.length; eIdx++) {
+            const ptA = uvToScreen(face.uvs[eIdx].u, face.uvs[eIdx].v)
+            const ptB = uvToScreen(face.uvs[(eIdx + 1) % face.uvs.length].u, face.uvs[(eIdx + 1) % face.uvs.length].v)
+            const mid = { x: (ptA.x + ptB.x) / 2, y: (ptA.y + ptB.y) / 2 }
+            if (isInsideBox(ptA.x, ptA.y) || isInsideBox(ptB.x, ptB.y) || isInsideBox(mid.x, mid.y)) {
+              newEdges.push({ faceIndex: fIdx, edgeIndex: eIdx })
+            }
+          }
+        })
+        if (e.shiftKey) {
+          selectedUvEdges.value = [...selectedUvEdges.value, ...newEdges]
+        } else {
+          selectedUvEdges.value = newEdges
+        }
+        syncEdgesTo3D()
+      }
+
+      // UV FACE / ISLAND MODE
+      else {
+        const newFaces: number[] = []
+        activeMesh.value.faces.forEach((face, fIdx) => {
+          let anyIn = false
+          for (const uvCoord of face.uvs) {
+            const pt = uvToScreen(uvCoord.u, uvCoord.v)
+            if (isInsideBox(pt.x, pt.y)) {
+              anyIn = true
+              break
+            }
+          }
+          if (anyIn) {
+            newFaces.push(fIdx)
+          }
+        })
+        if (e.shiftKey) {
+          selectedFaceIndices.value = Array.from(new Set([...selectedFaceIndices.value, ...newFaces]))
+        } else {
+          selectedFaceIndices.value = newFaces
+        }
+        syncFacesTo3D()
+      }
+    } else if (!e.shiftKey) {
+      selectedFaceIndices.value = []
+      selectedUvVerts.value = []
+      selectedUvEdges.value = []
+      if (activeMesh.value) {
+        projectStore.selectedFaceIds = []
+        projectStore.selectedVertexIds = []
+        projectStore.selectedEdgeIds = []
+      }
+    }
+    renderCanvas()
+    return
+  }
+
   if (activeDrag !== 'none') {
     activeDrag = 'none'
     projectStore.recordState('UV Transform Edit')
@@ -863,26 +1015,46 @@ function onPointerUp(e: PointerEvent) {
 
 function onWheel(e: WheelEvent) {
   e.preventDefault()
-  if (e.ctrlKey || e.metaKey) {
-    // Laptop Trackpad Pinch-to-zoom or Ctrl+Wheel
-    const delta = e.deltaY < 0 ? 1 : -1
-    zoom.value = Math.max(1, Math.min(24, zoom.value + delta))
-  } else {
-    // Laptop Trackpad 2-finger Pan
-    panOffset.value.x -= e.deltaX * 0.8
-    panOffset.value.y -= e.deltaY * 0.8
+  if (e.shiftKey) {
+    panOffset.value.x -= e.deltaY * 0.8
+    renderCanvas()
+    return
+  }
+
+  const rect = canvasRef.value?.getBoundingClientRect()
+  const mouseX = rect ? e.clientX - rect.left : panOffset.value.x
+  const mouseY = rect ? e.clientY - rect.top : panOffset.value.y
+
+  const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85
+  const oldZoom = zoom.value
+  const newZoom = Math.max(1, Math.min(32, Math.round(oldZoom * zoomFactor * 10) / 10))
+
+  if (newZoom !== oldZoom) {
+    panOffset.value.x = mouseX - (mouseX - panOffset.value.x) * (newZoom / oldZoom)
+    panOffset.value.y = mouseY - (mouseY - panOffset.value.y) * (newZoom / oldZoom)
+    zoom.value = newZoom
   }
   renderCanvas()
 }
 
 function resetPanZoom() {
   if (!containerRef.value) return
-  zoom.value = 5
+  const w = containerRef.value.clientWidth
+  const h = containerRef.value.clientHeight
+  if (w <= 0 || h <= 0) return
+
+  const pb = projectStore.pixelBuffer
+  // Fit texture into ~70% of available viewport area
+  const targetW = w * 0.72
+  const targetH = h * 0.72
+  const fitZoom = Math.max(1, Math.min(24, Math.floor(Math.min(targetW / pb.width, targetH / pb.height))))
+  zoom.value = fitZoom
+
   panOffset.value = {
-    x: (containerRef.value.clientWidth - 64 * zoom.value) / 2,
-    y: (containerRef.value.clientHeight - 64 * zoom.value) / 2
+    x: Math.round((w - pb.width * fitZoom) / 2),
+    y: Math.round((h - pb.height * fitZoom) / 2)
   }
-  renderCanvas()
+  scheduleRender()
 }
 
 // ----------------------------------------------------
@@ -1128,11 +1300,73 @@ function handleCubemapCross() {
   scheduleRender()
 }
 
-function packAllIslands() {
+function handlePackIslands(marginPx = 2) {
   if (!activeMesh.value) return
-  projectStore.recordState('Auto-Pack UV Islands')
-  const unwrapped = autoPackIslands(activeMesh.value, 0.02)
+  projectStore.recordState(`Auto-Pack UV Islands (${marginPx}px)`)
+  const unwrapped = packUVIslands(activeMesh.value, marginPx, projectStore.pixelBuffer.width)
   activeMesh.value.faces = unwrapped.faces
+  scheduleRender()
+}
+
+function handleGridify() {
+  if (!activeMesh.value) return
+  projectStore.recordState('Gridify Quad Loops')
+  const targetFaces = getTargetFaces()
+  const unwrapped = gridifyQuadIslands(activeMesh.value, targetFaces)
+  activeMesh.value.faces = unwrapped.faces
+  scheduleRender()
+}
+
+function handleEqualizeTexels() {
+  if (!activeMesh.value) return
+  projectStore.recordState('Equalize Texel Density')
+  const unwrapped = equalizeTexelDensity(activeMesh.value)
+  activeMesh.value.faces = unwrapped.faces
+  scheduleRender()
+}
+
+function alignSelection(alignment: 'left' | 'right' | 'top' | 'bottom' | 'center_h' | 'center_v') {
+  if (!activeMesh.value || !selectionBounds.value) return
+  projectStore.recordState(`Align UVs (${alignment})`)
+  const b = selectionBounds.value
+  const targetFaces = getTargetFaces()
+
+  for (const fIdx of targetFaces) {
+    const face = activeMesh.value.faces[fIdx]
+    if (!face) continue
+    for (const uv of face.uvs) {
+      if (alignment === 'left') uv.u = b.minU
+      else if (alignment === 'right') uv.u = b.maxU
+      else if (alignment === 'top') uv.v = b.maxV
+      else if (alignment === 'bottom') uv.v = b.minV
+      else if (alignment === 'center_h') uv.u = b.cU
+      else if (alignment === 'center_v') uv.v = b.cV
+    }
+  }
+  scheduleRender()
+}
+
+function snapToTrimCell(col: number, row: number, totalCols: number, totalRows: number) {
+  if (!activeMesh.value || !selectionBounds.value) return
+  projectStore.recordState(`Snap to Trim (${col + 1}, ${row + 1})`)
+  const b = selectionBounds.value
+  const targetFaces = getTargetFaces()
+
+  const cellW = 1.0 / totalCols
+  const cellH = 1.0 / totalRows
+  const targetU0 = col * cellW
+  const targetV0 = 1.0 - (row + 1) * cellH
+
+  for (const fIdx of targetFaces) {
+    const face = activeMesh.value.faces[fIdx]
+    if (!face) continue
+    for (const uv of face.uvs) {
+      const normU = (uv.u - b.minU) / b.width
+      const normV = (uv.v - b.minV) / b.height
+      uv.u = Math.max(0, Math.min(1, targetU0 + normU * cellW))
+      uv.v = Math.max(0, Math.min(1, targetV0 + normV * cellH))
+    }
+  }
   scheduleRender()
 }
 
@@ -1144,6 +1378,8 @@ watch(() => projectStore.meshes, scheduleRender, { deep: true })
 watch(() => projectStore.selectedFaceIds, scheduleRender)
 watch(() => projectStore.selectedVertexIds, scheduleRender)
 watch(() => projectStore.selectedEdgeIds, scheduleRender)
+watch(showCheckerboard, scheduleRender)
+watch(showHeatmap, scheduleRender)
 
 watch(() => toolStore.uvWorkspaceTab, (tab) => {
   if (tab === 'uv') {
@@ -1156,6 +1392,14 @@ watch(() => toolStore.uvWorkspaceTab, (tab) => {
 let resizeObserver: ResizeObserver | null = null
 
 onMounted(() => {
+  // Generate high-contrast numbered calibration test grid
+  const img = new Image()
+  img.src = generateUVCheckerboardDataURL(512)
+  img.onload = () => {
+    checkerboardImage.value = img
+    scheduleRender()
+  }
+
   if (containerRef.value) {
     if (containerRef.value.clientWidth > 0) {
       panOffset.value = {
@@ -1184,11 +1428,16 @@ defineExpose({
   uvSelectMode,
   snapToPixels,
   showPixelGrid,
+  showCheckerboard,
+  showHeatmap,
   zoom,
   snapToQuadrant,
   snapToFull,
   centerInView,
-  packAllIslands,
+  handlePackIslands,
+  handleGridify,
+  handleEqualizeTexels,
+  alignSelection,
   handleBoxUnwrap,
   handlePlanarUnwrap,
   handleCylinderUnwrap,
@@ -1205,26 +1454,26 @@ defineExpose({
   <div class="h-full w-full bg-dcc-900 flex flex-col select-none overflow-hidden relative font-mono text-xs touch-none">
     <input ref="fileInputRef" type="file" accept="image/*" @change="handleImageImport" class="hidden" />
 
-    <!-- 1. TOP COMPLETE BLOCKBENCH/BLENDER UV TOOLBAR -->
-    <div class="bg-dcc-850 border-b border-dcc-750 px-2 py-1 flex flex-wrap items-center justify-between gap-1.5 text-slate-300 shrink-0">
-      
-      <!-- Left: Selection Modes, Image Actions & Unwrapping Engines -->
-      <div class="flex flex-wrap items-center gap-1.5">
-        <!-- Selection Mode Switcher (Vertex: 1 | Edge: 2 | Face: 3 | Island: 4) -->
+    <!-- 1. TOP DUAL-ROW BLENDER/BLOCKBENCH UV TOOLBAR -->
+    <!-- Row 1: Selection Modes, Unwrapping, Island Layout, Align, File I/O, Snap & Zoom -->
+    <div class="h-7 bg-dcc-850 border-b border-dcc-750 px-2 flex items-center justify-between gap-1 text-slate-300 shrink-0 font-mono text-xs">
+      <!-- Left: Selection Modes, Unwrap & Island Tools -->
+      <div class="flex items-center gap-1.5 shrink-0">
+        <!-- Selection Mode Switcher -->
         <div class="flex items-center bg-dcc-900 rounded p-0.5 border border-dcc-750">
           <button 
             @click="uvSelectMode = 'vertex'"
-            class="flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] transition"
+            class="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] transition"
             :class="uvSelectMode === 'vertex' ? 'bg-amber-500 text-slate-950 font-bold shadow-xs' : 'text-slate-400 hover:text-slate-200'"
-            title="UV Vertex / Point Select (1)"
+            title="UV Vertex Select (1)"
           >
             <BlenderIcon name="vertex-select" :size="11" />
-            <span>Vertex</span>
+            <span>Vert</span>
           </button>
 
           <button 
             @click="uvSelectMode = 'edge'"
-            class="flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] transition"
+            class="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] transition"
             :class="uvSelectMode === 'edge' ? 'bg-amber-500 text-slate-950 font-bold shadow-xs' : 'text-slate-400 hover:text-slate-200'"
             title="UV Edge Select (2)"
           >
@@ -1234,9 +1483,9 @@ defineExpose({
 
           <button 
             @click="uvSelectMode = 'face'"
-            class="flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] transition"
+            class="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] transition"
             :class="uvSelectMode === 'face' ? 'bg-amber-500 text-slate-950 font-bold shadow-xs' : 'text-slate-400 hover:text-slate-200'"
-            title="UV Face Select & 8-Point Transform (3)"
+            title="UV Face Select (3)"
           >
             <BlenderIcon name="face-select" :size="11" />
             <span>Face</span>
@@ -1244,36 +1493,17 @@ defineExpose({
 
           <button 
             @click="uvSelectMode = 'island'"
-            class="flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] transition"
+            class="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] transition"
             :class="uvSelectMode === 'island' ? 'bg-amber-500 text-slate-950 font-bold shadow-xs' : 'text-slate-400 hover:text-slate-200'"
-            title="UV Island / All Mesh UVs (4)"
+            title="UV Island Select (4)"
           >
             <BlenderIcon name="object-mode" :size="11" />
             <span>Island</span>
           </button>
         </div>
 
-        <!-- Image & Texture Atlas Import / Export -->
-        <div class="flex items-center space-x-1 bg-dcc-900 rounded p-0.5 border border-dcc-750">
-          <button 
-            @click="fileInputRef?.click()" 
-            class="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-dcc-800 text-indigo-300 text-[10px] font-bold transition"
-            title="Import Texture / Sprite Sheet Image"
-          >
-            <Upload class="w-3 h-3 text-indigo-400" />
-            <span>Import Image</span>
-          </button>
-          <button 
-            @click="exportTexturePng" 
-            class="p-1 hover:bg-dcc-800 rounded text-slate-400 hover:text-emerald-400 transition"
-            title="Export UV Texture PNG"
-          >
-            <Download class="w-3 h-3" />
-          </button>
-        </div>
-
-        <!-- Universal 3D Unwrapping Dropdown -->
-        <div class="flex items-center bg-dcc-900 rounded border border-dcc-750 px-1 py-0.5 text-[10px]">
+        <!-- 3D Unwrapping Dropdown -->
+        <div class="flex items-center bg-dcc-900 rounded border border-dcc-750 px-1.5 py-0.5 text-[10px]">
           <select 
             @change="(e) => {
               const val = (e.target as HTMLSelectElement).value
@@ -1285,12 +1515,13 @@ defineExpose({
               else if (val === 'planar-z') handlePlanarUnwrap('z')
               else if (val === 'planar-x') handlePlanarUnwrap('x')
               else if (val === 'planar-y') handlePlanarUnwrap('y')
-              else if (val === 'pack') packAllIslands()
+              else if (val === 'reset') snapToFull()
               ;(e.target as HTMLSelectElement).value = 'default'
             }"
             class="bg-transparent text-indigo-300 font-bold focus:outline-none cursor-pointer"
           >
             <option value="default" disabled selected class="bg-dcc-900 text-slate-400">Unwrap 3D...</option>
+            <option value="reset" class="bg-dcc-900 text-rose-300 font-semibold">Reset UVs (0..1 Full)</option>
             <option value="cubemap" class="bg-dcc-900 text-amber-300">Cubemap Cross (Blockbench)</option>
             <option value="box" class="bg-dcc-900 text-slate-200">Smart Box Unwrap</option>
             <option value="cylinder" class="bg-dcc-900 text-slate-200">Cylinder (Tube + Caps)</option>
@@ -1299,44 +1530,75 @@ defineExpose({
             <option value="planar-z" class="bg-dcc-900 text-slate-200">Planar Z-Axis</option>
             <option value="planar-x" class="bg-dcc-900 text-slate-200">Planar X-Axis</option>
             <option value="planar-y" class="bg-dcc-900 text-slate-200">Planar Y-Axis</option>
-            <option value="pack" class="bg-dcc-900 text-emerald-400">Auto Pack Islands</option>
           </select>
         </div>
 
-        <!-- Atlas Snapping (Q1-Q4, Full, Center) -->
-        <div class="flex items-center space-x-0.5 bg-dcc-900 rounded p-0.5 border border-dcc-750">
-          <span class="text-[9px] text-slate-400 pl-1 pr-0.5">Atlas:</span>
-          <button @click="snapToQuadrant(1)" class="px-1.5 py-0.5 hover:bg-dcc-800 rounded text-[10px] text-amber-300 font-bold" title="Snap to Quad 1 (Top-Left)">Q1</button>
-          <button @click="snapToQuadrant(2)" class="px-1.5 py-0.5 hover:bg-dcc-800 rounded text-[10px] text-amber-300 font-bold" title="Snap to Quad 2 (Top-Right)">Q2</button>
-          <button @click="snapToQuadrant(3)" class="px-1.5 py-0.5 hover:bg-dcc-800 rounded text-[10px] text-amber-300 font-bold" title="Snap to Quad 3 (Bottom-Left)">Q3</button>
-          <button @click="snapToQuadrant(4)" class="px-1.5 py-0.5 hover:bg-dcc-800 rounded text-[10px] text-amber-300 font-bold" title="Snap to Quad 4 (Bottom-Right)">Q4</button>
-          <button @click="snapToFull" class="px-1.5 py-0.5 hover:bg-dcc-800 rounded text-[10px] text-indigo-300 font-bold" title="Fit to Full Texture (0..1)">Full</button>
-          <button @click="centerInView" class="p-1 hover:bg-dcc-800 rounded text-slate-400 hover:text-slate-200" title="Center in UV Canvas">
-            <AlignCenter class="w-3 h-3" />
-          </button>
+        <!-- Islands & Layout Operations Dropdown -->
+        <div class="flex items-center bg-dcc-900 rounded border border-dcc-750 px-1.5 py-0.5 text-[10px]">
+          <select 
+            @change="(e) => {
+              const val = (e.target as HTMLSelectElement).value
+              if (val === 'pack-2') handlePackIslands(2)
+              else if (val === 'pack-0') handlePackIslands(0)
+              else if (val === 'pack-4') handlePackIslands(4)
+              else if (val === 'gridify') handleGridify()
+              else if (val === 'equalize') handleEqualizeTexels()
+              ;(e.target as HTMLSelectElement).value = 'default'
+            }"
+            class="bg-transparent text-emerald-400 font-bold focus:outline-none cursor-pointer"
+          >
+            <option value="default" disabled selected class="bg-dcc-900 text-slate-400">Islands & Layout...</option>
+            <option value="pack-2" class="bg-dcc-900 text-emerald-300">Auto-Pack Islands (2px Margin)</option>
+            <option value="pack-0" class="bg-dcc-900 text-slate-200">Auto-Pack Islands (0px Tight)</option>
+            <option value="pack-4" class="bg-dcc-900 text-slate-200">Auto-Pack Islands (4px Margin)</option>
+            <option value="gridify" class="bg-dcc-900 text-amber-300">Gridify Quad Loops</option>
+            <option value="equalize" class="bg-dcc-900 text-sky-300">Equalize Texel Density</option>
+          </select>
         </div>
 
-        <!-- Transform Presets (Rotate 90°, Flip, Scale) -->
-        <div class="flex items-center space-x-0.5 bg-dcc-900 rounded p-0.5 border border-dcc-750">
-          <button @click="rotateUVs(-90)" class="p-1 hover:bg-dcc-800 rounded text-slate-300" title="Rotate 90° CCW">
-            <RotateCcw class="w-3 h-3" />
-          </button>
-          <button @click="rotateUVs(90)" class="p-1 hover:bg-dcc-800 rounded text-slate-300" title="Rotate 90° CW">
-            <RotateCw class="w-3 h-3" />
-          </button>
-          <button @click="flipUVs('u')" class="p-1 hover:bg-dcc-800 rounded text-slate-300" title="Flip Horizontal">
-            <FlipHorizontal class="w-3 h-3" />
-          </button>
-          <button @click="flipUVs('v')" class="p-1 hover:bg-dcc-800 rounded text-slate-300" title="Flip Vertical">
-            <FlipVertical class="w-3 h-3" />
-          </button>
-          <button @click="scaleUVs(1.5)" class="px-1.5 py-0.5 hover:bg-dcc-800 rounded text-[9px] text-indigo-300 font-bold" title="Scale Up +50%">+50%</button>
-          <button @click="scaleUVs(0.67)" class="px-1.5 py-0.5 hover:bg-dcc-800 rounded text-[9px] text-indigo-300 font-bold" title="Scale Down -33%">-33%</button>
+        <!-- UV Alignment Dropdown -->
+        <div class="flex items-center bg-dcc-900 rounded border border-dcc-750 px-1.5 py-0.5 text-[10px]">
+          <select 
+            @change="(e) => {
+              const val = (e.target as HTMLSelectElement).value
+              if (val) alignSelection(val as any)
+              ;(e.target as HTMLSelectElement).value = 'default'
+            }"
+            class="bg-transparent text-slate-300 font-bold focus:outline-none cursor-pointer"
+          >
+            <option value="default" disabled selected class="bg-dcc-900 text-slate-400">Align...</option>
+            <option value="left" class="bg-dcc-900 text-slate-200">Align Left</option>
+            <option value="right" class="bg-dcc-900 text-slate-200">Align Right</option>
+            <option value="top" class="bg-dcc-900 text-slate-200">Align Top</option>
+            <option value="bottom" class="bg-dcc-900 text-slate-200">Align Bottom</option>
+            <option value="center_h" class="bg-dcc-900 text-slate-200">Align Center (Horiz)</option>
+            <option value="center_v" class="bg-dcc-900 text-slate-200">Align Center (Vert)</option>
+          </select>
         </div>
       </div>
 
-      <!-- Right: Grid Snapping & Infinite Zoom Navigation -->
+      <!-- Right: Image Import/Export, Snap, Grid & Zoom -->
       <div class="flex items-center space-x-1 shrink-0">
+        <button 
+          @click="fileInputRef?.click()" 
+          class="flex items-center gap-1 px-1.5 py-0.5 rounded bg-dcc-900 hover:bg-dcc-800 text-indigo-300 text-[10px] font-bold border border-dcc-750 transition"
+          title="Import Texture / Sprite Sheet Image"
+        >
+          <Upload class="w-3 h-3 text-indigo-400" />
+          <span>Import</span>
+        </button>
+
+        <button 
+          @click="exportTexturePng" 
+          class="flex items-center gap-1 px-1.5 py-0.5 hover:bg-dcc-800 rounded text-slate-300 hover:text-emerald-400 border border-dcc-750 bg-dcc-900 text-[10px] transition"
+          title="Export UV Texture PNG"
+        >
+          <Download class="w-3 h-3 text-emerald-400" />
+          <span>Export</span>
+        </button>
+
+        <div class="h-3.5 w-px bg-dcc-750 mx-0.5"></div>
+
         <button 
           @click="snapToPixels = !snapToPixels" 
           class="flex items-center space-x-0.5 px-1.5 py-0.5 rounded text-[10px] transition border"
@@ -1360,7 +1622,7 @@ defineExpose({
           <button @click="zoom = Math.max(1, zoom - 1)" class="p-1 hover:bg-dcc-750 rounded-l text-slate-400 hover:text-white" title="Zoom Out">
             <ZoomOut class="w-3 h-3" />
           </button>
-          <span @dblclick="resetPanZoom" class="text-[9px] text-slate-300 px-1.5 text-center cursor-pointer" title="Double click to reset pan/zoom">
+          <span @dblclick="resetPanZoom" class="text-[9px] text-slate-300 px-1.5 text-center cursor-pointer font-mono" title="Double click to reset pan/zoom">
             {{ zoom }}x
           </span>
           <button @click="zoom = Math.min(24, zoom + 1)" class="p-1 hover:bg-dcc-750 rounded-r text-slate-400 hover:text-white" title="Zoom In">
@@ -1370,10 +1632,100 @@ defineExpose({
       </div>
     </div>
 
+    <!-- Row 2: Trim Sheet Snapping, Visual Diagnostics & Transforms -->
+    <div class="h-7 bg-dcc-800/80 border-b border-dcc-750 px-2 flex items-center justify-between text-xs text-slate-300 shrink-0 font-mono">
+      <!-- Left: Modular Trim Sheet & Multi-Grid Snapping -->
+      <div class="flex items-center space-x-1.5">
+        <span class="text-[10px] text-slate-400 font-semibold">Trim Snap:</span>
+        <div class="flex items-center bg-dcc-900 rounded border border-dcc-750 px-1.5 py-0.5 text-[10px]">
+          <select 
+            @change="(e) => {
+              const val = (e.target as HTMLSelectElement).value
+              if (val === 'q1') snapToQuadrant(1)
+              else if (val === 'q2') snapToQuadrant(2)
+              else if (val === 'q3') snapToQuadrant(3)
+              else if (val === 'q4') snapToQuadrant(4)
+              else if (val === 'full') snapToFull()
+              else if (val.startsWith('grid-')) {
+                const [, c, r, tc, tr] = val.split('-').map(Number)
+                snapToTrimCell(c, r, tc, tr)
+              }
+              ;(e.target as HTMLSelectElement).value = 'default'
+            }"
+            class="bg-transparent text-amber-300 font-bold focus:outline-none cursor-pointer"
+          >
+            <option value="default" disabled selected class="bg-dcc-900 text-slate-400">Trim / Atlas Snapping...</option>
+            <option value="full" class="bg-dcc-900 text-indigo-300 font-bold">Fit to Full (0..1)</option>
+            <option value="q1" class="bg-dcc-900 text-amber-300">Quadrant 1 (Top-Left 2x2)</option>
+            <option value="q2" class="bg-dcc-900 text-amber-300">Quadrant 2 (Top-Right 2x2)</option>
+            <option value="q3" class="bg-dcc-900 text-amber-300">Quadrant 3 (Bottom-Left 2x2)</option>
+            <option value="q4" class="bg-dcc-900 text-amber-300">Quadrant 4 (Bottom-Right 2x2)</option>
+            <option value="grid-0-0-4-4" class="bg-dcc-900 text-slate-200">Tile 1/16 (4x4 Grid)</option>
+            <option value="grid-0-0-8-8" class="bg-dcc-900 text-slate-200">Tile 1/64 (8x8 Grid)</option>
+            <option value="grid-0-0-1-2" class="bg-dcc-900 text-sky-300">Horizontal Trim Top 1/2</option>
+            <option value="grid-0-1-1-2" class="bg-dcc-900 text-sky-300">Horizontal Trim Bottom 1/2</option>
+            <option value="grid-0-0-1-4" class="bg-dcc-900 text-sky-300">Horizontal Trim 1/4 Band</option>
+            <option value="grid-0-0-1-8" class="bg-dcc-900 text-sky-300">Horizontal Trim 1/8 Strip</option>
+            <option value="grid-0-0-4-1" class="bg-dcc-900 text-sky-300">Vertical Trim 1/4 Column</option>
+          </select>
+        </div>
+
+        <div class="h-3.5 w-px bg-dcc-750 mx-0.5"></div>
+
+        <!-- Visual Diagnostics: Checkerboard & Stretch Heatmap -->
+        <button 
+          @click="showCheckerboard = !showCheckerboard"
+          class="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-bold border transition"
+          :class="showCheckerboard ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-xs' : 'bg-dcc-900 text-slate-400 border-dcc-750 hover:text-slate-200'"
+          title="Toggle Calibration Checkerboard Test Grid"
+        >
+          <Layers class="w-3 h-3" />
+          <span>Checkerboard</span>
+        </button>
+
+        <button 
+          @click="showHeatmap = !showHeatmap"
+          class="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-bold border transition"
+          :class="showHeatmap ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-xs' : 'bg-dcc-900 text-slate-400 border-dcc-750 hover:text-slate-200'"
+          title="Toggle UV Stretch & Distortion Heatmap (Green = 1:1, Blue = Compressed, Red = Stretched)"
+        >
+          <Activity class="w-3 h-3" />
+          <span>Heatmap</span>
+        </button>
+      </div>
+
+      <!-- Right: Transform Presets -->
+      <div class="flex items-center space-x-1.5">
+        <span class="text-[10px] text-slate-400 font-semibold">Transforms:</span>
+        <div class="flex items-center space-x-0.5 bg-dcc-900 rounded p-0.5 border border-dcc-750">
+          <button @click="rotateUVs(-90)" class="p-1 hover:bg-dcc-800 rounded text-slate-300 hover:text-white transition" title="Rotate 90° CCW">
+            <RotateCcw class="w-3 h-3" />
+          </button>
+          <button @click="rotateUVs(90)" class="p-1 hover:bg-dcc-800 rounded text-slate-300 hover:text-white transition" title="Rotate 90° CW">
+            <RotateCw class="w-3 h-3" />
+          </button>
+          <button @click="flipUVs('u')" class="p-1 hover:bg-dcc-800 rounded text-slate-300 hover:text-white transition" title="Flip Horizontal">
+            <FlipHorizontal class="w-3 h-3" />
+          </button>
+          <button @click="flipUVs('v')" class="p-1 hover:bg-dcc-800 rounded text-slate-300 hover:text-white transition" title="Flip Vertical">
+            <FlipVertical class="w-3 h-3" />
+          </button>
+          <button @click="scaleUVs(1.5)" class="px-1.5 py-0.5 hover:bg-dcc-800 rounded text-[9px] text-indigo-300 font-bold transition" title="Scale Up +50%">+50%</button>
+          <button @click="scaleUVs(0.67)" class="px-1.5 py-0.5 hover:bg-dcc-800 rounded text-[9px] text-indigo-300 font-bold transition" title="Scale Down -33%">-33%</button>
+          <button @click="centerInView" class="p-1 hover:bg-dcc-800 rounded text-slate-400 hover:text-slate-200 transition" title="Center UV Islands in Canvas">
+            <AlignCenter class="w-3 h-3" />
+          </button>
+          <button @click="resetPanZoom" class="px-1.5 py-0.5 hover:bg-dcc-800 rounded text-[9px] text-amber-300 font-bold transition" title="Frame & Center Viewport on Texture">
+            Frame
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- 2. INFINITE STAGING CANVAS VIEWPORT (Desktop, Laptop, Tablet, Stylus) -->
     <div 
       ref="containerRef" 
-      class="flex-1 min-h-0 relative overflow-hidden bg-[#111317] cursor-crosshair select-none touch-none"
+      class="flex-1 min-h-0 relative overflow-hidden bg-[#0b0d12] cursor-crosshair select-none touch-none"
       @wheel="onWheel"
     >
       <canvas 
@@ -1387,15 +1739,13 @@ defineExpose({
       ></canvas>
 
       <!-- Quick Info HUD at Bottom Left -->
-      <div class="absolute bottom-3 left-3 bg-dcc-850/90 backdrop-blur-sm px-2.5 py-1 rounded border border-dcc-700/80 shadow text-[10px] font-mono text-slate-400 flex items-center space-x-3 select-none pointer-events-none">
-        <span>Mode: <strong class="text-amber-400">{{ uvSelectMode.toUpperCase() }}</strong></span>
-        <span>Res: <strong class="text-slate-200">{{ projectStore.pixelBuffer.width }}x{{ projectStore.pixelBuffer.height }}</strong></span>
-        <span>Handles: <strong class="text-amber-300">Transform</strong></span>
-        <span>Knob: <strong class="text-amber-300">Rotate</strong></span>
+      <div class="absolute bottom-3 left-3 bg-dcc-850/90 backdrop-blur-md px-2.5 py-1 rounded-sm border border-dcc-700/80 shadow-lg text-[10px] font-mono text-slate-400 flex items-center space-x-3 select-none pointer-events-none z-10">
+        <span class="flex items-center gap-1">Mode: <strong class="text-amber-400 uppercase font-bold">{{ uvSelectMode }}</strong></span>
+        <span>Res: <strong class="text-slate-200 font-bold">{{ projectStore.pixelBuffer.width }}x{{ projectStore.pixelBuffer.height }}</strong></span>
         <span v-if="selectionBounds" class="text-indigo-400 font-bold">
-          {{ Math.round(selectionBounds.width * 100) }}% x {{ Math.round(selectionBounds.height * 100) }}%
+          Bounds: {{ Math.round(selectionBounds.width * 100) }}% x {{ Math.round(selectionBounds.height * 100) }}%
         </span>
-        <span class="text-slate-500">2-Finger / Space / Alt Drag</span>
+        <span class="text-slate-500">Space+Drag / Middle Click to Pan | Double-Click Zoom to Frame</span>
       </div>
     </div>
   </div>

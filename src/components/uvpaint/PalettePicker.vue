@@ -81,13 +81,13 @@ function setSecondaryColor(e: MouseEvent, hex: string) {
         <ChevronDown class="w-3.5 h-3.5 text-ui-textMuted absolute right-2 pointer-events-none" />
       </div>
 
-      <!-- Color Swatches Grid (High visibility 24px boxes) -->
-      <div class="grid grid-cols-8 gap-1.5 pt-1">
+      <!-- Color Swatches Grid (Sleek Stylus-Friendly 20px boxes) -->
+      <div class="grid grid-cols-8 gap-1 pt-1 p-1 bg-ui-input/50 rounded-xs border border-ui-borderSubtle">
         <button 
           v-for="(color, idx) in projectStore.activePalette.colors" 
           :key="idx"
-          class="w-full h-6 rounded-xs border border-black/40 hover:scale-105 active:scale-95 transition-transform cursor-pointer relative shadow-sm"
-          :class="{ 'ring-2 ring-ui-accent ring-offset-1 ring-offset-ui-panel': toolStore.primaryColor.toLowerCase() === color.toLowerCase() }"
+          class="w-full h-5 rounded-xs border transition-all hover:scale-105 active:scale-95 cursor-pointer relative shadow-2xs"
+          :class="toolStore.primaryColor.toLowerCase() === color.toLowerCase() ? 'border-white ring-1.5 ring-amber-400 ring-offset-1 ring-offset-[#181a20] z-10' : 'border-black/40 hover:border-white/70'"
           :style="{ backgroundColor: color }"
           :title="`Left-Click: Primary, Right-Click: Secondary (${color})`"
           @click="setColor(color)"
