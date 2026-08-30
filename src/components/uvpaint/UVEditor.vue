@@ -1521,6 +1521,7 @@ function snapToTrimCell(col: number, row: number, totalCols: number, totalRows: 
 }
 
 watch(() => projectStore.textureRevision, scheduleRender)
+watch(() => projectStore.activeTextureId, scheduleRender)
 watch(zoom, scheduleRender)
 watch(showPixelGrid, scheduleRender)
 watch(() => projectStore.activeMeshId, scheduleRender)

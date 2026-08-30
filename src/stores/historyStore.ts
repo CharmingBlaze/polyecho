@@ -9,7 +9,7 @@ export interface TextureSnapshot {
   name: string
   width: number
   height: number
-  dataUrl: string
+  dataUrl?: string
   pixelBuffer: PixelBuffer
 }
 
@@ -55,7 +55,6 @@ export const useHistoryStore = defineStore('history', () => {
         name: t.name,
         width: t.width,
         height: t.height,
-        dataUrl: buf.toDataURL(),
         pixelBuffer: buf
       }
     })
@@ -105,7 +104,6 @@ export const useHistoryStore = defineStore('history', () => {
           name: t.name,
           width: t.width,
           height: t.height,
-          dataUrl: clonedBuf.toDataURL(),
           pixelBuffer: clonedBuf
         }
       })

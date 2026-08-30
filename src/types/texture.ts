@@ -9,7 +9,7 @@ export interface TextureMap {
   name: string
   width: number
   height: number
-  dataUrl: string
+  dataUrl?: string
   pixelBuffer?: any
 }
 

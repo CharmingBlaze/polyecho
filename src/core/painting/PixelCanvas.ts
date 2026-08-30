@@ -441,6 +441,34 @@ export class PixelBuffer {
     return copy
   }
 
+  async loadFromFile(file: File | Blob, autoResize = true): Promise<void> {
+    if (typeof createImageBitmap === 'function') {
+      try {
+        const bitmap = await createImageBitmap(file)
+        if (autoResize && (bitmap.width !== this.width || bitmap.height !== this.height)) {
+          this.width = bitmap.width
+          this.height = bitmap.height
+          this.canvas.width = bitmap.width
+          this.canvas.height = bitmap.height
+          this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!
+        }
+        this.ctx.clearRect(0, 0, this.width, this.height)
+        this.ctx.drawImage(bitmap, 0, 0, this.width, this.height)
+        bitmap.close()
+        return
+      } catch (e) {
+        // Fallback to Image loader
+      }
+    }
+
+    const objectUrl = URL.createObjectURL(file)
+    try {
+      await this.loadFromDataURL(objectUrl, autoResize)
+    } finally {
+      URL.revokeObjectURL(objectUrl)
+    }
+  }
+
   loadFromDataURL(url: string, autoResize = true): Promise<void> {
     return new Promise((resolve) => {
       const img = new Image()

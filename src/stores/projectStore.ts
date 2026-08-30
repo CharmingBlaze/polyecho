@@ -80,7 +80,6 @@ export const useProjectStore = defineStore('project', () => {
       activeTexture.value.pixelBuffer = buf
       activeTexture.value.width = buf.width
       activeTexture.value.height = buf.height
-      activeTexture.value.dataUrl = buf.toDataURL()
     }
   })
 
@@ -611,7 +610,6 @@ export const useProjectStore = defineStore('project', () => {
     if (tex && tex.pixelBuffer) {
       tex.width = tex.pixelBuffer.width
       tex.height = tex.pixelBuffer.height
-      tex.dataUrl = tex.pixelBuffer.toDataURL()
     }
   }
 
@@ -628,7 +626,7 @@ export const useProjectStore = defineStore('project', () => {
       name: name || `Texture.${String(count).padStart(3, '0')}`,
       width,
       height,
-      dataUrl: buffer.toDataURL(),
+      dataUrl: dataUrl || '',
       pixelBuffer: buffer
     }
     textures.value.push(newTex)

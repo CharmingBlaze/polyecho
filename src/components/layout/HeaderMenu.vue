@@ -223,20 +223,29 @@ async function handleImportGltf(e: Event) {
 }
 
 async function handleImportTexture(e: Event) {
-  const file = (e.target as HTMLInputElement).files?.[0]
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
   if (!file) return
   try {
-    const buffer = await file.arrayBuffer()
-    const blob = new Blob([buffer], { type: file.type })
-    const url = URL.createObjectURL(blob)
-    await projectStore.pixelBuffer.loadFromDataURL(url, true)
-    projectStore.markTextureUpdated()
-    URL.revokeObjectURL(url)
+    const texName = file.name.replace(/\.[^/.]+$/, '')
+    let currentTex = projectStore.activeTexture
+    if (!currentTex || currentTex.id === 'tex_default') {
+      currentTex = projectStore.addTexture(texName, 64, 64)
+      if (projectStore.activeMesh && projectStore.activeMesh.materialId) {
+        projectStore.assignTextureToMaterial(projectStore.activeMesh.materialId, currentTex.id)
+      }
+    }
+    await currentTex.pixelBuffer.loadFromFile(file, true)
+    currentTex.name = texName
+    currentTex.width = currentTex.pixelBuffer.width
+    currentTex.height = currentTex.pixelBuffer.height
+    projectStore.activeTextureId = currentTex.id
+    projectStore.markTextureUpdated(currentTex.id)
   } catch (err) {
     console.error('Failed to import texture:', err)
     alert('Failed to import texture image')
   } finally {
-    if (importTextureInput.value) importTextureInput.value.value = ''
+    input.value = ''
     closeDropdowns()
   }
 }

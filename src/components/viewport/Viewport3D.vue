@@ -3403,11 +3403,17 @@ watch(() => toolStore.viewport.shading, () => {
 })
 
 watch(() => projectStore.textureRevision, () => {
-  updateThreeTexture()
+  updateThreeTextures()
+  rebuildMeshes()
+})
+
+watch(() => [projectStore.activeTextureId, projectStore.textures.length], () => {
+  updateThreeTextures()
   rebuildMeshes()
 })
 
 watch(() => projectStore.materials, () => {
+  updateThreeTextures()
   rebuildMeshes()
 }, { deep: true })
 

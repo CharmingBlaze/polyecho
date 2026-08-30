@@ -61,25 +61,24 @@ function triggerTextureUpload() {
   textureUploadInput.value?.click()
 }
 
-function handleTextureImageUpload(e: Event) {
-  const file = (e.target as HTMLInputElement).files?.[0]
+async function handleTextureImageUpload(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
   if (!file || !activeMaterial.value) return
-  const reader = new FileReader()
-  reader.onload = async (event) => {
-    const url = event.target?.result as string
-    let currentTex = projectStore.getTextureForMaterial(activeMaterial.value.id)
-    if (!currentTex || currentTex.id === 'tex_default') {
-      currentTex = projectStore.addTexture(`${activeMaterial.value.name}_Texture`, 64, 64)
-      projectStore.assignTextureToMaterial(activeMaterial.value.id, currentTex.id)
-    }
-    await currentTex.pixelBuffer.loadFromDataURL(url, true)
-    currentTex.name = file.name.replace(/\.[^/.]+$/, '')
-    currentTex.width = currentTex.pixelBuffer.width
-    currentTex.height = currentTex.pixelBuffer.height
-    currentTex.dataUrl = currentTex.pixelBuffer.toDataURL()
-    projectStore.markTextureUpdated(currentTex.id)
+
+  let currentTex = projectStore.getTextureForMaterial(activeMaterial.value.id)
+  if (!currentTex || currentTex.id === 'tex_default') {
+    currentTex = projectStore.addTexture(`${activeMaterial.value.name}_Texture`, 64, 64)
+    projectStore.assignTextureToMaterial(activeMaterial.value.id, currentTex.id)
   }
-  reader.readAsDataURL(file)
+
+  await currentTex.pixelBuffer.loadFromFile(file, true)
+  currentTex.name = file.name.replace(/\.[^/.]+$/, '')
+  currentTex.width = currentTex.pixelBuffer.width
+  currentTex.height = currentTex.pixelBuffer.height
+  projectStore.activeTextureId = currentTex.id
+  projectStore.markTextureUpdated(currentTex.id)
+  input.value = ''
 }
 
 function openUvWorkspace() {

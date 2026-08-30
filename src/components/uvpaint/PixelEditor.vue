@@ -92,27 +92,22 @@ function swapColors() {
   toolStore.secondaryColor = temp
 }
 
-function handleTextureUpload(event: Event) {
+async function handleTextureUpload(event: Event) {
   const input = event.target as HTMLInputElement
   if (!input.files || input.files.length === 0) return
   const file = input.files[0]
-  const reader = new FileReader()
-  reader.onload = async (e) => {
-    const url = e.target?.result as string
-    await projectStore.pixelBuffer.loadFromDataURL(url, true)
-    if (projectStore.activeTexture) {
-      projectStore.activeTexture.name = file.name.replace(/\.[^/.]+$/, '')
-      projectStore.activeTexture.width = projectStore.pixelBuffer.width
-      projectStore.activeTexture.height = projectStore.pixelBuffer.height
-      projectStore.activeTexture.dataUrl = projectStore.pixelBuffer.toDataURL()
-    }
-    projectStore.markTextureUpdated()
-    nextTick(() => {
-      resetPanZoom()
-      renderCanvas()
-    })
+  await projectStore.pixelBuffer.loadFromFile(file, true)
+  if (projectStore.activeTexture) {
+    projectStore.activeTexture.name = file.name.replace(/\.[^/.]+$/, '')
+    projectStore.activeTexture.width = projectStore.pixelBuffer.width
+    projectStore.activeTexture.height = projectStore.pixelBuffer.height
   }
-  reader.readAsDataURL(file)
+  projectStore.markTextureUpdated()
+  input.value = ''
+  nextTick(() => {
+    resetPanZoom()
+    renderCanvas()
+  })
 }
 
 function onTextureChanged() {
