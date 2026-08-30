@@ -76,8 +76,10 @@ async function handleTextureImageUpload(e: Event) {
   currentTex.name = file.name.replace(/\.[^/.]+$/, '')
   currentTex.width = currentTex.pixelBuffer.width
   currentTex.height = currentTex.pixelBuffer.height
+  currentTex.dataUrl = currentTex.pixelBuffer.toDataURL()
   projectStore.activeTextureId = currentTex.id
   projectStore.markTextureUpdated(currentTex.id)
+  projectStore.recordState('Load Texture Image')
   input.value = ''
 }
 

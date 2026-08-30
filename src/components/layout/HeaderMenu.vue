@@ -239,8 +239,10 @@ async function handleImportTexture(e: Event) {
     currentTex.name = texName
     currentTex.width = currentTex.pixelBuffer.width
     currentTex.height = currentTex.pixelBuffer.height
+    currentTex.dataUrl = currentTex.pixelBuffer.toDataURL()
     projectStore.activeTextureId = currentTex.id
     projectStore.markTextureUpdated(currentTex.id)
+    projectStore.recordState('Import Texture Image')
   } catch (err) {
     console.error('Failed to import texture:', err)
     alert('Failed to import texture image')

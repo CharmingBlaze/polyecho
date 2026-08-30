@@ -441,32 +441,35 @@ export class PixelBuffer {
     return copy
   }
 
-  async loadFromFile(file: File | Blob, autoResize = true): Promise<void> {
-    if (typeof createImageBitmap === 'function') {
-      try {
-        const bitmap = await createImageBitmap(file)
-        if (autoResize && (bitmap.width !== this.width || bitmap.height !== this.height)) {
-          this.width = bitmap.width
-          this.height = bitmap.height
-          this.canvas.width = bitmap.width
-          this.canvas.height = bitmap.height
-          this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!
+  loadFromFile(file: File | Blob, autoResize = true): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const objectUrl = URL.createObjectURL(file)
+      const img = new Image()
+      img.onload = () => {
+        try {
+          if (autoResize && (img.naturalWidth !== this.width || img.naturalHeight !== this.height)) {
+            this.width = img.naturalWidth
+            this.height = img.naturalHeight
+            this.canvas.width = img.naturalWidth
+            this.canvas.height = img.naturalHeight
+            this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!
+          }
+          this.ctx.imageSmoothingEnabled = false
+          this.ctx.clearRect(0, 0, this.width, this.height)
+          this.ctx.drawImage(img, 0, 0, this.width, this.height)
+          resolve()
+        } catch (err) {
+          reject(err)
+        } finally {
+          URL.revokeObjectURL(objectUrl)
         }
-        this.ctx.clearRect(0, 0, this.width, this.height)
-        this.ctx.drawImage(bitmap, 0, 0, this.width, this.height)
-        bitmap.close()
-        return
-      } catch (e) {
-        // Fallback to Image loader
       }
-    }
-
-    const objectUrl = URL.createObjectURL(file)
-    try {
-      await this.loadFromDataURL(objectUrl, autoResize)
-    } finally {
-      URL.revokeObjectURL(objectUrl)
-    }
+      img.onerror = (err) => {
+        URL.revokeObjectURL(objectUrl)
+        reject(err)
+      }
+      img.src = objectUrl
+    })
   }
 
   loadFromDataURL(url: string, autoResize = true): Promise<void> {

@@ -101,8 +101,10 @@ async function handleTextureUpload(event: Event) {
     projectStore.activeTexture.name = file.name.replace(/\.[^/.]+$/, '')
     projectStore.activeTexture.width = projectStore.pixelBuffer.width
     projectStore.activeTexture.height = projectStore.pixelBuffer.height
+    projectStore.activeTexture.dataUrl = projectStore.pixelBuffer.toDataURL()
   }
   projectStore.markTextureUpdated()
+  projectStore.recordState('Load Texture Image')
   input.value = ''
   nextTick(() => {
     resetPanZoom()
