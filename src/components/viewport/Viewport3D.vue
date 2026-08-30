@@ -181,9 +181,9 @@ function initThree() {
     renderer = null as any
   }
 
-  // Clear previous canvases from container
-  while (containerRef.value.firstChild) {
-    containerRef.value.removeChild(containerRef.value.firstChild)
+  const mountEl = canvasMountRef.value || containerRef.value
+  while (mountEl.firstChild) {
+    mountEl.removeChild(mountEl.firstChild)
   }
 
   const width = containerRef.value.clientWidth || window.innerWidth
@@ -194,7 +194,7 @@ function initThree() {
   canvas.style.display = 'block'
   canvas.style.width = '100%'
   canvas.style.height = '100%'
-  containerRef.value.appendChild(canvas)
+  mountEl.appendChild(canvas)
 
   // Scene
   scene = new THREE.Scene()
@@ -3714,7 +3714,7 @@ onUnmounted(() => {
     renderer.domElement.removeEventListener('wheel', onWheel)
     renderer.domElement.removeEventListener('webglcontextlost', handleWebGLContextLost)
     renderer.domElement.removeEventListener('webglcontextrestored', handleWebGLContextRestored)
-    containerRef.value.removeChild(renderer.domElement)
+    renderer.domElement.parentElement?.removeChild(renderer.domElement)
     renderer.dispose()
   }
   if (layers) {

@@ -992,25 +992,28 @@ defineExpose({
         @pointercancel="onPointerUp"
       >
         <!-- Top Right Floating View Controls -->
-        <div class="uv-view-group" aria-label="Canvas View Controls">
+        <div class="pixel-view-group" aria-label="Canvas View Controls">
           <button
             @click="showUvOverlay = !showUvOverlay"
-            class="uv-view-icon"
+            class="pixel-view-toggle"
             :class="{ 'is-active': showUvOverlay }"
             title="Toggle UV Wireframe Overlay (Alt+Z)"
-          ><BlenderIcon name="xray" :size="14" /></button>
+          >
+            <BlenderIcon name="xray" :size="13" />
+            <span>UV</span>
+          </button>
           <button
             @click="showPixelGrid = !showPixelGrid"
-            class="uv-view-icon"
+            class="pixel-view-icon"
             :class="{ 'is-active': showPixelGrid }"
             title="Toggle Pixel Grid"
           ><Grid class="w-3.5 h-3.5" /></button>
-          <div class="uv-zoom-control">
+          <div class="pixel-zoom-control">
             <button @click="zoomOut" title="Zoom out"><ZoomOut class="w-3.5 h-3.5" /></button>
             <span @dblclick="resetPanZoom" title="Double-click to fit">{{ Math.round(zoom * 100) }}%</span>
             <button @click="zoomIn" title="Zoom in"><ZoomIn class="w-3.5 h-3.5" /></button>
           </div>
-          <button @click="resetPanZoom" class="uv-view-icon" title="Fit Canvas to View">
+          <button @click="resetPanZoom" class="pixel-view-icon" title="Fit Canvas to View">
             <Maximize class="w-3.5 h-3.5" />
           </button>
         </div>
@@ -1202,7 +1205,7 @@ defineExpose({
 .pixel-status-hud {
   position: absolute;
   bottom: 8px;
-  left: 10px;
+  right: 10px;
   display: flex;
   align-items: center;
   gap: 12px;
