@@ -8,6 +8,7 @@ import { useLayoutStore } from '../../stores/layoutStore'
 import { useThemeStore } from '../../stores/themeStore'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import PolyEchoLogo from '../icons/PolyEchoLogo.vue'
+import ImportTextureModal from '../modals/ImportTextureModal.vue'
 import { 
   Download, 
   Upload,
@@ -66,6 +67,8 @@ const loadProjectInput = ref<HTMLInputElement | null>(null)
 const importObjInput = ref<HTMLInputElement | null>(null)
 const importGltfInput = ref<HTMLInputElement | null>(null)
 const importTextureInput = ref<HTMLInputElement | null>(null)
+const showImportModal = ref(false)
+const pendingImportFile = ref<File | null>(null)
 
 function toggleDropdown(name: string) {
   activeDropdown.value = activeDropdown.value === name ? null : name
@@ -222,34 +225,14 @@ async function handleImportGltf(e: Event) {
   }
 }
 
-async function handleImportTexture(e: Event) {
+function handleImportTexture(e: Event) {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
-  try {
-    const texName = file.name.replace(/\.[^/.]+$/, '')
-    let currentTex = projectStore.activeTexture
-    if (!currentTex || currentTex.id === 'tex_default') {
-      currentTex = projectStore.addTexture(texName, 64, 64)
-      if (projectStore.activeMesh && projectStore.activeMesh.materialId) {
-        projectStore.assignTextureToMaterial(projectStore.activeMesh.materialId, currentTex.id)
-      }
-    }
-    await currentTex.pixelBuffer.loadFromFile(file, true)
-    currentTex.name = texName
-    currentTex.width = currentTex.pixelBuffer.width
-    currentTex.height = currentTex.pixelBuffer.height
-    currentTex.dataUrl = currentTex.pixelBuffer.toDataURL()
-    projectStore.activeTextureId = currentTex.id
-    projectStore.markTextureUpdated(currentTex.id)
-    projectStore.recordState('Import Texture Image')
-  } catch (err) {
-    console.error('Failed to import texture:', err)
-    alert('Failed to import texture image')
-  } finally {
-    input.value = ''
-    closeDropdowns()
-  }
+  pendingImportFile.value = file
+  showImportModal.value = true
+  input.value = ''
+  closeDropdowns()
 }
 
 function handleExitProject() {
@@ -701,5 +684,13 @@ function handleExitProject() {
         <span>Export</span>
       </button>
     </div>
+
+    <!-- Import Image Texture Modal -->
+    <ImportTextureModal 
+      v-if="showImportModal && pendingImportFile" 
+      :file="pendingImportFile" 
+      @close="showImportModal = false"
+      @imported="showImportModal = false"
+    />
   </header>
 </template>

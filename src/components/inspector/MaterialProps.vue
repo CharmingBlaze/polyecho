@@ -4,6 +4,7 @@ import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import UiSection from '../ui/UiSection.vue'
+import ImportTextureModal from '../modals/ImportTextureModal.vue'
 import { 
   Plus, 
   Trash2, 
@@ -19,6 +20,9 @@ import {
 
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
+
+const showImportModal = ref(false)
+const pendingImportFile = ref<File | null>(null)
 
 // Active Material Management
 const activeMesh = computed(() => projectStore.activeMesh)
@@ -61,25 +65,12 @@ function triggerTextureUpload() {
   textureUploadInput.value?.click()
 }
 
-async function handleTextureImageUpload(e: Event) {
+function handleTextureImageUpload(e: Event) {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file || !activeMaterial.value) return
-
-  let currentTex = projectStore.getTextureForMaterial(activeMaterial.value.id)
-  if (!currentTex || currentTex.id === 'tex_default') {
-    currentTex = projectStore.addTexture(`${activeMaterial.value.name}_Texture`, 64, 64)
-    projectStore.assignTextureToMaterial(activeMaterial.value.id, currentTex.id)
-  }
-
-  await currentTex.pixelBuffer.loadFromFile(file, true)
-  currentTex.name = file.name.replace(/\.[^/.]+$/, '')
-  currentTex.width = currentTex.pixelBuffer.width
-  currentTex.height = currentTex.pixelBuffer.height
-  currentTex.dataUrl = currentTex.pixelBuffer.toDataURL()
-  projectStore.activeTextureId = currentTex.id
-  projectStore.markTextureUpdated(currentTex.id)
-  projectStore.recordState('Load Texture Image')
+  pendingImportFile.value = file
+  showImportModal.value = true
   input.value = ''
 }
 
@@ -1023,5 +1014,14 @@ function rgbToHex(r: number, g: number, b: number): string {
         </label>
       </div>
     </UiSection>
+
+    <!-- Import Image Texture Modal -->
+    <ImportTextureModal 
+      v-if="showImportModal && pendingImportFile" 
+      :file="pendingImportFile" 
+      :target-material-id="activeMaterial?.id"
+      @close="showImportModal = false"
+      @imported="showImportModal = false"
+    />
   </div>
 </template>

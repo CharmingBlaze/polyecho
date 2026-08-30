@@ -4,6 +4,7 @@ import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import { generateRetroAtlas } from '../../core/painting/DefaultTextures'
 import BlenderIcon from '../icons/BlenderIcon.vue'
+import ImportTextureModal from '../modals/ImportTextureModal.vue'
 import { 
   ZoomIn, 
   ZoomOut, 
@@ -16,6 +17,9 @@ import {
 
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
+
+const showImportModal = ref(false)
+const pendingImportFile = ref<File | null>(null)
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const containerRef = ref<HTMLDivElement | null>(null)
@@ -92,24 +96,12 @@ function swapColors() {
   toolStore.secondaryColor = temp
 }
 
-async function handleTextureUpload(event: Event) {
+function handleTextureUpload(event: Event) {
   const input = event.target as HTMLInputElement
   if (!input.files || input.files.length === 0) return
-  const file = input.files[0]
-  await projectStore.pixelBuffer.loadFromFile(file, true)
-  if (projectStore.activeTexture) {
-    projectStore.activeTexture.name = file.name.replace(/\.[^/.]+$/, '')
-    projectStore.activeTexture.width = projectStore.pixelBuffer.width
-    projectStore.activeTexture.height = projectStore.pixelBuffer.height
-    projectStore.activeTexture.dataUrl = projectStore.pixelBuffer.toDataURL()
-  }
-  projectStore.markTextureUpdated()
-  projectStore.recordState('Load Texture Image')
+  pendingImportFile.value = input.files[0]
+  showImportModal.value = true
   input.value = ''
-  nextTick(() => {
-    resetPanZoom()
-    renderCanvas()
-  })
 }
 
 function onTextureChanged() {
@@ -931,5 +923,19 @@ defineExpose({
         </div>
       </div>
     </div>
+
+    <!-- Import Image Texture Modal -->
+    <ImportTextureModal 
+      v-if="showImportModal && pendingImportFile" 
+      :file="pendingImportFile" 
+      @close="showImportModal = false"
+      @imported="() => {
+        showImportModal = false
+        nextTick(() => {
+          resetPanZoom()
+          renderCanvas()
+        })
+      }"
+    />
   </div>
 </template>
