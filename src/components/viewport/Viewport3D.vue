@@ -2834,8 +2834,11 @@ watch(() => toolStore.appMode, async () => {
 })
 watch(() => toolStore.selectMode, rebuildMeshes)
 watch(() => toolStore.modelTool, updateTransformGizmo)
-watch(() => toolStore.viewport, rebuildMeshes, { deep: true })
-watch(() => animationStore.selectedBoneId, rebuildMeshes)
+watch(() => animationStore.selectedBoneId, () => {
+  rebuildBones()
+  rebuildMeshes()
+  updateTransformGizmo()
+})
 watch(() => animationStore.selectedSocketId, () => {
   rebuildBones()
   updateTransformGizmo()

@@ -257,28 +257,37 @@ function handleKeyDown(e: KeyboardEvent) {
     case 'g':
       if (toolStore.appMode === 'model') {
         window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'grab' }))
+      } else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
+        toolStore.setModelTool('move')
       } else if (toolStore.appMode === 'uvpaint') {
         toolStore.setPaintTool('bucket')
       }
       break
     case 'w':
-      if (toolStore.appMode === 'model') toolStore.setModelTool('move')
-      else if (toolStore.appMode === 'uvpaint') toolStore.setPaintTool('bucket')
+      if (toolStore.appMode === 'model' || toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
+        toolStore.setModelTool('move')
+      } else if (toolStore.appMode === 'uvpaint') {
+        toolStore.setPaintTool('bucket')
+      }
       break
     case 'r':
       if (toolStore.appMode === 'model') {
         window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'rotate' }))
+      } else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
+        toolStore.setModelTool('rotate')
       }
       break
     case 's':
       if (toolStore.appMode === 'model') {
         window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'scale' }))
+      } else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
+        toolStore.setModelTool('scale')
       }
       break
     case 'e':
       if (toolStore.appMode === 'model') {
         window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'extrude' }))
-      } else if (toolStore.appMode === 'rig') {
+      } else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
         animationStore.extrudeBone(animationStore.selectedBoneId)
       } else if (toolStore.appMode === 'uvpaint') {
         toolStore.setPaintTool('eraser')
