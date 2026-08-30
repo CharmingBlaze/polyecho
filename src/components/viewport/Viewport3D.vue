@@ -2812,8 +2812,11 @@ function updateHoverState() {
     hoverBoneMesh.visible = false
   }
 
-  // Weight Paint 3D Projector Ring
-  if (toolStore.appMode === 'rig' && animationStore.isWeightPaintActive && hoverWeightBrushRing) {
+  // 3D Paint & Weight Paint Projector Ring
+  const isPaintHoverActive = (toolStore.appMode === 'rig' && animationStore.isWeightPaintActive) ||
+    ((toolStore.appMode === 'uvpaint' || ['brush', 'eraser'].includes(toolStore.paintTool)) && (toolStore.uvWorkspaceTab === 'paint' || toolStore.uvWorkspaceTab === 'vertex' || toolStore.appMode !== 'uvpaint'))
+
+  if (isPaintHoverActive && hoverWeightBrushRing) {
     const intersects = raycaster.intersectObjects(layers.modelGroup.children, true)
     if (intersects.length > 0 && intersects[0].point) {
       const hit = intersects[0]
@@ -2821,7 +2824,9 @@ function updateHoverState() {
       if (hit.face) {
         hoverWeightBrushRing.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), hit.face.normal)
       }
-      const r = animationStore.weightBrushRadius || 0.5
+      const r = toolStore.appMode === 'rig' 
+        ? (animationStore.weightBrushRadius || 0.5) 
+        : Math.max(0.08, (toolStore.brushSize || 1) * 0.06)
       hoverWeightBrushRing.scale.set(r, r, r)
       hoverWeightBrushRing.visible = true
       hasHover = true

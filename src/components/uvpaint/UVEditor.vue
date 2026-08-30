@@ -333,7 +333,31 @@ function renderCanvas() {
     }
   }
 
-  // 4. Draw UV Faces & Edges & Vertices
+  // 3.5 Draw Inactive Selected Meshes (Multi-Mesh UV Atlas Visualization)
+  projectStore.meshes.forEach(otherMesh => {
+    if (otherMesh.id === activeMesh.value?.id || !otherMesh.visible) return
+    if (!projectStore.selectedMeshIds.includes(otherMesh.id)) return
+    ensureMeshUVs(otherMesh)
+
+    otherMesh.faces.forEach(face => {
+      if (!face.uvs || face.uvs.length < 3) return
+      ctx.beginPath()
+      const p0 = uvToScreen(face.uvs[0].u, face.uvs[0].v)
+      ctx.moveTo(p0.x, p0.y)
+      for (let i = 1; i < face.uvs.length; i++) {
+        const pt = uvToScreen(face.uvs[i].u, face.uvs[i].v)
+        ctx.lineTo(pt.x, pt.y)
+      }
+      ctx.closePath()
+      ctx.fillStyle = 'rgba(168, 85, 247, 0.08)'
+      ctx.strokeStyle = 'rgba(168, 85, 247, 0.45)'
+      ctx.lineWidth = 1
+      ctx.fill()
+      ctx.stroke()
+    })
+  })
+
+  // 4. Draw Active Mesh UV Faces & Edges & Vertices
   if (activeMesh.value) {
     activeMesh.value.faces.forEach((face, fIdx) => {
       if (face.uvs.length < 3) return
