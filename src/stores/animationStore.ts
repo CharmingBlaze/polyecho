@@ -277,12 +277,75 @@ export const useAnimationStore = defineStore('animation', () => {
     selectedBoneId.value = id
   }
 
+  function generateSmartBoneName(parentName?: string): string {
+    const existingNames = new Set(armature.value.bones.map(b => b.name))
+    if (!parentName) {
+      let idx = armature.value.bones.length + 1
+      while (existingNames.has(`Bone_${idx}`)) {
+        idx++
+      }
+      return `Bone_${idx}`
+    }
+
+    // Strip trailing _Ext or .001, etc.
+    const base = parentName.replace(/(_Ext|\.\d+)+$/g, '')
+    let idx = 1
+    while (true) {
+      const suffix = String(idx).padStart(3, '0')
+      const candidate = `${base}.${suffix}`
+      if (!existingNames.has(candidate)) {
+        return candidate
+      }
+      idx++
+    }
+  }
+
+  function selectParentBone() {
+    if (!selectedBone.value || !selectedBone.value.parentId) return
+    selectedBoneId.value = selectedBone.value.parentId
+  }
+
+  function selectFirstChildBone() {
+    if (!selectedBone.value || selectedBone.value.childrenIds.length === 0) return
+    selectedBoneId.value = selectedBone.value.childrenIds[0]
+  }
+
+  function selectNextBone() {
+    const bones = armature.value.bones
+    if (bones.length === 0) return
+    if (!selectedBoneId.value) {
+      selectedBoneId.value = bones[0].id
+      return
+    }
+    const curIdx = bones.findIndex(b => b.id === selectedBoneId.value)
+    if (curIdx >= 0 && curIdx < bones.length - 1) {
+      selectedBoneId.value = bones[curIdx + 1].id
+    } else {
+      selectedBoneId.value = bones[0].id
+    }
+  }
+
+  function selectPreviousBone() {
+    const bones = armature.value.bones
+    if (bones.length === 0) return
+    if (!selectedBoneId.value) {
+      selectedBoneId.value = bones[bones.length - 1].id
+      return
+    }
+    const curIdx = bones.findIndex(b => b.id === selectedBoneId.value)
+    if (curIdx > 0) {
+      selectedBoneId.value = bones[curIdx - 1].id
+    } else {
+      selectedBoneId.value = bones[bones.length - 1].id
+    }
+  }
+
   function extrudeBone(parentBoneId?: string | null): Bone {
     const pId = parentBoneId || selectedBoneId.value
     const parent = pId ? armature.value.bones.find(b => b.id === pId) : null
 
     if (!parent) {
-      return addRootBone(`Bone_${armature.value.bones.length + 1}`)
+      return addRootBone(generateSmartBoneName())
     }
 
     const dirX = parent.tail.x - parent.head.x
@@ -295,7 +358,7 @@ export const useAnimationStore = defineStore('animation', () => {
 
     const newBone: Bone = {
       id: genId('bone'),
-      name: `${parent.name}_Ext`,
+      name: generateSmartBoneName(parent.name),
       parentId: parent.id,
       head: { ...parent.tail },
       tail: {
@@ -1782,6 +1845,11 @@ export const useAnimationStore = defineStore('animation', () => {
     removeSocket,
     splitBone,
     addBoneFromPoints,
+    generateSmartBoneName,
+    selectParentBone,
+    selectFirstChildBone,
+    selectNextBone,
+    selectPreviousBone,
     setClipDuration,
     togglePlay,
     setFrame,

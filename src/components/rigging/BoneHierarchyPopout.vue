@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
+import type { Bone, BoneSocket } from '../../types/animation'
 import { 
   FolderTree, 
   Plus, 
@@ -24,7 +25,13 @@ import {
   EyeOff,
   ChevronDown,
   ChevronRight,
-  Link
+  Link,
+  ChevronsDown,
+  ChevronsUp,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight
 } from 'lucide-vue-next'
 
 const animationStore = useAnimationStore()
@@ -32,9 +39,9 @@ const projectStore = useProjectStore()
 const toolStore = useToolStore()
 
 // Popout Window Dimensions & Position State
-const pos = ref({ x: Math.max(20, window.innerWidth - 380), y: 70 })
-const width = ref(320)
-const height = ref(480)
+const pos = ref({ x: Math.max(20, window.innerWidth - 400), y: 70 })
+const width = ref(340)
+const height = ref(520)
 const isMinimized = ref(false)
 const isDragging = ref(false)
 const isResizing = ref(false)
@@ -56,27 +63,76 @@ let resizeStart = { x: 0, y: 0, w: 0, h: 0 }
 const selectedBone = computed(() => animationStore.selectedBone)
 const selectedSocket = computed(() => animationStore.selectedSocket)
 
-const rootBones = computed(() => {
-  const roots = animationStore.armature.bones.filter(b => !b.parentId)
-  if (!searchQuery.value.trim()) return roots
-  const q = searchQuery.value.toLowerCase()
-  return roots.filter(b => b.name.toLowerCase().includes(q) || hasMatchingChild(b.id, q))
-})
+export interface FlattenedTreeNode {
+  bone: Bone
+  depth: number
+  hasChildren: boolean
+  isCollapsed: boolean
+  isVisible: boolean
+  isMatching: boolean
+  sockets: BoneSocket[]
+}
 
-function hasMatchingChild(parentId: string, query: string): boolean {
-  const children = animationStore.armature.bones.filter(b => b.parentId === parentId)
-  for (const c of children) {
-    if (c.name.toLowerCase().includes(query) || hasMatchingChild(c.id, query)) return true
+// Arbitrary Depth Recursive Tree Flattener
+const flattenedBoneTree = computed<FlattenedTreeNode[]>(() => {
+  const allBones = animationStore.armature.bones
+  const boneMap = new Map(allBones.map(b => [b.id, b]))
+  const q = searchQuery.value.trim().toLowerCase()
+
+  const matchSet = new Set<string>()
+  if (q) {
+    for (const b of allBones) {
+      const matchBone = b.name.toLowerCase().includes(q)
+      const matchSocket = b.sockets?.some(s => s.name.toLowerCase().includes(q))
+      if (matchBone || matchSocket) {
+        matchSet.add(b.id)
+        let cur = b
+        while (cur.parentId) {
+          const parent = boneMap.get(cur.parentId)
+          if (!parent) break
+          matchSet.add(parent.id)
+          cur = parent
+        }
+      }
+    }
   }
-  return false
-}
 
-function getChildBones(parentId: string) {
-  const children = animationStore.armature.bones.filter(b => b.parentId === parentId)
-  if (!searchQuery.value.trim()) return children
-  const q = searchQuery.value.toLowerCase()
-  return children.filter(b => b.name.toLowerCase().includes(q) || hasMatchingChild(b.id, q))
-}
+  const result: FlattenedTreeNode[] = []
+
+  function traverse(boneId: string, depth: number, parentVisible: boolean) {
+    const bone = boneMap.get(boneId)
+    if (!bone) return
+
+    const isCollapsed = collapsedBranchIds.value.has(bone.id)
+    const hasChildren = (bone.childrenIds && bone.childrenIds.length > 0) || (bone.sockets && bone.sockets.length > 0)
+    const isMatching = !q || matchSet.has(bone.id)
+    const isVisible = parentVisible && (!q || isMatching)
+
+    result.push({
+      bone,
+      depth,
+      hasChildren: Boolean(hasChildren),
+      isCollapsed,
+      isVisible,
+      isMatching,
+      sockets: bone.sockets || []
+    })
+
+    const childrenVisible = isVisible && !isCollapsed
+    if (bone.childrenIds && bone.childrenIds.length > 0) {
+      for (const childId of bone.childrenIds) {
+        traverse(childId, depth + 1, childrenVisible)
+      }
+    }
+  }
+
+  const rootBones = allBones.filter(b => !b.parentId)
+  for (const root of rootBones) {
+    traverse(root.id, 0, true)
+  }
+
+  return result
+})
 
 function toggleBranch(id: string) {
   if (collapsedBranchIds.value.has(id)) {
@@ -84,6 +140,20 @@ function toggleBranch(id: string) {
   } else {
     collapsedBranchIds.value.add(id)
   }
+}
+
+function handleExpandAll() {
+  collapsedBranchIds.value.clear()
+}
+
+function handleCollapseAll() {
+  const newSet = new Set<string>()
+  for (const b of animationStore.armature.bones) {
+    if ((b.childrenIds && b.childrenIds.length > 0) || (b.sockets && b.sockets.length > 0)) {
+      newSet.add(b.id)
+    }
+  }
+  collapsedBranchIds.value = newSet
 }
 
 function toggleBoneVisibility(id: string) {
@@ -131,7 +201,6 @@ function commitSocketRename(boneId: string, socketId: string) {
   editingSocketId.value = null
 }
 
-// Window Dragging Handlers
 function startDrag(e: MouseEvent) {
   if (e.button !== 0) return
   isDragging.value = true
@@ -158,7 +227,6 @@ function startDrag(e: MouseEvent) {
   window.addEventListener('mouseup', onMouseUp)
 }
 
-// Window Resizing Handlers
 function startResize(e: MouseEvent) {
   e.preventDefault()
   isResizing.value = true
@@ -173,8 +241,8 @@ function startResize(e: MouseEvent) {
     if (!isResizing.value) return
     const dw = moveEvent.clientX - resizeStart.x
     const dh = moveEvent.clientY - resizeStart.y
-    width.value = Math.max(260, Math.min(600, resizeStart.w + dw))
-    height.value = Math.max(220, Math.min(window.innerHeight - 100, resizeStart.h + dh))
+    width.value = Math.max(280, Math.min(700, resizeStart.w + dw))
+    height.value = Math.max(220, Math.min(window.innerHeight - 80, resizeStart.h + dh))
   }
 
   const onMouseUp = () => {
@@ -187,7 +255,6 @@ function startResize(e: MouseEvent) {
   window.addEventListener('mouseup', onMouseUp)
 }
 
-// Quick Operations
 function handleAddRoot() {
   projectStore.recordState('Add Root Bone')
   const mesh = projectStore.activeMesh
@@ -213,13 +280,14 @@ function handleAddRoot() {
     head = { x: Number(cx.toFixed(3)), y: Number(minY.toFixed(3)), z: Number(cz.toFixed(3)) }
     tail = { x: Number(cx.toFixed(3)), y: Number((minY + h).toFixed(3)), z: Number(cz.toFixed(3)) }
   }
-  const bone = animationStore.addBoneFromPoints(head, tail, null, `Bone_Root_${animationStore.armature.bones.length + 1}`)
+  const bone = animationStore.addBoneFromPoints(head, tail, null, animationStore.generateSmartBoneName())
   animationStore.selectedBoneId = bone.id
 }
 
 function handleAddChild(parentId: string) {
   projectStore.recordState('Add Child Bone')
-  animationStore.addChildBone(parentId, `Bone_${animationStore.armature.bones.length + 1}`)
+  const pBone = animationStore.armature.bones.find(b => b.id === parentId)
+  animationStore.addChildBone(parentId, animationStore.generateSmartBoneName(pBone?.name))
 }
 
 function handleExtrude() {
@@ -317,8 +385,23 @@ function closePopout() {
         </span>
       </div>
 
-      <!-- Controls (Minimize / Close) -->
+      <!-- Controls (Expand/Collapse All / Minimize / Close) -->
       <div class="flex items-center gap-1">
+        <button 
+          @click="handleExpandAll" 
+          class="p-1 text-ui-textMuted hover:text-ui-textPrimary rounded-xs hover:bg-ui-hover transition cursor-pointer"
+          title="Expand All Bone Branches"
+        >
+          <ChevronsDown class="w-3 h-3" />
+        </button>
+        <button 
+          @click="handleCollapseAll" 
+          class="p-1 text-ui-textMuted hover:text-ui-textPrimary rounded-xs hover:bg-ui-hover transition cursor-pointer"
+          title="Collapse All Bone Branches"
+        >
+          <ChevronsUp class="w-3 h-3" />
+        </button>
+        <div class="w-px h-3.5 bg-ui-borderSubtle mx-0.5"></div>
         <button 
           @click="isMinimized = !isMinimized"
           class="p-1 text-ui-textMuted hover:text-ui-textPrimary rounded-xs hover:bg-ui-hover transition cursor-pointer"
@@ -330,7 +413,7 @@ function closePopout() {
         <button 
           @click="closePopout"
           class="p-1 text-ui-textMuted hover:text-rose-400 rounded-xs hover:bg-ui-hover transition cursor-pointer"
-          title="Close Hierarchy Popout"
+          title="Close Hierarchy Popout (H)"
         >
           <X class="w-3 h-3" />
         </button>
@@ -339,27 +422,61 @@ function closePopout() {
 
     <!-- 2. Body Content (When Not Minimized) -->
     <div v-show="!isMinimized" class="flex-1 flex flex-col min-h-0 bg-ui-panel/95">
-      <!-- Fast Animator / Rigger Workflow Toolbar -->
-      <div class="p-2 border-b border-ui-borderSubtle bg-ui-surface/40 space-y-1.5">
+      <!-- Search and Quick Traversal Toolbar -->
+      <div class="p-2 border-b border-ui-borderSubtle bg-ui-surface/40 space-y-1.5 shrink-0">
         <!-- Search filter -->
         <div class="relative flex items-center">
           <Search class="w-3 h-3 text-ui-textMuted absolute left-2 pointer-events-none" />
           <input 
             v-model="searchQuery"
             placeholder="Search skeleton bones..."
-            class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs pl-7 pr-2 py-1 text-[11px] text-ui-textPrimary focus:outline-none focus:border-ui-accent placeholder:text-ui-textMuted/60"
+            class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs pl-7 pr-7 py-1 text-[11px] text-ui-textPrimary focus:outline-none focus:border-ui-accent placeholder:text-ui-textMuted/60"
           />
           <button 
             v-if="searchQuery" 
             @click="searchQuery = ''"
-            class="absolute right-2 text-ui-textMuted hover:text-ui-textPrimary text-[10px]"
+            class="absolute right-2 text-ui-textMuted hover:text-ui-textPrimary text-[10px] cursor-pointer"
           >
             ×
           </button>
         </div>
 
-        <!-- Quick Action Buttons -->
+        <!-- Quick Traversal & Pose Controls -->
         <div class="flex items-center justify-between gap-1 text-[10px]">
+          <!-- Parent / Child Traversal Island -->
+          <div class="flex items-center gap-0.5 bg-ui-input/70 p-0.5 rounded-xs border border-ui-borderSubtle">
+            <button 
+              @click="animationStore.selectParentBone()" 
+              :disabled="!selectedBone || !selectedBone.parentId"
+              class="p-1 text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover rounded-xs transition cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Select Parent Bone (Up)"
+            >
+              <ArrowUp class="w-3 h-3" />
+            </button>
+            <button 
+              @click="animationStore.selectFirstChildBone()" 
+              :disabled="!selectedBone || selectedBone.childrenIds.length === 0"
+              class="p-1 text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover rounded-xs transition cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Select First Child Bone (Down)"
+            >
+              <ArrowDown class="w-3 h-3" />
+            </button>
+            <button 
+              @click="animationStore.selectPreviousBone()" 
+              class="p-1 text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover rounded-xs transition cursor-pointer"
+              title="Select Previous Bone in Skeleton"
+            >
+              <ArrowLeft class="w-3 h-3" />
+            </button>
+            <button 
+              @click="animationStore.selectNextBone()" 
+              class="p-1 text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover rounded-xs transition cursor-pointer"
+              title="Select Next Bone in Skeleton"
+            >
+              <ArrowRight class="w-3 h-3" />
+            </button>
+          </div>
+
           <!-- Animation Workspace Tools -->
           <template v-if="toolStore.appMode === 'animate' || animationStore.isTestPoseActive">
             <button 
@@ -373,10 +490,10 @@ function closePopout() {
             </button>
             <button 
               @click="handleKeyAll"
-              class="flex-1 py-1 px-1.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textPrimary rounded-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer"
+              class="py-1 px-1.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textPrimary rounded-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer"
               title="Key Entire Skeleton"
             >
-              <span>Key All</span>
+              <span>All</span>
             </button>
             <button 
               @click="handleResetPose"
@@ -384,7 +501,6 @@ function closePopout() {
               title="Reset Rest Pose (Alt+R)"
             >
               <RotateCcw class="w-2.5 h-2.5" />
-              <span>Reset</span>
             </button>
             <button 
               @click="handleCopyPose"
@@ -410,7 +526,7 @@ function closePopout() {
               title="Add Center Bone"
             >
               <Plus class="w-2.5 h-2.5" />
-              <span>Add Root</span>
+              <span>+ Root</span>
             </button>
             <button 
               @click="handleExtrude"
@@ -418,7 +534,7 @@ function closePopout() {
               title="Extrude Child Bone (E)"
             >
               <GitBranch class="w-2.5 h-2.5 text-amber-400" />
-              <span>Extrude (E)</span>
+              <span>Extrude</span>
             </button>
             <button 
               @click="handleToggleDrawBone"
@@ -427,7 +543,6 @@ function closePopout() {
               title="Draw Bone in 3D (B)"
             >
               <Crosshair class="w-2.5 h-2.5" />
-              <span>Draw</span>
             </button>
             <button 
               @click="handleSymmetrize"
@@ -440,8 +555,8 @@ function closePopout() {
         </div>
       </div>
 
-      <!-- 3. Hierarchy Tree Scroll View -->
-      <div class="flex-1 p-1.5 overflow-y-auto space-y-0.5 min-h-[140px]">
+      <!-- 3. Full Recursive Hierarchy Tree Scroll View -->
+      <div class="flex-1 p-1.5 overflow-y-auto space-y-0.5 min-h-[140px] custom-scrollbar">
         <div v-if="animationStore.armature.bones.length === 0" class="py-10 text-center text-ui-textMuted space-y-2">
           <p class="text-[11px]">No bones in skeleton yet.</p>
           <button 
@@ -453,135 +568,88 @@ function closePopout() {
           </button>
         </div>
 
-        <template v-for="root in rootBones" :key="root.id">
-          <!-- Root Bone Row -->
-          <div 
-            @click="selectBone(root.id)"
-            class="flex items-center justify-between px-2 py-1 rounded-xs cursor-pointer text-[11px] transition group"
-            :class="animationStore.selectedBoneId === root.id && !animationStore.selectedSocketId ? 'bg-ui-active text-ui-textAccent font-semibold border border-ui-accent/40 shadow-xs' : 'hover:bg-ui-hover text-ui-textSecondary'"
-          >
-            <div class="flex items-center gap-1.5 truncate flex-1 min-w-0">
-              <!-- Expand / Collapse Branch -->
-              <button 
-                v-if="getChildBones(root.id).length > 0 || (root.sockets && root.sockets.length > 0)"
-                @click.stop="toggleBranch(root.id)"
-                class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary"
-              >
-                <ChevronRight v-if="collapsedBranchIds.has(root.id)" class="w-3 h-3" />
-                <ChevronDown v-else class="w-3 h-3" />
-              </button>
-              <span v-else class="w-3.5"></span>
-
-              <GitCommitVertical class="w-3.5 h-3.5 shrink-0" :class="animationStore.selectedBoneId === root.id && !animationStore.selectedSocketId ? 'text-ui-accent' : 'text-ui-textMuted'" />
-              
-              <input 
-                v-if="editingBoneId === root.id"
-                v-model="editingName"
-                @blur="commitRename(root.id)"
-                @keydown.enter="commitRename(root.id)"
-                class="bg-ui-input text-ui-textPrimary px-1 py-0.5 rounded-xs text-[11px] w-full border border-ui-accent focus:outline-none"
-                autoFocus
-              />
-              <span v-else class="truncate select-none" @dblclick="startRename(root.id, root.name)">
-                {{ root.name }}
-              </span>
-            </div>
-
-            <!-- Row Tools -->
-            <div class="flex items-center gap-1 opacity-60 group-hover:opacity-100">
-              <button @click.stop="toggleBoneVisibility(root.id)" class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary" title="Toggle Visibility">
-                <EyeOff v-if="hiddenBoneIds.has(root.id)" class="w-3 h-3 text-rose-400" />
-                <Eye v-else class="w-3 h-3" />
-              </button>
-              <button @click.stop="handleAddSocket(root.id)" class="p-0.5 text-ui-textMuted hover:text-sky-300" title="Add Socket (+S)">
-                <Wrench class="w-3 h-3" />
-              </button>
-              <button @click.stop="handleAddChild(root.id)" class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary" title="Add Child Bone">
-                <Plus class="w-3 h-3" />
-              </button>
-              <button @click.stop="handleDeleteBone(root.id)" class="p-0.5 text-ui-textMuted hover:text-rose-400" title="Delete Bone">
-                <Trash2 class="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-
-          <!-- Branch Contents: Sockets and Child Bones -->
-          <div v-show="!collapsedBranchIds.has(root.id)">
-            <!-- Sockets on Root -->
+        <!-- Render each recursive tree node at any depth -->
+        <template v-for="node in flattenedBoneTree" :key="node.bone.id">
+          <div v-show="node.isVisible">
+            <!-- Bone Row -->
             <div 
-              v-for="s in root.sockets || []" 
-              :key="s.id" 
-              @click.stop="selectSocket(s.id)"
-              class="flex items-center justify-between pl-7 pr-2 py-0.5 rounded-xs cursor-pointer text-[10px] transition group"
-              :class="animationStore.selectedSocketId === s.id ? 'bg-sky-500/20 text-sky-300 font-semibold border border-sky-500/50 shadow-xs' : 'text-sky-400 hover:bg-ui-hover'"
+              @click="selectBone(node.bone.id)"
+              class="flex items-center justify-between pr-2 py-1 rounded-xs cursor-pointer text-[11px] transition group"
+              :style="{ paddingLeft: `${8 + node.depth * 14}px` }"
+              :class="animationStore.selectedBoneId === node.bone.id && !animationStore.selectedSocketId ? 'bg-ui-active text-ui-textAccent font-semibold border border-ui-accent/40 shadow-xs' : 'hover:bg-ui-hover text-ui-textSecondary'"
             >
               <div class="flex items-center gap-1.5 truncate flex-1 min-w-0">
-                <Wrench class="w-2.5 h-2.5 shrink-0" />
+                <!-- Branch Expand / Collapse Toggle -->
+                <button 
+                  v-if="node.hasChildren"
+                  @click.stop="toggleBranch(node.bone.id)"
+                  class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary cursor-pointer"
+                >
+                  <ChevronRight v-if="node.isCollapsed" class="w-3 h-3" />
+                  <ChevronDown v-else class="w-3 h-3" />
+                </button>
+                <span v-else class="w-3 text-ui-borderSubtle text-[9px] text-center font-mono">
+                  {{ node.depth > 0 ? '└' : '' }}
+                </span>
+
+                <GitCommitVertical 
+                  class="w-3.5 h-3.5 shrink-0" 
+                  :class="animationStore.selectedBoneId === node.bone.id && !animationStore.selectedSocketId ? 'text-ui-accent' : node.depth === 0 ? 'text-purple-400' : 'text-sky-400'" 
+                />
+                
                 <input 
-                  v-if="editingSocketId === s.id"
-                  v-model="editingSocketName"
-                  @blur="commitSocketRename(root.id, s.id)"
-                  @keydown.enter="commitSocketRename(root.id, s.id)"
-                  class="bg-ui-input text-sky-200 px-1 py-0.5 rounded-xs text-[10px] w-full border border-sky-400 focus:outline-none"
+                  v-if="editingBoneId === node.bone.id"
+                  v-model="editingName"
+                  @blur="commitRename(node.bone.id)"
+                  @keydown.enter="commitRename(node.bone.id)"
+                  class="bg-ui-input text-ui-textPrimary px-1 py-0.5 rounded-xs text-[11px] w-full border border-ui-accent focus:outline-none"
                   autoFocus
                 />
-                <span v-else class="truncate select-none" @dblclick="startSocketRename(s.id, s.name)">
-                  [S] {{ s.name }}
+                <span 
+                  v-else 
+                  class="truncate select-none font-mono" 
+                  :class="node.isMatching && searchQuery ? 'text-amber-300 font-bold' : ''"
+                  @dblclick="startRename(node.bone.id, node.bone.name)"
+                  :title="node.bone.name + ' (Double-click to rename)'"
+                >
+                  {{ node.bone.name }}
+                </span>
+
+                <!-- Child Count Pill -->
+                <span 
+                  v-if="node.bone.childrenIds.length > 0" 
+                  class="text-[9px] text-ui-textMuted bg-ui-input/60 px-1 rounded-xs shrink-0 font-sans"
+                >
+                  {{ node.bone.childrenIds.length }}
                 </span>
               </div>
+
+              <!-- Row Tools -->
               <div class="flex items-center gap-1 opacity-60 group-hover:opacity-100">
-                <button @click.stop="handleRemoveSocket(root.id, s.id)" class="p-0.5 text-ui-textMuted hover:text-rose-400" title="Delete Socket">
-                  <Trash2 class="w-2.5 h-2.5" />
+                <button @click.stop="toggleBoneVisibility(node.bone.id)" class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary cursor-pointer" title="Toggle Visibility">
+                  <EyeOff v-if="hiddenBoneIds.has(node.bone.id)" class="w-3 h-3 text-rose-400" />
+                  <Eye v-else class="w-3 h-3" />
+                </button>
+                <button @click.stop="handleAddSocket(node.bone.id)" class="p-0.5 text-ui-textMuted hover:text-sky-300 cursor-pointer" title="Add Socket (+S)">
+                  <Wrench class="w-3 h-3" />
+                </button>
+                <button @click.stop="handleAddChild(node.bone.id)" class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary cursor-pointer" title="Add Child Bone">
+                  <Plus class="w-3 h-3" />
+                </button>
+                <button @click.stop="handleDeleteBone(node.bone.id)" class="p-0.5 text-ui-textMuted hover:text-rose-400 cursor-pointer" title="Delete Bone">
+                  <Trash2 class="w-3 h-3" />
                 </button>
               </div>
             </div>
 
-            <!-- Children Subtree -->
-            <template v-for="child in getChildBones(root.id)" :key="child.id">
+            <!-- Sockets directly under this bone -->
+            <div v-show="!node.isCollapsed && node.sockets.length > 0">
               <div 
-                @click="selectBone(child.id)"
-                class="flex items-center justify-between pl-6 pr-2 py-1 rounded-xs cursor-pointer text-[11px] transition group"
-                :class="animationStore.selectedBoneId === child.id && !animationStore.selectedSocketId ? 'bg-ui-active text-ui-textAccent font-semibold border border-ui-accent/40 shadow-xs' : 'hover:bg-ui-hover text-ui-textSecondary'"
-              >
-                <div class="flex items-center gap-1.5 truncate flex-1 min-w-0">
-                  <span class="text-ui-borderSubtle">└</span>
-                  <GitCommitVertical class="w-3 h-3 shrink-0" :class="animationStore.selectedBoneId === child.id && !animationStore.selectedSocketId ? 'text-ui-accent' : 'text-ui-textMuted'" />
-                  <input 
-                    v-if="editingBoneId === child.id"
-                    v-model="editingName"
-                    @blur="commitRename(child.id)"
-                    @keydown.enter="commitRename(child.id)"
-                    class="bg-ui-input text-ui-textPrimary px-1 py-0.5 rounded-xs text-[11px] w-full border border-ui-accent focus:outline-none"
-                    autoFocus
-                  />
-                  <span v-else class="truncate select-none" @dblclick="startRename(child.id, child.name)">
-                    {{ child.name }}
-                  </span>
-                </div>
-
-                <div class="flex items-center gap-1 opacity-60 group-hover:opacity-100">
-                  <button @click.stop="toggleBoneVisibility(child.id)" class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary" title="Toggle Visibility">
-                    <EyeOff v-if="hiddenBoneIds.has(child.id)" class="w-3 h-3 text-rose-400" />
-                    <Eye v-else class="w-3 h-3" />
-                  </button>
-                  <button @click.stop="handleAddSocket(child.id)" class="p-0.5 text-ui-textMuted hover:text-sky-300" title="Add Socket (+S)">
-                    <Wrench class="w-3 h-3" />
-                  </button>
-                  <button @click.stop="handleAddChild(child.id)" class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary" title="Add Child Bone">
-                    <Plus class="w-3 h-3" />
-                  </button>
-                  <button @click.stop="handleDeleteBone(child.id)" class="p-0.5 text-ui-textMuted hover:text-rose-400" title="Delete Bone">
-                    <Trash2 class="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-
-              <!-- Sockets on Child -->
-              <div 
-                v-for="s in child.sockets || []" 
+                v-for="s in node.sockets" 
                 :key="s.id" 
                 @click.stop="selectSocket(s.id)"
-                class="flex items-center justify-between pl-11 pr-2 py-0.5 rounded-xs cursor-pointer text-[10px] transition group"
+                class="flex items-center justify-between pr-2 py-0.5 rounded-xs cursor-pointer text-[10px] transition group"
+                :style="{ paddingLeft: `${22 + node.depth * 14}px` }"
                 :class="animationStore.selectedSocketId === s.id ? 'bg-sky-500/20 text-sky-300 font-semibold border border-sky-500/50 shadow-xs' : 'text-sky-400 hover:bg-ui-hover'"
               >
                 <div class="flex items-center gap-1.5 truncate flex-1 min-w-0">
@@ -589,29 +657,29 @@ function closePopout() {
                   <input 
                     v-if="editingSocketId === s.id"
                     v-model="editingSocketName"
-                    @blur="commitSocketRename(child.id, s.id)"
-                    @keydown.enter="commitSocketRename(child.id, s.id)"
+                    @blur="commitSocketRename(node.bone.id, s.id)"
+                    @keydown.enter="commitSocketRename(node.bone.id, s.id)"
                     class="bg-ui-input text-sky-200 px-1 py-0.5 rounded-xs text-[10px] w-full border border-sky-400 focus:outline-none"
                     autoFocus
                   />
-                  <span v-else class="truncate select-none" @dblclick="startSocketRename(s.id, s.name)">
+                  <span v-else class="truncate select-none font-mono" @dblclick="startSocketRename(s.id, s.name)">
                     [S] {{ s.name }}
                   </span>
                 </div>
                 <div class="flex items-center gap-1 opacity-60 group-hover:opacity-100">
-                  <button @click.stop="handleRemoveSocket(child.id, s.id)" class="p-0.5 text-ui-textMuted hover:text-rose-400" title="Delete Socket">
+                  <button @click.stop="handleRemoveSocket(node.bone.id, s.id)" class="p-0.5 text-ui-textMuted hover:text-rose-400 cursor-pointer" title="Delete Socket">
                     <Trash2 class="w-2.5 h-2.5" />
                   </button>
                 </div>
               </div>
-            </template>
+            </div>
           </div>
         </template>
       </div>
 
       <!-- 4. Selected Joint / Socket Inspector Tray -->
       <!-- Case A: Selected Socket -->
-      <div v-if="selectedSocket" class="p-2 border-t border-ui-borderSubtle bg-sky-950/20 space-y-1.5 text-[10px]">
+      <div v-if="selectedSocket" class="p-2 border-t border-ui-borderSubtle bg-sky-950/20 space-y-1.5 text-[10px] shrink-0">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-1.5 text-sky-300 font-semibold truncate">
             <Wrench class="w-3 h-3 shrink-0" />
@@ -647,29 +715,29 @@ function closePopout() {
       </div>
 
       <!-- Case B: Selected Bone -->
-      <div v-else-if="selectedBone" class="p-2 border-t border-ui-borderSubtle bg-ui-surface/60 flex items-center justify-between text-[10px] text-ui-textMuted">
+      <div v-else-if="selectedBone" class="p-2 border-t border-ui-borderSubtle bg-ui-surface/60 flex items-center justify-between text-[10px] text-ui-textMuted shrink-0">
         <div class="flex items-center gap-1.5 truncate">
-          <span class="font-semibold text-ui-textPrimary truncate">{{ selectedBone.name }}</span>
-          <span>·</span>
-          <span>Parent: {{ selectedBone.parentId ? 'Linked' : 'Root' }}</span>
+          <span class="text-ui-textPrimary font-mono font-bold">{{ selectedBone.name }}</span>
+          <span v-if="selectedBone.parentId" class="text-ui-textSecondary truncate max-w-[90px]">
+            Parent: {{ animationStore.armature.bones.find(b => b.id === selectedBone?.parentId)?.name }}
+          </span>
+          <span v-else class="text-purple-400 font-semibold">(Root)</span>
         </div>
         <button 
           @click="handleAddSocket(selectedBone.id)"
-          class="text-sky-400 hover:text-sky-300 flex items-center gap-1 transition cursor-pointer"
+          class="px-1.5 py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[10px] text-sky-300 font-semibold transition cursor-pointer"
         >
-          <Wrench class="w-2.5 h-2.5" />
-          <span>+ Socket</span>
+          + Socket
         </button>
       </div>
     </div>
 
-    <!-- Corner Resizer Handle -->
+    <!-- Window Resize Handle (Bottom-Right Corner) -->
     <div 
-      v-show="!isMinimized"
       @mousedown="startResize"
-      class="absolute right-0 bottom-0 w-3 h-3 cursor-se-resize flex items-end justify-end p-0.5 opacity-40 hover:opacity-100 select-none z-10"
+      class="absolute bottom-0 right-0 w-3.5 h-3.5 cursor-nwse-resize z-50 flex items-end justify-end p-0.5 text-ui-textMuted hover:text-ui-textPrimary"
     >
-      <div class="w-1.5 h-1.5 border-r-2 border-b-2 border-ui-borderDefault"></div>
+      <div class="w-1.5 h-1.5 border-r-2 border-b-2 border-ui-borderStrong"></div>
     </div>
   </div>
 </template>

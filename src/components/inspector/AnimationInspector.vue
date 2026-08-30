@@ -9,18 +9,22 @@ import {
   Sparkles, 
   ChevronDown, 
   Link, 
-  Unlink,
-  Wand2, 
+  Unlink, 
   Settings,
   Eye,
-  ExternalLink,
   Key,
   RotateCcw,
   Clipboard,
   GitCommitVertical,
   Box,
   Film,
-  Sliders
+  Sliders,
+  Search,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  FolderTree
 } from 'lucide-vue-next'
 
 const animationStore = useAnimationStore()
@@ -30,6 +34,19 @@ import { sampleTrack } from '../../core/animation/Armature'
 
 const activeTab = ref<'bone' | 'blend' | 'proc' | 'mesh' | 'anims' | 'settings'>('bone')
 const newClipTitle = ref<string>('')
+const boneSearchQuery = ref<string>('')
+const boneFilterType = ref<'all' | 'roots' | 'leaves'>('all')
+
+const filteredBones = computed(() => {
+  const bones = animationStore.armature.bones
+  const q = boneSearchQuery.value.trim().toLowerCase()
+  return bones.filter(b => {
+    if (boneFilterType.value === 'roots' && b.parentId) return false
+    if (boneFilterType.value === 'leaves' && b.childrenIds.length > 0) return false
+    if (q && !b.name.toLowerCase().includes(q)) return false
+    return true
+  })
+})
 
 const blendClipAId = ref<string>('')
 const blendClipBId = ref<string>('')
@@ -290,32 +307,137 @@ function setClipFps(fps: number) {
         </div>
       </div>
 
-      <!-- Skeleton Bone Quick Selector -->
-      <div v-if="animationStore.armature.bones.length > 0" class="bg-ui-surface p-2 rounded-xs border border-ui-borderSubtle space-y-1.5">
+      <!-- Skeleton Bone Quick Selector & Navigator -->
+      <div v-if="animationStore.armature.bones.length > 0" class="bg-ui-surface p-2.5 rounded-xs border border-ui-borderSubtle space-y-2">
         <div class="text-[10px] text-ui-textMuted font-bold uppercase flex items-center justify-between">
-          <span>Skeleton Bones</span>
           <div class="flex items-center gap-1.5">
-            <span class="text-ui-textSecondary font-normal">{{ animationStore.armature.bones.length }} Bones</span>
+            <GitCommitVertical class="w-3.5 h-3.5 text-ui-accent" />
+            <span>Skeleton Bones</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="text-ui-textSecondary font-mono text-[9.5px] bg-ui-input px-1.5 py-0.5 rounded-xs border border-ui-borderSubtle">
+              {{ filteredBones.length }} / {{ animationStore.armature.bones.length }}
+            </span>
             <button 
               @click="animationStore.toggleBoneHierarchyPopout(true)"
-              class="p-0.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-accent rounded-xs transition cursor-pointer"
+              class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-accent rounded-xs transition cursor-pointer flex items-center gap-1"
               title="Pop out Floating Bone Hierarchy (H)"
             >
-              <ExternalLink class="w-3 h-3" />
+              <FolderTree class="w-3 h-3 text-sky-400" />
             </button>
           </div>
         </div>
-        <div class="space-y-0.5 max-h-28 overflow-y-auto">
+
+        <!-- Bone Search Filter -->
+        <div class="relative flex items-center">
+          <Search class="w-3 h-3 text-ui-textMuted absolute left-2 pointer-events-none" />
+          <input 
+            v-model="boneSearchQuery"
+            placeholder="Search skeleton bones..."
+            class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs pl-7 pr-6 py-1 text-[11px] text-ui-textPrimary focus:outline-none focus:border-ui-accent placeholder:text-ui-textMuted/60"
+          />
           <button 
-            v-for="b in animationStore.armature.bones" 
+            v-if="boneSearchQuery" 
+            @click="boneSearchQuery = ''"
+            class="absolute right-2 text-ui-textMuted hover:text-ui-textPrimary text-[10px] cursor-pointer"
+          >
+            ×
+          </button>
+        </div>
+
+        <!-- Traversal and Filter Island -->
+        <div class="flex items-center justify-between gap-1 text-[10px] pt-0.5">
+          <!-- Filter Tabs -->
+          <div class="flex items-center gap-1">
+            <button 
+              @click="boneFilterType = 'all'"
+              class="px-1.5 py-0.5 rounded-xs transition font-medium text-[9.5px]"
+              :class="boneFilterType === 'all' ? 'bg-ui-active text-ui-textAccent font-bold border border-ui-accent/40' : 'bg-ui-input text-ui-textMuted hover:bg-ui-hover'"
+            >
+              All
+            </button>
+            <button 
+              @click="boneFilterType = 'roots'"
+              class="px-1.5 py-0.5 rounded-xs transition font-medium text-[9.5px]"
+              :class="boneFilterType === 'roots' ? 'bg-ui-active text-ui-textAccent font-bold border border-ui-accent/40' : 'bg-ui-input text-ui-textMuted hover:bg-ui-hover'"
+            >
+              Roots
+            </button>
+            <button 
+              @click="boneFilterType = 'leaves'"
+              class="px-1.5 py-0.5 rounded-xs transition font-medium text-[9.5px]"
+              :class="boneFilterType === 'leaves' ? 'bg-ui-active text-ui-textAccent font-bold border border-ui-accent/40' : 'bg-ui-input text-ui-textMuted hover:bg-ui-hover'"
+            >
+              Leaves
+            </button>
+          </div>
+
+          <!-- Fast Step Traversal -->
+          <div class="flex items-center gap-0.5 bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle">
+            <button 
+              @click="animationStore.selectParentBone()" 
+              :disabled="!selectedBone || !selectedBone.parentId"
+              class="p-0.5 text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover rounded-xs transition cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Select Parent Bone (Up)"
+            >
+              <ArrowUp class="w-3 h-3" />
+            </button>
+            <button 
+              @click="animationStore.selectFirstChildBone()" 
+              :disabled="!selectedBone || selectedBone.childrenIds.length === 0"
+              class="p-0.5 text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover rounded-xs transition cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Select First Child Bone (Down)"
+            >
+              <ArrowDown class="w-3 h-3" />
+            </button>
+            <button 
+              @click="animationStore.selectPreviousBone()" 
+              class="p-0.5 text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover rounded-xs transition cursor-pointer"
+              title="Previous Bone"
+            >
+              <ArrowLeft class="w-3 h-3" />
+            </button>
+            <button 
+              @click="animationStore.selectNextBone()" 
+              class="p-0.5 text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover rounded-xs transition cursor-pointer"
+              title="Next Bone"
+            >
+              <ArrowRight class="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+
+        <!-- Scrollable Bones List -->
+        <div class="space-y-0.5 max-h-52 overflow-y-auto custom-scrollbar">
+          <button 
+            v-for="b in filteredBones" 
             :key="b.id"
             @click="animationStore.selectBone(b.id)"
-            class="w-full px-2 py-1 rounded-xs text-left text-xs font-bold flex items-center gap-1.5 transition"
-            :class="animationStore.selectedBoneId === b.id ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40' : 'bg-ui-input text-ui-textSecondary hover:bg-ui-hover'"
+            class="w-full px-2 py-1 rounded-xs text-left text-xs font-mono flex items-center justify-between gap-1.5 transition cursor-pointer"
+            :class="animationStore.selectedBoneId === b.id ? 'bg-ui-active text-ui-textAccent font-bold border border-ui-accent/40 shadow-xs' : 'bg-ui-input/70 text-ui-textSecondary hover:bg-ui-hover hover:text-ui-textPrimary border border-transparent'"
           >
-            <GitCommitVertical class="w-3.5 h-3.5" :class="animationStore.selectedBoneId === b.id ? 'text-amber-400' : 'text-purple-400'" />
-            <span class="truncate">{{ b.name }}</span>
+            <div class="flex items-center gap-1.5 truncate flex-1 min-w-0">
+              <GitCommitVertical 
+                class="w-3.5 h-3.5 shrink-0" 
+                :class="animationStore.selectedBoneId === b.id ? 'text-amber-400' : !b.parentId ? 'text-purple-400' : 'text-sky-400'" 
+              />
+              <span class="truncate">{{ b.name }}</span>
+            </div>
+
+            <!-- Meta Badges (Root / Child count) -->
+            <div class="flex items-center gap-1 shrink-0 font-sans text-[9px]">
+              <span v-if="!b.parentId" class="text-purple-400 font-semibold px-1 rounded-xs bg-purple-950/40 border border-purple-800/40">
+                Root
+              </span>
+              <span v-if="b.childrenIds.length > 0" class="text-ui-textMuted bg-ui-panel px-1 rounded-xs border border-ui-borderSubtle">
+                {{ b.childrenIds.length }} ch
+              </span>
+            </div>
           </button>
+
+          <div v-if="filteredBones.length === 0" class="text-center py-4 text-ui-textMuted text-[10px] italic">
+            No bones matching search
+          </div>
         </div>
       </div>
 
