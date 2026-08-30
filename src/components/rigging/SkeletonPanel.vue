@@ -455,24 +455,89 @@ function handleAttachActiveMeshToSocket(socketId: string) {
         </div>
       </div>
 
-      <!-- Quick Parenting Inspector for Selected Bone -->
-      <div v-else-if="selectedBone" class="bg-ui-surface/60 p-2 rounded-xs border border-ui-borderSubtle space-y-1">
-        <div class="text-[10px] text-ui-textMuted font-semibold uppercase">Parent Bone</div>
-        <select 
-          :value="selectedBone.parentId || 'root'"
-          @change="handleReparent(selectedBone.id, ($event.target as HTMLSelectElement).value)"
-          class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-ui-textPrimary text-xs focus:outline-none focus:border-ui-accent cursor-pointer"
-        >
-          <option value="root" class="bg-ui-panel text-ui-textMuted">-- None (Root Bone) --</option>
-          <option 
-            v-for="b in animationStore.armature.bones.filter(b => b.id !== selectedBone?.id)" 
-            :key="b.id" 
-            :value="b.id"
-            class="bg-ui-panel text-ui-textPrimary"
+      <!-- Quick Parenting & Spring Physics Inspector for Selected Bone -->
+      <div v-else-if="selectedBone" class="bg-ui-surface/60 p-2 rounded-xs border border-ui-borderSubtle space-y-2">
+        <div class="space-y-1">
+          <div class="text-[10px] text-ui-textMuted font-semibold uppercase">Parent Bone</div>
+          <select 
+            :value="selectedBone.parentId || 'root'"
+            @change="handleReparent(selectedBone.id, ($event.target as HTMLSelectElement).value)"
+            class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-ui-textPrimary text-xs focus:outline-none focus:border-ui-accent cursor-pointer"
           >
-            {{ b.name }}
-          </option>
-        </select>
+            <option value="root" class="bg-ui-panel text-ui-textMuted">-- None (Root Bone) --</option>
+            <option 
+              v-for="b in animationStore.armature.bones.filter(b => b.id !== selectedBone?.id)" 
+              :key="b.id" 
+              :value="b.id"
+              class="bg-ui-panel text-ui-textPrimary"
+            >
+              {{ b.name }}
+            </option>
+          </select>
+        </div>
+
+        <!-- Spring / Jiggle Physics Section -->
+        <div class="space-y-1.5 pt-1.5 border-t border-ui-borderSubtle/60">
+          <div class="flex items-center justify-between">
+            <span class="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">Spring Physics (Jiggle)</span>
+            <input 
+              type="checkbox"
+              :checked="selectedBone?.springConstraint?.enabled || false"
+              @change="(e) => {
+                if (!selectedBone) return
+                if (!selectedBone.springConstraint) {
+                  selectedBone.springConstraint = { enabled: true, stiffness: 0.3, damping: 0.25, gravity: 0.0 }
+                } else {
+                  selectedBone.springConstraint.enabled = (e.target as HTMLInputElement).checked
+                }
+              }"
+              class="rounded-xs accent-emerald-500 cursor-pointer"
+            />
+          </div>
+
+          <template v-if="selectedBone && selectedBone.springConstraint?.enabled">
+            <div class="space-y-1 text-[10px]">
+              <div class="flex items-center justify-between text-ui-textMuted">
+                <span>Stiffness:</span>
+                <span class="font-mono text-ui-textPrimary">{{ selectedBone.springConstraint.stiffness }}</span>
+              </div>
+              <input 
+                type="range" 
+                min="0.05" 
+                max="1.0" 
+                step="0.05" 
+                v-model.number="selectedBone.springConstraint.stiffness"
+                class="w-full accent-emerald-500 h-1 bg-ui-input rounded-xs cursor-pointer"
+              />
+
+              <div class="flex items-center justify-between text-ui-textMuted">
+                <span>Damping:</span>
+                <span class="font-mono text-ui-textPrimary">{{ selectedBone.springConstraint.damping }}</span>
+              </div>
+              <input 
+                type="range" 
+                min="0.05" 
+                max="1.0" 
+                step="0.05" 
+                v-model.number="selectedBone.springConstraint.damping"
+                class="w-full accent-emerald-500 h-1 bg-ui-input rounded-xs cursor-pointer"
+              />
+
+              <div class="flex items-center justify-between text-ui-textMuted">
+                <span>Gravity Sag:</span>
+                <span class="font-mono text-ui-textPrimary">{{ selectedBone.springConstraint.gravity }}</span>
+              </div>
+              <input 
+                type="range" 
+                min="0.0" 
+                max="1.0" 
+                step="0.05" 
+                v-model.number="selectedBone.springConstraint.gravity"
+                class="w-full accent-emerald-500 h-1 bg-ui-input rounded-xs cursor-pointer"
+              />
+            </div>
+          </template>
+        </div>
       </div>
     </div>
   </div>

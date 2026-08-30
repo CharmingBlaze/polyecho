@@ -1690,7 +1690,8 @@ defineExpose({
           <select 
             @change="(e) => {
               const val = (e.target as HTMLSelectElement).value
-              if (val === 'pack-2') handlePackIslands(2)
+              if (val === 'bake-atlas') projectStore.bakeSceneAtlas(2)
+              else if (val === 'pack-2') handlePackIslands(2)
               else if (val === 'pack-0') handlePackIslands(0)
               else if (val === 'pack-4') handlePackIslands(4)
               else if (val === 'gridify') handleGridify()
@@ -1700,6 +1701,7 @@ defineExpose({
             class="bg-transparent text-emerald-500 font-bold focus:outline-none cursor-pointer"
           >
             <option value="default" disabled selected class="bg-ui-panel text-ui-textMuted">Islands & Layout...</option>
+            <option value="bake-atlas" class="bg-ui-panel text-amber-400 font-bold">Bake Scene Texture Atlas (All Meshes)</option>
             <option value="pack-2" class="bg-ui-panel text-emerald-500 font-medium">Auto-Pack Islands (2px Margin)</option>
             <option value="pack-0" class="bg-ui-panel text-ui-textPrimary">Auto-Pack Islands (0px Tight)</option>
             <option value="pack-4" class="bg-ui-panel text-ui-textPrimary">Auto-Pack Islands (4px Margin)</option>

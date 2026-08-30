@@ -293,6 +293,69 @@ function startScrubVector(e: MouseEvent, targetObj: { x: number; y: number; z: n
           </div>
         </div>
       </div>
+
+      <!-- Spring / Jiggle Physics Section -->
+      <div class="space-y-1.5 pt-1.5 border-t border-ui-borderSubtle/60">
+        <div class="flex items-center justify-between">
+          <span class="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">Spring Physics (Jiggle)</span>
+          <input 
+            type="checkbox"
+            :checked="selectedBone?.springConstraint?.enabled || false"
+            @change="(e) => {
+              if (!selectedBone) return
+              if (!selectedBone.springConstraint) {
+                selectedBone.springConstraint = { enabled: true, stiffness: 0.3, damping: 0.25, gravity: 0.0 }
+              } else {
+                selectedBone.springConstraint.enabled = (e.target as HTMLInputElement).checked
+              }
+            }"
+            class="rounded-xs accent-emerald-500 cursor-pointer"
+          />
+        </div>
+
+        <template v-if="selectedBone && selectedBone.springConstraint?.enabled">
+          <div class="space-y-1 text-[10px]">
+            <div class="flex items-center justify-between text-ui-textMuted">
+              <span>Stiffness:</span>
+              <span class="font-mono text-ui-textPrimary">{{ selectedBone.springConstraint.stiffness }}</span>
+            </div>
+            <input 
+              type="range" 
+              min="0.05" 
+              max="1.0" 
+              step="0.05" 
+              v-model.number="selectedBone.springConstraint.stiffness"
+              class="w-full accent-emerald-500 h-1 bg-ui-input rounded-xs cursor-pointer"
+            />
+
+            <div class="flex items-center justify-between text-ui-textMuted">
+              <span>Damping:</span>
+              <span class="font-mono text-ui-textPrimary">{{ selectedBone.springConstraint.damping }}</span>
+            </div>
+            <input 
+              type="range" 
+              min="0.05" 
+              max="1.0" 
+              step="0.05" 
+              v-model.number="selectedBone.springConstraint.damping"
+              class="w-full accent-emerald-500 h-1 bg-ui-input rounded-xs cursor-pointer"
+            />
+
+            <div class="flex items-center justify-between text-ui-textMuted">
+              <span>Gravity Sag:</span>
+              <span class="font-mono text-ui-textPrimary">{{ selectedBone.springConstraint.gravity }}</span>
+            </div>
+            <input 
+              type="range" 
+              min="0.0" 
+              max="1.0" 
+              step="0.05" 
+              v-model.number="selectedBone.springConstraint.gravity"
+              class="w-full accent-emerald-500 h-1 bg-ui-input rounded-xs cursor-pointer"
+            />
+          </div>
+        </template>
+      </div>
     </div>
 
     <!-- Empty State / Quick Selector -->

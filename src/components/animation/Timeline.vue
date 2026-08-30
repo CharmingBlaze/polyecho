@@ -1207,7 +1207,14 @@ function handleGraphSvgClick(e: MouseEvent) {
               class="px-1.5 py-0.5 rounded-xs text-[9px]"
               :class="selectedGraphKey.interpolation === 'cubic' ? 'bg-amber-600 text-white font-bold' : 'text-ui-textMuted hover:text-ui-textPrimary'"
             >
-              Cubic Smooth
+              Cubic
+            </button>
+            <button 
+              @click="updateGraphKeyInterp('bezier')"
+              class="px-1.5 py-0.5 rounded-xs text-[9px]"
+              :class="selectedGraphKey.interpolation === 'bezier' ? 'bg-purple-600 text-white font-bold' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+            >
+              Bézier
             </button>
           </div>
 

@@ -10,6 +10,7 @@ import { useThemeStore, type ThemeColors } from '../../stores/themeStore'
 import { meshToThreeGeometry, computeBoneWorldMatrix } from '../../core/geometry/Converters'
 import { solveCCDIK } from '../../core/animation/IKSolver'
 import { sampleTrack } from '../../core/animation/Armature'
+import { SpringPhysicsSolver } from '../../core/animation/SpringPhysics'
 import { createPSXMaterial } from '../../core/shaders/PSXShader'
 import { computeCentroid } from '../../utils/math'
 import { getMeshEdges } from '../../core/geometry/EdgeUtils'
@@ -3038,6 +3039,11 @@ function onWindowResize() {
 
 function animate() {
   animationFrameId = requestAnimationFrame(animate)
+
+  if (animationStore.armature.bones.length > 0 && (animationStore.isPlaying || animationStore.isTestPoseActive)) {
+    SpringPhysicsSolver.step(animationStore.armature.bones)
+  }
+
   if (orbitControls && orbitControls.enabled && !isGizmoDragging && !transformControls.dragging) {
     orbitControls.update()
   }

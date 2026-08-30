@@ -30,6 +30,7 @@ import { MeshBridge } from '../core/mesh/MeshBridge'
 import { PrimitiveTransform } from '../core/history/commands/CreatePrimitiveCommand'
 import { SeamUnwrapper } from '../core/uv/SeamUnwrapper'
 import { UVIslandPacker } from '../core/uv/UVIslandPacker'
+import { AtlasBaker } from '../core/uv/AtlasBaker'
 import { computeFaceNormal } from '../utils/math'
 import { Vector3D } from '../types/mesh'
 import { useHistoryStore } from './historyStore'
@@ -798,6 +799,27 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
+  function bakeSceneAtlas(padding = 2) {
+    if (meshes.value.length === 0) return
+    recordState('Bake Scene Texture Atlas')
+    try {
+      const result = AtlasBaker.bakeSceneAtlas(
+        meshes.value,
+        textures.value,
+        materials.value,
+        padding
+      )
+
+      textures.value.push(result.atlasTexture)
+      materials.value.push(result.atlasMaterial)
+      activeTextureId.value = result.atlasTexture.id
+      meshes.value = result.remappedMeshes
+      markTextureUpdated()
+    } catch (e: any) {
+      console.error('Atlas Bake Error:', e)
+    }
+  }
+
   return {
     projectName,
     meshes,
@@ -863,6 +885,7 @@ export const useProjectStore = defineStore('project', () => {
     performSeamUnwrap,
     performPackUVIslands,
     generateBoxUVs,
+    bakeSceneAtlas,
     recordState,
   }
 })

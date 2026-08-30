@@ -395,6 +395,12 @@ const allCommands = computed<CommandItem[]>(() => [
     category: 'Topology',
     action: () => projectStore.performPackUVIslands()
   },
+  {
+    id: 'bake-scene-atlas',
+    title: 'Bake Scene Texture Atlas (All Meshes)',
+    category: 'Topology',
+    action: () => projectStore.bakeSceneAtlas(2)
+  },
 
   // 8. RIGGING & ANIMATION
   {

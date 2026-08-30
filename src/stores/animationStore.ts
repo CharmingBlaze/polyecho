@@ -1244,6 +1244,7 @@ export const useAnimationStore = defineStore('animation', () => {
 
   function setKeyframeInterpolation(targetId: string, channel: 'position' | 'rotation' | 'scale', frame: number, interpolation: InterpolationType) {
     if (!activeClip.value) return
+    projectStore.recordState('Set Interpolation')
     const track = activeClip.value.tracks.find(t => t.targetId === targetId)
     if (!track) return
 
@@ -1251,6 +1252,27 @@ export const useAnimationStore = defineStore('animation', () => {
     const key = keyList.find(k => k.frame === frame)
     if (key) {
       key.interpolation = interpolation
+      if (interpolation === 'bezier' && !key.tangent) {
+        key.tangent = {
+          handleIn: { x: -2, y: 0 },
+          handleOut: { x: 2, y: 0 },
+          type: 'aligned'
+        }
+      }
+      evaluatePose()
+    }
+  }
+
+  function setKeyframeTangent(targetId: string, channel: 'position' | 'rotation' | 'scale', frame: number, tangent: any) {
+    if (!activeClip.value) return
+    const track = activeClip.value.tracks.find(t => t.targetId === targetId)
+    if (!track) return
+
+    const keyList = channel === 'position' ? track.positionKeys : channel === 'rotation' ? track.rotationKeys : track.scaleKeys
+    const key = keyList.find(k => k.frame === frame)
+    if (key) {
+      key.tangent = { ...tangent }
+      key.interpolation = 'bezier'
       evaluatePose()
     }
   }
@@ -1805,6 +1827,7 @@ export const useAnimationStore = defineStore('animation', () => {
     addKeyframeForSelected,
     deleteKeyframeAt,
     setKeyframeInterpolation,
+    setKeyframeTangent,
     updateKeyframeValue,
     resetPose,
     copyPose,

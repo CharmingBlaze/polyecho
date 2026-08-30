@@ -26,11 +26,21 @@ export function createDefaultArmature(name = 'Armature'): Armature {
   }
 }
 
+function evaluateCubicBezier(t: number, p0: number, p1: number, p2: number, p3: number): number {
+  const oneMinusT = 1 - t
+  return (
+    oneMinusT * oneMinusT * oneMinusT * p0 +
+    3 * oneMinusT * oneMinusT * t * p1 +
+    3 * oneMinusT * t * t * p2 +
+    t * t * t * p3
+  )
+}
+
 /**
  * Samples track transform values at a given frame with interpolation.
  */
 export function sampleTrack(track: AnimationTrack, frame: number): { position: Vector3D; rotation: Vector3D; scale: Vector3D } {
-  const sampleVectorKeys = (keys: { frame: number; value: Vector3D; interpolation?: string }[], def: Vector3D): Vector3D => {
+  const sampleVectorKeys = (keys: { frame: number; value: Vector3D; interpolation?: string; tangent?: any }[], def: Vector3D): Vector3D => {
     if (keys.length === 0) return { ...def }
     if (keys.length === 1) return { ...keys[0].value }
 
@@ -47,11 +57,21 @@ export function sampleTrack(track: AnimationTrack, frame: number): { position: V
           return { ...k1.value }
         }
 
-        let t = (frame - k1.frame) / (k2.frame - k1.frame)
+        const deltaF = k2.frame - k1.frame
+        let t = deltaF > 0 ? (frame - k1.frame) / deltaF : 0
 
-        // Smooth cubic ease in/out
         if (k1.interpolation === 'cubic') {
           t = t * t * (3 - 2 * t)
+        } else if (k1.interpolation === 'bezier') {
+          // Custom Bézier curve with tangent handles
+          const outY = k1.tangent?.handleOut?.y ?? 0
+          const inY = k2.tangent?.handleIn?.y ?? 0
+          
+          return {
+            x: evaluateCubicBezier(t, k1.value.x, k1.value.x + outY, k2.value.x + inY, k2.value.x),
+            y: evaluateCubicBezier(t, k1.value.y, k1.value.y + outY, k2.value.y + inY, k2.value.y),
+            z: evaluateCubicBezier(t, k1.value.z, k1.value.z + outY, k2.value.z + inY, k2.value.z),
+          }
         }
 
         return {

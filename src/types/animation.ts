@@ -19,6 +19,14 @@ export interface IKConstraint {
   weight?: number // 0..1
 }
 
+export interface SpringConstraint {
+  enabled: boolean
+  stiffness: number // 0.05..1.0
+  damping: number // 0.05..1.0
+  gravity: number // 0.0..1.0
+  wind?: Vector3D
+}
+
 export interface Bone {
   id: string
   name: string
@@ -33,6 +41,7 @@ export interface Bone {
   childrenIds: string[]
   sockets?: BoneSocket[]
   ikConstraint?: IKConstraint
+  springConstraint?: SpringConstraint
 }
 
 export type BindingType = 'object' | 'rigid_vertex' | 'smooth_vertex'
@@ -55,11 +64,18 @@ export type Binding = ObjectBoneBinding | SkinBinding
 
 export type InterpolationType = 'step' | 'linear' | 'cubic' | 'bezier'
 
+export interface KeyframeTangent {
+  handleIn: { x: number; y: number } // relative frame offset and value offset
+  handleOut: { x: number; y: number }
+  type: 'auto' | 'free' | 'aligned' | 'vector'
+}
+
 export interface Keyframe<T> {
   id: string
   frame: number // Frame number (0, 1, 2...)
   value: T
   interpolation?: InterpolationType
+  tangent?: KeyframeTangent
 }
 
 export type TrackTargetType = 'mesh' | 'bone'
