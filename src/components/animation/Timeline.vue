@@ -23,7 +23,8 @@ import {
   Maximize2,
   Minimize2,
   Flag,
-  TrendingUp
+  TrendingUp,
+  FolderTree
 } from 'lucide-vue-next'
 import { InterpolationType } from '../../types/animation'
 import { sampleTrack } from '../../core/animation/Armature'
@@ -528,6 +529,16 @@ function handleGraphSvgClick(e: MouseEvent) {
         >
           <RotateCcw class="w-2.5 h-2.5" />
           <span>Reset</span>
+        </button>
+
+        <button 
+          @click="animationStore.toggleBoneHierarchyPopout()" 
+          class="px-2 py-0.5 rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-accent transition flex items-center gap-1 cursor-pointer"
+          :class="animationStore.showBoneHierarchyPopout ? 'bg-ui-active text-ui-textAccent font-bold' : ''"
+          title="Toggle Floating Bone Hierarchy (H)"
+        >
+          <FolderTree class="w-2.5 h-2.5 text-ui-accent" />
+          <span>Hierarchy (H)</span>
         </button>
       </div>
 

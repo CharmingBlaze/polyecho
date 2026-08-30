@@ -10,7 +10,8 @@ import {
   Crosshair,
   GitBranch,
   FlipHorizontal,
-  GitCommitVertical
+  GitCommitVertical,
+  ExternalLink
 } from 'lucide-vue-next'
 
 const animationStore = useAnimationStore()
@@ -142,9 +143,18 @@ function handleReparent(boneId: string, parentBoneId: string) {
           <FolderTree class="w-3.5 h-3.5 text-ui-accent" />
           <span class="text-[11px] uppercase tracking-wider text-ui-textMuted font-bold">Rig Setup & Skeleton</span>
         </div>
-        <span class="text-[10px] text-ui-textMuted font-medium">
-          {{ animationStore.armature.bones.length }} Bones
-        </span>
+        <div class="flex items-center gap-1.5">
+          <span class="text-[10px] text-ui-textMuted font-medium">
+            {{ animationStore.armature.bones.length }} Bones
+          </span>
+          <button 
+            @click="animationStore.toggleBoneHierarchyPopout(true)"
+            class="p-0.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-accent rounded-xs transition cursor-pointer"
+            title="Pop out Floating Bone Hierarchy (H)"
+          >
+            <ExternalLink class="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       <!-- Quick Add Toolbar -->

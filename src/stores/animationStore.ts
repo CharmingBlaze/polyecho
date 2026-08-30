@@ -48,6 +48,7 @@ export const useAnimationStore = defineStore('animation', () => {
   const xrayBones = ref<boolean>(true)
   const isTestPoseActive = ref<boolean>(false)
   const clickToPlaceMode = ref<boolean>(false)
+  const showBoneHierarchyPopout = ref<boolean>(false)
   const autoKey = ref<boolean>(true)
   const interpolationMode = ref<InterpolationType>('cubic')
   const onionSkin = ref<boolean>(false)
@@ -55,6 +56,14 @@ export const useAnimationStore = defineStore('animation', () => {
   const onionOpacity = ref<number>(0.35)
   const showMotionTrail = ref<boolean>(false)
   const recordedStatusMessage = ref<string>('Ready')
+
+  function toggleBoneHierarchyPopout(force?: boolean) {
+    if (typeof force === 'boolean') {
+      showBoneHierarchyPopout.value = force
+    } else {
+      showBoneHierarchyPopout.value = !showBoneHierarchyPopout.value
+    }
+  }
 
   // Blockbench / GLB Animator Pose Clipboard
   const poseClipboard = ref<Record<string, { position: Vector3D; rotation: Vector3D; scale: Vector3D }>>({})
@@ -1338,6 +1347,8 @@ export const useAnimationStore = defineStore('animation', () => {
     generateImpactShake,
     isTestPoseActive,
     clickToPlaceMode,
+    showBoneHierarchyPopout,
+    toggleBoneHierarchyPopout,
     toggleTestPose,
     resetAllBonesToRest,
     bindSelectedGeometry,

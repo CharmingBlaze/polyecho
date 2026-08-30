@@ -14,6 +14,7 @@ import AddPrimitivePopout from './components/modals/AddPrimitivePopout.vue'
 import BlenderPieMenu from './components/viewport/BlenderPieMenu.vue'
 import CommandPaletteModal from './components/modals/CommandPaletteModal.vue'
 import PreferencesModal from './components/modals/PreferencesModal.vue'
+import BoneHierarchyPopout from './components/rigging/BoneHierarchyPopout.vue'
 
 import { useToolStore } from './stores/toolStore'
 import { useProjectStore } from './stores/projectStore'
@@ -311,6 +312,13 @@ function handleKeyDown(e: KeyboardEvent) {
     case 'd':
       if (toolStore.appMode === 'uvpaint') toolStore.setPaintTool('dither')
       break
+    case 'h':
+    case 'H':
+      if (e.shiftKey || toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
+        e.preventDefault()
+        animationStore.toggleBoneHierarchyPopout()
+      }
+      break
     case ' ':
       e.preventDefault()
       if (toolStore.appMode === 'animate') {
@@ -413,5 +421,6 @@ onUnmounted(() => {
     <AddPrimitivePopout />
     <BlenderPieMenu />
     <CommandPaletteModal />
+    <BoneHierarchyPopout />
   </div>
 </template>

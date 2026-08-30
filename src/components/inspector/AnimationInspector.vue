@@ -11,10 +11,10 @@ import {
   ChevronDown, 
   Link, 
   Unlink,
-  Film,
   Wand2, 
   Settings,
-  Eye
+  Eye,
+  ExternalLink
 } from 'lucide-vue-next'
 
 const animationStore = useAnimationStore()
@@ -257,10 +257,19 @@ function setClipFps(fps: number) {
 
       <!-- Skeleton Bone Quick Selector -->
       <div v-if="animationStore.armature.bones.length > 0" class="bg-ui-surface p-2 rounded-xs border border-ui-borderSubtle space-y-1.5">
-        <span class="text-[10px] text-ui-textMuted font-bold uppercase flex items-center justify-between">
+        <div class="text-[10px] text-ui-textMuted font-bold uppercase flex items-center justify-between">
           <span>Skeleton Bones</span>
-          <span class="text-ui-textSecondary">{{ animationStore.armature.bones.length }} Bones</span>
-        </span>
+          <div class="flex items-center gap-1.5">
+            <span class="text-ui-textSecondary font-normal">{{ animationStore.armature.bones.length }} Bones</span>
+            <button 
+              @click="animationStore.toggleBoneHierarchyPopout(true)"
+              class="p-0.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-accent rounded-xs transition cursor-pointer"
+              title="Pop out Floating Bone Hierarchy (H)"
+            >
+              <ExternalLink class="w-3 h-3" />
+            </button>
+          </div>
+        </div>
         <div class="space-y-0.5 max-h-28 overflow-y-auto">
           <button 
             v-for="b in animationStore.armature.bones" 
