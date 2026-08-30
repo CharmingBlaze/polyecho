@@ -63,11 +63,21 @@ const fragmentShader = /* glsl */ `
   uniform bool uAffineEnabled;
   uniform bool uDitherEnabled;
   uniform float uColorDepth;
+  uniform int uBayerSize;
 
   varying vec2 vUv;
   varying vec3 vColor;
   varying float vLightIntensity;
   varying vec4 vAffineUv;
+
+  float bayer2x2(vec2 uv) {
+    vec2 p = mod(floor(uv), 2.0);
+    if (p.y == 0.0) {
+      return p.x == 0.0 ? 0.0 / 4.0 : 2.0 / 4.0;
+    } else {
+      return p.x == 0.0 ? 3.0 / 4.0 : 1.0 / 4.0;
+    }
+  }
 
   // 4x4 Bayer Matrix for dithering
   float bayer4x4(vec2 uv) {
@@ -98,10 +108,25 @@ const fragmentShader = /* glsl */ `
     }
   }
 
+  float bayer8x8(vec2 uv) {
+    vec2 p = mod(floor(uv), 8.0);
+    vec2 p4 = mod(p, 4.0);
+    float m4 = bayer4x4(p4);
+    vec2 p2 = floor(p / 4.0);
+    float m2 = bayer2x2(p2);
+    return (m4 * 16.0 + m2) / 64.0;
+  }
+
+  float getBayerDither(vec2 uv) {
+    if (uBayerSize == 2) return bayer2x2(uv);
+    if (uBayerSize == 8) return bayer8x8(uv);
+    return bayer4x4(uv);
+  }
+
   void main() {
     vec2 finalUv;
     if (uAffineEnabled) {
-      finalUv = vAffineUv.xy / vAffineUv.w;
+      finalUv = vAffineUv.xy / max(vAffineUv.w, 0.0001);
     } else {
       finalUv = vUv;
     }
@@ -117,7 +142,7 @@ const fragmentShader = /* glsl */ `
 
     // Retro Bayer Dithering & Color Quantization (RGB555 15-bit color)
     if (uDitherEnabled) {
-      float dither = (bayer4x4(gl_FragCoord.xy) - 0.5) / uColorDepth;
+      float dither = (getBayerDither(gl_FragCoord.xy) - 0.5) / max(uColorDepth, 1.0);
       baseCol += vec3(dither);
     }
 
@@ -146,6 +171,7 @@ export function createPSXMaterial(texture: THREE.Texture | null = null, resoluti
     uAffineEnabled: { value: true },
     uDitherEnabled: { value: true },
     uColorDepth: { value: 32.0 }, // 32 steps per channel (RGB555)
+    uBayerSize: { value: 4 },
     uLightDirection: { value: new THREE.Vector3(0.5, 1.0, 0.8).normalize() },
     uAmbientLight: { value: new THREE.Color(0.2, 0.2, 0.25) }
   }

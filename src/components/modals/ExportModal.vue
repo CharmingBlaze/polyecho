@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import * as THREE from 'three'
 import { useProjectStore } from '../../stores/projectStore'
 import { exportToOBJ, exportToMTL } from '../../core/export/ObjExport'
@@ -14,6 +14,20 @@ const animationStore = useAnimationStore()
 const emit = defineEmits<{
   (e: 'close'): void
 }>()
+
+function handleKeyDown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    emit('close')
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeyDown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown)
+})
 
 const activeTab = ref<'gltf' | 'obj' | 'spritesheet' | 'texture' | 'turntable'>('gltf')
 
@@ -160,7 +174,7 @@ async function handleExportTurntable() {
 </script>
 
 <template>
-  <div class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 select-none">
+  <div @click.self="$emit('close')" class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 select-none">
     <div class="bg-dcc-850 border border-dcc-700 rounded-xl w-[520px] shadow-2xl overflow-hidden flex flex-col">
       <!-- Modal Header -->
       <div class="h-12 bg-dcc-900 border-b border-dcc-750 px-4 flex items-center justify-between">

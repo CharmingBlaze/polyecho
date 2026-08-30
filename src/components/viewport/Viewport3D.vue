@@ -83,6 +83,7 @@ let editorEnv: EditorEnvironment
 const raycaster = new THREE.Raycaster()
 const mouse = new THREE.Vector2()
 let isPaintingOn3D = false
+let lastPaintUV: { u: number; v: number } | null = null
 let isGizmoDragging = false
 let pointerDownClientPos = { x: 0, y: 0 }
 let lastHoverClientPos = { x: 0, y: 0 }
@@ -2147,6 +2148,23 @@ function onPointerDown(event: PointerEvent) {
     }
   }
 
+  // Direct 3D Surface Paint Click / Drag Start
+  const isPaintActive = (toolStore.appMode === 'uvpaint' && (toolStore.uvWorkspaceTab === 'paint' || toolStore.uvWorkspaceTab === 'vertex')) ||
+    ['brush', 'eraser', 'picker', 'bucket', 'dither'].includes(toolStore.paintTool)
+  if (event.button === 0 && isPaintActive && !event.altKey) {
+    const intersects = raycaster.intersectObjects(layers.modelGroup.children, true)
+    if (intersects.length > 0 && intersects[0].uv) {
+      isPaintingOn3D = true
+      pointerDownHitMesh = true
+      orbitControls.enabled = false
+      event.stopImmediatePropagation()
+      event.preventDefault()
+      lastPaintUV = null
+      paintRaycastHit()
+      return
+    }
+  }
+
   const isSelectionAllowed = toolStore.appMode === 'model' || (toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'uv')
   const activeMesh = projectStore.activeMesh
 
@@ -2271,7 +2289,7 @@ function onPointerMove(event: PointerEvent) {
     return
   }
 
-  if (isPaintingOn3D && toolStore.appMode === 'uvpaint' && (toolStore.uvWorkspaceTab === 'paint' || toolStore.uvWorkspaceTab === 'vertex')) {
+  if (isPaintingOn3D && (event.buttons === 1)) {
     orbitControls.enabled = false
     event.stopImmediatePropagation()
     event.preventDefault()
@@ -2497,6 +2515,8 @@ function onPointerUp(event?: PointerEvent) {
 
   if (isPaintingOn3D) {
     isPaintingOn3D = false
+    lastPaintUV = null
+    orbitControls.enabled = true
     projectStore.recordState('3D Paint')
     if (event) {
       event.stopImmediatePropagation()
@@ -2870,9 +2890,19 @@ function paintRaycastHit() {
     const effectiveSize = isPen ? Math.max(1, Math.round(toolStore.brushSize * toolStore.currentPressure * 1.5)) : toolStore.brushSize
 
     if (toolStore.paintTool === 'brush') {
-      pb.drawBrush(px, py, toolStore.primaryColor, effectiveSize)
+      if (lastPaintUV) {
+        pb.paintLineAtUV(lastPaintUV.u, lastPaintUV.v, uv.x, uv.y, toolStore.primaryColor, effectiveSize, 'brush', toolStore.brushOpacity)
+      } else {
+        pb.drawBrush(px, py, toolStore.primaryColor, effectiveSize, toolStore.brushOpacity)
+      }
+      lastPaintUV = { u: uv.x, v: uv.y }
     } else if (toolStore.paintTool === 'eraser') {
-      pb.erase(px, py, effectiveSize)
+      if (lastPaintUV) {
+        pb.paintLineAtUV(lastPaintUV.u, lastPaintUV.v, uv.x, uv.y, toolStore.primaryColor, effectiveSize, 'eraser')
+      } else {
+        pb.erase(px, py, effectiveSize)
+      }
+      lastPaintUV = { u: uv.x, v: uv.y }
     } else if (toolStore.paintTool === 'bucket') {
       pb.floodFill(px, py, toolStore.primaryColor)
     } else if (toolStore.paintTool === 'dither') {

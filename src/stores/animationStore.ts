@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { Armature, Bone, BoneSocket, Keyframe, AnimationClip, AnimationTrack, InterpolationType } from '../types/animation'
 import { Vector3D, MeshObject, Vertex } from '../types/mesh'
 import { sampleTrack } from '../core/animation/Armature'
+import { autoWeightMeshToArmature } from '../core/animation/AutoSkinning'
 import { useProjectStore } from './projectStore'
 
 function genId(prefix: string): string {
@@ -480,47 +481,8 @@ export const useAnimationStore = defineStore('animation', () => {
 
   function autoWeightMeshToBones(mesh: MeshObject) {
     if (armature.value.bones.length === 0) return
-
-    for (const v of mesh.vertices) {
-      v.boneWeights = {}
-      const vertWorld = {
-        x: mesh.position.x + v.position.x,
-        y: mesh.position.y + v.position.y,
-        z: mesh.position.z + v.position.z
-      }
-
-      let totalWeight = 0
-      const distances: { boneId: string; dist: number }[] = []
-
-      for (const bone of armature.value.bones) {
-        const d = distanceToSegment3D(vertWorld, bone.head, bone.tail)
-        distances.push({ boneId: bone.id, dist: d })
-      }
-
-      distances.sort((a, b) => a.dist - b.dist)
-      const closest = distances.slice(0, 2)
-
-      for (const item of closest) {
-        const weight = Math.max(0.001, 1 / (Math.pow(item.dist, 2) + 0.05))
-        v.boneWeights[item.boneId] = weight
-        totalWeight += weight
-      }
-
-      if (totalWeight > 0) {
-        for (const bId in v.boneWeights) {
-          v.boneWeights[bId] = Number((v.boneWeights[bId] / totalWeight).toFixed(3))
-        }
-      }
-    }
-  }
-
-  function distanceToSegment3D(p: Vector3D, v1: Vector3D, v2: Vector3D): number {
-    const dx = v2.x - v1.x, dy = v2.y - v1.y, dz = v2.z - v1.z
-    const l2 = dx * dx + dy * dy + dz * dz
-    if (l2 === 0) return Math.hypot(p.x - v1.x, p.y - v1.y, p.z - v1.z)
-    let t = ((p.x - v1.x) * dx + (p.y - v1.y) * dy + (p.z - v1.z) * dz) / l2
-    t = Math.max(0, Math.min(1, t))
-    return Math.hypot(p.x - (v1.x + t * dx), p.y - (v1.y + t * dy), p.z - (v1.z + t * dz))
+    autoWeightMeshToArmature(mesh, armature.value.bones, { maxInfluences: 4, falloffPower: 2.0 })
+    projectStore.markGeometryUpdated()
   }
 
   function addBoneFromPoints(head: Vector3D, tail: Vector3D, parentId?: string | null, name = 'Bone'): Bone {

@@ -142,6 +142,62 @@ export class PixelBuffer {
     }
   }
 
+  paintAtUV(
+    u: number, 
+    v: number, 
+    color: string, 
+    size = 1, 
+    tool: 'brush' | 'eraser' | 'shade-light' | 'shade-dark' = 'brush',
+    opacity = 1.0
+  ) {
+    const px = Math.floor(u * this.width)
+    const py = Math.floor((1 - v) * this.height)
+
+    if (tool === 'eraser') {
+      this.erase(px, py, size)
+    } else if (tool === 'shade-light') {
+      this.drawShade(px, py, 'lighten', size)
+    } else if (tool === 'shade-dark') {
+      this.drawShade(px, py, 'darken', size)
+    } else {
+      this.drawBrush(px, py, color, size, opacity)
+    }
+  }
+
+  paintLineAtUV(
+    u0: number, 
+    v0: number, 
+    u1: number, 
+    v1: number, 
+    color: string, 
+    size = 1, 
+    tool: 'brush' | 'eraser' = 'brush',
+    opacity = 1.0
+  ) {
+    const x0 = Math.floor(u0 * this.width)
+    const y0 = Math.floor((1 - v0) * this.height)
+    const x1 = Math.floor(u1 * this.width)
+    const y1 = Math.floor((1 - v1) * this.height)
+
+    if (tool === 'eraser') {
+      let dx = Math.abs(x1 - x0)
+      let dy = Math.abs(y1 - y0)
+      let sx = x0 < x1 ? 1 : -1
+      let sy = y0 < y1 ? 1 : -1
+      let err = dx - dy
+      let cx = x0, cy = y0
+      while (true) {
+        this.erase(cx, cy, size)
+        if (cx === x1 && cy === y1) break
+        let e2 = 2 * err
+        if (e2 > -dy) { err -= dy; cx += sx }
+        if (e2 < dx) { err += dx; cy += sy }
+      }
+    } else {
+      this.drawLine(x0, y0, x1, y1, color, size, opacity)
+    }
+  }
+
   drawLine(x0: number, y0: number, x1: number, y1: number, colorHex: string, size = 1, opacity = 1.0) {
     let dx = Math.abs(x1 - x0)
     let dy = Math.abs(y1 - y0)
