@@ -26,11 +26,8 @@ import {
   FlipVertical, 
   Grid, 
   Magnet, 
-  AlignCenter,
   Upload, 
-  Download,
-  Activity,
-  Layers,
+  Download, 
   Maximize
 } from 'lucide-vue-next'
 import { SeamUnwrapper } from '../../core/uv/SeamUnwrapper'
@@ -43,6 +40,16 @@ const containerRef = ref<HTMLDivElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 
 // UV Selection mode: 'vertex' | 'edge' | 'face' | 'island'
+const activeDropdown = ref<string | null>(null)
+
+function toggleDropdown(name: string) {
+  activeDropdown.value = activeDropdown.value === name ? null : name
+}
+
+function closeDropdowns() {
+  activeDropdown.value = null
+}
+
 const uvSelectMode = computed<'vertex' | 'edge' | 'face' | 'island'>({
   get: () => {
     if (toolStore.selectMode === 'object') return 'island'
@@ -1595,6 +1602,7 @@ watch(() => toolStore.uvWorkspaceTab, (tab) => {
 let resizeObserver: ResizeObserver | null = null
 
 onMounted(() => {
+  window.addEventListener('click', closeDropdowns)
   // Generate high-contrast numbered calibration test grid
   const img = new Image()
   img.src = generateUVCheckerboardDataURL(512)
@@ -1621,6 +1629,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('click', closeDropdowns)
   if (resizeObserver) {
     resizeObserver.disconnect()
     resizeObserver = null
@@ -1657,112 +1666,41 @@ defineExpose({
   <div class="uv-editor h-full w-full bg-ui-panel flex flex-col select-none overflow-hidden relative font-mono text-xs touch-none">
     <input ref="fileInputRef" type="file" accept="image/*" @change="handleImageImport" class="hidden" />
 
-    <!-- 1. TOP COMPACT UV HEADER BAR -->
-    <div class="uv-primary-bar">
-      <div class="uv-primary-grid">
-        <!-- Active 3D Object Selector -->
-        <div class="uv-object-control uv-control-shell">
-          <span class="text-ui-textMuted font-semibold text-[9px]">OBJ:</span>
-          <select 
-            v-model="projectStore.activeMeshId" 
-            class="bg-transparent text-ui-textPrimary font-bold focus:outline-none cursor-pointer max-w-[120px] truncate"
-          >
-            <option v-for="m in projectStore.meshes" :key="m.id" :value="m.id" class="bg-ui-panel text-ui-textPrimary">
-              {{ m.name }} ({{ m.faces.length }}f)
-            </option>
-          </select>
-        </div>
+    <!-- 1. ROW 1: WORKSPACE TABS & TEXTURE / DOCUMENT ACTIONS -->
+    <div class="uv-header-row-1 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between gap-2 shrink-0 z-30 select-none h-8 min-h-[32px]">
+      <!-- Main 2D Workspace Tabs: UV Editor vs Pixel Paint -->
+      <div class="flex items-center bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle shrink-0">
+        <button 
+          @click="toolStore.uvWorkspaceTab = 'uv'"
+          class="flex items-center space-x-1.5 px-3 py-0.5 rounded-xs text-[10px] font-bold transition cursor-pointer"
+          :class="toolStore.uvWorkspaceTab === 'uv' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          title="UV Unwrapping, Seams & Quadrant Atlas Mapping"
+        >
+          <BlenderIcon name="uv" :size="12" />
+          <span>UV Editor</span>
+        </button>
 
-        <!-- 3D Unwrapping Dropdown -->
-        <div class="uv-dropdown-control uv-unwrap-control">
-          <select 
-            @change="(e) => {
-              const val = (e.target as HTMLSelectElement).value
-              if (val === 'seams') handleSeamUnwrap()
-              else if (val === 'cubemap') handleCubemapCross()
-              else if (val === 'box') handleBoxUnwrap()
-              else if (val === 'cylinder') handleCylinderUnwrap()
-              else if (val === 'sphere') handleSphereUnwrap()
-              else if (val === 'cone') handleConeUnwrap()
-              else if (val === 'planar-z') handlePlanarUnwrap('z')
-              else if (val === 'planar-x') handlePlanarUnwrap('x')
-              else if (val === 'planar-y') handlePlanarUnwrap('y')
-              else if (val === 'reset') snapToFull()
-              ;(e.target as HTMLSelectElement).value = 'default'
-            }"
-            class="bg-transparent text-ui-textAccent font-bold focus:outline-none cursor-pointer"
-          >
-            <option value="default" disabled selected class="bg-ui-panel text-ui-textMuted">Unwrap 3D...</option>
-            <option value="seams" class="bg-ui-panel text-amber-400 font-bold">Unwrap Along Seams (LSCM)</option>
-            <option value="reset" class="bg-ui-panel text-rose-500 font-semibold">Reset UVs (0..1 Full)</option>
-            <option value="cubemap" class="bg-ui-panel text-ui-textAccent">Cubemap Cross (Blockbench)</option>
-            <option value="box" class="bg-ui-panel text-ui-textPrimary">Smart Box Unwrap</option>
-            <option value="cylinder" class="bg-ui-panel text-ui-textPrimary">Cylinder (Tube + Caps)</option>
-            <option value="sphere" class="bg-ui-panel text-ui-textPrimary">Sphere (Equirectangular)</option>
-            <option value="cone" class="bg-ui-panel text-ui-textPrimary">Cone / Pyramid (Radial Fan)</option>
-            <option value="planar-z" class="bg-ui-panel text-ui-textPrimary">Planar Z-Axis</option>
-            <option value="planar-x" class="bg-ui-panel text-ui-textPrimary">Planar X-Axis</option>
-            <option value="planar-y" class="bg-ui-panel text-ui-textPrimary">Planar Y-Axis</option>
-          </select>
-        </div>
-
-        <!-- Islands & Layout Operations Dropdown -->
-        <div class="uv-dropdown-control uv-layout-control">
-          <select 
-            @change="(e) => {
-              const val = (e.target as HTMLSelectElement).value
-              if (val === 'bake-atlas') projectStore.bakeSceneAtlas(2)
-              else if (val === 'pack-2') handlePackIslands(2)
-              else if (val === 'pack-0') handlePackIslands(0)
-              else if (val === 'pack-4') handlePackIslands(4)
-              else if (val === 'gridify') handleGridify()
-              else if (val === 'equalize') handleEqualizeTexels()
-              ;(e.target as HTMLSelectElement).value = 'default'
-            }"
-            class="bg-transparent text-emerald-500 font-bold focus:outline-none cursor-pointer"
-          >
-            <option value="default" disabled selected class="bg-ui-panel text-ui-textMuted">Islands & Layout...</option>
-            <option value="bake-atlas" class="bg-ui-panel text-amber-400 font-bold">Bake Scene Texture Atlas</option>
-            <option value="pack-2" class="bg-ui-panel text-emerald-500 font-medium">Auto-Pack Islands (2px)</option>
-            <option value="pack-0" class="bg-ui-panel text-ui-textPrimary">Auto-Pack Islands (0px)</option>
-            <option value="pack-4" class="bg-ui-panel text-ui-textPrimary">Auto-Pack Islands (4px)</option>
-            <option value="gridify" class="bg-ui-panel text-ui-textAccent font-medium">Gridify Quad Loops</option>
-            <option value="equalize" class="bg-ui-panel text-sky-500 font-medium">Equalize Texel Density</option>
-          </select>
-        </div>
-
-        <!-- UV Alignment Dropdown -->
-        <div class="uv-dropdown-control uv-align-control">
-          <select 
-            @change="(e) => {
-              const val = (e.target as HTMLSelectElement).value
-              if (val) alignSelection(val as any)
-              ;(e.target as HTMLSelectElement).value = 'default'
-            }"
-            class="bg-transparent text-ui-textPrimary font-bold focus:outline-none cursor-pointer"
-          >
-            <option value="default" disabled selected class="bg-ui-panel text-ui-textMuted">Align...</option>
-            <option value="left" class="bg-ui-panel text-ui-textPrimary">Align Left</option>
-            <option value="right" class="bg-ui-panel text-ui-textPrimary">Align Right</option>
-            <option value="top" class="bg-ui-panel text-ui-textPrimary">Align Top</option>
-            <option value="bottom" class="bg-ui-panel text-ui-textPrimary">Align Bottom</option>
-            <option value="center_h" class="bg-ui-panel text-ui-textPrimary">Align Center (Horiz)</option>
-            <option value="center_v" class="bg-ui-panel text-ui-textPrimary">Align Center (Vert)</option>
-          </select>
-        </div>
+        <button 
+          @click="toolStore.uvWorkspaceTab = 'paint'"
+          class="flex items-center space-x-1.5 px-3 py-0.5 rounded-xs text-[10px] font-bold transition cursor-pointer"
+          :class="toolStore.uvWorkspaceTab === 'paint' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          title="Pixel & Texture Paint Studio"
+        >
+          <BlenderIcon name="brush" :size="11" />
+          <span>Pixel Paint</span>
+        </button>
       </div>
 
-      <!-- Right: Texture Selector, Image Import/Export -->
-      <div class="uv-document-bar">
-        <!-- Texture Selector Dropdown -->
-        <div class="uv-texture-control">
-          <span class="text-[10px] text-ui-textMuted font-semibold">Tex:</span>
+      <!-- Right: Active Texture Picker & Import/Export -->
+      <div class="flex items-center gap-1.5 shrink-0">
+        <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px]">
+          <span class="text-ui-textMuted font-bold text-[9px]">TEX:</span>
           <select 
             v-model="projectStore.activeTextureId" 
             @change="onTextureChanged"
-            class="bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-ui-textPrimary text-[10px] font-mono focus:outline-none focus:border-ui-accent cursor-pointer"
+            class="bg-transparent text-ui-textPrimary font-mono focus:outline-none cursor-pointer max-w-[140px] truncate"
           >
-            <option v-for="t in projectStore.textures" :key="t.id" :value="t.id">
+            <option v-for="t in projectStore.textures" :key="t.id" :value="t.id" class="bg-ui-panel">
               {{ t.name }} ({{ t.width }}x{{ t.height }})
             </option>
           </select>
@@ -1770,7 +1708,7 @@ defineExpose({
 
         <button 
           @click="fileInputRef?.click()" 
-          class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input hover:bg-ui-hover text-ui-textAccent text-[10px] font-bold border border-ui-borderSubtle transition cursor-pointer"
+          class="flex items-center gap-1 px-2 py-0.5 rounded-xs bg-ui-input hover:bg-ui-hover text-ui-textAccent text-[10px] font-bold border border-ui-borderSubtle transition cursor-pointer"
           title="Import Texture / Sprite Sheet Image"
         >
           <Upload class="w-3 h-3 text-ui-accent" />
@@ -1779,118 +1717,221 @@ defineExpose({
 
         <button 
           @click="exportTexturePng" 
-          class="flex items-center gap-1 px-1.5 py-0.5 hover:bg-ui-hover rounded-xs text-ui-textSecondary hover:text-emerald-500 border border-ui-borderSubtle bg-ui-input text-[10px] transition cursor-pointer"
+          class="flex items-center gap-1 px-2 py-0.5 hover:bg-ui-hover rounded-xs text-emerald-400 border border-ui-borderSubtle bg-ui-input text-[10px] font-bold transition cursor-pointer"
           title="Export UV Texture PNG"
         >
-          <Download class="w-3 h-3 text-emerald-500" />
+          <Download class="w-3 h-3 text-emerald-400" />
           <span>Export</span>
         </button>
       </div>
     </div>
 
-    <!-- Row 2: Trim Sheet Snapping, Visual Diagnostics & Transforms -->
-    <div class="uv-secondary-bar">
-      <!-- Left: Modular Trim Sheet & Multi-Grid Snapping -->
-      <div class="uv-trim-diagnostics">
-        <span class="text-[10px] text-ui-textMuted font-semibold">Trim Snap:</span>
-        <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle px-1.5 py-0.5 text-[10px]">
+    <!-- 2. ROW 2: ACTIVE 3D OBJECT & DCC DROPDOWN MENUS + DIAGNOSTICS -->
+    <div class="uv-header-row-2 bg-ui-panel border-b border-ui-borderSubtle px-2 flex items-center justify-between gap-2 shrink-0 z-20 select-none h-8 min-h-[32px] overflow-visible">
+      <!-- Left: Active Object & DCC Dropdown Menus -->
+      <div class="flex items-center gap-1 min-w-0">
+        <!-- Active 3D Object Selector -->
+        <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px] text-ui-textSecondary shrink-0 mr-1">
+          <span class="text-ui-textMuted font-bold text-[9px]">OBJ:</span>
           <select 
-            @change="(e) => {
-              const val = (e.target as HTMLSelectElement).value
-              if (val === 'q1') snapToQuadrant(1)
-              else if (val === 'q2') snapToQuadrant(2)
-              else if (val === 'q3') snapToQuadrant(3)
-              else if (val === 'q4') snapToQuadrant(4)
-              else if (val === 'full') snapToFull()
-              else if (val.startsWith('grid-')) {
-                const [, c, r, tc, tr] = val.split('-').map(Number)
-                snapToTrimCell(c, r, tc, tr)
-              }
-              ;(e.target as HTMLSelectElement).value = 'default'
-            }"
-            class="bg-transparent text-ui-textAccent font-bold focus:outline-none cursor-pointer"
+            v-model="projectStore.activeMeshId" 
+            class="bg-transparent text-ui-textPrimary font-bold focus:outline-none cursor-pointer max-w-[110px] truncate"
           >
-            <option value="default" disabled selected class="bg-ui-panel text-ui-textMuted">Trim / Atlas Snapping...</option>
-            <option value="full" class="bg-ui-panel text-ui-textAccent font-bold">Fit to Full (0..1)</option>
-            <option value="q1" class="bg-ui-panel text-ui-textPrimary">Top-Left Quadrant (Q1)</option>
-            <option value="q2" class="bg-ui-panel text-ui-textPrimary">Top-Right Quadrant (Q2)</option>
-            <option value="q3" class="bg-ui-panel text-ui-textPrimary">Bottom-Left Quadrant (Q3)</option>
-            <option value="q4" class="bg-ui-panel text-ui-textPrimary">Bottom-Right Quadrant (Q4)</option>
-            <option disabled class="bg-ui-panel text-ui-textMuted font-bold">--- Modular Trim Grid Presets ---</option>
-            <option value="grid-0-0-2-2" class="bg-ui-panel text-ui-textPrimary">2x2 Grid: Cell (1,1)</option>
-            <option value="grid-1-0-2-2" class="bg-ui-panel text-ui-textPrimary">2x2 Grid: Cell (2,1)</option>
-            <option value="grid-0-1-2-2" class="bg-ui-panel text-ui-textPrimary">2x2 Grid: Cell (1,2)</option>
-            <option value="grid-1-1-2-2" class="bg-ui-panel text-ui-textPrimary">2x2 Grid: Cell (2,2)</option>
-            <option value="grid-0-0-4-4" class="bg-ui-panel text-ui-textPrimary">4x4 Grid: Top-Left (1,1)</option>
-            <option value="grid-3-3-4-4" class="bg-ui-panel text-ui-textPrimary">4x4 Grid: Bottom-Right (4,4)</option>
-            <option value="grid-0-0-8-8" class="bg-ui-panel text-ui-textPrimary">8x8 Tile: Top-Left (1,1)</option>
+            <option v-for="m in projectStore.meshes" :key="m.id" :value="m.id" class="bg-ui-panel text-ui-textPrimary">
+              {{ m.name }} ({{ m.faces.length }}f)
+            </option>
           </select>
         </div>
 
+        <!-- UV Menu Dropdown -->
+        <div class="relative" @click.stop>
+          <button 
+            @click="toggleDropdown('uv')"
+            class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1"
+            :class="activeDropdown === 'uv' ? 'bg-ui-hover text-ui-textAccent shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+          >
+            <span>UV</span>
+            <span class="text-[8px] opacity-70">▼</span>
+          </button>
+
+          <div v-if="activeDropdown === 'uv'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-56 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+            <button @click="handleSeamUnwrap(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-amber-400 font-bold">
+              <span>Unwrap Along Seams (LSCM)</span>
+              <span class="text-[10px] text-ui-textMuted font-mono font-normal">U</span>
+            </button>
+            <button @click="handleBoxUnwrap(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+              <span>Smart Box Unwrap</span>
+            </button>
+            <button @click="handleCubemapCross(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-ui-textAccent">
+              <span>Cubemap Cross (Blockbench)</span>
+            </button>
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="handleCylinderUnwrap(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
+              <span>Cylinder (Tube + Caps)</span>
+            </button>
+            <button @click="handleSphereUnwrap(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
+              <span>Sphere (Equirectangular)</span>
+            </button>
+            <button @click="handleConeUnwrap(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
+              <span>Cone / Pyramid (Radial Fan)</span>
+            </button>
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <div class="px-3 py-0.5 text-[9px] font-bold text-ui-textMuted uppercase">Planar Projections</div>
+            <button @click="handlePlanarUnwrap('z'); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover text-xs">Planar Z-Axis (Front)</button>
+            <button @click="handlePlanarUnwrap('x'); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover text-xs">Planar X-Axis (Side)</button>
+            <button @click="handlePlanarUnwrap('y'); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover text-xs">Planar Y-Axis (Top)</button>
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="snapToFull(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-rose-950/60 hover:text-rose-300 text-rose-400">
+              Reset UVs (0..1 Full)
+            </button>
+          </div>
+        </div>
+
+        <!-- Islands Menu Dropdown -->
+        <div class="relative" @click.stop>
+          <button 
+            @click="toggleDropdown('islands')"
+            class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1"
+            :class="activeDropdown === 'islands' ? 'bg-ui-hover text-emerald-400 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+          >
+            <span>Islands</span>
+            <span class="text-[8px] opacity-70">▼</span>
+          </button>
+
+          <div v-if="activeDropdown === 'islands'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-60 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+            <button @click="handlePackIslands(2); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-emerald-400 font-bold">
+              <span>Auto-Pack Islands (2px Margin)</span>
+            </button>
+            <button @click="handlePackIslands(0); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+              <span>Auto-Pack Islands (0px Tight)</span>
+            </button>
+            <button @click="handlePackIslands(4); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+              <span>Auto-Pack Islands (4px Margin)</span>
+            </button>
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="projectStore.bakeSceneAtlas(2); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover text-amber-400 font-bold">
+              <span>Bake Scene Atlas (All Meshes)</span>
+            </button>
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="handleGridify(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover text-ui-textAccent">
+              <span>Gridify Quad Loops</span>
+            </button>
+            <button @click="handleEqualizeTexels(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover text-sky-400">
+              <span>Equalize Texel Density</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Align & Snap Menu Dropdown -->
+        <div class="relative" @click.stop>
+          <button 
+            @click="toggleDropdown('align')"
+            class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1"
+            :class="activeDropdown === 'align' ? 'bg-ui-hover text-ui-textAccent shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+          >
+            <span>Align & Snap</span>
+            <span class="text-[8px] opacity-70">▼</span>
+          </button>
+
+          <div v-if="activeDropdown === 'align'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-56 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+            <div class="px-3 py-0.5 text-[9px] font-bold text-ui-textMuted uppercase">Align Island / Vertices</div>
+            <div class="grid grid-cols-2 gap-1 px-2 py-1">
+              <button @click="alignSelection('left'); closeDropdowns()" class="px-2 py-1 bg-ui-input hover:bg-ui-hover text-center rounded-xs text-[11px]">Left</button>
+              <button @click="alignSelection('right'); closeDropdowns()" class="px-2 py-1 bg-ui-input hover:bg-ui-hover text-center rounded-xs text-[11px]">Right</button>
+              <button @click="alignSelection('top'); closeDropdowns()" class="px-2 py-1 bg-ui-input hover:bg-ui-hover text-center rounded-xs text-[11px]">Top</button>
+              <button @click="alignSelection('bottom'); closeDropdowns()" class="px-2 py-1 bg-ui-input hover:bg-ui-hover text-center rounded-xs text-[11px]">Bottom</button>
+              <button @click="alignSelection('center_h'); closeDropdowns()" class="px-2 py-1 bg-ui-input hover:bg-ui-hover text-center rounded-xs text-[11px]">Center H</button>
+              <button @click="alignSelection('center_v'); closeDropdowns()" class="px-2 py-1 bg-ui-input hover:bg-ui-hover text-center rounded-xs text-[11px]">Center V</button>
+            </div>
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <div class="px-3 py-0.5 text-[9px] font-bold text-ui-textMuted uppercase">Quadrant / Trim Snapping</div>
+            <button @click="snapToFull(); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover text-amber-400 font-bold">Fit to Full (0..1)</button>
+            <button @click="snapToQuadrant(1); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover">Top-Left (Q1)</button>
+            <button @click="snapToQuadrant(2); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover">Top-Right (Q2)</button>
+            <button @click="snapToQuadrant(3); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover">Bottom-Left (Q3)</button>
+            <button @click="snapToQuadrant(4); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover">Bottom-Right (Q4)</button>
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="snapToTrimCell(0,0,2,2); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover text-ui-textMuted">2x2 Grid (1,1)</button>
+            <button @click="snapToTrimCell(1,1,2,2); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover text-ui-textMuted">2x2 Grid (2,2)</button>
+            <button @click="snapToTrimCell(0,0,4,4); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover text-ui-textMuted">4x4 Grid (1,1)</button>
+          </div>
+        </div>
+
+        <!-- View Menu Dropdown -->
+        <div class="relative" @click.stop>
+          <button 
+            @click="toggleDropdown('view')"
+            class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1"
+            :class="activeDropdown === 'view' ? 'bg-ui-hover text-ui-textPrimary shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+          >
+            <span>View</span>
+            <span class="text-[8px] opacity-70">▼</span>
+          </button>
+
+          <div v-if="activeDropdown === 'view'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-52 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+            <button @click="showCheckerboard = !showCheckerboard; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+              <span>Checkerboard Grid</span>
+              <span class="text-amber-400 font-bold">{{ showCheckerboard ? 'ON' : 'OFF' }}</span>
+            </button>
+            <button @click="showHeatmap = !showHeatmap; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+              <span>UV Stretch Heatmap</span>
+              <span class="text-amber-400 font-bold">{{ showHeatmap ? 'ON' : 'OFF' }}</span>
+            </button>
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="showPixelGrid = !showPixelGrid; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+              <span>Pixel Grid Lines</span>
+              <span class="text-amber-400 font-bold">{{ showPixelGrid ? 'ON' : 'OFF' }}</span>
+            </button>
+            <button @click="snapToPixels = !snapToPixels; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+              <span>Snap to Pixels</span>
+              <span class="text-amber-400 font-bold">{{ snapToPixels ? 'ON' : 'OFF' }}</span>
+            </button>
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="resetPanZoom(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-ui-textAccent">
+              <span>Frame UV Canvas</span>
+              <span class="text-[10px] text-ui-textMuted font-mono">Home</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Diagnostic Toggles -->
+      <div class="flex items-center gap-1 shrink-0">
         <button 
           @click="showCheckerboard = !showCheckerboard" 
-          class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs text-[10px] font-bold border transition"
+          class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs text-[10px] font-bold border transition cursor-pointer"
           :class="showCheckerboard ? 'bg-ui-active text-ui-textAccent border-ui-accent/40 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Toggle Calibration Checkerboard Test Grid"
         >
-          <Layers class="w-3 h-3" />
           <span>Checkerboard</span>
         </button>
 
         <button 
           @click="showHeatmap = !showHeatmap" 
-          class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs text-[10px] font-bold border transition"
+          class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs text-[10px] font-bold border transition cursor-pointer"
           :class="showHeatmap ? 'bg-ui-active text-ui-textAccent border-ui-accent/40 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
-          title="Toggle UV Stretch & Distortion Heatmap (Green = 1:1, Blue = Compressed, Red = Stretched)"
+          title="Toggle UV Stretch & Distortion Heatmap"
         >
-          <Activity class="w-3 h-3" />
           <span>Heatmap</span>
         </button>
       </div>
-
-      <!-- Right: Transform Presets -->
-      <div class="uv-transform-presets">
-        <span class="text-[10px] text-ui-textMuted font-semibold">Transforms:</span>
-        <div class="flex items-center space-x-0.5 bg-ui-input rounded-xs p-0.5 border border-ui-borderSubtle">
-          <button @click="rotateUVs(-90)" class="p-1 hover:bg-ui-hover rounded-xs text-ui-textSecondary hover:text-ui-textPrimary transition" title="Rotate 90° CCW">
-            <RotateCcw class="w-3 h-3" />
-          </button>
-          <button @click="rotateUVs(90)" class="p-1 hover:bg-ui-hover rounded-xs text-ui-textSecondary hover:text-ui-textPrimary transition" title="Rotate 90° CW">
-            <RotateCw class="w-3 h-3" />
-          </button>
-          <button @click="flipUVs('u')" class="p-1 hover:bg-ui-hover rounded-xs text-ui-textSecondary hover:text-ui-textPrimary transition" title="Flip Horizontal">
-            <FlipHorizontal class="w-3 h-3" />
-          </button>
-          <button @click="flipUVs('v')" class="p-1 hover:bg-ui-hover rounded-xs text-ui-textSecondary hover:text-ui-textPrimary transition" title="Flip Vertical">
-            <FlipVertical class="w-3 h-3" />
-          </button>
-          <button @click="scaleUVs(1.5)" class="px-1.5 py-0.5 hover:bg-ui-hover rounded-xs text-[9px] text-ui-textAccent font-bold transition" title="Scale Up +50%">+50%</button>
-          <button @click="scaleUVs(0.67)" class="px-1.5 py-0.5 hover:bg-ui-hover rounded-xs text-[9px] text-ui-textAccent font-bold transition" title="Scale Down -33%">-33%</button>
-          <button @click="centerInView" class="p-1 hover:bg-ui-hover rounded-xs text-ui-textMuted hover:text-ui-textPrimary transition" title="Center UV Islands in Canvas">
-            <AlignCenter class="w-3 h-3" />
-          </button>
-          <button @click="resetPanZoom" class="px-1.5 py-0.5 hover:bg-ui-hover rounded-xs text-[9px] text-ui-textAccent font-bold transition" title="Frame & Center Viewport on Texture">
-            Frame
-          </button>
-        </div>
-      </div>
     </div>
 
-    <!-- 2. INFINITE STAGING CANVAS VIEWPORT -->
+    <!-- 3. INFINITE STAGING CANVAS VIEWPORT -->
     <div 
       ref="containerRef" 
-      class="uv-canvas-viewport"
+      class="uv-canvas-viewport relative flex-1 min-h-0 overflow-hidden"
       @wheel="onWheel"
     >
-      <!-- Sleek Vertical Toolbar inside UV Canvas Window (Left Pinned) -->
+      <!-- Vertical Selection & Quick Actions Toolbar (Docked Inside Canvas Left) -->
       <div class="uv-vertical-toolbar" aria-label="UV Selection & Quick Tools">
-        <!-- UV Selection Mode Icons -->
+        <!-- UV Selection Modes -->
         <div class="uv-vert-tool-group">
           <button 
             @click="uvSelectMode = 'vertex'"
             class="uv-vert-tool-btn"
             :class="{ 'is-active': uvSelectMode === 'vertex' }"
-            title="UV Vertex Select (1)"
+            title="Vertex Select (1)"
           >
             <BlenderIcon name="vertex-select" :size="15" />
           </button>
@@ -1898,7 +1939,7 @@ defineExpose({
             @click="uvSelectMode = 'edge'"
             class="uv-vert-tool-btn"
             :class="{ 'is-active': uvSelectMode === 'edge' }"
-            title="UV Edge Select (2)"
+            title="Edge Select (2)"
           >
             <BlenderIcon name="edge-select" :size="15" />
           </button>
@@ -1906,7 +1947,7 @@ defineExpose({
             @click="uvSelectMode = 'face'"
             class="uv-vert-tool-btn"
             :class="{ 'is-active': uvSelectMode === 'face' }"
-            title="UV Face Select (3)"
+            title="Face Select (3)"
           >
             <BlenderIcon name="face-select" :size="15" />
           </button>
@@ -1914,7 +1955,7 @@ defineExpose({
             @click="uvSelectMode = 'island'"
             class="uv-vert-tool-btn"
             :class="{ 'is-active': uvSelectMode === 'island' }"
-            title="UV Island Select (4)"
+            title="Island Select (4)"
           >
             <BlenderIcon name="object-mode" :size="15" />
           </button>
@@ -1945,7 +1986,7 @@ defineExpose({
         </div>
       </div>
 
-      <!-- Top Right View & Zoom Controls -->
+      <!-- Top Right Floating View Controls -->
       <div class="uv-view-group" aria-label="UV canvas view controls">
         <button
           @click="snapToPixels = !snapToPixels"
@@ -1986,7 +2027,7 @@ defineExpose({
         <span v-if="selectionBounds" class="text-ui-textAccent font-bold">
           Bounds: {{ Math.round(selectionBounds.width * 100) }}% x {{ Math.round(selectionBounds.height * 100) }}%
         </span>
-        <span class="text-ui-textMuted">Space+Drag / Middle Click to Pan | Double-Click Zoom to Frame</span>
+        <span class="text-ui-textMuted hidden md:inline">Space+Drag / MMB to Pan | Double-Click Zoom to Frame</span>
       </div>
     </div>
   </div>
@@ -1997,211 +2038,32 @@ defineExpose({
   container-type: inline-size;
 }
 
-.uv-primary-bar {
-  flex: none;
-  padding: 5px 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  color: var(--ui-text-secondary);
-  background: var(--ui-bg-header);
-  border-bottom: 1px solid var(--ui-border-subtle);
-  box-shadow: 0 1px 0 rgb(0 0 0 / 18%);
-  z-index: 5;
+.uv-header-row-1 {
+  height: 32px;
+  min-height: 32px;
 }
 
-.uv-primary-grid {
-  display: grid;
-  grid-template-columns: minmax(110px, auto) repeat(3, minmax(100px, 1fr));
-  gap: 5px;
-  align-items: center;
-  min-width: 0;
+.uv-header-row-2 {
+  height: 32px;
+  min-height: 32px;
 }
 
-.uv-object-control { grid-area: auto; }
-.uv-unwrap-control { grid-area: auto; }
-.uv-layout-control { grid-area: auto; }
-.uv-align-control { grid-area: auto; }
-
-.uv-control-shell,
-.uv-dropdown-control,
-.uv-texture-control {
-  min-width: 0;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  background: var(--ui-bg-input);
-  border: 1px solid var(--ui-border-subtle);
-  border-radius: 3px;
+.header-dropdown-menu {
+  animation: dropdownIn 100ms ease-out forwards;
 }
 
-.uv-control-shell,
-.uv-texture-control {
-  gap: 5px;
-  padding: 0 7px;
-}
-
-.uv-control-shell select,
-.uv-dropdown-control select,
-.uv-texture-control select {
-  min-width: 0;
-  width: 100%;
-  height: 25px;
-  color: var(--ui-text-primary);
-  background: transparent;
-  border: 0;
-  outline: none;
-  font: inherit;
-  font-size: 10px;
-  text-overflow: ellipsis;
-}
-
-.uv-dropdown-control {
-  padding: 0 5px;
-}
-
-.uv-unwrap-control select { color: var(--ui-text-accent); font-weight: 700; }
-.uv-layout-control select { color: #34d399; font-weight: 700; }
-
-.uv-document-bar {
-  min-height: 31px;
-  padding-top: 4px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  border-top: 1px solid var(--ui-border-subtle);
-}
-
-.uv-texture-control {
-  flex: 1;
-  max-width: 340px;
-}
-
-.uv-document-bar > button {
-  height: 27px;
-  padding: 0 9px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  white-space: nowrap;
-  color: var(--ui-text-secondary);
-  background: var(--ui-bg-input);
-  border: 1px solid var(--ui-border-subtle);
-  border-radius: 3px;
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.uv-document-bar > button:hover {
-  color: var(--ui-text-primary);
-  background: var(--ui-bg-hover);
-  border-color: var(--ui-border-default);
-}
-
-.uv-document-bar > button:first-of-type { color: var(--ui-text-accent); }
-.uv-document-bar > button:last-of-type:hover { color: #34d399; }
-
-.uv-secondary-bar {
-  min-height: 38px;
-  padding: 5px 8px;
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  color: var(--ui-text-secondary);
-  background: var(--ui-bg-panel);
-  border-bottom: 1px solid var(--ui-border-subtle);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
-  z-index: 4;
-}
-
-.uv-trim-diagnostics,
-.uv-transform-presets {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.uv-trim-diagnostics > span,
-.uv-transform-presets > span,
-.uv-object-control > span,
-.uv-texture-control > span {
-  flex: none;
-  color: var(--ui-text-muted);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-}
-
-.uv-trim-diagnostics > div:nth-of-type(1) {
-  height: 27px;
-  min-width: 135px;
-  flex: 1;
-  padding: 0 5px;
-  display: flex;
-  align-items: center;
-  background: var(--ui-bg-input);
-  border: 1px solid var(--ui-border-subtle);
-  border-radius: 3px;
-}
-
-.uv-trim-diagnostics > div:nth-of-type(1) select {
-  width: 100%;
-  border: 0;
-  font-size: 10px;
-}
-
-.uv-trim-diagnostics > button {
-  height: 27px;
-  padding: 0 8px;
-  color: var(--ui-text-muted);
-  background: var(--ui-bg-input);
-  border: 1px solid var(--ui-border-subtle);
-  border-radius: 3px;
-  font-size: 9px;
-}
-
-.uv-trim-diagnostics > button:hover {
-  color: var(--ui-text-primary);
-  background: var(--ui-bg-hover);
-}
-
-.uv-transform-presets > div {
-  height: 27px;
-  padding: 2px;
-  display: flex;
-  align-items: center;
-  gap: 1px;
-  background: var(--ui-bg-input);
-  border: 1px solid var(--ui-border-subtle);
-  border-radius: 3px;
-}
-
-.uv-transform-presets button {
-  height: 21px;
-  min-width: 23px;
-  padding: 0 5px;
-  display: grid;
-  place-items: center;
-  color: var(--ui-text-muted);
-  border-radius: 2px;
-  font-size: 9px;
-}
-
-.uv-transform-presets button:hover {
-  color: var(--ui-text-primary);
-  background: var(--ui-bg-hover);
+@keyframes dropdownIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .uv-canvas-viewport {
-  flex: 1;
-  min-height: 0;
-  position: relative;
-  overflow: hidden;
   color: var(--ui-text-secondary);
   background: var(--ui-bg-root);
   cursor: crosshair;
@@ -2219,10 +2081,10 @@ defineExpose({
   flex-direction: column;
   gap: 3px;
   padding: 4px;
-  background: color-mix(in srgb, var(--ui-bg-header) 92%, transparent);
+  background: color-mix(in srgb, var(--ui-bg-header) 94%, transparent);
   border: 1px solid var(--ui-border-strong);
   border-radius: 4px;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
   backdrop-filter: blur(8px);
 }
 
@@ -2270,22 +2132,22 @@ defineExpose({
   top: 10px;
   right: 10px;
   z-index: 10;
-  height: 36px;
-  padding: 4px;
+  height: 32px;
+  padding: 3px;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   background: color-mix(in srgb, var(--ui-bg-header) 94%, transparent);
   border: 1px solid var(--ui-border-strong);
   border-radius: 4px;
-  box-shadow: 0 5px 18px rgb(0 0 0 / 30%);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
   backdrop-filter: blur(8px);
 }
 
 .uv-view-toggle,
 .uv-view-icon,
 .uv-zoom-control {
-  height: 26px;
+  height: 24px;
   color: var(--ui-text-muted);
   background: var(--ui-bg-input);
   border: 1px solid var(--ui-border-subtle);
@@ -2294,7 +2156,7 @@ defineExpose({
 
 .uv-view-toggle,
 .uv-view-icon {
-  padding: 0 7px;
+  padding: 0 6px;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -2316,8 +2178,8 @@ defineExpose({
 }
 
 .uv-zoom-control button {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   display: grid;
   place-items: center;
   color: var(--ui-text-muted);
@@ -2330,7 +2192,7 @@ defineExpose({
 }
 
 .uv-zoom-control span {
-  min-width: 42px;
+  min-width: 38px;
   text-align: center;
   font-size: 9px;
   font-weight: 700;

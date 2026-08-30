@@ -568,6 +568,29 @@ defineExpose({
     <!-- Stable document and view controls -->
     <div class="pixel-document-bar">
       <div class="pixel-document-group">
+        <!-- Main 2D Workspace Tabs: UV Editor vs Pixel Paint -->
+        <div class="flex items-center bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle shrink-0 mr-1">
+          <button 
+            @click="toolStore.uvWorkspaceTab = 'uv'"
+            class="flex items-center space-x-1 px-2 py-0.5 rounded-xs text-[10px] font-bold transition"
+            :class="toolStore.uvWorkspaceTab === 'uv' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+            title="UV Unwrapping, Seams & Quadrant Atlas Mapping"
+          >
+            <BlenderIcon name="uv" :size="11" />
+            <span>UV Editor</span>
+          </button>
+
+          <button 
+            @click="toolStore.uvWorkspaceTab = 'paint'"
+            class="flex items-center space-x-1 px-2 py-0.5 rounded-xs text-[10px] font-bold transition"
+            :class="toolStore.uvWorkspaceTab === 'paint' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+            title="Pixel & Texture Paint Studio"
+          >
+            <BlenderIcon name="brush" :size="10" />
+            <span>Pixel Paint</span>
+          </button>
+        </div>
+
         <span class="pixel-group-label">Texture</span>
         <select
           v-model="projectStore.activeTextureId"
