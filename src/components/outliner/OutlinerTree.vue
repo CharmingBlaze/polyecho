@@ -228,20 +228,20 @@ function handleAddBone() {
           </div>
 
           <div class="flex items-center space-x-1 shrink-0">
-            <button @click.stop="duplicateMesh(mesh.id)" class="p-1 hover:bg-dcc-700 rounded text-slate-400 hover:text-indigo-300 transition" title="Duplicate Object">
+            <button @click.stop="duplicateMesh(mesh.id)" class="p-1 hover:bg-ui-hover rounded-xs text-ui-textMuted hover:text-ui-textAccent transition" title="Duplicate Object">
               <BlenderIcon name="duplicate" :size="13" />
             </button>
-            <button @click.stop="toggleLock(mesh.id)" class="p-1 hover:bg-dcc-700 rounded transition" :class="mesh.locked ? 'text-amber-400' : 'text-slate-400 hover:text-slate-200'" title="Lock Object">
+            <button @click.stop="toggleLock(mesh.id)" class="p-1 hover:bg-ui-hover rounded-xs transition" :class="mesh.locked ? 'text-amber-400' : 'text-ui-textMuted hover:text-ui-textPrimary'" title="Lock Object">
               <BlenderIcon v-if="mesh.locked" name="lock" :size="13" color="#f59e0b" />
               <BlenderIcon v-else name="unlock" :size="13" />
             </button>
-            <button @click.stop="toggleVisibility(mesh.id)" class="p-1 hover:bg-dcc-700 rounded transition" :class="mesh.visible ? 'text-slate-300' : 'text-slate-600'" title="Toggle Visibility">
+            <button @click.stop="toggleVisibility(mesh.id)" class="p-1 hover:bg-ui-hover rounded-xs transition" :class="mesh.visible ? 'text-ui-textSecondary' : 'text-ui-textMuted opacity-50'" title="Toggle Visibility">
               <BlenderIcon v-if="mesh.visible" name="eye-open" :size="13" />
               <BlenderIcon v-else name="eye-closed" :size="13" />
             </button>
             <button 
               @click.stop="deleteMesh(mesh.id)" 
-              class="p-1 hover:bg-rose-500/20 rounded text-slate-400 hover:text-rose-400 transition" 
+              class="p-1 hover:bg-rose-500/20 rounded-xs text-ui-textMuted hover:text-rose-400 transition" 
               title="Delete Object"
             >
               <BlenderIcon name="trash" :size="13" />
@@ -252,9 +252,9 @@ function handleAddBone() {
 
       <!-- 2. BONES LIST -->
       <template v-else>
-        <div v-if="filteredBones.length === 0" class="py-12 text-center text-slate-500 font-mono text-[11px] flex flex-col items-center gap-2">
+        <div v-if="filteredBones.length === 0" class="py-12 text-center text-ui-textMuted font-mono text-[11px] flex flex-col items-center gap-2">
           <span>No bones in armature</span>
-          <button @click="handleAddBone" class="px-3 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-500 font-bold shadow transition">
+          <button @click="handleAddBone" class="px-3 py-1 rounded-xs bg-ui-accent text-white hover:bg-ui-accentHover font-bold shadow transition">
             + Add First Root Bone
           </button>
         </div>
@@ -263,7 +263,7 @@ function handleAddBone() {
           v-for="bone in filteredBones" 
           :key="bone.id"
           @click="animationStore.selectBone(bone.id); toolStore.appMode = 'animate'"
-          class="flex items-center justify-between px-2.5 py-2 rounded cursor-pointer transition border"
+          class="flex items-center justify-between px-2.5 py-2 rounded-xs cursor-pointer transition border"
           :style="{ paddingLeft: bone.parentId ? '1.5rem' : '0.625rem' }"
           :class="bone.id === animationStore.selectedBoneId ? 'bg-ui-active border-ui-accent/50 text-ui-textAccent shadow-xs' : 'bg-ui-surface/60 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover hover:text-ui-textAccent'"
         >
@@ -294,14 +294,14 @@ function handleAddBone() {
           <div class="flex items-center space-x-1 shrink-0">
             <button 
               @click.stop="animationStore.addChildBone(bone.id, `${bone.name}_Child`); toolStore.appMode = 'animate'" 
-              class="p-1 hover:bg-dcc-700 rounded text-slate-400 hover:text-indigo-300 transition" 
+              class="p-1 hover:bg-ui-hover rounded-xs text-ui-textMuted hover:text-ui-textAccent transition" 
               title="Add Child Bone"
             >
               <GitBranch class="w-3.5 h-3.5" />
             </button>
             <button 
               @click.stop="animationStore.deleteBone(bone.id)" 
-              class="p-1 hover:bg-rose-500/20 rounded text-slate-400 hover:text-rose-400 transition" 
+              class="p-1 hover:bg-rose-500/20 rounded-xs text-ui-textMuted hover:text-rose-400 transition" 
               title="Delete Bone"
             >
               <BlenderIcon name="trash" :size="13" />
@@ -312,9 +312,9 @@ function handleAddBone() {
     </div>
 
     <!-- Outliner Footer Stats -->
-    <div class="p-2 bg-dcc-850 border-t border-dcc-750 text-[10px] font-mono text-slate-400 flex items-center justify-between">
-      <span>Total Meshes: <strong class="text-slate-200">{{ projectStore.meshes.length }}</strong></span>
-      <span>Bones: <strong class="text-slate-200">{{ animationStore.armature.bones.length }}</strong></span>
+    <div class="p-2 bg-ui-header border-t border-ui-borderSubtle text-[10px] font-mono text-ui-textMuted flex items-center justify-between">
+      <span>Total Meshes: <strong class="text-ui-textPrimary">{{ projectStore.meshes.length }}</strong></span>
+      <span>Bones: <strong class="text-ui-textPrimary">{{ animationStore.armature.bones.length }}</strong></span>
     </div>
   </div>
 </template>

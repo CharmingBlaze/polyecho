@@ -496,88 +496,88 @@ defineExpose({
 </script>
 
 <template>
-  <div class="h-full w-full bg-dcc-900 flex flex-col select-none overflow-hidden touch-none relative font-mono text-xs">
+  <div class="h-full w-full bg-ui-panel flex flex-col select-none overflow-hidden touch-none relative font-mono text-xs">
     <input ref="fileInputRef" type="file" accept="image/*" @change="handleTextureUpload" class="hidden" />
 
     <!-- Top Complete Dual-Row Professional Pixel & Texture Toolbar -->
     <!-- Row 1: Comprehensive Tool Strip, Brush Options, Resolution & View Controls -->
-    <div class="h-7 bg-dcc-850 border-b border-dcc-750 px-2 flex items-center justify-between gap-1 text-slate-300 shrink-0 font-mono text-xs">
+    <div class="h-7 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between gap-1 text-ui-textSecondary shrink-0 font-mono text-xs">
       <!-- Left: Tools Switcher & Options -->
       <div class="flex items-center gap-1.5 shrink-0">
         <!-- Tools Switcher Group (Brush, Eraser, Fill, Picker, Line, Rect, Circle, Dither, Shade) -->
-        <div class="flex items-center bg-dcc-900 rounded p-0.5 border border-dcc-750">
+        <div class="flex items-center bg-ui-input rounded-xs p-0.5 border border-ui-borderSubtle">
           <button 
             @click="toolStore.setPaintTool('brush')"
-            class="p-1 rounded text-slate-400 hover:text-white transition"
-            :class="{ 'bg-amber-500 text-slate-950 font-bold shadow-xs': toolStore.paintTool === 'brush' }"
+            class="p-1 rounded-xs text-ui-textMuted hover:text-ui-textPrimary transition"
+            :class="{ 'bg-ui-active text-ui-textAccent font-bold shadow-xs': toolStore.paintTool === 'brush' }"
             title="Pencil / Brush Tool (B)"
           >
             <BlenderIcon name="brush" :size="12" />
           </button>
           <button 
             @click="toolStore.setPaintTool('eraser')"
-            class="p-1 rounded text-slate-400 hover:text-white transition"
-            :class="{ 'bg-amber-500 text-slate-950 font-bold shadow-xs': toolStore.paintTool === 'eraser' }"
+            class="p-1 rounded-xs text-ui-textMuted hover:text-ui-textPrimary transition"
+            :class="{ 'bg-ui-active text-ui-textAccent font-bold shadow-xs': toolStore.paintTool === 'eraser' }"
             title="Eraser Tool (E)"
           >
             <BlenderIcon name="eraser" :size="12" />
           </button>
           <button 
             @click="toolStore.setPaintTool('bucket')"
-            class="p-1 rounded text-slate-400 hover:text-white transition"
-            :class="{ 'bg-amber-500 text-slate-950 font-bold shadow-xs': toolStore.paintTool === 'bucket' }"
+            class="p-1 rounded-xs text-ui-textMuted hover:text-ui-textPrimary transition"
+            :class="{ 'bg-ui-active text-ui-textAccent font-bold shadow-xs': toolStore.paintTool === 'bucket' }"
             title="Paint Bucket / Fill Tool (G)"
           >
             <BlenderIcon name="fill" :size="12" />
           </button>
           <button 
             @click="toolStore.setPaintTool('picker')"
-            class="p-1 rounded text-slate-400 hover:text-white transition"
-            :class="{ 'bg-amber-500 text-slate-950 font-bold shadow-xs': toolStore.paintTool === 'picker' }"
+            class="p-1 rounded-xs text-ui-textMuted hover:text-ui-textPrimary transition"
+            :class="{ 'bg-ui-active text-ui-textAccent font-bold shadow-xs': toolStore.paintTool === 'picker' }"
             title="Eyedropper Color Picker (I)"
           >
             <BlenderIcon name="picker" :size="12" />
           </button>
 
-          <div class="h-3 w-px bg-dcc-750 mx-0.5"></div>
+          <div class="h-3 w-px bg-ui-borderSubtle mx-0.5"></div>
 
           <!-- Shape Tools -->
           <button 
             @click="toolStore.setPaintTool('line')"
-            class="p-1 rounded text-slate-400 hover:text-white transition"
-            :class="{ 'bg-amber-500 text-slate-950 font-bold shadow-xs': toolStore.paintTool === 'line' }"
+            class="p-1 rounded-xs text-ui-textMuted hover:text-ui-textPrimary transition"
+            :class="{ 'bg-ui-active text-ui-textAccent font-bold shadow-xs': toolStore.paintTool === 'line' }"
             title="Line Tool (L)"
           >
             <BlenderIcon name="line" :size="12" />
           </button>
           <button 
             @click="toolStore.setPaintTool('rect')"
-            class="p-1 rounded text-slate-400 hover:text-white transition"
-            :class="{ 'bg-amber-500 text-slate-950 font-bold shadow-xs': toolStore.paintTool === 'rect' }"
+            class="p-1 rounded-xs text-ui-textMuted hover:text-ui-textPrimary transition"
+            :class="{ 'bg-ui-active text-ui-textAccent font-bold shadow-xs': toolStore.paintTool === 'rect' }"
             title="Rectangle / Frame Tool (U)"
           >
             <BlenderIcon name="rect" :size="12" />
           </button>
           <button 
             @click="toolStore.setPaintTool('circle')"
-            class="p-1 rounded text-slate-400 hover:text-white transition"
-            :class="{ 'bg-amber-500 text-slate-950 font-bold shadow-xs': toolStore.paintTool === 'circle' }"
+            class="p-1 rounded-xs text-ui-textMuted hover:text-ui-textPrimary transition"
+            :class="{ 'bg-ui-active text-ui-textAccent font-bold shadow-xs': toolStore.paintTool === 'circle' }"
             title="Circle / Ellipse Tool (C)"
           >
             <BlenderIcon name="circle" :size="12" />
           </button>
           <button 
             @click="toolStore.setPaintTool('dither')"
-            class="p-1 rounded text-slate-400 hover:text-white transition"
-            :class="{ 'bg-amber-500 text-slate-950 font-bold shadow-xs': toolStore.paintTool === 'dither' }"
+            class="p-1 rounded-xs text-ui-textMuted hover:text-ui-textPrimary transition"
+            :class="{ 'bg-ui-active text-ui-textAccent font-bold shadow-xs': toolStore.paintTool === 'dither' }"
             title="Bayer Dither Shader (D)"
           >
             <BlenderIcon name="dither" :size="12" />
           </button>
           <button 
             @click="toolStore.setPaintTool('shade')"
-            class="p-1 rounded text-slate-400 hover:text-white transition"
-            :class="{ 'bg-amber-500 text-slate-950 font-bold shadow-xs': toolStore.paintTool === 'shade' }"
+            class="p-1 rounded-xs text-ui-textMuted hover:text-ui-textPrimary transition"
+            :class="{ 'bg-ui-active text-ui-textAccent font-bold shadow-xs': toolStore.paintTool === 'shade' }"
             title="Shading Brush (Lighten / Darken) (H)"
           >
             <BlenderIcon name="shade" :size="12" />
@@ -585,35 +585,35 @@ defineExpose({
         </div>
 
         <!-- Brush Size Stepper & Presets -->
-        <div class="flex items-center bg-dcc-900 rounded border border-dcc-750 p-0.5 text-[10px]">
-          <span class="text-[9px] text-slate-400 px-1 font-semibold">Size:</span>
+        <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle p-0.5 text-[10px]">
+          <span class="text-[9px] text-ui-textMuted px-1 font-semibold">Size:</span>
           <button 
             v-for="s in [1, 2, 4, 8, 16, 32]" 
             :key="s"
             @click="toolStore.brushSize = s"
-            class="px-1.5 py-0.5 rounded transition font-bold"
-            :class="toolStore.brushSize === s ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'"
+            class="px-1.5 py-0.5 rounded-xs transition font-bold"
+            :class="toolStore.brushSize === s ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
           >
             {{ s }}
           </button>
         </div>
 
         <!-- Shape / Brush Option Toggles -->
-        <div v-if="toolStore.paintTool === 'rect' || toolStore.paintTool === 'circle'" class="flex items-center bg-dcc-900 rounded border border-dcc-750 px-1 py-0.5 text-[10px]">
+        <div v-if="toolStore.paintTool === 'rect' || toolStore.paintTool === 'circle'" class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle px-1 py-0.5 text-[10px]">
           <button 
             @click="toolStore.brushFilled = !toolStore.brushFilled"
-            class="px-1.5 py-0.5 rounded font-bold transition"
-            :class="toolStore.brushFilled ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'"
+            class="px-1.5 py-0.5 rounded-xs font-bold transition"
+            :class="toolStore.brushFilled ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
           >
             {{ toolStore.brushFilled ? 'Filled' : 'Outline' }}
           </button>
         </div>
 
         <!-- Brush Shape Toggle (Square vs Circle) -->
-        <div v-else class="flex items-center bg-dcc-900 rounded border border-dcc-750 px-1 py-0.5 text-[10px]">
+        <div v-else class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle px-1 py-0.5 text-[10px]">
           <button 
             @click="toolStore.brushShape = toolStore.brushShape === 'square' ? 'circle' : 'square'"
-            class="px-1.5 py-0.5 rounded font-semibold text-slate-300 hover:text-white"
+            class="px-1.5 py-0.5 rounded-xs font-semibold text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover"
             title="Toggle Square (Pixel) vs Circle (Round) brush shape"
           >
             {{ toolStore.brushShape === 'square' ? 'Square' : 'Round' }}
@@ -624,8 +624,8 @@ defineExpose({
       <!-- Right: Resolution Switcher, File Actions, Overlays & Zoom -->
       <div class="flex items-center space-x-1 shrink-0">
         <!-- Texture Canvas Resolution Switcher Dropdown -->
-        <div class="flex items-center bg-dcc-900 rounded border border-dcc-750 px-1.5 py-0.5 text-[10px]">
-          <span class="text-[9px] text-slate-400 font-semibold pr-1">Res:</span>
+        <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle px-1.5 py-0.5 text-[10px]">
+          <span class="text-[9px] text-ui-textMuted font-semibold pr-1">Res:</span>
           <select 
             @change="(e) => {
               const val = (e.target as HTMLSelectElement).value
@@ -639,47 +639,47 @@ defineExpose({
               }
               ;(e.target as HTMLSelectElement).value = 'default'
             }"
-            class="bg-transparent text-amber-300 font-bold focus:outline-none cursor-pointer"
+            class="bg-transparent text-ui-textAccent font-bold focus:outline-none cursor-pointer"
           >
-            <option value="default" disabled selected class="bg-dcc-900 text-slate-400">
+            <option value="default" disabled selected class="bg-ui-panel text-ui-textMuted">
               {{ projectStore.pixelBuffer.width }}x{{ projectStore.pixelBuffer.height }}
             </option>
-            <option value="64x64" class="bg-dcc-900 text-slate-200">64 x 64 (PSX Retro)</option>
-            <option value="128x128" class="bg-dcc-900 text-slate-200">128 x 128 (Standard Low-Poly)</option>
-            <option value="256x256" class="bg-dcc-900 text-slate-200">256 x 256 (Detailed Atlas)</option>
-            <option value="512x512" class="bg-dcc-900 text-slate-200">512 x 512 (HD Trim Sheet)</option>
-            <option value="1024x1024" class="bg-dcc-900 text-slate-200">1024 x 1024 (2K Full Model)</option>
-            <option value="2048x2048" class="bg-dcc-900 text-slate-200">2048 x 2048 (4K Ultra Atlas)</option>
-            <option value="custom" class="bg-dcc-900 text-indigo-400 font-bold">Custom Canvas Size...</option>
+            <option value="64x64" class="bg-ui-panel text-ui-textPrimary">64 x 64 (PSX Retro)</option>
+            <option value="128x128" class="bg-ui-panel text-ui-textPrimary">128 x 128 (Standard Low-Poly)</option>
+            <option value="256x256" class="bg-ui-panel text-ui-textPrimary">256 x 256 (Detailed Atlas)</option>
+            <option value="512x512" class="bg-ui-panel text-ui-textPrimary">512 x 512 (HD Trim Sheet)</option>
+            <option value="1024x1024" class="bg-ui-panel text-ui-textPrimary">1024 x 1024 (2K Full Model)</option>
+            <option value="2048x2048" class="bg-ui-panel text-ui-textPrimary">2048 x 2048 (4K Ultra Atlas)</option>
+            <option value="custom" class="bg-ui-panel text-ui-textAccent font-bold">Custom Canvas Size...</option>
           </select>
         </div>
 
-        <div class="h-3.5 w-px bg-dcc-750 mx-0.5"></div>
+        <div class="h-3.5 w-px bg-ui-borderSubtle mx-0.5"></div>
 
         <button 
           @click="fileInputRef?.click()" 
-          class="flex items-center gap-1 px-1.5 py-0.5 bg-dcc-900 hover:bg-dcc-800 text-indigo-300 rounded border border-dcc-750 text-[10px] font-bold transition"
+          class="flex items-center gap-1 px-1.5 py-0.5 bg-ui-input hover:bg-ui-hover text-ui-textAccent rounded-xs border border-ui-borderSubtle text-[10px] font-bold transition"
           title="Upload texture PNG/JPG/WebP of any resolution"
         >
-          <Upload class="w-3 h-3 text-indigo-400" />
+          <Upload class="w-3 h-3 text-ui-accent" />
           <span>Upload</span>
         </button>
 
         <button 
           @click="downloadTexturePng" 
-          class="flex items-center gap-1 px-1.5 py-0.5 bg-dcc-900 hover:bg-dcc-800 text-slate-300 hover:text-emerald-400 rounded border border-dcc-750 text-[10px] transition"
+          class="flex items-center gap-1 px-1.5 py-0.5 bg-ui-input hover:bg-ui-hover text-ui-textSecondary hover:text-emerald-500 rounded-xs border border-ui-borderSubtle text-[10px] transition"
           title="Download Texture PNG"
         >
-          <Download class="w-3 h-3 text-emerald-400" />
+          <Download class="w-3 h-3 text-emerald-500" />
           <span>Export</span>
         </button>
 
-        <div class="h-3.5 w-px bg-dcc-750 mx-0.5"></div>
+        <div class="h-3.5 w-px bg-ui-borderSubtle mx-0.5"></div>
 
         <button 
           @click="showUvOverlay = !showUvOverlay" 
-          class="px-1.5 py-0.5 rounded text-[10px] border transition font-bold"
-          :class="showUvOverlay ? 'bg-sky-500/20 text-sky-300 border-sky-500/50' : 'bg-dcc-900 text-slate-500 border-dcc-750'"
+          class="px-1.5 py-0.5 rounded-xs text-[10px] border transition font-bold"
+          :class="showUvOverlay ? 'bg-ui-active text-ui-textAccent border-ui-accent/40 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:bg-ui-hover'"
           title="Toggle 3D UV Wireframe Overlay"
         >
           UV Wire
@@ -687,21 +687,21 @@ defineExpose({
 
         <button 
           @click="showPixelGrid = !showPixelGrid" 
-          class="p-1 rounded hover:bg-dcc-750 text-slate-400 hover:text-white border border-dcc-750 bg-dcc-900"
-          :class="{ 'text-indigo-400 bg-indigo-500/20 border-indigo-500/50': showPixelGrid }"
+          class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary border border-ui-borderSubtle bg-ui-input"
+          :class="{ 'text-ui-textAccent bg-ui-active border-ui-accent/40': showPixelGrid }"
           title="Toggle Pixel Grid"
         >
           <Grid class="w-3 h-3" />
         </button>
 
-        <div class="flex items-center bg-dcc-900 border border-dcc-750 rounded">
-          <button @click="zoom = Math.max(0.25, zoom / 1.5)" class="p-1 hover:bg-dcc-750 rounded-l text-slate-400 hover:text-white" title="Zoom Out">
+        <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs">
+          <button @click="zoom = Math.max(0.25, zoom / 1.5)" class="p-1 hover:bg-ui-hover rounded-l-xs text-ui-textMuted hover:text-ui-textPrimary" title="Zoom Out">
             <ZoomOut class="w-3 h-3" />
           </button>
-          <span @dblclick="resetPanZoom" class="px-1.5 font-mono text-[9px] text-slate-300 cursor-pointer font-mono" title="Double click to reset zoom">
+          <span @dblclick="resetPanZoom" class="px-1.5 font-mono text-[9px] text-ui-textPrimary cursor-pointer font-mono" title="Double click to reset zoom">
             {{ zoom }}x
           </span>
-          <button @click="zoom = Math.min(32, zoom * 1.5)" class="p-1 hover:bg-dcc-750 rounded-r text-slate-400 hover:text-white" title="Zoom In">
+          <button @click="zoom = Math.min(32, zoom * 1.5)" class="p-1 hover:bg-ui-hover rounded-r-xs text-ui-textMuted hover:text-ui-textPrimary" title="Zoom In">
             <ZoomIn class="w-3 h-3" />
           </button>
         </div>
@@ -709,20 +709,20 @@ defineExpose({
     </div>
 
     <!-- Row 2: Color Studio, Preset Palettes Strip & Image Adjustments -->
-    <div class="h-7 bg-dcc-800/80 border-b border-dcc-750 px-2 flex items-center justify-between text-xs text-slate-300 shrink-0 font-mono">
+    <div class="h-7 bg-ui-panel border-b border-ui-borderSubtle px-2 flex items-center justify-between text-xs text-ui-textSecondary shrink-0 font-mono">
       <!-- Left: Dual Swatches & Color Input -->
       <div class="flex items-center space-x-1.5">
-        <div class="flex items-center space-x-1 bg-dcc-900 px-1 py-0.5 rounded border border-dcc-750">
+        <div class="flex items-center space-x-1 bg-ui-input px-1 py-0.5 rounded-xs border border-ui-borderSubtle">
           <div class="relative w-4 h-4 rounded-xs overflow-hidden border border-white/60 shadow-xs" title="Primary Color (Left Click to paint)">
             <input type="color" v-model="toolStore.primaryColor" class="absolute -top-2 -left-2 w-8 h-8 cursor-pointer border-none p-0 bg-transparent" />
           </div>
-          <button @click="swapColors" class="p-0.5 text-slate-400 hover:text-white transition" title="Swap Primary & Secondary Colors (X)">
+          <button @click="swapColors" class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary transition" title="Swap Primary & Secondary Colors (X)">
             <ArrowLeftRight class="w-2.5 h-2.5" />
           </button>
-          <div class="relative w-4 h-4 rounded-xs overflow-hidden border border-slate-600 shadow-xs" title="Secondary Color (Right Click to paint)">
+          <div class="relative w-4 h-4 rounded-xs overflow-hidden border border-ui-borderDefault shadow-xs" title="Secondary Color (Right Click to paint)">
             <input type="color" v-model="toolStore.secondaryColor" class="absolute -top-2 -left-2 w-8 h-8 cursor-pointer border-none p-0 bg-transparent" />
           </div>
-          <input type="text" v-model="toolStore.primaryColor" class="w-16 bg-transparent text-[10px] font-mono font-bold text-slate-200 uppercase focus:outline-none pl-1" />
+          <input type="text" v-model="toolStore.primaryColor" class="w-16 bg-transparent text-[10px] font-mono font-bold text-ui-textPrimary uppercase focus:outline-none pl-1" />
         </div>
       </div>
 
@@ -731,13 +731,13 @@ defineExpose({
         <select 
           :value="selectedPaletteName"
           @change="(e) => switchPalette((e.target as HTMLSelectElement).value)"
-          class="bg-dcc-900 text-slate-300 border border-dcc-750 rounded px-1 py-0.5 text-[9px] focus:outline-none cursor-pointer"
+          class="bg-ui-input text-ui-textPrimary border border-ui-borderSubtle rounded-xs px-1 py-0.5 text-[9px] focus:outline-none cursor-pointer"
         >
-          <option v-for="name in Object.keys(palettePresets)" :key="name" :value="name">{{ name }}</option>
-          <option v-if="!palettePresets[selectedPaletteName]" :value="selectedPaletteName">{{ selectedPaletteName }}</option>
+          <option v-for="name in Object.keys(palettePresets)" :key="name" :value="name" class="bg-ui-panel text-ui-textPrimary">{{ name }}</option>
+          <option v-if="!palettePresets[selectedPaletteName]" :value="selectedPaletteName" class="bg-ui-panel text-ui-textPrimary">{{ selectedPaletteName }}</option>
         </select>
 
-        <div class="flex items-center space-x-0.5 bg-dcc-900 p-0.5 rounded border border-dcc-750 max-w-[280px] overflow-x-auto">
+        <div class="flex items-center space-x-0.5 bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle max-w-[280px] overflow-x-auto">
           <button 
             v-for="c in activePalette" 
             :key="c"
@@ -751,7 +751,7 @@ defineExpose({
 
         <button 
           @click="extractPaletteFromTexture"
-          class="px-1.5 py-0.5 rounded bg-dcc-900 hover:bg-dcc-750 border border-dcc-750 text-indigo-300 text-[9px] font-bold transition"
+          class="px-1.5 py-0.5 rounded-xs bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textAccent text-[9px] font-bold transition"
           title="Extract dominant color palette from the current texture"
         >
           Extract
@@ -760,7 +760,7 @@ defineExpose({
 
       <!-- Right: Aseprite Adjustments & FX Dropdown -->
       <div class="flex items-center space-x-1">
-        <div class="flex items-center bg-dcc-900 rounded border border-dcc-750 px-1.5 py-0.5 text-[10px]">
+        <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle px-1.5 py-0.5 text-[10px]">
           <select 
             @change="(e) => {
               const val = (e.target as HTMLSelectElement).value
@@ -769,19 +769,19 @@ defineExpose({
               else applyAdjustment(val)
               ;(e.target as HTMLSelectElement).value = 'default'
             }"
-            class="bg-transparent text-indigo-300 font-bold focus:outline-none cursor-pointer"
+            class="bg-transparent text-ui-textAccent font-bold focus:outline-none cursor-pointer"
           >
-            <option value="default" disabled selected class="bg-dcc-900 text-slate-400">Adjustments...</option>
-            <option value="outline" class="bg-dcc-900 text-amber-300 font-bold">1px Outline Effect</option>
-            <option value="brighten" class="bg-dcc-900 text-slate-200">Brightness (+10%)</option>
-            <option value="darken" class="bg-dcc-900 text-slate-200">Darkness (-10%)</option>
-            <option value="grayscale" class="bg-dcc-900 text-slate-200">Desaturate (Grayscale)</option>
-            <option value="invert" class="bg-dcc-900 text-slate-200">Invert Colors</option>
-            <option value="flipH" class="bg-dcc-900 text-slate-200">Flip Horizontal</option>
-            <option value="flipV" class="bg-dcc-900 text-slate-200">Flip Vertical</option>
-            <option value="rot90" class="bg-dcc-900 text-slate-200">Rotate 90° CW</option>
-            <option value="retro-atlas" class="bg-dcc-900 text-amber-400">Generate Retro Atlas</option>
-            <option value="clear" class="bg-dcc-900 text-rose-400 font-bold">Clear Canvas</option>
+            <option value="default" disabled selected class="bg-ui-panel text-ui-textMuted">Adjustments...</option>
+            <option value="outline" class="bg-ui-panel text-ui-textAccent font-bold">1px Outline Effect</option>
+            <option value="brighten" class="bg-ui-panel text-ui-textPrimary">Brightness (+10%)</option>
+            <option value="darken" class="bg-ui-panel text-ui-textPrimary">Darkness (-10%)</option>
+            <option value="grayscale" class="bg-ui-panel text-ui-textPrimary">Desaturate (Grayscale)</option>
+            <option value="invert" class="bg-ui-panel text-ui-textPrimary">Invert Colors</option>
+            <option value="flipH" class="bg-ui-panel text-ui-textPrimary">Flip Horizontal</option>
+            <option value="flipV" class="bg-ui-panel text-ui-textPrimary">Flip Vertical</option>
+            <option value="rot90" class="bg-ui-panel text-ui-textPrimary">Rotate 90° CW</option>
+            <option value="retro-atlas" class="bg-ui-panel text-ui-textAccent">Generate Retro Atlas</option>
+            <option value="clear" class="bg-ui-panel text-rose-500 font-bold">Clear Canvas</option>
           </select>
         </div>
       </div>
@@ -789,8 +789,8 @@ defineExpose({
 
     <!-- Canvas Scroll & Pan Viewport -->
     <div 
-      ref="containerRef"
-      class="flex-1 min-h-0 relative overflow-hidden bg-dcc-950 flex items-center justify-center cursor-crosshair touch-none"
+      ref="containerRef" 
+      class="flex-1 min-h-0 relative overflow-hidden bg-ui-root flex items-center justify-center cursor-crosshair touch-none"
       @wheel="onWheel"
     >
       <!-- Moveable Pan Group -->
@@ -799,70 +799,70 @@ defineExpose({
         class="transition-transform duration-75"
       >
         <canvas 
-          ref="canvasRef"
-          @pointerdown="onPointerDown"
-          @pointermove="onPointerMove"
-          @pointerup="onPointerUp"
-          @pointerleave="onPointerUp"
-          @pointercancel="onPointerUp"
-          class="shadow-2xl border border-dcc-700/80 image-rendering-pixelated touch-none"
+          ref="canvasRef" 
+          @pointerdown="onPointerDown" 
+          @pointermove="onPointerMove" 
+          @pointerup="onPointerUp" 
+          @pointerleave="onPointerUp" 
+          @pointercancel="onPointerUp" 
+          class="shadow-2xl border border-ui-borderStrong image-rendering-pixelated touch-none"
         ></canvas>
       </div>
 
       <!-- Status HUD: Resolution & Hover Pixel Coords -->
-      <div class="absolute bottom-3 left-3 bg-dcc-850/90 border border-dcc-750/80 px-2.5 py-1 rounded shadow text-[10px] font-mono text-slate-400 flex items-center space-x-3 pointer-events-none z-10">
-        <span>Res: <strong class="text-slate-200">{{ projectStore.pixelBuffer.width }}x{{ projectStore.pixelBuffer.height }}</strong></span>
+      <div class="absolute bottom-3 left-3 bg-ui-panel/95 border border-ui-borderStrong px-2.5 py-1 rounded-xs shadow-md text-[10px] font-mono text-ui-textMuted flex items-center space-x-3 pointer-events-none z-10">
+        <span>Res: <strong class="text-ui-textPrimary">{{ projectStore.pixelBuffer.width }}x{{ projectStore.pixelBuffer.height }}</strong></span>
         <span v-if="cursorCoords">
-          XY: <strong class="text-indigo-400">{{ cursorCoords.x }}, {{ cursorCoords.y }}</strong>
+          XY: <strong class="text-ui-textAccent">{{ cursorCoords.x }}, {{ cursorCoords.y }}</strong>
           <span class="inline-block w-2.5 h-2.5 rounded-xs ml-1.5 align-middle border border-black/40" :style="{ backgroundColor: cursorCoords.hex }"></span>
         </span>
-        <span class="text-slate-500">Tool: <strong class="text-amber-400 uppercase">{{ toolStore.paintTool }}</strong></span>
-        <span class="text-slate-500">Space+Drag / Middle Click to Pan</span>
+        <span class="text-ui-textMuted">Tool: <strong class="text-ui-textAccent uppercase">{{ toolStore.paintTool }}</strong></span>
+        <span class="text-ui-textMuted">Space+Drag / Middle Click to Pan</span>
       </div>
     </div>
 
     <!-- Custom Canvas Resize Modal -->
     <div v-if="showResizeModal" class="absolute inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-      <div class="bg-dcc-850 border border-dcc-750 rounded p-4 max-w-sm w-full space-y-3 shadow-2xl font-mono text-xs text-slate-200">
-        <div class="flex items-center justify-between border-b border-dcc-750 pb-2">
-          <span class="font-bold text-slate-200 uppercase tracking-wide">Resize Texture Canvas</span>
-          <button @click="showResizeModal = false" class="text-slate-400 hover:text-white">&times;</button>
+      <div class="bg-ui-panel border border-ui-borderStrong rounded-xs p-4 max-w-sm w-full space-y-3 shadow-2xl font-mono text-xs text-ui-textPrimary">
+        <div class="flex items-center justify-between border-b border-ui-borderSubtle pb-2">
+          <span class="font-bold text-ui-textPrimary uppercase tracking-wide">Resize Texture Canvas</span>
+          <button @click="showResizeModal = false" class="text-ui-textMuted hover:text-ui-textPrimary">&times;</button>
         </div>
 
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-[10px] text-slate-400 mb-1">Width (px):</label>
-            <input type="number" v-model.number="resizeW" min="8" max="8192" class="w-full bg-dcc-900 border border-dcc-700 rounded px-2 py-1 text-slate-200 font-bold focus:outline-none focus:border-indigo-500" />
+            <label class="block text-[10px] text-ui-textMuted mb-1">Width (px):</label>
+            <input type="number" v-model.number="resizeW" min="8" max="8192" class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-ui-textPrimary font-bold focus:outline-none focus:border-ui-accent" />
           </div>
           <div>
-            <label class="block text-[10px] text-slate-400 mb-1">Height (px):</label>
-            <input type="number" v-model.number="resizeH" min="8" max="8192" class="w-full bg-dcc-900 border border-dcc-700 rounded px-2 py-1 text-slate-200 font-bold focus:outline-none focus:border-indigo-500" />
+            <label class="block text-[10px] text-ui-textMuted mb-1">Height (px):</label>
+            <input type="number" v-model.number="resizeH" min="8" max="8192" class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-ui-textPrimary font-bold focus:outline-none focus:border-ui-accent" />
           </div>
         </div>
 
         <div>
-          <label class="block text-[10px] text-slate-400 mb-1">Mode:</label>
+          <label class="block text-[10px] text-ui-textMuted mb-1">Mode:</label>
           <div class="grid grid-cols-2 gap-2">
             <button 
               @click="resizeMode = 'crop'" 
-              class="py-1 px-2 rounded border text-center font-bold text-[10px] transition"
-              :class="resizeMode === 'crop' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-dcc-900 border-dcc-750 text-slate-400'"
+              class="py-1 px-2 rounded-xs border text-center font-bold text-[10px] transition"
+              :class="resizeMode === 'crop' ? 'bg-ui-active border-ui-accent/40 text-ui-textAccent' : 'bg-ui-input border-ui-borderSubtle text-ui-textMuted hover:bg-ui-hover'"
             >
               Extend / Crop
             </button>
             <button 
               @click="resizeMode = 'resample'" 
-              class="py-1 px-2 rounded border text-center font-bold text-[10px] transition"
-              :class="resizeMode === 'resample' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-dcc-900 border-dcc-750 text-slate-400'"
+              class="py-1 px-2 rounded-xs border text-center font-bold text-[10px] transition"
+              :class="resizeMode === 'resample' ? 'bg-ui-active border-ui-accent/40 text-ui-textAccent' : 'bg-ui-input border-ui-borderSubtle text-ui-textMuted hover:bg-ui-hover'"
             >
               Resample / Scale
             </button>
           </div>
         </div>
 
-        <div class="flex justify-end space-x-2 pt-2 border-t border-dcc-750">
-          <button @click="showResizeModal = false" class="px-3 py-1 bg-dcc-900 hover:bg-dcc-750 rounded text-slate-400 text-[10px]">Cancel</button>
-          <button @click="applyCustomResize" class="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 rounded text-white font-bold text-[10px]">Apply Resize</button>
+        <div class="flex justify-end space-x-2 pt-2 border-t border-ui-borderSubtle">
+          <button @click="showResizeModal = false" class="px-3 py-1 bg-ui-input hover:bg-ui-hover rounded-xs text-ui-textMuted hover:text-ui-textPrimary text-[10px]">Cancel</button>
+          <button @click="applyCustomResize" class="px-3 py-1 bg-ui-accent hover:bg-ui-accentHover rounded-xs text-white font-bold text-[10px]">Apply Resize</button>
         </div>
       </div>
     </div>

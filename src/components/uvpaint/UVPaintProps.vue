@@ -361,15 +361,15 @@ function hslToRgb(h: number, s: number, l: number) {
 </script>
 
 <template>
-  <div class="h-full w-full bg-dcc-900 flex flex-col select-none overflow-y-auto p-2 text-slate-200 space-y-2 font-mono text-xs">
+  <div class="h-full w-full bg-ui-panel flex flex-col select-none overflow-y-auto p-2 text-ui-textPrimary space-y-2 font-mono text-xs">
     <!-- Studio Header Navigation (Material | Color | Gradient | Shading) -->
-    <div class="border-b border-dcc-750 pb-1.5 shrink-0">
-      <div class="text-[9px] text-slate-400 font-bold mb-1 uppercase tracking-wider">Paint & Material Studio</div>
-      <div class="grid grid-cols-4 gap-1 bg-dcc-900 p-0.5 rounded border border-dcc-750 text-[10px]">
+    <div class="border-b border-ui-borderSubtle pb-1.5 shrink-0">
+      <div class="text-[9px] text-ui-textMuted font-bold mb-1 uppercase tracking-wider">Paint & Material Studio</div>
+      <div class="grid grid-cols-4 gap-1 bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle text-[10px]">
         <button 
           @click="activeTab = 'material'"
-          class="py-1 rounded text-center transition flex items-center justify-center gap-1"
-          :class="activeTab === 'material' ? 'bg-indigo-600 text-white font-bold shadow-xs' : 'text-slate-400 hover:text-slate-200'"
+          class="py-1 rounded-xs text-center transition flex items-center justify-center gap-1"
+          :class="activeTab === 'material' ? 'bg-ui-accent text-white font-bold shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
         >
           <BlenderIcon name="material" :size="11" />
           <span>Material</span>
@@ -377,8 +377,8 @@ function hslToRgb(h: number, s: number, l: number) {
 
         <button 
           @click="activeTab = 'color'"
-          class="py-1 rounded text-center transition flex items-center justify-center gap-1"
-          :class="activeTab === 'color' ? 'bg-indigo-600 text-white font-bold shadow-xs' : 'text-slate-400 hover:text-slate-200'"
+          class="py-1 rounded-xs text-center transition flex items-center justify-center gap-1"
+          :class="activeTab === 'color' ? 'bg-ui-accent text-white font-bold shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
         >
           <BlenderIcon name="brush" :size="11" />
           <span>Color</span>
@@ -386,8 +386,8 @@ function hslToRgb(h: number, s: number, l: number) {
 
         <button 
           @click="activeTab = 'gradient'"
-          class="py-1 rounded text-center transition flex items-center justify-center gap-1"
-          :class="activeTab === 'gradient' ? 'bg-indigo-600 text-white font-bold shadow-xs' : 'text-slate-400 hover:text-slate-200'"
+          class="py-1 rounded-xs text-center transition flex items-center justify-center gap-1"
+          :class="activeTab === 'gradient' ? 'bg-ui-accent text-white font-bold shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
         >
           <BlenderIcon name="texture" :size="11" />
           <span>Gradient</span>
@@ -395,8 +395,8 @@ function hslToRgb(h: number, s: number, l: number) {
 
         <button 
           @click="activeTab = 'shading'"
-          class="py-1 rounded text-center transition flex items-center justify-center gap-1"
-          :class="activeTab === 'shading' ? 'bg-indigo-600 text-white font-bold shadow-xs' : 'text-slate-400 hover:text-slate-200'"
+          class="py-1 rounded-xs text-center transition flex items-center justify-center gap-1"
+          :class="activeTab === 'shading' ? 'bg-ui-accent text-white font-bold shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
         >
           <BlenderIcon name="shading-rendered" :size="11" />
           <span>Shading</span>
@@ -407,9 +407,9 @@ function hslToRgb(h: number, s: number, l: number) {
     <!-- TAB 1: 1-CLICK MATERIAL SYSTEM -->
     <div v-show="activeTab === 'material'" class="space-y-2">
       <!-- 1-Click Material Presets Grid -->
-      <div class="bg-dcc-850 p-2 rounded border border-dcc-750 space-y-1.5">
-        <span class="text-[10px] font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
-          <BlenderIcon name="material" :size="12" color="#818cf8" />
+      <div class="bg-ui-surface p-2 rounded-xs border border-ui-borderSubtle space-y-1.5">
+        <span class="text-[10px] font-bold text-ui-textAccent uppercase tracking-wider flex items-center gap-1.5">
+          <BlenderIcon name="material" :size="12" />
           <span>Material Presets</span>
         </span>
 
@@ -418,73 +418,73 @@ function hslToRgb(h: number, s: number, l: number) {
             v-for="preset in materialPresets" 
             :key="preset.name"
             @click="applyPreset(preset)"
-            class="p-1.5 rounded bg-dcc-900 hover:bg-dcc-750 border border-dcc-750 hover:border-indigo-500 text-left flex items-center space-x-1.5 transition group"
+            class="p-1.5 rounded-xs bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle hover:border-ui-accent text-left flex items-center space-x-1.5 transition group"
           >
             <div 
               class="w-2.5 h-2.5 rounded-full border border-white/40 shrink-0"
               :style="{ backgroundColor: preset.color }"
             ></div>
             <div class="truncate">
-              <div class="text-[10px] font-bold text-slate-200 group-hover:text-indigo-300 truncate">{{ preset.name }}</div>
-              <div class="text-[8px] text-slate-500 uppercase">{{ preset.shading }}</div>
+              <div class="text-[10px] font-bold text-ui-textPrimary group-hover:text-ui-textAccent truncate">{{ preset.name }}</div>
+              <div class="text-[8px] text-ui-textMuted uppercase">{{ preset.shading }}</div>
             </div>
           </button>
         </div>
       </div>
 
       <!-- Material Properties Customizer -->
-      <div class="bg-dcc-850 p-2 rounded border border-dcc-750 space-y-2">
-        <span class="text-[10px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-          <Sliders class="w-3 h-3 text-slate-400" />
+      <div class="bg-ui-surface p-2 rounded-xs border border-ui-borderSubtle space-y-2">
+        <span class="text-[10px] font-bold text-ui-textPrimary uppercase tracking-wider flex items-center gap-1.5">
+          <Sliders class="w-3 h-3 text-ui-textMuted" />
           <span>Material Parameters</span>
         </span>
 
         <!-- Base Tint Color -->
         <div class="space-y-0.5">
-          <div class="flex items-center justify-between text-[9px] text-slate-400">
+          <div class="flex items-center justify-between text-[9px] text-ui-textMuted">
             <span>Base Tint:</span>
-            <span class="font-mono text-slate-200">{{ matColor }}</span>
+            <span class="font-mono text-ui-textPrimary">{{ matColor }}</span>
           </div>
           <div class="flex items-center space-x-1.5">
-            <input type="color" v-model="matColor" @input="applyMaterialToMesh" class="w-6 h-6 rounded border border-dcc-700 bg-transparent cursor-pointer" />
-            <input type="text" v-model="matColor" @change="applyMaterialToMesh" class="flex-1 bg-dcc-900 border border-dcc-700 rounded px-1.5 py-0.5 text-slate-200 text-[10px] focus:outline-none" />
+            <input type="color" v-model="matColor" @input="applyMaterialToMesh" class="w-6 h-6 rounded-xs border border-ui-borderDefault bg-transparent cursor-pointer" />
+            <input type="text" v-model="matColor" @change="applyMaterialToMesh" class="flex-1 bg-ui-input border border-ui-borderDefault rounded-xs px-1.5 py-0.5 text-ui-textPrimary text-[10px] focus:outline-none focus:border-ui-accent font-mono" />
           </div>
         </div>
 
         <!-- Roughness Slider -->
         <div class="space-y-0.5">
-          <div class="flex items-center justify-between text-[9px] text-slate-400">
+          <div class="flex items-center justify-between text-[9px] text-ui-textMuted">
             <span>Roughness / Matte:</span>
-            <span class="text-indigo-400 font-bold">{{ Math.round(matRoughness * 100) }}%</span>
+            <span class="text-ui-textAccent font-bold">{{ Math.round(matRoughness * 100) }}%</span>
           </div>
-          <input type="range" min="0" max="1" step="0.05" v-model.number="matRoughness" @input="applyMaterialToMesh" class="w-full accent-indigo-500 bg-dcc-900 h-1 rounded cursor-pointer" />
+          <input type="range" min="0" max="1" step="0.05" v-model.number="matRoughness" @input="applyMaterialToMesh" class="w-full accent-ui-accent bg-ui-input h-1.5 rounded-xs cursor-pointer" />
         </div>
 
         <!-- Metalness Slider -->
         <div class="space-y-0.5">
-          <div class="flex items-center justify-between text-[9px] text-slate-400">
+          <div class="flex items-center justify-between text-[9px] text-ui-textMuted">
             <span>Metalness:</span>
-            <span class="text-indigo-400 font-bold">{{ Math.round(matMetalness * 100) }}%</span>
+            <span class="text-ui-textAccent font-bold">{{ Math.round(matMetalness * 100) }}%</span>
           </div>
-          <input type="range" min="0" max="1" step="0.05" v-model.number="matMetalness" @input="applyMaterialToMesh" class="w-full accent-indigo-500 bg-dcc-900 h-1 rounded cursor-pointer" />
+          <input type="range" min="0" max="1" step="0.05" v-model.number="matMetalness" @input="applyMaterialToMesh" class="w-full accent-ui-accent bg-ui-input h-1.5 rounded-xs cursor-pointer" />
         </div>
 
         <!-- Emission Glow -->
         <div class="space-y-0.5">
-          <div class="flex items-center justify-between text-[9px] text-slate-400">
+          <div class="flex items-center justify-between text-[9px] text-ui-textMuted">
             <span>Emissive Glow:</span>
-            <span class="text-indigo-400 font-bold">{{ matEmissiveIntensity }}x</span>
+            <span class="text-ui-textAccent font-bold">{{ matEmissiveIntensity }}x</span>
           </div>
           <div class="flex items-center space-x-1.5">
-            <input type="color" v-model="matEmissive" @input="applyMaterialToMesh" class="w-6 h-6 rounded border border-dcc-700 bg-transparent cursor-pointer" />
-            <input type="range" min="0" max="3" step="0.1" v-model.number="matEmissiveIntensity" @input="applyMaterialToMesh" class="flex-1 accent-indigo-500 bg-dcc-900 h-1 rounded cursor-pointer" />
+            <input type="color" v-model="matEmissive" @input="applyMaterialToMesh" class="w-6 h-6 rounded-xs border border-ui-borderDefault bg-transparent cursor-pointer" />
+            <input type="range" min="0" max="3" step="0.1" v-model.number="matEmissiveIntensity" @input="applyMaterialToMesh" class="flex-1 accent-ui-accent bg-ui-input h-1.5 rounded-xs cursor-pointer" />
           </div>
         </div>
 
         <!-- Apply Button -->
         <button 
           @click="applyMaterialToMesh"
-          class="w-full py-1.5 px-2 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[10px] shadow-xs flex items-center justify-center space-x-1.5 transition"
+          class="w-full py-1.5 px-2 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white font-bold text-[10px] shadow-xs flex items-center justify-center space-x-1.5 transition"
         >
           <Check class="w-3 h-3" />
           <span>Apply Material to Mesh</span>
@@ -495,61 +495,61 @@ function hslToRgb(h: number, s: number, l: number) {
     <!-- TAB 2: ADVANCED COLOR & HARMONIES -->
     <div v-show="activeTab === 'color'" class="space-y-3">
       <!-- Primary / Secondary Swatches -->
-      <div class="bg-dcc-850 p-2.5 rounded border border-dcc-750 flex items-center justify-between">
+      <div class="bg-ui-surface p-2.5 rounded-xs border border-ui-borderSubtle flex items-center justify-between">
         <div class="flex items-center space-x-3">
           <div class="relative w-10 h-10">
             <!-- Secondary swatch -->
             <div 
-              class="absolute bottom-0 right-0 w-6 h-6 rounded border border-dcc-700 shadow"
+              class="absolute bottom-0 right-0 w-6 h-6 rounded-xs border border-ui-borderDefault shadow"
               :style="{ backgroundColor: toolStore.secondaryColor }"
               title="Secondary Color (Background)"
             ></div>
             <!-- Primary swatch -->
             <div 
-              class="absolute top-0 left-0 w-6 h-6 rounded border border-white shadow-md z-10"
+              class="absolute top-0 left-0 w-6 h-6 rounded-xs border border-white shadow-md z-10"
               :style="{ backgroundColor: toolStore.primaryColor }"
               title="Primary Paint Color"
             ></div>
           </div>
           <div>
-            <div class="text-[11px] font-bold text-slate-200">{{ toolStore.primaryColor.toUpperCase() }}</div>
-            <div class="text-[9px] text-slate-500">Active Paint Color</div>
+            <div class="text-[11px] font-bold text-ui-textPrimary font-mono">{{ toolStore.primaryColor.toUpperCase() }}</div>
+            <div class="text-[9px] text-ui-textMuted">Active Paint Color</div>
           </div>
         </div>
 
         <input 
           type="color" 
           v-model="toolStore.primaryColor" 
-          class="w-8 h-8 rounded border border-dcc-700 bg-transparent cursor-pointer"
+          class="w-8 h-8 rounded-xs border border-ui-borderDefault bg-transparent cursor-pointer"
         />
       </div>
 
       <!-- Color Harmonies Generator -->
-      <div class="bg-dcc-850 p-2.5 rounded border border-dcc-750 space-y-2">
-        <span class="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-          <Wand2 class="w-3.5 h-3.5 text-indigo-400" />
+      <div class="bg-ui-surface p-2.5 rounded-xs border border-ui-borderSubtle space-y-2">
+        <span class="text-[11px] font-bold text-ui-textPrimary uppercase tracking-wider flex items-center gap-1.5">
+          <Wand2 class="w-3.5 h-3.5 text-ui-textAccent" />
           <span>Color Harmonies</span>
         </span>
 
         <!-- Complementary & Triadic -->
         <div class="space-y-1 text-[10px]">
-          <span class="text-slate-400">Complementary & Triadic:</span>
+          <span class="text-ui-textMuted">Complementary & Triadic:</span>
           <div class="flex items-center gap-1.5">
             <button 
               @click="toolStore.primaryColor = colorHarmonies.complementary"
-              class="flex-1 h-6 rounded border border-dcc-700 hover:scale-105 transition"
+              class="flex-1 h-6 rounded-xs border border-ui-borderDefault hover:scale-105 transition"
               :style="{ backgroundColor: colorHarmonies.complementary }"
               title="Complementary Color"
             ></button>
             <button 
               @click="toolStore.primaryColor = colorHarmonies.triadic1"
-              class="flex-1 h-6 rounded border border-dcc-700 hover:scale-105 transition"
+              class="flex-1 h-6 rounded-xs border border-ui-borderDefault hover:scale-105 transition"
               :style="{ backgroundColor: colorHarmonies.triadic1 }"
               title="Triadic 1"
             ></button>
             <button 
               @click="toolStore.primaryColor = colorHarmonies.triadic2"
-              class="flex-1 h-6 rounded border border-dcc-700 hover:scale-105 transition"
+              class="flex-1 h-6 rounded-xs border border-ui-borderDefault hover:scale-105 transition"
               :style="{ backgroundColor: colorHarmonies.triadic2 }"
               title="Triadic 2"
             ></button>
@@ -558,13 +558,13 @@ function hslToRgb(h: number, s: number, l: number) {
 
         <!-- Monochromatic Shades Ramp -->
         <div class="space-y-1 text-[10px] pt-1">
-          <span class="text-slate-400">Shades & Tints:</span>
+          <span class="text-ui-textMuted">Shades & Tints:</span>
           <div class="grid grid-cols-5 gap-1">
             <button 
               v-for="(shd, idx) in colorHarmonies.shades" 
               :key="idx"
               @click="toolStore.primaryColor = shd"
-              class="h-6 rounded border border-dcc-700 hover:scale-105 transition"
+              class="h-6 rounded-xs border border-ui-borderDefault hover:scale-105 transition"
               :style="{ backgroundColor: shd }"
             ></button>
           </div>
@@ -572,17 +572,17 @@ function hslToRgb(h: number, s: number, l: number) {
       </div>
 
       <!-- Curated Retro Palettes Switcher -->
-      <div class="bg-dcc-850 p-2.5 rounded border border-dcc-750 space-y-2">
+      <div class="bg-ui-surface p-2.5 rounded-xs border border-ui-borderSubtle space-y-2">
         <div class="flex items-center justify-between">
-          <span class="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-            <BlenderIcon name="brush" :size="13" color="#818cf8" />
+          <span class="text-[11px] font-bold text-ui-textPrimary uppercase tracking-wider flex items-center gap-1.5">
+            <BlenderIcon name="brush" :size="13" />
             <span>Palettes</span>
           </span>
           <select 
             v-model="selectedPaletteIndex"
-            class="bg-dcc-900 text-slate-200 border border-dcc-700 text-[10px] rounded px-1.5 py-0.5 focus:outline-none"
+            class="bg-ui-input text-ui-textPrimary border border-ui-borderDefault text-[10px] rounded-xs px-1.5 py-0.5 focus:outline-none cursor-pointer"
           >
-            <option v-for="(p, idx) in retroPalettes" :key="p.name" :value="idx">
+            <option v-for="(p, idx) in retroPalettes" :key="p.name" :value="idx" class="bg-ui-panel text-ui-textPrimary">
               {{ p.name }}
             </option>
           </select>
@@ -595,7 +595,7 @@ function hslToRgb(h: number, s: number, l: number) {
             :key="c"
             @click="toolStore.primaryColor = c"
             @contextmenu.prevent="toolStore.secondaryColor = c"
-            class="w-full aspect-square rounded border border-dcc-750 hover:border-white hover:scale-110 transition shadow-xs"
+            class="w-full aspect-square rounded-xs border border-ui-borderSubtle hover:border-white hover:scale-110 transition shadow-xs"
             :style="{ backgroundColor: c }"
             :title="`${c} (Left-click: Primary, Right-click: Secondary)`"
           ></button>
@@ -605,21 +605,21 @@ function hslToRgb(h: number, s: number, l: number) {
 
     <!-- TAB 3: BLOCKBENCH MULTI-STOP INTERACTIVE GRADIENT STUDIO -->
     <div v-show="activeTab === 'gradient'" class="space-y-3">
-      <div class="bg-dcc-850 p-3 rounded border border-dcc-750 space-y-3">
+      <div class="bg-ui-surface p-3 rounded-xs border border-ui-borderSubtle space-y-3">
         <!-- Header Type Selector -->
         <div class="flex items-center justify-between">
-          <span class="text-[11px] font-bold text-slate-300 uppercase flex items-center gap-1.5">
-            <BlenderIcon name="texture" :size="13" color="#818cf8" />
+          <span class="text-[11px] font-bold text-ui-textPrimary uppercase flex items-center gap-1.5">
+            <BlenderIcon name="texture" :size="13" />
             <span>Gradient</span>
           </span>
           <select 
             v-model="gradientType"
-            class="bg-dcc-900 text-slate-200 border border-dcc-700 text-[10px] rounded px-2 py-1 focus:outline-none"
+            class="bg-ui-input text-ui-textPrimary border border-ui-borderDefault text-[10px] rounded-xs px-2 py-1 focus:outline-none cursor-pointer"
           >
-            <option value="Linear">Linear</option>
-            <option value="Radial">Radial</option>
-            <option value="Angle">Angle</option>
-            <option value="Reflected">Reflected</option>
+            <option value="Linear" class="bg-ui-panel text-ui-textPrimary">Linear</option>
+            <option value="Radial" class="bg-ui-panel text-ui-textPrimary">Radial</option>
+            <option value="Angle" class="bg-ui-panel text-ui-textPrimary">Angle</option>
+            <option value="Reflected" class="bg-ui-panel text-ui-textPrimary">Reflected</option>
           </select>
         </div>
 
@@ -627,7 +627,7 @@ function hslToRgb(h: number, s: number, l: number) {
         <div class="space-y-1.5 pt-1">
           <div 
             @click="handleBarClick"
-            class="gradient-rail relative h-12 w-full rounded border border-dcc-700 shadow-inner cursor-pointer select-none"
+            class="gradient-rail relative h-12 w-full rounded-xs border border-ui-borderDefault shadow-inner cursor-pointer select-none"
             :style="{ background: gradientHorizontalCss }"
             title="Click anywhere to add color stop. Drag handles to move."
           >
@@ -636,11 +636,11 @@ function hslToRgb(h: number, s: number, l: number) {
 
             <!-- Stop Handles -->
             <div 
-              v-for="stop in gradientStops"
+              v-for="stop in gradientStops" 
               :key="stop.id"
               @mousedown="handleStopMouseDown($event, stop.id)"
               class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 rounded-full border-2 cursor-grab shadow-lg transition-transform"
-              :class="selectedStopId === stop.id ? 'border-white scale-125 ring-2 ring-indigo-500 z-20' : 'border-slate-800 z-10 hover:scale-110'"
+              :class="selectedStopId === stop.id ? 'border-white scale-125 ring-2 ring-ui-accent z-20' : 'border-slate-800 z-10 hover:scale-110'"
               :style="{ left: `${stop.offset}%`, backgroundColor: stop.color }"
               :title="`Stop ${stop.offset}% (${stop.color})`"
             ></div>
@@ -649,7 +649,7 @@ function hslToRgb(h: number, s: number, l: number) {
             <button 
               v-if="gradientStops.length > 2"
               @click.stop="deleteSelectedStop"
-              class="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-dcc-900/90 hover:bg-rose-600 text-slate-300 hover:text-white text-[9px] border border-dcc-700 transition"
+              class="absolute bottom-1 right-1 px-1.5 py-0.5 rounded-xs bg-ui-panel/90 hover:bg-rose-600 text-ui-textPrimary hover:text-white text-[9px] border border-ui-borderDefault transition"
               title="Delete Selected Stop"
             >
               -
@@ -660,40 +660,40 @@ function hslToRgb(h: number, s: number, l: number) {
         <!-- Selected Stop Controls (Color Swatch Pill & Offset Input) -->
         <div v-if="selectedStop" class="flex items-center justify-between gap-3 pt-1">
           <div class="flex items-center space-x-2">
-            <span class="text-[11px] text-slate-400">Color</span>
+            <span class="text-[11px] text-ui-textMuted">Color</span>
             <div class="flex items-center space-x-1.5">
               <input 
                 type="color" 
                 v-model="selectedStop.color" 
-                class="w-7 h-7 rounded border border-dcc-700 bg-transparent cursor-pointer" 
+                class="w-7 h-7 rounded-xs border border-ui-borderDefault bg-transparent cursor-pointer" 
               />
               <input 
                 type="text" 
                 v-model="selectedStop.color" 
-                class="w-18 bg-dcc-900 border border-dcc-700 rounded px-1.5 py-1 text-slate-200 text-[10px] focus:outline-none" 
+                class="w-18 bg-ui-input border border-ui-borderDefault rounded-xs px-1.5 py-1 text-ui-textPrimary text-[10px] focus:outline-none font-mono" 
               />
             </div>
           </div>
 
           <div class="flex items-center space-x-1.5">
-            <span class="text-[11px] text-slate-400">Offset</span>
+            <span class="text-[11px] text-ui-textMuted">Offset</span>
             <input 
               type="number" 
               min="0" 
               max="100" 
               v-model.number="selectedStop.offset" 
-              class="w-14 bg-dcc-900 border border-dcc-700 rounded px-1.5 py-1 text-center text-slate-100 text-xs font-bold focus:outline-none" 
+              class="w-14 bg-ui-input border border-ui-borderDefault rounded-xs px-1.5 py-1 text-center text-ui-textPrimary text-xs font-bold focus:outline-none font-mono" 
             />
           </div>
         </div>
 
         <!-- Interactive 2D Angle / Direction Control Box -->
-        <div class="space-y-1.5 pt-1 border-t border-dcc-750">
-          <div class="flex items-center justify-between text-[10px] text-slate-400">
+        <div class="space-y-1.5 pt-1 border-t border-ui-borderSubtle">
+          <div class="flex items-center justify-between text-[10px] text-ui-textMuted">
             <span>2D Angle & Direction:</span>
-            <div class="flex items-center space-x-1 text-indigo-400 font-bold">
+            <div class="flex items-center space-x-1 text-ui-textAccent font-bold">
               <span>{{ gradientAngle }}°</span>
-              <button @click="gradientAngle = (gradientAngle + 90) % 360" class="p-0.5 hover:bg-dcc-750 rounded text-slate-400 hover:text-white" title="Rotate 90°">
+              <button @click="gradientAngle = (gradientAngle + 90) % 360" class="p-0.5 hover:bg-ui-hover rounded-xs text-ui-textMuted hover:text-ui-textPrimary" title="Rotate 90°">
                 <RotateCw class="w-3 h-3" />
               </button>
             </div>
@@ -704,7 +704,7 @@ function hslToRgb(h: number, s: number, l: number) {
             <div 
               id="angle-preview-box"
               @mousedown="startAngleDrag"
-              class="w-36 h-36 rounded-md border border-dcc-700 shadow-xl relative cursor-crosshair overflow-hidden select-none flex items-center justify-center"
+              class="w-36 h-36 rounded-xs border border-ui-borderDefault shadow-xl relative cursor-crosshair overflow-hidden select-none flex items-center justify-center"
               :style="{ background: gradientCss }"
               title="Click and drag around the center to freely rotate the gradient angle"
             >
@@ -725,7 +725,7 @@ function hslToRgb(h: number, s: number, l: number) {
         <!-- 1-Click Bake Gradient to Active Face / Texture -->
         <button 
           @click="bakeGradientToActiveFace"
-          class="w-full py-2 px-3 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] shadow-xs flex items-center justify-center space-x-1.5 transition active:scale-98"
+          class="w-full py-2 px-3 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white font-bold text-[11px] shadow-xs flex items-center justify-center space-x-1.5 transition active:scale-98"
         >
           <Zap class="w-3.5 h-3.5" />
           <span>Bake Gradient to Active UV / Face</span>
@@ -733,14 +733,14 @@ function hslToRgb(h: number, s: number, l: number) {
       </div>
 
       <!-- Preset Gradient Ramps -->
-      <div class="bg-dcc-850 p-2.5 rounded border border-dcc-750 space-y-1.5">
-        <span class="text-[10px] text-slate-400 font-bold uppercase">Popular Presets</span>
+      <div class="bg-ui-surface p-2.5 rounded-xs border border-ui-borderSubtle space-y-1.5">
+        <span class="text-[10px] text-ui-textMuted font-bold uppercase">Popular Presets</span>
         <div class="space-y-1">
           <button 
             v-for="p in gradientPresets" 
             :key="p.name"
             @click="applyGradPreset(p)"
-            class="w-full h-6 rounded border border-dcc-700 flex items-center justify-between px-2 text-[10px] font-bold text-white drop-shadow hover:scale-[1.02] transition"
+            class="w-full h-6 rounded-xs border border-ui-borderDefault flex items-center justify-between px-2 text-[10px] font-bold text-white drop-shadow hover:scale-[1.02] transition"
             :style="{ background: `linear-gradient(to right, ${p.stops.map(s => `${s.color} ${s.offset}%`).join(', ')})` }"
           >
             <span>{{ p.name }}</span>
@@ -752,44 +752,44 @@ function hslToRgb(h: number, s: number, l: number) {
     <!-- TAB 4: SHADING & LIGHTING -->
     <div v-show="activeTab === 'shading'" class="space-y-3">
       <!-- Retro Shading Controls -->
-      <div class="bg-dcc-850 p-2.5 rounded border border-dcc-750 space-y-2">
-        <span class="text-[11px] font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
-          <BlenderIcon name="shading-rendered" :size="13" color="#818cf8" />
+      <div class="bg-ui-surface p-2.5 rounded-xs border border-ui-borderSubtle space-y-2">
+        <span class="text-[11px] font-bold text-ui-textAccent uppercase tracking-wider flex items-center gap-1.5">
+          <BlenderIcon name="shading-rendered" :size="13" />
           <span>PSX Shading & Lighting</span>
         </span>
 
         <!-- Shading Mode -->
         <div class="space-y-1">
-          <span class="text-[10px] text-slate-400">Viewport Shading Mode:</span>
+          <span class="text-[10px] text-ui-textMuted">Viewport Shading Mode:</span>
           <div class="grid grid-cols-2 gap-1 text-[10px]">
             <button 
               @click="toolStore.viewport.shading = 'textured'"
-              class="py-1 rounded border transition flex items-center justify-center gap-1"
-              :class="toolStore.viewport.shading === 'textured' ? 'bg-indigo-600 text-white font-bold border-indigo-400' : 'bg-dcc-900 border-dcc-750 text-slate-400 hover:text-slate-200'"
+              class="py-1 rounded-xs border transition flex items-center justify-center gap-1"
+              :class="toolStore.viewport.shading === 'textured' ? 'bg-ui-accent text-white font-bold border-ui-accent' : 'bg-ui-input border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
             >
               <BlenderIcon name="shading-textured" :size="12" />
               <span>Textured</span>
             </button>
             <button 
               @click="toolStore.viewport.shading = 'psx'"
-              class="py-1 rounded border transition flex items-center justify-center gap-1"
-              :class="toolStore.viewport.shading === 'psx' ? 'bg-indigo-600 text-white font-bold border-indigo-400' : 'bg-dcc-900 border-dcc-750 text-slate-400 hover:text-slate-200'"
+              class="py-1 rounded-xs border transition flex items-center justify-center gap-1"
+              :class="toolStore.viewport.shading === 'psx' ? 'bg-ui-accent text-white font-bold border-ui-accent' : 'bg-ui-input border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
             >
               <BlenderIcon name="shading-rendered" :size="12" />
               <span>Retro PSX</span>
             </button>
             <button 
               @click="toolStore.viewport.shading = 'solid'"
-              class="py-1 rounded border transition flex items-center justify-center gap-1"
-              :class="toolStore.viewport.shading === 'solid' ? 'bg-indigo-600 text-white font-bold border-indigo-400' : 'bg-dcc-900 border-dcc-750 text-slate-400 hover:text-slate-200'"
+              class="py-1 rounded-xs border transition flex items-center justify-center gap-1"
+              :class="toolStore.viewport.shading === 'solid' ? 'bg-ui-accent text-white font-bold border-ui-accent' : 'bg-ui-input border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
             >
               <BlenderIcon name="shading-solid" :size="12" />
               <span>Solid</span>
             </button>
             <button 
               @click="toolStore.viewport.shading = 'wireframe'"
-              class="py-1 rounded border transition flex items-center justify-center gap-1"
-              :class="toolStore.viewport.shading === 'wireframe' ? 'bg-indigo-600 text-white font-bold border-indigo-400' : 'bg-dcc-900 border-dcc-750 text-slate-400 hover:text-slate-200'"
+              class="py-1 rounded-xs border transition flex items-center justify-center gap-1"
+              :class="toolStore.viewport.shading === 'wireframe' ? 'bg-ui-accent text-white font-bold border-ui-accent' : 'bg-ui-input border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
             >
               <BlenderIcon name="shading-wire" :size="12" />
               <span>Wireframe</span>
@@ -798,25 +798,25 @@ function hslToRgb(h: number, s: number, l: number) {
         </div>
 
         <!-- PSX Retro Features Toggles -->
-        <div class="space-y-1.5 pt-1 border-t border-dcc-750">
-          <label class="flex items-center justify-between p-1.5 bg-dcc-900 rounded border border-dcc-750 cursor-pointer">
-            <span class="text-slate-300">Affine Texture Warping</span>
-            <input type="checkbox" v-model="toolStore.viewport.psxAffine" class="rounded bg-dcc-800 border-dcc-700 text-indigo-600" />
+        <div class="space-y-1.5 pt-1 border-t border-ui-borderSubtle">
+          <label class="flex items-center justify-between p-1.5 bg-ui-input rounded-xs border border-ui-borderSubtle cursor-pointer">
+            <span class="text-ui-textPrimary">Affine Texture Warping</span>
+            <input type="checkbox" v-model="toolStore.viewport.psxAffine" class="rounded-xs bg-ui-panel border-ui-borderDefault text-ui-accent" />
           </label>
 
-          <label class="flex items-center justify-between p-1.5 bg-dcc-900 rounded border border-dcc-750 cursor-pointer">
-            <span class="text-slate-300">Vertex Coordinate Jitter</span>
-            <input type="checkbox" v-model="toolStore.viewport.psxJitter" class="rounded bg-dcc-800 border-dcc-700 text-indigo-600" />
+          <label class="flex items-center justify-between p-1.5 bg-ui-input rounded-xs border border-ui-borderSubtle cursor-pointer">
+            <span class="text-ui-textPrimary">Vertex Coordinate Jitter</span>
+            <input type="checkbox" v-model="toolStore.viewport.psxJitter" class="rounded-xs bg-ui-panel border-ui-borderDefault text-ui-accent" />
           </label>
 
-          <label class="flex items-center justify-between p-1.5 bg-dcc-900 rounded border border-dcc-750 cursor-pointer">
-            <span class="text-slate-300">Bayer Matrix Dithering</span>
-            <input type="checkbox" v-model="toolStore.viewport.dither" class="rounded bg-dcc-800 border-dcc-700 text-indigo-600" />
+          <label class="flex items-center justify-between p-1.5 bg-ui-input rounded-xs border border-ui-borderSubtle cursor-pointer">
+            <span class="text-ui-textPrimary">Bayer Matrix Dithering</span>
+            <input type="checkbox" v-model="toolStore.viewport.dither" class="rounded-xs bg-ui-panel border-ui-borderDefault text-ui-accent" />
           </label>
 
-          <label class="flex items-center justify-between p-1.5 bg-dcc-900 rounded border border-dcc-750 cursor-pointer">
-            <span class="text-slate-300">CRT Scanline Filter</span>
-            <input type="checkbox" v-model="toolStore.viewport.crtFilter" class="rounded bg-dcc-800 border-dcc-700 text-indigo-600" />
+          <label class="flex items-center justify-between p-1.5 bg-ui-input rounded-xs border border-ui-borderSubtle cursor-pointer">
+            <span class="text-ui-textPrimary">CRT Scanline Filter</span>
+            <input type="checkbox" v-model="toolStore.viewport.crtFilter" class="rounded-xs bg-ui-panel border-ui-borderDefault text-ui-accent" />
           </label>
         </div>
       </div>

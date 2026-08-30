@@ -358,7 +358,7 @@ onUnmounted(() => {
       <LeftToolbar v-if="layoutStore.showLeftToolbar" />
 
       <!-- Center Work Area -->
-      <main class="flex-1 flex flex-col overflow-hidden bg-dcc-900 relative">
+      <main class="flex-1 flex flex-col overflow-hidden bg-ui-root relative">
         <!-- 3D Viewport / UV Paint Viewport Split -->
         <div class="flex-1 flex overflow-hidden relative">
           <!-- 3D Viewport Pane (Left in UV mode, Full in Model/Rig/Animate mode) -->
@@ -375,16 +375,16 @@ onUnmounted(() => {
             v-if="toolStore.appMode === 'uvpaint'"
             @mousedown="startUvSplit"
             @dblclick="toggleUvSplitPreset"
-            class="w-1.5 h-full bg-dcc-850 hover:bg-indigo-600/70 border-x border-dcc-750 cursor-col-resize flex items-center justify-center transition group shrink-0 relative select-none z-10"
+            class="w-1.5 h-full bg-ui-header hover:bg-ui-hover border-x border-ui-borderSubtle cursor-col-resize flex items-center justify-center transition group shrink-0 relative select-none z-10"
             title="Drag left/right to resize 3D vs UV Canvas. Double-click to toggle layout."
           >
-            <div class="h-12 w-0.5 rounded-full bg-dcc-600 group-hover:bg-indigo-200 transition"></div>
+            <div class="h-12 w-0.5 rounded-full bg-ui-borderDefault group-hover:bg-ui-accent transition"></div>
           </div>
 
           <!-- 2D UV & Pixel Canvas Pane (Right in UV mode) -->
           <div 
             v-if="toolStore.appMode === 'uvpaint'" 
-            class="h-full bg-dcc-900 relative flex flex-col overflow-hidden transition-[width] duration-75"
+            class="h-full bg-ui-panel relative flex flex-col overflow-hidden transition-[width] duration-75"
             :class="{ 'transition-none': isUvSplitting }"
             :style="{ width: (100 - uvSplitRatio) + '%' }"
           >

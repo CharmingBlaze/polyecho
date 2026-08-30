@@ -16,16 +16,16 @@ const activeTab = computed({
 </script>
 
 <template>
-  <div class="h-full w-full bg-dcc-900 flex flex-col select-none overflow-hidden relative font-mono text-xs">
+  <div class="h-full w-full bg-ui-panel flex flex-col select-none overflow-hidden relative font-mono text-xs">
     <!-- Top 2D DCC Workspace Mode Bar -->
-    <div class="h-8 bg-dcc-850 border-b border-dcc-750 px-2 flex items-center justify-between text-xs text-slate-300 z-20 shrink-0">
+    <div class="h-8 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between text-xs text-ui-textPrimary z-20 shrink-0">
       <!-- Main 2D Workspace Tabs: UV Editor vs Pixel Paint -->
       <div class="flex items-center space-x-1">
-        <div class="flex items-center bg-dcc-900 p-0.5 rounded border border-dcc-750">
+        <div class="flex items-center bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle">
           <button 
             @click="activeTab = 'uv'"
-            class="flex items-center space-x-1.5 px-3 py-0.5 rounded text-[10px] font-bold transition"
-            :class="activeTab === 'uv' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'"
+            class="flex items-center space-x-1.5 px-3 py-0.5 rounded-xs text-[10px] font-bold transition"
+            :class="activeTab === 'uv' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
             title="UV Unwrapping, Seams & Quadrant Atlas Mapping"
           >
             <BlenderIcon name="uv" :size="12" />
@@ -34,8 +34,8 @@ const activeTab = computed({
 
           <button 
             @click="activeTab = 'paint'"
-            class="flex items-center space-x-1.5 px-3 py-0.5 rounded text-[10px] font-bold transition"
-            :class="activeTab === 'paint' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'"
+            class="flex items-center space-x-1.5 px-3 py-0.5 rounded-xs text-[10px] font-bold transition"
+            :class="activeTab === 'paint' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
             title="Pixel & Texture Paint Studio"
           >
             <BlenderIcon name="brush" :size="11" />
@@ -45,7 +45,7 @@ const activeTab = computed({
       </div>
 
       <!-- Mode Info Label -->
-      <div class="text-[9px] text-slate-500 font-mono hidden sm:block">
+      <div class="text-[9px] text-ui-textMuted font-mono hidden sm:block">
         <span v-if="activeTab === 'uv'">UV Unwrapping & Quadrant Atlas Mapping</span>
         <span v-else>2D Texture & Pixel Painting Studio</span>
       </div>

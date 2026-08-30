@@ -1451,20 +1451,20 @@ defineExpose({
 </script>
 
 <template>
-  <div class="h-full w-full bg-dcc-900 flex flex-col select-none overflow-hidden relative font-mono text-xs touch-none">
+  <div class="h-full w-full bg-ui-panel flex flex-col select-none overflow-hidden relative font-mono text-xs touch-none">
     <input ref="fileInputRef" type="file" accept="image/*" @change="handleImageImport" class="hidden" />
 
     <!-- 1. TOP DUAL-ROW BLENDER/BLOCKBENCH UV TOOLBAR -->
     <!-- Row 1: Selection Modes, Unwrapping, Island Layout, Align, File I/O, Snap & Zoom -->
-    <div class="h-7 bg-dcc-850 border-b border-dcc-750 px-2 flex items-center justify-between gap-1 text-slate-300 shrink-0 font-mono text-xs">
+    <div class="h-7 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between gap-1 text-ui-textSecondary shrink-0 font-mono text-xs">
       <!-- Left: Selection Modes, Unwrap & Island Tools -->
       <div class="flex items-center gap-1.5 shrink-0">
         <!-- Selection Mode Switcher -->
-        <div class="flex items-center bg-dcc-900 rounded p-0.5 border border-dcc-750">
+        <div class="flex items-center bg-ui-input rounded-xs p-0.5 border border-ui-borderSubtle">
           <button 
             @click="uvSelectMode = 'vertex'"
-            class="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] transition"
-            :class="uvSelectMode === 'vertex' ? 'bg-amber-500 text-slate-950 font-bold shadow-xs' : 'text-slate-400 hover:text-slate-200'"
+            class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs text-[10px] transition"
+            :class="uvSelectMode === 'vertex' ? 'bg-ui-active text-ui-textAccent font-bold shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
             title="UV Vertex Select (1)"
           >
             <BlenderIcon name="vertex-select" :size="11" />
@@ -1473,8 +1473,8 @@ defineExpose({
 
           <button 
             @click="uvSelectMode = 'edge'"
-            class="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] transition"
-            :class="uvSelectMode === 'edge' ? 'bg-amber-500 text-slate-950 font-bold shadow-xs' : 'text-slate-400 hover:text-slate-200'"
+            class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs text-[10px] transition"
+            :class="uvSelectMode === 'edge' ? 'bg-ui-active text-ui-textAccent font-bold shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
             title="UV Edge Select (2)"
           >
             <BlenderIcon name="edge-select" :size="11" />
@@ -1483,8 +1483,8 @@ defineExpose({
 
           <button 
             @click="uvSelectMode = 'face'"
-            class="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] transition"
-            :class="uvSelectMode === 'face' ? 'bg-amber-500 text-slate-950 font-bold shadow-xs' : 'text-slate-400 hover:text-slate-200'"
+            class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs text-[10px] transition"
+            :class="uvSelectMode === 'face' ? 'bg-ui-active text-ui-textAccent font-bold shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
             title="UV Face Select (3)"
           >
             <BlenderIcon name="face-select" :size="11" />
@@ -1493,8 +1493,8 @@ defineExpose({
 
           <button 
             @click="uvSelectMode = 'island'"
-            class="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] transition"
-            :class="uvSelectMode === 'island' ? 'bg-amber-500 text-slate-950 font-bold shadow-xs' : 'text-slate-400 hover:text-slate-200'"
+            class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs text-[10px] transition"
+            :class="uvSelectMode === 'island' ? 'bg-ui-active text-ui-textAccent font-bold shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
             title="UV Island Select (4)"
           >
             <BlenderIcon name="object-mode" :size="11" />
@@ -1503,7 +1503,7 @@ defineExpose({
         </div>
 
         <!-- 3D Unwrapping Dropdown -->
-        <div class="flex items-center bg-dcc-900 rounded border border-dcc-750 px-1.5 py-0.5 text-[10px]">
+        <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle px-1.5 py-0.5 text-[10px]">
           <select 
             @change="(e) => {
               const val = (e.target as HTMLSelectElement).value
@@ -1518,23 +1518,23 @@ defineExpose({
               else if (val === 'reset') snapToFull()
               ;(e.target as HTMLSelectElement).value = 'default'
             }"
-            class="bg-transparent text-indigo-300 font-bold focus:outline-none cursor-pointer"
+            class="bg-transparent text-ui-textAccent font-bold focus:outline-none cursor-pointer"
           >
-            <option value="default" disabled selected class="bg-dcc-900 text-slate-400">Unwrap 3D...</option>
-            <option value="reset" class="bg-dcc-900 text-rose-300 font-semibold">Reset UVs (0..1 Full)</option>
-            <option value="cubemap" class="bg-dcc-900 text-amber-300">Cubemap Cross (Blockbench)</option>
-            <option value="box" class="bg-dcc-900 text-slate-200">Smart Box Unwrap</option>
-            <option value="cylinder" class="bg-dcc-900 text-slate-200">Cylinder (Tube + Caps)</option>
-            <option value="sphere" class="bg-dcc-900 text-slate-200">Sphere (Equirectangular)</option>
-            <option value="cone" class="bg-dcc-900 text-slate-200">Cone / Pyramid (Radial Fan)</option>
-            <option value="planar-z" class="bg-dcc-900 text-slate-200">Planar Z-Axis</option>
-            <option value="planar-x" class="bg-dcc-900 text-slate-200">Planar X-Axis</option>
-            <option value="planar-y" class="bg-dcc-900 text-slate-200">Planar Y-Axis</option>
+            <option value="default" disabled selected class="bg-ui-panel text-ui-textMuted">Unwrap 3D...</option>
+            <option value="reset" class="bg-ui-panel text-rose-500 font-semibold">Reset UVs (0..1 Full)</option>
+            <option value="cubemap" class="bg-ui-panel text-ui-textAccent">Cubemap Cross (Blockbench)</option>
+            <option value="box" class="bg-ui-panel text-ui-textPrimary">Smart Box Unwrap</option>
+            <option value="cylinder" class="bg-ui-panel text-ui-textPrimary">Cylinder (Tube + Caps)</option>
+            <option value="sphere" class="bg-ui-panel text-ui-textPrimary">Sphere (Equirectangular)</option>
+            <option value="cone" class="bg-ui-panel text-ui-textPrimary">Cone / Pyramid (Radial Fan)</option>
+            <option value="planar-z" class="bg-ui-panel text-ui-textPrimary">Planar Z-Axis</option>
+            <option value="planar-x" class="bg-ui-panel text-ui-textPrimary">Planar X-Axis</option>
+            <option value="planar-y" class="bg-ui-panel text-ui-textPrimary">Planar Y-Axis</option>
           </select>
         </div>
 
         <!-- Islands & Layout Operations Dropdown -->
-        <div class="flex items-center bg-dcc-900 rounded border border-dcc-750 px-1.5 py-0.5 text-[10px]">
+        <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle px-1.5 py-0.5 text-[10px]">
           <select 
             @change="(e) => {
               const val = (e.target as HTMLSelectElement).value
@@ -1545,34 +1545,34 @@ defineExpose({
               else if (val === 'equalize') handleEqualizeTexels()
               ;(e.target as HTMLSelectElement).value = 'default'
             }"
-            class="bg-transparent text-emerald-400 font-bold focus:outline-none cursor-pointer"
+            class="bg-transparent text-emerald-500 font-bold focus:outline-none cursor-pointer"
           >
-            <option value="default" disabled selected class="bg-dcc-900 text-slate-400">Islands & Layout...</option>
-            <option value="pack-2" class="bg-dcc-900 text-emerald-300">Auto-Pack Islands (2px Margin)</option>
-            <option value="pack-0" class="bg-dcc-900 text-slate-200">Auto-Pack Islands (0px Tight)</option>
-            <option value="pack-4" class="bg-dcc-900 text-slate-200">Auto-Pack Islands (4px Margin)</option>
-            <option value="gridify" class="bg-dcc-900 text-amber-300">Gridify Quad Loops</option>
-            <option value="equalize" class="bg-dcc-900 text-sky-300">Equalize Texel Density</option>
+            <option value="default" disabled selected class="bg-ui-panel text-ui-textMuted">Islands & Layout...</option>
+            <option value="pack-2" class="bg-ui-panel text-emerald-500 font-medium">Auto-Pack Islands (2px Margin)</option>
+            <option value="pack-0" class="bg-ui-panel text-ui-textPrimary">Auto-Pack Islands (0px Tight)</option>
+            <option value="pack-4" class="bg-ui-panel text-ui-textPrimary">Auto-Pack Islands (4px Margin)</option>
+            <option value="gridify" class="bg-ui-panel text-ui-textAccent font-medium">Gridify Quad Loops</option>
+            <option value="equalize" class="bg-ui-panel text-sky-500 font-medium">Equalize Texel Density</option>
           </select>
         </div>
 
         <!-- UV Alignment Dropdown -->
-        <div class="flex items-center bg-dcc-900 rounded border border-dcc-750 px-1.5 py-0.5 text-[10px]">
+        <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle px-1.5 py-0.5 text-[10px]">
           <select 
             @change="(e) => {
               const val = (e.target as HTMLSelectElement).value
               if (val) alignSelection(val as any)
               ;(e.target as HTMLSelectElement).value = 'default'
             }"
-            class="bg-transparent text-slate-300 font-bold focus:outline-none cursor-pointer"
+            class="bg-transparent text-ui-textPrimary font-bold focus:outline-none cursor-pointer"
           >
-            <option value="default" disabled selected class="bg-dcc-900 text-slate-400">Align...</option>
-            <option value="left" class="bg-dcc-900 text-slate-200">Align Left</option>
-            <option value="right" class="bg-dcc-900 text-slate-200">Align Right</option>
-            <option value="top" class="bg-dcc-900 text-slate-200">Align Top</option>
-            <option value="bottom" class="bg-dcc-900 text-slate-200">Align Bottom</option>
-            <option value="center_h" class="bg-dcc-900 text-slate-200">Align Center (Horiz)</option>
-            <option value="center_v" class="bg-dcc-900 text-slate-200">Align Center (Vert)</option>
+            <option value="default" disabled selected class="bg-ui-panel text-ui-textMuted">Align...</option>
+            <option value="left" class="bg-ui-panel text-ui-textPrimary">Align Left</option>
+            <option value="right" class="bg-ui-panel text-ui-textPrimary">Align Right</option>
+            <option value="top" class="bg-ui-panel text-ui-textPrimary">Align Top</option>
+            <option value="bottom" class="bg-ui-panel text-ui-textPrimary">Align Bottom</option>
+            <option value="center_h" class="bg-ui-panel text-ui-textPrimary">Align Center (Horiz)</option>
+            <option value="center_v" class="bg-ui-panel text-ui-textPrimary">Align Center (Vert)</option>
           </select>
         </div>
       </div>
@@ -1581,28 +1581,28 @@ defineExpose({
       <div class="flex items-center space-x-1 shrink-0">
         <button 
           @click="fileInputRef?.click()" 
-          class="flex items-center gap-1 px-1.5 py-0.5 rounded bg-dcc-900 hover:bg-dcc-800 text-indigo-300 text-[10px] font-bold border border-dcc-750 transition"
+          class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input hover:bg-ui-hover text-ui-textAccent text-[10px] font-bold border border-ui-borderSubtle transition"
           title="Import Texture / Sprite Sheet Image"
         >
-          <Upload class="w-3 h-3 text-indigo-400" />
+          <Upload class="w-3 h-3 text-ui-accent" />
           <span>Import</span>
         </button>
 
         <button 
           @click="exportTexturePng" 
-          class="flex items-center gap-1 px-1.5 py-0.5 hover:bg-dcc-800 rounded text-slate-300 hover:text-emerald-400 border border-dcc-750 bg-dcc-900 text-[10px] transition"
+          class="flex items-center gap-1 px-1.5 py-0.5 hover:bg-ui-hover rounded-xs text-ui-textSecondary hover:text-emerald-500 border border-ui-borderSubtle bg-ui-input text-[10px] transition"
           title="Export UV Texture PNG"
         >
-          <Download class="w-3 h-3 text-emerald-400" />
+          <Download class="w-3 h-3 text-emerald-500" />
           <span>Export</span>
         </button>
 
-        <div class="h-3.5 w-px bg-dcc-750 mx-0.5"></div>
+        <div class="h-3.5 w-px bg-ui-borderSubtle mx-0.5"></div>
 
         <button 
           @click="snapToPixels = !snapToPixels" 
-          class="flex items-center space-x-0.5 px-1.5 py-0.5 rounded text-[10px] transition border"
-          :class="snapToPixels ? 'bg-indigo-600/30 text-indigo-300 border-indigo-500/50 font-bold' : 'bg-dcc-900 text-slate-500 border-dcc-750'"
+          class="flex items-center space-x-0.5 px-1.5 py-0.5 rounded-xs text-[10px] transition border"
+          :class="snapToPixels ? 'bg-ui-active text-ui-textAccent border-ui-accent/40 font-bold shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:bg-ui-hover'"
           title="Snap to Pixel Grid"
         >
           <Magnet class="w-3 h-3" />
@@ -1611,21 +1611,21 @@ defineExpose({
 
         <button 
           @click="showPixelGrid = !showPixelGrid" 
-          class="p-1 rounded hover:bg-dcc-750 text-slate-400 hover:text-slate-200 border border-dcc-750 bg-dcc-900"
-          :class="{ 'text-indigo-400 bg-indigo-500/20 border-indigo-500/50': showPixelGrid }"
+          class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary border border-ui-borderSubtle bg-ui-input"
+          :class="{ 'text-ui-textAccent bg-ui-active border-ui-accent/40': showPixelGrid }"
           title="Toggle Pixel Grid"
         >
           <Grid class="w-3 h-3" />
         </button>
 
-        <div class="flex items-center bg-dcc-900 border border-dcc-750 rounded">
-          <button @click="zoom = Math.max(1, zoom - 1)" class="p-1 hover:bg-dcc-750 rounded-l text-slate-400 hover:text-white" title="Zoom Out">
+        <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs">
+          <button @click="zoom = Math.max(1, zoom - 1)" class="p-1 hover:bg-ui-hover rounded-l-xs text-ui-textMuted hover:text-ui-textPrimary" title="Zoom Out">
             <ZoomOut class="w-3 h-3" />
           </button>
-          <span @dblclick="resetPanZoom" class="text-[9px] text-slate-300 px-1.5 text-center cursor-pointer font-mono" title="Double click to reset pan/zoom">
+          <span @dblclick="resetPanZoom" class="text-[9px] text-ui-textPrimary px-1.5 text-center cursor-pointer font-mono" title="Double click to reset pan/zoom">
             {{ zoom }}x
           </span>
-          <button @click="zoom = Math.min(24, zoom + 1)" class="p-1 hover:bg-dcc-750 rounded-r text-slate-400 hover:text-white" title="Zoom In">
+          <button @click="zoom = Math.min(24, zoom + 1)" class="p-1 hover:bg-ui-hover rounded-r-xs text-ui-textMuted hover:text-ui-textPrimary" title="Zoom In">
             <ZoomIn class="w-3 h-3" />
           </button>
         </div>
@@ -1633,11 +1633,11 @@ defineExpose({
     </div>
 
     <!-- Row 2: Trim Sheet Snapping, Visual Diagnostics & Transforms -->
-    <div class="h-7 bg-dcc-800/80 border-b border-dcc-750 px-2 flex items-center justify-between text-xs text-slate-300 shrink-0 font-mono">
+    <div class="h-7 bg-ui-panel border-b border-ui-borderSubtle px-2 flex items-center justify-between text-xs text-ui-textSecondary shrink-0 font-mono">
       <!-- Left: Modular Trim Sheet & Multi-Grid Snapping -->
       <div class="flex items-center space-x-1.5">
-        <span class="text-[10px] text-slate-400 font-semibold">Trim Snap:</span>
-        <div class="flex items-center bg-dcc-900 rounded border border-dcc-750 px-1.5 py-0.5 text-[10px]">
+        <span class="text-[10px] text-ui-textMuted font-semibold">Trim Snap:</span>
+        <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle px-1.5 py-0.5 text-[10px]">
           <select 
             @change="(e) => {
               const val = (e.target as HTMLSelectElement).value
@@ -1652,31 +1652,31 @@ defineExpose({
               }
               ;(e.target as HTMLSelectElement).value = 'default'
             }"
-            class="bg-transparent text-amber-300 font-bold focus:outline-none cursor-pointer"
+            class="bg-transparent text-ui-textAccent font-bold focus:outline-none cursor-pointer"
           >
-            <option value="default" disabled selected class="bg-dcc-900 text-slate-400">Trim / Atlas Snapping...</option>
-            <option value="full" class="bg-dcc-900 text-indigo-300 font-bold">Fit to Full (0..1)</option>
-            <option value="q1" class="bg-dcc-900 text-amber-300">Quadrant 1 (Top-Left 2x2)</option>
-            <option value="q2" class="bg-dcc-900 text-amber-300">Quadrant 2 (Top-Right 2x2)</option>
-            <option value="q3" class="bg-dcc-900 text-amber-300">Quadrant 3 (Bottom-Left 2x2)</option>
-            <option value="q4" class="bg-dcc-900 text-amber-300">Quadrant 4 (Bottom-Right 2x2)</option>
-            <option value="grid-0-0-4-4" class="bg-dcc-900 text-slate-200">Tile 1/16 (4x4 Grid)</option>
-            <option value="grid-0-0-8-8" class="bg-dcc-900 text-slate-200">Tile 1/64 (8x8 Grid)</option>
-            <option value="grid-0-0-1-2" class="bg-dcc-900 text-sky-300">Horizontal Trim Top 1/2</option>
-            <option value="grid-0-1-1-2" class="bg-dcc-900 text-sky-300">Horizontal Trim Bottom 1/2</option>
-            <option value="grid-0-0-1-4" class="bg-dcc-900 text-sky-300">Horizontal Trim 1/4 Band</option>
-            <option value="grid-0-0-1-8" class="bg-dcc-900 text-sky-300">Horizontal Trim 1/8 Strip</option>
-            <option value="grid-0-0-4-1" class="bg-dcc-900 text-sky-300">Vertical Trim 1/4 Column</option>
+            <option value="default" disabled selected class="bg-ui-panel text-ui-textMuted">Trim / Atlas Snapping...</option>
+            <option value="full" class="bg-ui-panel text-ui-textAccent font-bold">Fit to Full (0..1)</option>
+            <option value="q1" class="bg-ui-panel text-ui-textPrimary">Quadrant 1 (Top-Left 2x2)</option>
+            <option value="q2" class="bg-ui-panel text-ui-textPrimary">Quadrant 2 (Top-Right 2x2)</option>
+            <option value="q3" class="bg-ui-panel text-ui-textPrimary">Quadrant 3 (Bottom-Left 2x2)</option>
+            <option value="q4" class="bg-ui-panel text-ui-textPrimary">Quadrant 4 (Bottom-Right 2x2)</option>
+            <option value="grid-0-0-4-4" class="bg-ui-panel text-ui-textSecondary">Tile 1/16 (4x4 Grid)</option>
+            <option value="grid-0-0-8-8" class="bg-ui-panel text-ui-textSecondary">Tile 1/64 (8x8 Grid)</option>
+            <option value="grid-0-0-1-2" class="bg-ui-panel text-sky-500">Horizontal Trim Top 1/2</option>
+            <option value="grid-0-1-1-2" class="bg-ui-panel text-sky-500">Horizontal Trim Bottom 1/2</option>
+            <option value="grid-0-0-1-4" class="bg-ui-panel text-sky-500">Horizontal Trim 1/4 Band</option>
+            <option value="grid-0-0-1-8" class="bg-ui-panel text-sky-500">Horizontal Trim 1/8 Strip</option>
+            <option value="grid-0-0-4-1" class="bg-ui-panel text-sky-500">Vertical Trim 1/4 Column</option>
           </select>
         </div>
 
-        <div class="h-3.5 w-px bg-dcc-750 mx-0.5"></div>
+        <div class="h-3.5 w-px bg-ui-borderSubtle mx-0.5"></div>
 
         <!-- Visual Diagnostics: Checkerboard & Stretch Heatmap -->
         <button 
           @click="showCheckerboard = !showCheckerboard"
-          class="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-bold border transition"
-          :class="showCheckerboard ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-xs' : 'bg-dcc-900 text-slate-400 border-dcc-750 hover:text-slate-200'"
+          class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs text-[10px] font-bold border transition"
+          :class="showCheckerboard ? 'bg-ui-active text-ui-textAccent border-ui-accent/40 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Toggle Calibration Checkerboard Test Grid"
         >
           <Layers class="w-3 h-3" />
@@ -1685,8 +1685,8 @@ defineExpose({
 
         <button 
           @click="showHeatmap = !showHeatmap"
-          class="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-bold border transition"
-          :class="showHeatmap ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-xs' : 'bg-dcc-900 text-slate-400 border-dcc-750 hover:text-slate-200'"
+          class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs text-[10px] font-bold border transition"
+          :class="showHeatmap ? 'bg-ui-active text-ui-textAccent border-ui-accent/40 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Toggle UV Stretch & Distortion Heatmap (Green = 1:1, Blue = Compressed, Red = Stretched)"
         >
           <Activity class="w-3 h-3" />
@@ -1696,26 +1696,26 @@ defineExpose({
 
       <!-- Right: Transform Presets -->
       <div class="flex items-center space-x-1.5">
-        <span class="text-[10px] text-slate-400 font-semibold">Transforms:</span>
-        <div class="flex items-center space-x-0.5 bg-dcc-900 rounded p-0.5 border border-dcc-750">
-          <button @click="rotateUVs(-90)" class="p-1 hover:bg-dcc-800 rounded text-slate-300 hover:text-white transition" title="Rotate 90° CCW">
+        <span class="text-[10px] text-ui-textMuted font-semibold">Transforms:</span>
+        <div class="flex items-center space-x-0.5 bg-ui-input rounded-xs p-0.5 border border-ui-borderSubtle">
+          <button @click="rotateUVs(-90)" class="p-1 hover:bg-ui-hover rounded-xs text-ui-textSecondary hover:text-ui-textPrimary transition" title="Rotate 90° CCW">
             <RotateCcw class="w-3 h-3" />
           </button>
-          <button @click="rotateUVs(90)" class="p-1 hover:bg-dcc-800 rounded text-slate-300 hover:text-white transition" title="Rotate 90° CW">
+          <button @click="rotateUVs(90)" class="p-1 hover:bg-ui-hover rounded-xs text-ui-textSecondary hover:text-ui-textPrimary transition" title="Rotate 90° CW">
             <RotateCw class="w-3 h-3" />
           </button>
-          <button @click="flipUVs('u')" class="p-1 hover:bg-dcc-800 rounded text-slate-300 hover:text-white transition" title="Flip Horizontal">
+          <button @click="flipUVs('u')" class="p-1 hover:bg-ui-hover rounded-xs text-ui-textSecondary hover:text-ui-textPrimary transition" title="Flip Horizontal">
             <FlipHorizontal class="w-3 h-3" />
           </button>
-          <button @click="flipUVs('v')" class="p-1 hover:bg-dcc-800 rounded text-slate-300 hover:text-white transition" title="Flip Vertical">
+          <button @click="flipUVs('v')" class="p-1 hover:bg-ui-hover rounded-xs text-ui-textSecondary hover:text-ui-textPrimary transition" title="Flip Vertical">
             <FlipVertical class="w-3 h-3" />
           </button>
-          <button @click="scaleUVs(1.5)" class="px-1.5 py-0.5 hover:bg-dcc-800 rounded text-[9px] text-indigo-300 font-bold transition" title="Scale Up +50%">+50%</button>
-          <button @click="scaleUVs(0.67)" class="px-1.5 py-0.5 hover:bg-dcc-800 rounded text-[9px] text-indigo-300 font-bold transition" title="Scale Down -33%">-33%</button>
-          <button @click="centerInView" class="p-1 hover:bg-dcc-800 rounded text-slate-400 hover:text-slate-200 transition" title="Center UV Islands in Canvas">
+          <button @click="scaleUVs(1.5)" class="px-1.5 py-0.5 hover:bg-ui-hover rounded-xs text-[9px] text-ui-textAccent font-bold transition" title="Scale Up +50%">+50%</button>
+          <button @click="scaleUVs(0.67)" class="px-1.5 py-0.5 hover:bg-ui-hover rounded-xs text-[9px] text-ui-textAccent font-bold transition" title="Scale Down -33%">-33%</button>
+          <button @click="centerInView" class="p-1 hover:bg-ui-hover rounded-xs text-ui-textMuted hover:text-ui-textPrimary transition" title="Center UV Islands in Canvas">
             <AlignCenter class="w-3 h-3" />
           </button>
-          <button @click="resetPanZoom" class="px-1.5 py-0.5 hover:bg-dcc-800 rounded text-[9px] text-amber-300 font-bold transition" title="Frame & Center Viewport on Texture">
+          <button @click="resetPanZoom" class="px-1.5 py-0.5 hover:bg-ui-hover rounded-xs text-[9px] text-ui-textAccent font-bold transition" title="Frame & Center Viewport on Texture">
             Frame
           </button>
         </div>
@@ -1725,7 +1725,7 @@ defineExpose({
     <!-- 2. INFINITE STAGING CANVAS VIEWPORT (Desktop, Laptop, Tablet, Stylus) -->
     <div 
       ref="containerRef" 
-      class="flex-1 min-h-0 relative overflow-hidden bg-[#0b0d12] cursor-crosshair select-none touch-none"
+      class="flex-1 min-h-0 relative overflow-hidden bg-ui-root cursor-crosshair select-none touch-none"
       @wheel="onWheel"
     >
       <canvas 
@@ -1739,13 +1739,13 @@ defineExpose({
       ></canvas>
 
       <!-- Quick Info HUD at Bottom Left -->
-      <div class="absolute bottom-3 left-3 bg-dcc-850/90 backdrop-blur-md px-2.5 py-1 rounded-sm border border-dcc-700/80 shadow-lg text-[10px] font-mono text-slate-400 flex items-center space-x-3 select-none pointer-events-none z-10">
-        <span class="flex items-center gap-1">Mode: <strong class="text-amber-400 uppercase font-bold">{{ uvSelectMode }}</strong></span>
-        <span>Res: <strong class="text-slate-200 font-bold">{{ projectStore.pixelBuffer.width }}x{{ projectStore.pixelBuffer.height }}</strong></span>
-        <span v-if="selectionBounds" class="text-indigo-400 font-bold">
+      <div class="absolute bottom-3 left-3 bg-ui-panel/95 backdrop-blur-md px-2.5 py-1 rounded-xs border border-ui-borderStrong shadow-md text-[10px] font-mono text-ui-textMuted flex items-center space-x-3 select-none pointer-events-none z-10">
+        <span class="flex items-center gap-1">Mode: <strong class="text-ui-textAccent uppercase font-bold">{{ uvSelectMode }}</strong></span>
+        <span>Res: <strong class="text-ui-textPrimary font-bold">{{ projectStore.pixelBuffer.width }}x{{ projectStore.pixelBuffer.height }}</strong></span>
+        <span v-if="selectionBounds" class="text-ui-textAccent font-bold">
           Bounds: {{ Math.round(selectionBounds.width * 100) }}% x {{ Math.round(selectionBounds.height * 100) }}%
         </span>
-        <span class="text-slate-500">Space+Drag / Middle Click to Pan | Double-Click Zoom to Frame</span>
+        <span class="text-ui-textMuted">Space+Drag / Middle Click to Pan | Double-Click Zoom to Frame</span>
       </div>
     </div>
   </div>
