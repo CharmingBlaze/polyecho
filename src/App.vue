@@ -13,12 +13,15 @@ import NewProjectModal from './components/modals/NewProjectModal.vue'
 import AddPrimitivePopout from './components/modals/AddPrimitivePopout.vue'
 import BlenderPieMenu from './components/viewport/BlenderPieMenu.vue'
 import CommandPaletteModal from './components/modals/CommandPaletteModal.vue'
+import PreferencesModal from './components/modals/PreferencesModal.vue'
 
 import { useToolStore } from './stores/toolStore'
 import { useProjectStore } from './stores/projectStore'
 import { useAnimationStore } from './stores/animationStore'
 import { useHistoryStore } from './stores/historyStore'
 import { useLayoutStore } from './stores/layoutStore'
+import { useThemeStore } from './stores/themeStore'
+import { useKeymapStore } from './stores/keymapStore'
 import { ProjectSerializer } from './core/project/ProjectSerializer'
 
 const toolStore = useToolStore()
@@ -26,10 +29,13 @@ const projectStore = useProjectStore()
 const animationStore = useAnimationStore()
 const historyStore = useHistoryStore()
 const layoutStore = useLayoutStore()
+const themeStore = useThemeStore()
+const keymapStore = useKeymapStore()
 
 const showExportModal = ref(false)
 const showHotkeyModal = ref(false)
 const showNewProjectModal = ref(false)
+const showPreferencesModal = ref(false)
 
 // UV / Paint Split Pane Resizing
 const uvSplitRatio = ref<number>(50) // percentage
@@ -129,6 +135,11 @@ function handleKeyDown(e: KeyboardEvent) {
     if (e.key === 'n' || e.key === 'N') {
       e.preventDefault()
       showNewProjectModal.value = true
+      return
+    }
+    if (e.key === ',' || e.key === '<') {
+      e.preventDefault()
+      showPreferencesModal.value = true
       return
     }
     if ((e.key === 'q' || e.key === 'Q') && e.altKey) {
@@ -321,6 +332,8 @@ function handleKeyDown(e: KeyboardEvent) {
 }
 
 onMounted(() => {
+  themeStore.initTheme()
+  keymapStore.initKeymaps()
   window.addEventListener('keydown', handleKeyDown)
 })
 
@@ -330,11 +343,12 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="h-screen w-screen flex flex-col bg-dcc-900 text-slate-200 overflow-hidden font-sans">
+  <div class="h-screen w-screen flex flex-col bg-ui-base text-ui-textPrimary overflow-hidden font-sans">
     <!-- Header Navigation -->
     <HeaderMenu 
       @open-export="showExportModal = true"
       @open-hotkeys="showHotkeyModal = true"
+      @open-preferences="showPreferencesModal = true"
       @new-project="showNewProjectModal = true"
     />
 
@@ -395,6 +409,7 @@ onUnmounted(() => {
     <ExportModal v-if="showExportModal" @close="showExportModal = false" />
     <HotkeyModal v-if="showHotkeyModal" @close="showHotkeyModal = false" />
     <NewProjectModal v-if="showNewProjectModal" @close="showNewProjectModal = false" />
+    <PreferencesModal v-if="showPreferencesModal" @close="showPreferencesModal = false" />
     <AddPrimitivePopout />
     <BlenderPieMenu />
     <CommandPaletteModal />

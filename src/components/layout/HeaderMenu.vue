@@ -49,6 +49,7 @@ const currentOrientation = ref<PlacementOrientation>('WORLD')
 const emit = defineEmits<{
   (e: 'open-export'): void
   (e: 'open-hotkeys'): void
+  (e: 'open-preferences'): void
   (e: 'new-project'): void
 }>()
 
@@ -302,6 +303,13 @@ function handleExitProject() {
           </button>
           <button @click="importTextureInput?.click()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
             <ImageIcon class="w-3.5 h-3.5 text-ui-textMuted" /> Texture (PNG, JPG)
+          </button>
+
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+
+          <button @click="$emit('open-preferences'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-ui-textPrimary font-medium">
+            <span class="flex items-center gap-2"><Sliders class="w-3.5 h-3.5 text-amber-400" /> Preferences & Properties...</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+,</span>
           </button>
 
           <div class="h-px bg-ui-borderSubtle my-1"></div>
