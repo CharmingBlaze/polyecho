@@ -2,13 +2,13 @@
 import { computed } from 'vue'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useProjectStore } from '../../stores/projectStore'
-import BlenderIcon from '../icons/BlenderIcon.vue'
 import { 
   Trash2, 
   RotateCcw, 
   Wrench, 
   Plus, 
-  Sliders 
+  Sliders,
+  GitCommitVertical
 } from 'lucide-vue-next'
 
 const animationStore = useAnimationStore()
@@ -94,13 +94,13 @@ function handleRemoveSocket(socketId: string) {
 </script>
 
 <template>
-  <div class="h-full w-full bg-ui-panel p-3 text-ui-textPrimary flex flex-col space-y-3 font-mono text-xs select-none overflow-y-auto">
+  <div class="h-full w-full bg-ui-panel p-3 text-ui-textPrimary flex flex-col space-y-3 font-sans text-xs select-none overflow-y-auto">
     <!-- Top Mode Switcher: EDIT RIG vs POSE -->
-    <div class="bg-ui-surface p-1.5 rounded-xs border border-ui-borderSubtle space-y-1.5">
-      <div class="grid grid-cols-2 gap-1 bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle">
+    <div class="bg-ui-surface/60 p-1.5 rounded-xs border border-ui-borderSubtle space-y-1.5">
+      <div class="grid grid-cols-2 gap-1 bg-ui-input/70 p-0.5 rounded-xs border border-ui-borderSubtle">
         <button 
           @click="animationStore.toggleTestPose(false)"
-          class="py-1.5 px-2 rounded-xs font-bold text-xs flex items-center justify-center gap-1.5 transition"
+          class="py-1.5 px-2 rounded-xs font-semibold text-[11px] flex items-center justify-center gap-1.5 transition cursor-pointer"
           :class="!animationStore.isTestPoseActive ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
         >
           <Sliders class="w-3.5 h-3.5" />
@@ -109,8 +109,8 @@ function handleRemoveSocket(socketId: string) {
 
         <button 
           @click="animationStore.toggleTestPose(true)"
-          class="py-1.5 px-2 rounded-xs font-bold text-xs flex items-center justify-center gap-1.5 transition"
-          :class="animationStore.isTestPoseActive ? 'bg-amber-500 text-slate-950 shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          class="py-1.5 px-2 rounded-xs font-semibold text-[11px] flex items-center justify-center gap-1.5 transition cursor-pointer"
+          :class="animationStore.isTestPoseActive ? 'bg-amber-500 text-slate-950 shadow-xs font-bold' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
         >
           <RotateCcw class="w-3.5 h-3.5" />
           <span>Pose Mode</span>
@@ -120,7 +120,7 @@ function handleRemoveSocket(socketId: string) {
       <button 
         v-if="animationStore.isTestPoseActive"
         @click="animationStore.resetAllBonesToRest"
-        class="w-full py-1 text-[10px] text-amber-400 hover:bg-amber-500/10 border border-amber-500/30 rounded-xs font-bold flex items-center justify-center gap-1 transition"
+        class="w-full py-1 text-[11px] text-amber-400 hover:bg-amber-500/10 border border-amber-500/30 rounded-xs font-medium flex items-center justify-center gap-1.5 transition cursor-pointer"
       >
         <RotateCcw class="w-3 h-3" />
         <span>Reset Rest Pose (Alt+R)</span>
@@ -128,15 +128,15 @@ function handleRemoveSocket(socketId: string) {
     </div>
 
     <!-- Active Bone Inspector -->
-    <div v-if="selectedBone" class="bg-ui-surface p-2.5 rounded-xs border border-ui-borderSubtle space-y-3">
+    <div v-if="selectedBone" class="bg-ui-surface/60 p-2.5 rounded-xs border border-ui-borderSubtle space-y-3">
       <!-- Bone Header -->
       <div class="flex items-center justify-between border-b border-ui-borderSubtle pb-1.5">
-        <span class="text-[11px] font-bold text-ui-textAccent uppercase tracking-wider">
+        <span class="text-[11px] font-bold text-ui-textMuted uppercase tracking-wider">
           Bone Properties
         </span>
         <button 
           @click="animationStore.deleteBone(selectedBone.id)"
-          class="text-ui-textMuted hover:text-rose-400 p-0.5"
+          class="text-ui-textMuted hover:text-rose-400 p-0.5 transition cursor-pointer"
           title="Delete bone (Del)"
         >
           <Trash2 class="w-3.5 h-3.5" />
@@ -145,16 +145,16 @@ function handleRemoveSocket(socketId: string) {
 
       <!-- Rename -->
       <div class="space-y-1">
-        <span class="text-[10px] text-ui-textMuted">Bone Name</span>
+        <div class="text-[10px] text-ui-textMuted font-semibold uppercase">Bone Name</div>
         <input 
           v-model="selectedBone.name"
-          class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-ui-textPrimary text-xs focus:outline-none focus:border-ui-accent font-bold"
+          class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-ui-textPrimary text-xs focus:outline-none focus:border-ui-accent font-medium"
         />
       </div>
 
       <!-- Parent Bone Selector -->
       <div class="space-y-1">
-        <span class="text-[10px] text-ui-textMuted">Parent Bone</span>
+        <div class="text-[10px] text-ui-textMuted font-semibold uppercase">Parent Bone</div>
         <select 
           :value="selectedBone.parentId || 'root'"
           @change="handleReparent(($event.target as HTMLSelectElement).value)"
@@ -174,50 +174,50 @@ function handleRemoveSocket(socketId: string) {
 
       <!-- Head Position -->
       <div class="space-y-1">
-        <span class="text-[10px] text-ui-textMuted">Joint Head (Base)</span>
+        <div class="text-[10px] text-ui-textMuted font-semibold uppercase">Head Pivot</div>
         <div class="grid grid-cols-3 gap-1">
           <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5">
-            <span class="text-[9px] text-rose-400 font-bold mr-1">X</span>
-            <input type="number" step="0.1" v-model.number="selectedBone.head.x" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none" />
+            <span class="text-[10px] text-rose-400 font-bold mr-1">X</span>
+            <input type="number" step="0.1" v-model.number="selectedBone.head.x" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none font-mono" />
           </div>
           <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5">
-            <span class="text-[9px] text-emerald-400 font-bold mr-1">Y</span>
-            <input type="number" step="0.1" v-model.number="selectedBone.head.y" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none" />
+            <span class="text-[10px] text-emerald-400 font-bold mr-1">Y</span>
+            <input type="number" step="0.1" v-model.number="selectedBone.head.y" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none font-mono" />
           </div>
           <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5">
-            <span class="text-[9px] text-sky-400 font-bold mr-1">Z</span>
-            <input type="number" step="0.1" v-model.number="selectedBone.head.z" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none" />
+            <span class="text-[10px] text-sky-400 font-bold mr-1">Z</span>
+            <input type="number" step="0.1" v-model.number="selectedBone.head.z" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none font-mono" />
           </div>
         </div>
       </div>
 
       <!-- Tail Position -->
       <div class="space-y-1">
-        <span class="text-[10px] text-ui-textMuted">Joint Tail (Tip)</span>
+        <div class="text-[10px] text-ui-textMuted font-semibold uppercase">Tail Pivot</div>
         <div class="grid grid-cols-3 gap-1">
           <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5">
-            <span class="text-[9px] text-rose-400 font-bold mr-1">X</span>
-            <input type="number" step="0.1" v-model.number="selectedBone.tail.x" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none" />
+            <span class="text-[10px] text-rose-400 font-bold mr-1">X</span>
+            <input type="number" step="0.1" v-model.number="selectedBone.tail.x" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none font-mono" />
           </div>
           <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5">
-            <span class="text-[9px] text-emerald-400 font-bold mr-1">Y</span>
-            <input type="number" step="0.1" v-model.number="selectedBone.tail.y" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none" />
+            <span class="text-[10px] text-emerald-400 font-bold mr-1">Y</span>
+            <input type="number" step="0.1" v-model.number="selectedBone.tail.y" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none font-mono" />
           </div>
           <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5">
-            <span class="text-[9px] text-sky-400 font-bold mr-1">Z</span>
-            <input type="number" step="0.1" v-model.number="selectedBone.tail.z" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none" />
+            <span class="text-[10px] text-sky-400 font-bold mr-1">Z</span>
+            <input type="number" step="0.1" v-model.number="selectedBone.tail.z" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none font-mono" />
           </div>
         </div>
       </div>
 
       <!-- Bone Length Slider -->
-      <div class="space-y-1.5 pt-1 border-t border-ui-borderSubtle">
+      <div class="space-y-1.5 pt-1.5 border-t border-ui-borderSubtle/60">
         <div class="flex items-center justify-between text-[10px]">
-          <span class="text-ui-textMuted">Bone Length</span>
+          <span class="text-ui-textMuted font-semibold uppercase">Bone Length</span>
           <div class="flex items-center gap-1">
-            <button @click="adjustBoneLength(-0.1)" class="px-1 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[9px] text-ui-textMuted hover:text-ui-textPrimary">-0.1</button>
-            <span class="text-ui-textAccent font-bold font-mono">{{ boneLength }}m</span>
-            <button @click="adjustBoneLength(0.1)" class="px-1 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[9px] text-ui-textMuted hover:text-ui-textPrimary">+0.1</button>
+            <button @click="adjustBoneLength(-0.1)" class="px-1.5 py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[9px] text-ui-textSecondary cursor-pointer">-0.1</button>
+            <span class="text-ui-textAccent font-semibold font-mono">{{ boneLength }}m</span>
+            <button @click="adjustBoneLength(0.1)" class="px-1.5 py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[9px] text-ui-textSecondary cursor-pointer">+0.1</button>
           </div>
         </div>
         <input 
@@ -229,21 +229,21 @@ function handleRemoveSocket(socketId: string) {
           class="w-full accent-ui-accent h-1 bg-ui-input rounded-xs cursor-pointer"
         />
         <div class="grid grid-cols-4 gap-1">
-          <button @click="setPresetBoneLength(0.5)" class="py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[9px] text-ui-textMuted">0.5m</button>
-          <button @click="setPresetBoneLength(1.0)" class="py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[9px] text-ui-textMuted">1m</button>
-          <button @click="setPresetBoneLength(1.5)" class="py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[9px] text-ui-textMuted">1.5m</button>
-          <button @click="setPresetBoneLength(2.0)" class="py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[9px] text-ui-textMuted">2m</button>
+          <button @click="setPresetBoneLength(0.5)" class="py-0.5 bg-ui-input/70 hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[9px] text-ui-textMuted cursor-pointer">0.5m</button>
+          <button @click="setPresetBoneLength(1.0)" class="py-0.5 bg-ui-input/70 hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[9px] text-ui-textMuted cursor-pointer">1.0m</button>
+          <button @click="setPresetBoneLength(1.5)" class="py-0.5 bg-ui-input/70 hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[9px] text-ui-textMuted cursor-pointer">1.5m</button>
+          <button @click="setPresetBoneLength(2.0)" class="py-0.5 bg-ui-input/70 hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[9px] text-ui-textMuted cursor-pointer">2.0m</button>
         </div>
       </div>
 
       <!-- Sockets on this bone -->
-      <div class="space-y-1.5 pt-1 border-t border-ui-borderSubtle">
+      <div class="space-y-1.5 pt-1.5 border-t border-ui-borderSubtle/60">
         <div class="flex items-center justify-between text-[10px]">
-          <span class="text-ui-textMuted font-bold uppercase flex items-center gap-1">
+          <span class="text-ui-textMuted font-semibold uppercase flex items-center gap-1">
             <Wrench class="w-3 h-3 text-sky-400" />
             <span>Sockets ({{ selectedBone.sockets?.length || 0 }})</span>
           </span>
-          <button @click="handleAddSocket" class="px-1.5 py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textPrimary rounded-xs text-[9px] font-bold flex items-center gap-0.5">
+          <button @click="handleAddSocket" class="px-1.5 py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textPrimary rounded-xs text-[9px] font-medium flex items-center gap-0.5 cursor-pointer">
             <Plus class="w-2.5 h-2.5" />
             <span>Add</span>
           </button>
@@ -253,13 +253,13 @@ function handleRemoveSocket(socketId: string) {
           <div 
             v-for="s in selectedBone.sockets || []" 
             :key="s.id"
-            class="flex items-center justify-between px-2 py-1 bg-ui-input rounded-xs border border-ui-borderSubtle text-[10px]"
+            class="flex items-center justify-between px-2 py-1 bg-ui-input/70 rounded-xs border border-ui-borderSubtle text-[11px]"
           >
             <input 
               v-model="s.name"
-              class="bg-transparent text-sky-300 font-bold focus:outline-none border-b border-transparent focus:border-ui-accent truncate"
+              class="bg-transparent text-sky-300 font-medium focus:outline-none border-b border-transparent focus:border-ui-accent truncate"
             />
-            <button @click="handleRemoveSocket(s.id)" class="text-ui-textMuted hover:text-rose-400 p-0.5">
+            <button @click="handleRemoveSocket(s.id)" class="text-ui-textMuted hover:text-rose-400 p-0.5 transition cursor-pointer">
               <Trash2 class="w-3 h-3" />
             </button>
           </div>
@@ -268,45 +268,47 @@ function handleRemoveSocket(socketId: string) {
     </div>
 
     <!-- Empty State / Quick Selector -->
-    <div v-else class="flex-1 flex flex-col p-3 space-y-3 bg-ui-surface rounded-xs border border-ui-borderSubtle">
-      <div class="text-center space-y-1.5 py-3 border-b border-ui-borderSubtle">
-        <BlenderIcon name="bone" :size="24" color="#f59e0b" class="mx-auto" />
-        <h4 class="font-bold text-xs text-ui-textPrimary">No Bone Selected</h4>
-        <p class="text-[10px] text-ui-textMuted leading-relaxed">
-          Select a bone from the list below or create a new bone to edit its properties.
+    <div v-else class="flex-1 flex flex-col p-4 space-y-3 bg-ui-surface/60 rounded-xs border border-ui-borderSubtle text-center my-auto">
+      <div class="w-9 h-9 mx-auto rounded-full bg-ui-input/80 border border-ui-borderSubtle flex items-center justify-center text-ui-accent">
+        <GitCommitVertical class="w-5 h-5" />
+      </div>
+      <div class="space-y-1">
+        <h4 class="font-semibold text-xs text-ui-textPrimary">No Bone Selected</h4>
+        <p class="text-[11px] text-ui-textMuted leading-relaxed">
+          Select a bone to edit its properties or create a new joint.
         </p>
       </div>
 
       <!-- Quick Actions -->
-      <div class="grid grid-cols-2 gap-1.5">
+      <div class="grid grid-cols-2 gap-1.5 pt-1">
         <button 
           @click="animationStore.addRootBone(`Bone_Root_${animationStore.armature.bones.length + 1}`)"
-          class="py-1.5 px-2 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-bold text-xs flex items-center justify-center gap-1 shadow-xs transition"
+          class="py-1.5 px-2 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold text-[11px] flex items-center justify-center gap-1 shadow-sm transition cursor-pointer"
         >
           <Plus class="w-3.5 h-3.5" />
-          <span>+ Add Bone</span>
+          <span>Add Bone</span>
         </button>
 
         <button 
           @click="animationStore.clickToPlaceMode = !animationStore.clickToPlaceMode"
-          class="py-1.5 px-2 rounded-xs font-bold text-xs flex items-center justify-center gap-1 transition border"
-          :class="animationStore.clickToPlaceMode ? 'bg-amber-500 text-slate-950 border-amber-400 font-extrabold' : 'bg-ui-input border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
+          class="py-1.5 px-2 rounded-xs font-semibold text-[11px] flex items-center justify-center gap-1 transition border cursor-pointer"
+          :class="animationStore.clickToPlaceMode ? 'bg-amber-500/20 text-amber-300 border-amber-500/60' : 'bg-ui-input/70 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
         >
           <span>Draw (B)</span>
         </button>
       </div>
 
       <!-- Quick Bones List -->
-      <div v-if="animationStore.armature.bones.length > 0" class="space-y-1 flex-1 overflow-y-auto">
-        <span class="text-[10px] text-ui-textMuted font-bold uppercase">Armature Bones:</span>
+      <div v-if="animationStore.armature.bones.length > 0" class="space-y-1 flex-1 overflow-y-auto text-left pt-2 border-t border-ui-borderSubtle/60">
+        <span class="text-[10px] text-ui-textMuted font-semibold uppercase tracking-wider">Armature Bones</span>
         <div class="space-y-0.5">
           <button 
             v-for="b in animationStore.armature.bones" 
             :key="b.id"
             @click="animationStore.selectBone(b.id)"
-            class="w-full px-2 py-1 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-left text-xs text-ui-textPrimary font-bold flex items-center gap-1.5 transition"
+            class="w-full px-2 py-1 bg-ui-input/70 hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-left text-[11px] text-ui-textPrimary font-medium flex items-center gap-1.5 transition cursor-pointer"
           >
-            <BlenderIcon name="bone" :size="11" color="#f59e0b" />
+            <GitCommitVertical class="w-3.5 h-3.5 text-ui-accent" />
             <span class="truncate">{{ b.name }}</span>
           </button>
         </div>

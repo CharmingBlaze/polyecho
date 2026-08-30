@@ -2,7 +2,6 @@
 import { ref, computed } from 'vue'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useProjectStore } from '../../stores/projectStore'
-import BlenderIcon from '../icons/BlenderIcon.vue'
 import { 
   Plus, 
   Trash2, 
@@ -10,7 +9,8 @@ import {
   Wrench,
   Crosshair,
   GitBranch,
-  FlipHorizontal
+  FlipHorizontal,
+  GitCommitVertical
 } from 'lucide-vue-next'
 
 const animationStore = useAnimationStore()
@@ -134,15 +134,15 @@ function handleReparent(boneId: string, parentBoneId: string) {
 </script>
 
 <template>
-  <div class="h-full w-full bg-ui-panel p-3 text-ui-textPrimary flex flex-col space-y-3 font-mono text-xs select-none overflow-y-auto">
+  <div class="h-full w-full bg-ui-panel p-3 text-ui-textPrimary flex flex-col space-y-3 font-sans text-xs select-none overflow-y-auto">
     <!-- Top Setup Actions Bar -->
     <div class="space-y-2 border-b border-ui-borderSubtle pb-2.5">
       <div class="flex items-center justify-between">
-        <div class="flex items-center gap-1.5">
+        <div class="flex items-center gap-1.5 font-semibold text-ui-textPrimary">
           <FolderTree class="w-3.5 h-3.5 text-ui-accent" />
-          <span class="text-[11px] font-bold uppercase tracking-wider text-ui-textAccent">Rig Setup & Skeleton</span>
+          <span class="text-[11px] uppercase tracking-wider text-ui-textMuted font-bold">Rig Setup & Skeleton</span>
         </div>
-        <span class="text-[10px] text-ui-textMuted font-bold">
+        <span class="text-[10px] text-ui-textMuted font-medium">
           {{ animationStore.armature.bones.length }} Bones
         </span>
       </div>
@@ -151,17 +151,17 @@ function handleReparent(boneId: string, parentBoneId: string) {
       <div class="grid grid-cols-2 gap-1.5">
         <button 
           @click="handleAddRoot"
-          class="py-1.5 px-2 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition"
+          class="py-1.5 px-2.5 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold text-[11px] flex items-center justify-center gap-1.5 shadow-xs transition cursor-pointer"
           title="Add Center Root Bone at base of mesh"
         >
           <Plus class="w-3.5 h-3.5" />
-          <span>+ Add Bone</span>
+          <span>Add Bone</span>
         </button>
 
         <button 
           @click="handleToggleDrawBone"
-          class="py-1.5 px-2 rounded-xs font-bold text-xs flex items-center justify-center gap-1.5 transition border"
-          :class="animationStore.clickToPlaceMode ? 'bg-amber-500 text-slate-950 border-amber-400 font-extrabold shadow-xs' : 'bg-ui-input border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
+          class="py-1.5 px-2.5 rounded-xs font-semibold text-[11px] flex items-center justify-center gap-1.5 transition border cursor-pointer"
+          :class="animationStore.clickToPlaceMode ? 'bg-amber-500/20 text-amber-300 border-amber-500/60 shadow-xs' : 'bg-ui-input/70 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
           title="Click to place bone head and tail directly in 3D viewport (B)"
         >
           <Crosshair class="w-3.5 h-3.5" />
@@ -170,10 +170,10 @@ function handleReparent(boneId: string, parentBoneId: string) {
       </div>
 
       <!-- Secondary Tools -->
-      <div class="grid grid-cols-3 gap-1 text-[10px]">
+      <div class="grid grid-cols-3 gap-1.5 text-[10px]">
         <button 
           @click="handleExtrude"
-          class="py-1 px-1.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary hover:text-ui-textPrimary rounded-xs font-bold flex items-center justify-center gap-1 transition"
+          class="py-1 px-1.5 bg-ui-input/70 hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary hover:text-ui-textPrimary rounded-xs font-medium flex items-center justify-center gap-1 transition cursor-pointer"
           title="Extrude new child bone from active joint (E)"
         >
           <GitBranch class="w-3 h-3 text-amber-400" />
@@ -182,17 +182,17 @@ function handleReparent(boneId: string, parentBoneId: string) {
 
         <button 
           @click="handleSymmetrize"
-          class="py-1 px-1.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary hover:text-ui-textPrimary rounded-xs font-bold flex items-center justify-center gap-1 transition"
+          class="py-1 px-1.5 bg-ui-input/70 hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary hover:text-ui-textPrimary rounded-xs font-medium flex items-center justify-center gap-1 transition cursor-pointer"
           title="Mirror .L bones across X-axis to .R"
         >
           <FlipHorizontal class="w-3 h-3 text-sky-400" />
-          <span>Mirror .L/.R</span>
+          <span>Mirror X</span>
         </button>
 
         <button 
           v-if="selectedBone"
           @click="handleAddSocket(selectedBone.id)"
-          class="py-1 px-1.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary hover:text-sky-300 rounded-xs font-bold flex items-center justify-center gap-1 transition"
+          class="py-1 px-1.5 bg-ui-input/70 hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary hover:text-sky-300 rounded-xs font-medium flex items-center justify-center gap-1 transition cursor-pointer"
           title="Add accessory/weapon socket to selected bone"
         >
           <Wrench class="w-3 h-3 text-sky-400" />
@@ -202,57 +202,57 @@ function handleReparent(boneId: string, parentBoneId: string) {
     </div>
 
     <!-- Empty State Quick Setup (When 0 bones) -->
-    <div v-if="animationStore.armature.bones.length === 0" class="bg-ui-surface p-4 rounded-xs border border-ui-borderSubtle text-center space-y-3 my-auto">
-      <div class="w-10 h-10 mx-auto rounded-full bg-ui-input border border-ui-borderSubtle flex items-center justify-center">
-        <BlenderIcon name="bone" :size="20" color="#f59e0b" />
+    <div v-if="animationStore.armature.bones.length === 0" class="bg-ui-surface/60 p-4 rounded-xs border border-ui-borderSubtle text-center space-y-3 my-auto">
+      <div class="w-9 h-9 mx-auto rounded-full bg-ui-input/80 border border-ui-borderSubtle flex items-center justify-center text-ui-accent">
+        <GitCommitVertical class="w-5 h-5" />
       </div>
-      <div>
-        <h4 class="font-bold text-xs text-ui-textPrimary">No Skeleton Created Yet</h4>
-        <p class="text-[10px] text-ui-textMuted mt-1 leading-relaxed">
-          Create bones to control your model. Press <strong>B</strong> or click below to start building your custom rig.
+      <div class="space-y-1">
+        <h4 class="font-semibold text-xs text-ui-textPrimary">No Skeleton Created</h4>
+        <p class="text-[11px] text-ui-textMuted leading-relaxed">
+          Create bones to animate your model. Press <strong>B</strong> or click below to build your custom rig.
         </p>
       </div>
       <div class="space-y-1.5 pt-1">
         <button 
           @click="handleAddRoot"
-          class="w-full py-2 px-3 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition"
+          class="w-full py-2 px-3 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold text-xs flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer"
         >
           <Plus class="w-3.5 h-3.5" />
-          <span>+ Add First Center Bone</span>
+          <span>Add Center Bone</span>
         </button>
         <button 
           @click="handleToggleDrawBone"
-          class="w-full py-1.5 px-3 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary rounded-xs font-bold text-[11px] flex items-center justify-center gap-1.5 transition"
+          class="w-full py-1.5 px-3 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary rounded-xs font-medium text-[11px] flex items-center justify-center gap-1.5 transition cursor-pointer"
         >
           <Crosshair class="w-3 h-3 text-amber-400" />
-          <span>Draw Bone in Viewport (B)</span>
+          <span>Draw in Viewport (B)</span>
         </button>
       </div>
     </div>
 
     <!-- Active Hierarchy Tree View -->
     <div v-else class="flex-1 flex flex-col space-y-2 min-h-0">
-      <div class="flex items-center justify-between text-[10px] text-ui-textMuted font-bold uppercase">
-        <span>Bone Hierarchy Tree</span>
-        <span class="text-ui-textSecondary">{{ selectedBone ? selectedBone.name : 'Click to select' }}</span>
+      <div class="flex items-center justify-between text-[10px] text-ui-textMuted font-semibold uppercase tracking-wider">
+        <span>Bone Hierarchy</span>
+        <span class="text-ui-textSecondary truncate max-w-[130px]">{{ selectedBone ? selectedBone.name : 'Select bone' }}</span>
       </div>
 
-      <div class="flex-1 bg-ui-input rounded-xs border border-ui-borderSubtle p-1.5 space-y-0.5 overflow-y-auto min-h-[160px]">
+      <div class="flex-1 bg-ui-input/50 rounded-xs border border-ui-borderSubtle p-1 space-y-0.5 overflow-y-auto min-h-[160px]">
         <template v-for="root in rootBones" :key="root.id">
           <!-- Root Bone Row -->
           <div 
             @click="selectBone(root.id)"
             class="flex items-center justify-between px-2 py-1 rounded-xs cursor-pointer text-[11px] transition group"
-            :class="animationStore.selectedBoneId === root.id ? 'bg-ui-active text-ui-textAccent font-bold border border-ui-accent/40' : 'hover:bg-ui-hover text-ui-textSecondary'"
+            :class="animationStore.selectedBoneId === root.id ? 'bg-ui-active text-ui-textAccent font-semibold border border-ui-accent/40 shadow-xs' : 'hover:bg-ui-hover text-ui-textSecondary'"
           >
             <div class="flex items-center gap-1.5 truncate flex-1 min-w-0">
-              <BlenderIcon name="bone" :size="12" :color="animationStore.selectedBoneId === root.id ? '#f59e0b' : '#94a3b8'" />
+              <GitCommitVertical class="w-3.5 h-3.5 shrink-0" :class="animationStore.selectedBoneId === root.id ? 'text-ui-accent' : 'text-ui-textMuted'" />
               <input 
                 v-if="editingBoneId === root.id"
                 v-model="editingName"
                 @blur="commitRename(root.id)"
                 @keydown.enter="commitRename(root.id)"
-                class="bg-ui-input text-ui-textPrimary px-1 py-0.5 rounded-xs text-[10px] w-full border border-ui-accent focus:outline-none"
+                class="bg-ui-input text-ui-textPrimary px-1 py-0.5 rounded-xs text-[11px] w-full border border-ui-accent focus:outline-none"
                 autoFocus
               />
               <span v-else class="truncate select-none" @dblclick="startRename(root.id, root.name)">
@@ -261,7 +261,7 @@ function handleReparent(boneId: string, parentBoneId: string) {
             </div>
 
             <!-- Row Actions -->
-            <div class="flex items-center gap-1 opacity-80 group-hover:opacity-100">
+            <div class="flex items-center gap-1 opacity-60 group-hover:opacity-100">
               <button @click.stop="handleAddChild(root.id)" class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary" title="Add Child Bone">
                 <Plus class="w-3 h-3" />
               </button>
@@ -273,7 +273,7 @@ function handleReparent(boneId: string, parentBoneId: string) {
 
           <!-- Sockets on Root -->
           <div v-for="s in root.sockets || []" :key="s.id" class="flex items-center gap-1.5 pl-6 py-0.5 text-[10px] text-sky-400">
-            <Wrench class="w-2.5 h-2.5" />
+            <Wrench class="w-2.5 h-2.5 shrink-0" />
             <span>[S] {{ s.name }}</span>
           </div>
 
@@ -282,17 +282,17 @@ function handleReparent(boneId: string, parentBoneId: string) {
             <div 
               @click="selectBone(child.id)"
               class="flex items-center justify-between pl-5 pr-2 py-1 rounded-xs cursor-pointer text-[11px] transition group"
-              :class="animationStore.selectedBoneId === child.id ? 'bg-ui-active text-ui-textAccent font-bold border border-ui-accent/40' : 'hover:bg-ui-hover text-ui-textSecondary'"
+              :class="animationStore.selectedBoneId === child.id ? 'bg-ui-active text-ui-textAccent font-semibold border border-ui-accent/40 shadow-xs' : 'hover:bg-ui-hover text-ui-textSecondary'"
             >
               <div class="flex items-center gap-1.5 truncate flex-1 min-w-0">
                 <span class="text-ui-borderSubtle">└</span>
-                <BlenderIcon name="bone" :size="11" :color="animationStore.selectedBoneId === child.id ? '#f59e0b' : '#94a3b8'" />
+                <GitCommitVertical class="w-3 h-3 shrink-0" :class="animationStore.selectedBoneId === child.id ? 'text-ui-accent' : 'text-ui-textMuted'" />
                 <input 
                   v-if="editingBoneId === child.id"
                   v-model="editingName"
                   @blur="commitRename(child.id)"
                   @keydown.enter="commitRename(child.id)"
-                  class="bg-ui-input text-ui-textPrimary px-1 py-0.5 rounded-xs text-[10px] w-full border border-ui-accent focus:outline-none"
+                  class="bg-ui-input text-ui-textPrimary px-1 py-0.5 rounded-xs text-[11px] w-full border border-ui-accent focus:outline-none"
                   autoFocus
                 />
                 <span v-else class="truncate select-none" @dblclick="startRename(child.id, child.name)">
@@ -300,7 +300,7 @@ function handleReparent(boneId: string, parentBoneId: string) {
                 </span>
               </div>
 
-              <div class="flex items-center gap-1 opacity-80 group-hover:opacity-100">
+              <div class="flex items-center gap-1 opacity-60 group-hover:opacity-100">
                 <button @click.stop="handleAddChild(child.id)" class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary" title="Add Child Bone">
                   <Plus class="w-3 h-3" />
                 </button>
@@ -312,7 +312,7 @@ function handleReparent(boneId: string, parentBoneId: string) {
 
             <!-- Sockets on Child -->
             <div v-for="s in child.sockets || []" :key="s.id" class="flex items-center gap-1.5 pl-10 py-0.5 text-[10px] text-sky-400">
-              <Wrench class="w-2.5 h-2.5" />
+              <Wrench class="w-2.5 h-2.5 shrink-0" />
               <span>[S] {{ s.name }}</span>
             </div>
           </template>
@@ -320,25 +320,23 @@ function handleReparent(boneId: string, parentBoneId: string) {
       </div>
 
       <!-- Quick Parenting Inspector for Selected Bone -->
-      <div v-if="selectedBone" class="bg-ui-surface p-2.5 rounded-xs border border-ui-borderSubtle space-y-1.5">
-        <span class="text-[10px] text-ui-textMuted font-bold uppercase">Parenting: {{ selectedBone.name }}</span>
-        <div class="flex items-center gap-2">
-          <select 
-            :value="selectedBone.parentId || 'root'"
-            @change="handleReparent(selectedBone.id, ($event.target as HTMLSelectElement).value)"
-            class="flex-1 bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-ui-textPrimary text-xs focus:outline-none focus:border-ui-accent cursor-pointer"
+      <div v-if="selectedBone" class="bg-ui-surface/60 p-2 rounded-xs border border-ui-borderSubtle space-y-1">
+        <div class="text-[10px] text-ui-textMuted font-semibold uppercase">Parent Bone</div>
+        <select 
+          :value="selectedBone.parentId || 'root'"
+          @change="handleReparent(selectedBone.id, ($event.target as HTMLSelectElement).value)"
+          class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-ui-textPrimary text-xs focus:outline-none focus:border-ui-accent cursor-pointer"
+        >
+          <option value="root" class="bg-ui-panel text-ui-textMuted">-- None (Root Bone) --</option>
+          <option 
+            v-for="b in animationStore.armature.bones.filter(b => b.id !== selectedBone?.id)" 
+            :key="b.id" 
+            :value="b.id"
+            class="bg-ui-panel text-ui-textPrimary"
           >
-            <option value="root" class="bg-ui-panel text-ui-textMuted">-- None (Root Bone) --</option>
-            <option 
-              v-for="b in animationStore.armature.bones.filter(b => b.id !== selectedBone?.id)" 
-              :key="b.id" 
-              :value="b.id"
-              class="bg-ui-panel text-ui-textPrimary"
-            >
-              {{ b.name }}
-            </option>
-          </select>
-        </div>
+            {{ b.name }}
+          </option>
+        </select>
       </div>
     </div>
   </div>

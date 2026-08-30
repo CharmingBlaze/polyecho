@@ -49,9 +49,15 @@ const props = withDefaults(defineProps<{
     | 'xray'
     // Rigging & Animation
     | 'bone'
+    | 'bone-data'
     | 'armature'
     | 'pose'
     | 'keyframe'
+    | 'vertex-group'
+    | 'constraint'
+    | 'empty-axis'
+    | 'modifier-mirror'
+    | 'ik'
     // Painting & UV
     | 'uv'
     | 'uv-data'
@@ -403,6 +409,62 @@ const sizePx = computed(() => typeof props.size === 'number' ? `${props.size}px`
       <!-- Joint head & tail spheres -->
       <circle cx="12" cy="3" r="2" fill="#f59e0b" />
       <circle cx="12" cy="21" r="1.5" fill="currentColor" />
+    </g>
+
+    <!-- BONE DATA (Blender Green Bone Data Icon) -->
+    <g v-else-if="name === 'bone-data'">
+      <polygon points="12,4 15,8 12,19 9,8" stroke="#10b981" stroke-width="1.5" fill="#10b981" fill-opacity="0.3" stroke-linejoin="round" />
+      <circle cx="12" cy="4" r="1.8" fill="#10b981" />
+      <circle cx="12" cy="19" r="1.2" fill="#10b981" />
+    </g>
+
+    <!-- POSE (Blender Blue Pose Mode Icon) -->
+    <g v-else-if="name === 'pose'">
+      <polygon points="8,4 12,7 8,14 5,7" stroke="#38bdf8" stroke-width="1.4" fill="#38bdf8" fill-opacity="0.3" />
+      <polygon points="16,10 19,13 15,20 12,13" stroke="#38bdf8" stroke-width="1.4" fill="#38bdf8" fill-opacity="0.3" />
+      <circle cx="8" cy="4" r="1.5" fill="#38bdf8" />
+      <circle cx="16" cy="10" r="1.5" fill="#38bdf8" />
+    </g>
+
+    <!-- VERTEX GROUP / WEIGHTS (Blender Green Mesh Grid + Vertex Weights Icon) -->
+    <g v-else-if="name === 'vertex-group'">
+      <rect x="4" y="4" width="16" height="16" rx="2" stroke="#10b981" stroke-width="1.5" fill="none" />
+      <line x1="4" y1="12" x2="20" y2="12" stroke="#10b981" stroke-width="1.2" opacity="0.6" />
+      <line x1="12" y1="4" x2="12" y2="20" stroke="#10b981" stroke-width="1.2" opacity="0.6" />
+      <circle cx="12" cy="12" r="2.5" fill="#f59e0b" />
+      <circle cx="4" cy="4" r="1.5" fill="#10b981" />
+      <circle cx="20" cy="4" r="1.5" fill="#10b981" />
+      <circle cx="4" cy="20" r="1.5" fill="#10b981" />
+      <circle cx="20" cy="20" r="1.5" fill="#10b981" />
+    </g>
+
+    <!-- CONSTRAINT / BINDINGS (Blender Official Chain Links Icon) -->
+    <g v-else-if="name === 'constraint'">
+      <rect x="4" y="9" width="10" height="6" rx="3" stroke="#f59e0b" stroke-width="1.5" fill="none" transform="rotate(-45 9 12)" />
+      <rect x="10" y="9" width="10" height="6" rx="3" stroke="#f59e0b" stroke-width="1.5" fill="none" transform="rotate(-45 15 12)" />
+    </g>
+
+    <!-- EMPTY / SOCKET (Blender Plain Axis Empty Icon) -->
+    <g v-else-if="name === 'empty-axis'">
+      <line x1="12" y1="3" x2="12" y2="21" stroke="#38bdf8" stroke-width="1.5" stroke-linecap="round" />
+      <line x1="3" y1="12" x2="21" y2="12" stroke="#ef4444" stroke-width="1.5" stroke-linecap="round" />
+      <line x1="6" y1="18" x2="18" y2="6" stroke="#10b981" stroke-width="1.5" stroke-linecap="round" />
+      <circle cx="12" cy="12" r="2" fill="currentColor" opacity="0.6" />
+    </g>
+
+    <!-- MODIFIER MIRROR (Blender Butterfly / Symmetry Icon) -->
+    <g v-else-if="name === 'modifier-mirror'">
+      <line x1="12" y1="3" x2="12" y2="21" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 2" opacity="0.6" />
+      <polygon points="10,6 4,12 10,18" stroke="#38bdf8" stroke-width="1.5" fill="#38bdf8" fill-opacity="0.2" />
+      <polygon points="14,6 20,12 14,18" stroke="#38bdf8" stroke-width="1.5" fill="#38bdf8" fill-opacity="0.2" />
+    </g>
+
+    <!-- IK SOLVER ICON (Blender Bone with Target) -->
+    <g v-else-if="name === 'ik'">
+      <polygon points="9,5 12,8 9,18 6,8" stroke="#f59e0b" stroke-width="1.4" fill="#f59e0b" fill-opacity="0.25" />
+      <circle cx="17" cy="17" r="4" stroke="#38bdf8" stroke-width="1.4" fill="none" />
+      <line x1="17" y1="11" x2="17" y2="23" stroke="#38bdf8" stroke-width="1.2" />
+      <line x1="11" y1="17" x2="23" y2="17" stroke="#38bdf8" stroke-width="1.2" />
     </g>
 
     <g v-else-if="name === 'keyframe'">

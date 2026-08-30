@@ -2,11 +2,11 @@
 import { ref, computed } from 'vue'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useProjectStore } from '../../stores/projectStore'
-import BlenderIcon from '../icons/BlenderIcon.vue'
 import { 
   Percent, 
   Trash2, 
-  Layers 
+  Layers,
+  GitCommitVertical
 } from 'lucide-vue-next'
 
 const animationStore = useAnimationStore()
@@ -18,7 +18,6 @@ const selectedVertexIds = computed(() => projectStore.selectedVertexIds)
 
 const customWeight = ref<number>(1.0)
 
-// Compute aggregate bone weights across selected vertices
 const aggregateWeights = computed(() => {
   if (!activeMesh.value || selectedVertexIds.value.length === 0) return []
   const vMap = new Map(activeMesh.value.vertices.map(v => [v.id, v]))
@@ -78,39 +77,39 @@ function handleNormalize() {
 </script>
 
 <template>
-  <div class="h-full w-full bg-ui-panel p-3 text-ui-textPrimary flex flex-col space-y-3 font-mono text-xs select-none overflow-y-auto">
+  <div class="h-full w-full bg-ui-panel p-3 text-ui-textPrimary flex flex-col space-y-3 font-sans text-xs select-none overflow-y-auto">
     <!-- Header -->
     <div class="flex items-center justify-between border-b border-ui-borderSubtle pb-2">
-      <div class="flex items-center gap-1.5">
+      <div class="flex items-center gap-1.5 font-semibold text-ui-textPrimary">
         <Percent class="w-3.5 h-3.5 text-ui-accent" />
-        <span class="text-[11px] font-bold uppercase tracking-wider text-ui-textAccent">Vertex Weights</span>
+        <span class="text-[11px] uppercase tracking-wider text-ui-textMuted font-bold">Vertex Weights</span>
       </div>
-      <span class="text-[10px] text-ui-textMuted font-bold">
-        {{ selectedVertexIds.length }} Verts Selected
+      <span class="text-[10px] text-ui-textMuted font-medium">
+        {{ selectedVertexIds.length }} Vertices Selected
       </span>
     </div>
 
-    <!-- Active Bone Quick Assign 100% (Low-Poly Flagship) -->
-    <div v-if="selectedBone" class="bg-ui-surface p-2.5 rounded-xs border border-ui-borderSubtle space-y-2">
-      <div class="flex items-center justify-between">
-        <span class="text-[10px] text-ui-textMuted font-bold uppercase">Active Bone</span>
-        <span class="text-ui-textAccent font-bold">{{ selectedBone.name }}</span>
+    <!-- Active Bone Quick Assign 100% -->
+    <div v-if="selectedBone" class="bg-ui-surface/60 p-2.5 rounded-xs border border-ui-borderSubtle space-y-2">
+      <div class="flex items-center justify-between text-[11px]">
+        <span class="text-[10px] text-ui-textMuted font-semibold uppercase">Active Bone</span>
+        <span class="text-ui-textAccent font-semibold truncate max-w-[140px]">{{ selectedBone.name }}</span>
       </div>
 
       <button 
         @click="handleAssign100"
         :disabled="selectedVertexIds.length === 0"
-        class="w-full py-1.5 px-2.5 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition disabled:opacity-50"
+        class="w-full py-1.5 px-2.5 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold text-[11px] flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
       >
         <Layers class="w-3.5 h-3.5" />
         <span>Assign 100% Rigid Weight</span>
       </button>
 
       <!-- Custom Weight Slider -->
-      <div class="space-y-1 pt-1 border-t border-ui-borderSubtle">
+      <div class="space-y-1.5 pt-1.5 border-t border-ui-borderSubtle/60">
         <div class="flex items-center justify-between text-[10px] text-ui-textMuted">
-          <span>Custom Weight:</span>
-          <span class="text-ui-textAccent font-bold font-mono">{{ Number(customWeight).toFixed(2) }}</span>
+          <span>Custom Influence</span>
+          <span class="text-ui-textAccent font-semibold font-mono">{{ (customWeight * 100).toFixed(0) }}%</span>
         </div>
         <div class="flex items-center gap-2">
           <input 
@@ -124,22 +123,22 @@ function handleNormalize() {
           <button 
             @click="handleAssignCustomWeight"
             :disabled="selectedVertexIds.length === 0"
-            class="px-2 py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textPrimary rounded-xs text-[10px] font-bold"
+            class="px-2 py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textPrimary rounded-xs text-[10px] font-semibold transition cursor-pointer disabled:opacity-40"
           >
-            Assign
+            Apply
           </button>
         </div>
       </div>
     </div>
 
     <!-- Influences Table for Selected Vertices -->
-    <div class="bg-ui-surface p-2.5 rounded-xs border border-ui-borderSubtle space-y-2 flex-1 flex flex-col">
-      <div class="flex items-center justify-between">
-        <span class="text-[10px] text-ui-textMuted font-bold uppercase">Bone Influences</span>
+    <div class="bg-ui-surface/60 p-2.5 rounded-xs border border-ui-borderSubtle space-y-2 flex-1 flex flex-col min-h-0">
+      <div class="flex items-center justify-between text-[10px]">
+        <span class="text-ui-textMuted font-semibold uppercase tracking-wider">Influences Table</span>
         <button 
           @click="handleNormalize"
           :disabled="selectedVertexIds.length === 0"
-          class="text-[9px] text-ui-textAccent hover:underline font-bold"
+          class="text-ui-textAccent hover:underline font-semibold cursor-pointer disabled:opacity-40"
         >
           Normalize All
         </button>
@@ -149,21 +148,21 @@ function handleNormalize() {
         <div 
           v-for="inf in aggregateWeights" 
           :key="inf.boneId"
-          class="flex items-center justify-between px-2 py-1.5 rounded-xs border transition"
-          :class="inf.isSelected ? 'bg-ui-active border-ui-accent/40 text-ui-textAccent' : 'bg-ui-input border-ui-borderSubtle text-ui-textSecondary'"
+          class="flex items-center justify-between px-2 py-1 rounded-xs border transition"
+          :class="inf.isSelected ? 'bg-ui-active border-ui-accent/40 text-ui-textAccent shadow-xs' : 'bg-ui-input/70 border-ui-borderSubtle text-ui-textSecondary'"
         >
           <div class="flex items-center gap-1.5 truncate">
-            <BlenderIcon name="bone" :size="11" />
-            <span class="truncate font-bold">{{ inf.boneName }}</span>
+            <GitCommitVertical class="w-3.5 h-3.5 text-ui-accent shrink-0" />
+            <span class="truncate font-medium">{{ inf.boneName }}</span>
           </div>
 
           <div class="flex items-center gap-2">
-            <span class="font-mono text-ui-textPrimary font-bold text-[10px]">
+            <span class="font-mono text-ui-textPrimary font-semibold text-[10px]">
               {{ (inf.avgWeight * 100).toFixed(0) }}%
             </span>
             <button 
               @click="handleRemoveWeight(inf.boneId)"
-              class="text-ui-textMuted hover:text-rose-400 p-0.5"
+              class="text-ui-textMuted hover:text-rose-400 p-0.5 transition cursor-pointer"
               title="Remove bone influence from selected vertices"
             >
               <Trash2 class="w-3 h-3" />
@@ -171,7 +170,7 @@ function handleNormalize() {
           </div>
         </div>
 
-        <div v-if="aggregateWeights.length === 0" class="py-6 text-center text-ui-textMuted italic text-[10px]">
+        <div v-if="aggregateWeights.length === 0" class="py-6 text-center text-ui-textMuted italic text-[11px]">
           {{ selectedVertexIds.length === 0 ? 'Select vertices to inspect weights' : 'No bone weights assigned yet' }}
         </div>
       </div>

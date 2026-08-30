@@ -3,7 +3,6 @@ import { ref, computed } from 'vue'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
-import BlenderIcon from '../icons/BlenderIcon.vue'
 import { 
   Link, 
   Unlink, 
@@ -12,7 +11,8 @@ import {
   Check, 
   Layers, 
   Box, 
-  Activity 
+  Activity,
+  GitCommitVertical
 } from 'lucide-vue-next'
 
 const animationStore = useAnimationStore()
@@ -35,7 +35,7 @@ const selectionDescription = computed(() => {
         f.vertexIds.forEach(id => vertSet.add(id))
       }
     }
-    return `${projectStore.selectedFaceIds.length} faces (${vertSet.size} vertices)`
+    return `${projectStore.selectedFaceIds.length} faces (${vertSet.size} verts)`
   }
   if (toolStore.selectMode === 'vertex' && projectStore.selectedVertexIds.length > 0) {
     return `${projectStore.selectedVertexIds.length} vertices`
@@ -43,7 +43,7 @@ const selectionDescription = computed(() => {
   if (toolStore.selectMode === 'edge' && projectStore.selectedEdgeIds.length > 0) {
     return `${projectStore.selectedEdgeIds.length} edges`
   }
-  return `1 object (${activeMesh.value.name})`
+  return `${activeMesh.value.name} (Object)`
 })
 
 const boundMeshes = computed(() => {
@@ -59,7 +59,7 @@ const boundVerticesCount = computed(() => {
 
 function handleBind() {
   if (!selectedBone.value) {
-    lastActionMessage.value = 'Please select a target bone first'
+    lastActionMessage.value = 'Select a target bone first'
     return
   }
   projectStore.recordState('Bind Selected Geometry')
@@ -80,106 +80,105 @@ function handleUnbind() {
 </script>
 
 <template>
-  <div class="h-full w-full bg-ui-panel p-3 text-ui-textPrimary flex flex-col space-y-3 font-mono text-xs select-none overflow-y-auto">
+  <div class="h-full w-full bg-ui-panel p-3 text-ui-textPrimary flex flex-col space-y-3 font-sans text-xs select-none overflow-y-auto">
     <!-- Header -->
     <div class="flex items-center justify-between border-b border-ui-borderSubtle pb-2">
-      <div class="flex items-center gap-1.5">
+      <div class="flex items-center gap-1.5 text-ui-textPrimary font-semibold">
         <Link class="w-3.5 h-3.5 text-ui-accent" />
-        <span class="text-[11px] font-bold uppercase tracking-wider text-ui-textAccent">Geometry Bindings</span>
+        <span class="text-[11px] uppercase tracking-wider text-ui-textMuted font-bold">Geometry Bindings</span>
       </div>
-      <span v-if="lastActionMessage" class="text-[10px] text-emerald-400 font-bold truncate max-w-[160px]">
+      <span v-if="lastActionMessage" class="text-[11px] text-emerald-400 font-medium truncate max-w-[170px]">
         {{ lastActionMessage }}
       </span>
     </div>
 
-    <!-- Active Bone & Geometry Target Selection Status -->
-    <div class="grid grid-cols-2 gap-2">
-      <!-- Target Bone -->
-      <div class="bg-ui-surface p-2 rounded-xs border border-ui-borderSubtle space-y-1">
-        <span class="text-[10px] text-ui-textMuted font-bold uppercase">Target Bone</span>
-        <div v-if="selectedBone" class="flex items-center gap-1.5 text-ui-textPrimary font-bold truncate">
-          <BlenderIcon name="bone" :size="12" color="#f59e0b" />
+    <!-- Target & Selection Summary -->
+    <div class="grid grid-cols-2 gap-2 text-[11px]">
+      <div class="bg-ui-surface/60 p-2 rounded-xs border border-ui-borderSubtle space-y-1">
+        <div class="text-[10px] uppercase font-semibold text-ui-textMuted">Target Bone</div>
+        <div v-if="selectedBone" class="flex items-center gap-1.5 font-medium text-ui-textPrimary truncate">
+          <GitCommitVertical class="w-3.5 h-3.5 text-ui-accent shrink-0" />
           <span class="truncate">{{ selectedBone.name }}</span>
         </div>
-        <div v-else class="text-rose-400/80 text-[10px] italic">
+        <div v-else class="text-rose-400/80 text-[11px] italic">
           None selected
         </div>
       </div>
 
-      <!-- Selected Geometry -->
-      <div class="bg-ui-surface p-2 rounded-xs border border-ui-borderSubtle space-y-1">
-        <span class="text-[10px] text-ui-textMuted font-bold uppercase">Selected Geometry</span>
-        <div class="text-ui-textPrimary font-bold truncate text-[11px]">
+      <div class="bg-ui-surface/60 p-2 rounded-xs border border-ui-borderSubtle space-y-1">
+        <div class="text-[10px] uppercase font-semibold text-ui-textMuted">Geometry Selection</div>
+        <div class="font-medium text-ui-textPrimary truncate">
           {{ selectionDescription }}
         </div>
       </div>
     </div>
 
     <!-- Binding Mode Selection -->
-    <div class="bg-ui-surface p-2.5 rounded-xs border border-ui-borderSubtle space-y-2">
-      <span class="text-[10px] text-ui-textMuted font-bold uppercase">Binding Type</span>
-      <div class="grid grid-cols-3 gap-1">
+    <div class="bg-ui-surface/60 p-2.5 rounded-xs border border-ui-borderSubtle space-y-2">
+      <div class="text-[10px] uppercase font-semibold text-ui-textMuted tracking-wider">Binding Mode</div>
+      <div class="grid grid-cols-3 gap-1.5">
         <button 
           @click="bindingType = 'rigid_vertex'"
-          class="p-2 rounded-xs border text-left flex flex-col gap-1 transition"
-          :class="bindingType === 'rigid_vertex' ? 'bg-ui-active border-ui-accent text-ui-textAccent shadow-xs' : 'bg-ui-input border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
+          class="p-2 rounded-xs border text-left flex flex-col gap-1 transition cursor-pointer"
+          :class="bindingType === 'rigid_vertex' ? 'bg-ui-active border-ui-accent text-ui-textAccent shadow-xs' : 'bg-ui-input/60 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
         >
-          <div class="flex items-center gap-1 font-bold text-[10px]">
-            <Layers class="w-3 h-3 text-amber-400" />
+          <div class="flex items-center gap-1.5 font-semibold text-[11px]">
+            <Layers class="w-3.5 h-3.5 text-amber-400" />
             <span>Rigid (100%)</span>
           </div>
-          <span class="text-[8px] text-ui-textMuted leading-tight">Low-poly vertex lock</span>
+          <span class="text-[9px] text-ui-textMuted leading-snug">Low-poly vertex lock</span>
         </button>
 
         <button 
           @click="bindingType = 'object'"
-          class="p-2 rounded-xs border text-left flex flex-col gap-1 transition"
-          :class="bindingType === 'object' ? 'bg-ui-active border-ui-accent text-ui-textAccent shadow-xs' : 'bg-ui-input border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
+          class="p-2 rounded-xs border text-left flex flex-col gap-1 transition cursor-pointer"
+          :class="bindingType === 'object' ? 'bg-ui-active border-ui-accent text-ui-textAccent shadow-xs' : 'bg-ui-input/60 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
         >
-          <div class="flex items-center gap-1 font-bold text-[10px]">
-            <Box class="w-3 h-3 text-sky-400" />
+          <div class="flex items-center gap-1.5 font-semibold text-[11px]">
+            <Box class="w-3.5 h-3.5 text-sky-400" />
             <span>Object</span>
           </div>
-          <span class="text-[8px] text-ui-textMuted leading-tight">Whole piece attachment</span>
+          <span class="text-[9px] text-ui-textMuted leading-snug">Direct node parent</span>
         </button>
 
         <button 
           @click="bindingType = 'smooth_vertex'"
-          class="p-2 rounded-xs border text-left flex flex-col gap-1 transition"
-          :class="bindingType === 'smooth_vertex' ? 'bg-ui-active border-ui-accent text-ui-textAccent shadow-xs' : 'bg-ui-input border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
+          class="p-2 rounded-xs border text-left flex flex-col gap-1 transition cursor-pointer"
+          :class="bindingType === 'smooth_vertex' ? 'bg-ui-active border-ui-accent text-ui-textAccent shadow-xs' : 'bg-ui-input/60 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
         >
-          <div class="flex items-center gap-1 font-bold text-[10px]">
-            <Sparkles class="w-3 h-3 text-purple-400" />
+          <div class="flex items-center gap-1.5 font-semibold text-[11px]">
+            <Sparkles class="w-3.5 h-3.5 text-purple-400" />
             <span>Smooth</span>
           </div>
-          <span class="text-[8px] text-ui-textMuted leading-tight">Auto proximity weights</span>
+          <span class="text-[9px] text-ui-textMuted leading-snug">Proximity weights</span>
         </button>
       </div>
 
-      <!-- Boundary Split Seam Checkbox (Low-Poly Flagship Feature) -->
-      <label v-if="bindingType === 'rigid_vertex'" class="flex items-center gap-2 pt-1 border-t border-ui-borderSubtle cursor-pointer text-[10px] text-ui-textSecondary">
-        <input type="checkbox" v-model="splitBoundary" class="rounded-xs bg-ui-input border-ui-borderSubtle text-ui-accent focus:ring-0" />
-        <span class="flex items-center gap-1">
-          <Scissors class="w-3 h-3 text-amber-400" />
-          <span>Split Boundary Seam (for mechanical joints)</span>
+      <!-- Boundary Split Option -->
+      <label v-if="bindingType === 'rigid_vertex'" class="flex items-center gap-2 pt-2 border-t border-ui-borderSubtle/60 cursor-pointer text-[11px] text-ui-textSecondary hover:text-ui-textPrimary transition">
+        <input type="checkbox" v-model="splitBoundary" class="rounded-xs bg-ui-input border-ui-borderDefault text-ui-accent focus:ring-0 cursor-pointer" />
+        <span class="flex items-center gap-1.5">
+          <Scissors class="w-3.5 h-3.5 text-amber-400" />
+          <span>Split boundary vertices (for mechanical joints)</span>
         </span>
       </label>
     </div>
 
     <!-- Action Buttons -->
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-2 pt-1">
       <button 
         @click="handleBind"
-        class="flex-1 py-2 px-3 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition"
+        class="flex-1 py-2 px-3 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold text-xs flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
         :disabled="!selectedBone"
       >
         <Check class="w-3.5 h-3.5" />
-        <span>Bind Selected (Ctrl+B)</span>
+        <span>Bind Selected</span>
+        <span class="text-[10px] opacity-75 font-mono">(Ctrl+B)</span>
       </button>
 
       <button 
         @click="handleUnbind"
-        class="py-2 px-3 bg-ui-surface hover:bg-rose-950/60 hover:text-rose-300 text-ui-textMuted border border-ui-borderSubtle rounded-xs font-bold text-xs flex items-center justify-center gap-1 transition"
+        class="py-2 px-3 bg-ui-input hover:bg-rose-950/40 hover:text-rose-300 text-ui-textSecondary border border-ui-borderSubtle rounded-xs font-medium text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
         title="Unbind selected geometry from bone"
       >
         <Unlink class="w-3.5 h-3.5" />
@@ -188,31 +187,31 @@ function handleUnbind() {
     </div>
 
     <!-- Active Bone Current Bindings Outliner -->
-    <div v-if="selectedBone" class="bg-ui-surface p-2.5 rounded-xs border border-ui-borderSubtle space-y-1.5">
-      <span class="text-[10px] text-ui-textMuted font-bold uppercase flex items-center justify-between">
+    <div v-if="selectedBone" class="bg-ui-surface/60 p-2.5 rounded-xs border border-ui-borderSubtle space-y-1.5">
+      <div class="text-[10px] text-ui-textMuted font-semibold uppercase flex items-center justify-between">
         <span>Active Bindings: {{ selectedBone.name }}</span>
-        <span class="text-ui-textAccent">{{ boundVerticesCount }} Verts · {{ boundMeshes.length }} Objects</span>
-      </span>
+        <span class="text-ui-textAccent font-medium">{{ boundVerticesCount }} Verts · {{ boundMeshes.length }} Meshes</span>
+      </div>
 
-      <div class="space-y-1 max-h-32 overflow-y-auto text-[10px]">
-        <div v-if="boundVerticesCount > 0" class="flex items-center justify-between px-2 py-1 bg-ui-input rounded-xs border border-ui-borderSubtle text-emerald-400">
+      <div class="space-y-1 max-h-36 overflow-y-auto text-[11px]">
+        <div v-if="boundVerticesCount > 0" class="flex items-center justify-between px-2 py-1 bg-ui-input/70 rounded-xs border border-ui-borderSubtle text-emerald-400">
           <span class="flex items-center gap-1.5">
             <Activity class="w-3 h-3" />
-            <span>{{ boundVerticesCount }} Skinned Vertices ({{ activeMesh?.name }})</span>
+            <span>{{ boundVerticesCount }} Skinned Vertices</span>
           </span>
-          <span class="text-[9px] text-ui-textMuted font-bold">Rigid 1.0</span>
+          <span class="text-[9px] text-ui-textMuted font-mono font-semibold">100% Rigid</span>
         </div>
 
-        <div v-for="m in boundMeshes" :key="m.id" class="flex items-center justify-between px-2 py-1 bg-ui-input rounded-xs border border-ui-borderSubtle text-sky-300">
+        <div v-for="m in boundMeshes" :key="m.id" class="flex items-center justify-between px-2 py-1 bg-ui-input/70 rounded-xs border border-ui-borderSubtle text-sky-300">
           <span class="flex items-center gap-1.5 truncate">
             <Box class="w-3 h-3" />
             <span class="truncate">{{ m.name }}</span>
           </span>
-          <span class="text-[9px] text-ui-textMuted font-bold">Object</span>
+          <span class="text-[9px] text-ui-textMuted font-semibold">Object</span>
         </div>
 
-        <div v-if="boundVerticesCount === 0 && boundMeshes.length === 0" class="py-2 text-center text-ui-textMuted italic text-[10px]">
-          No geometry currently bound to this bone.
+        <div v-if="boundVerticesCount === 0 && boundMeshes.length === 0" class="py-2 text-center text-ui-textMuted italic text-[11px]">
+          No geometry bound to this bone yet.
         </div>
       </div>
     </div>
