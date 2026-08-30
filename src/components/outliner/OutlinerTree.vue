@@ -201,24 +201,27 @@ function handleAddBone() {
           :key="mesh.id"
           @click="selectMesh(mesh.id, $event)"
           class="flex items-center justify-between px-2.5 py-1.5 rounded-xs cursor-pointer transition border text-xs"
-          :class="projectStore.selectedMeshIds.includes(mesh.id) ? 'bg-ui-active border-ui-accent/40 text-ui-textPrimary' : 'bg-ui-surface/60 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover hover:text-ui-textPrimary'"
+          :class="projectStore.selectedMeshIds.includes(mesh.id) ? 'bg-ui-active border-ui-accent/40 text-ui-textAccent' : 'bg-ui-surface/60 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover hover:text-ui-textAccent'"
         >
           <div class="flex items-center space-x-2 flex-1 min-w-0 mr-1.5">
-            <BlenderIcon name="mesh-cube" :size="14" :color="projectStore.selectedMeshIds.includes(mesh.id) ? '#818cf8' : '#8d939d'" />
+            <BlenderIcon name="mesh-cube" :size="14" :color="projectStore.selectedMeshIds.includes(mesh.id) ? 'currentColor' : '#8d939d'" />
             
             <input 
               v-if="editingItemId === mesh.id"
               v-model="editingName"
               @blur="commitRenameMesh(mesh.id)"
               @keydown.enter="commitRenameMesh(mesh.id)"
-              class="bg-dcc-800 text-slate-200 px-1.5 py-0.5 rounded font-mono text-xs w-full focus:outline-none border border-indigo-500"
+              class="bg-ui-input text-ui-textPrimary px-1.5 py-0.5 rounded-xs font-mono text-xs w-full focus:outline-none border border-ui-accent"
               autoFocus
             />
             <div v-else class="flex flex-col min-w-0" @dblclick="startRename(mesh.id, mesh.name)">
               <span class="font-mono font-bold text-[11px] truncate select-none">
                 {{ mesh.name }}
               </span>
-              <span class="font-mono text-[9px] text-slate-500">
+              <span 
+                class="font-mono text-[9px]"
+                :class="projectStore.selectedMeshIds.includes(mesh.id) ? 'opacity-80' : 'text-ui-textMuted'"
+              >
                 {{ mesh.faces.length }} faces · {{ mesh.vertices.length }} verts
               </span>
             </div>
@@ -262,24 +265,27 @@ function handleAddBone() {
           @click="animationStore.selectBone(bone.id); toolStore.appMode = 'animate'"
           class="flex items-center justify-between px-2.5 py-2 rounded cursor-pointer transition border"
           :style="{ paddingLeft: bone.parentId ? '1.5rem' : '0.625rem' }"
-          :class="bone.id === animationStore.selectedBoneId ? 'bg-amber-500/20 border-amber-500/50 text-amber-100 shadow-sm' : 'bg-dcc-850/70 border-dcc-750 text-slate-300 hover:bg-dcc-800 hover:text-white'"
+          :class="bone.id === animationStore.selectedBoneId ? 'bg-ui-active border-ui-accent/50 text-ui-textAccent shadow-xs' : 'bg-ui-surface/60 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover hover:text-ui-textAccent'"
         >
           <div class="flex items-center space-x-2 flex-1 min-w-0 mr-1.5">
-            <BlenderIcon name="bone" :size="15" :color="bone.id === animationStore.selectedBoneId ? '#f59e0b' : '#06b6d4'" />
+            <BlenderIcon name="bone" :size="15" :color="bone.id === animationStore.selectedBoneId ? 'currentColor' : '#06b6d4'" />
             
             <input 
               v-if="editingItemId === bone.id"
               v-model="editingName"
               @blur="commitRenameBone(bone.id)"
               @keydown.enter="commitRenameBone(bone.id)"
-              class="bg-dcc-800 text-slate-200 px-1.5 py-0.5 rounded font-mono text-xs w-full focus:outline-none border border-amber-500"
+              class="bg-ui-input text-ui-textPrimary px-1.5 py-0.5 rounded-xs font-mono text-xs w-full focus:outline-none border border-ui-accent"
               autoFocus
             />
             <div v-else class="flex flex-col min-w-0" @dblclick="startRename(bone.id, bone.name)">
               <span class="font-mono font-bold text-[11px] truncate select-none">
                 {{ bone.name }}
               </span>
-              <span class="font-mono text-[9px] text-slate-500">
+              <span 
+                class="font-mono text-[9px]"
+                :class="bone.id === animationStore.selectedBoneId ? 'opacity-80' : 'text-ui-textMuted'"
+              >
                 Head: ({{ bone.head.x.toFixed(1) }}, {{ bone.head.y.toFixed(1) }}, {{ bone.head.z.toFixed(1) }})
               </span>
             </div>

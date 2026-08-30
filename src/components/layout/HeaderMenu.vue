@@ -275,8 +275,8 @@ function handleExitProject() {
           File
         </button>
 
-        <div v-if="activeDropdown === 'file'" class="absolute left-0 top-full mt-0.5 w-56 bg-[#181a1f] opacity-100 border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
-          <button @click="$emit('new-project'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+        <div v-if="activeDropdown === 'file'" class="absolute left-0 top-full mt-0.5 w-56 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+          <button @click="$emit('new-project'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
             <span class="flex items-center gap-2"><Plus class="w-3.5 h-3.5 text-ui-accent" /> New Project...</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+N</span>
           </button>
@@ -336,25 +336,25 @@ function handleExitProject() {
         >
           Edit
         </button>
-        <div v-if="activeDropdown === 'edit'" class="absolute left-0 top-full mt-0.5 w-52 bg-[#181a1f] opacity-100 border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
-          <button @click="historyStore.undo(); closeDropdowns()" :disabled="historyStore.undoStack.length === 0" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between disabled:opacity-40">
+        <div v-if="activeDropdown === 'edit'" class="absolute left-0 top-full mt-0.5 w-52 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+          <button @click="historyStore.undo(); closeDropdowns()" :disabled="historyStore.undoStack.length === 0" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between disabled:opacity-40">
             <span class="flex items-center gap-2"><Undo2 class="w-3.5 h-3.5 text-ui-textMuted" /> Undo</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+Z</span>
           </button>
-          <button @click="historyStore.redo(); closeDropdowns()" :disabled="historyStore.redoStack.length === 0" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between disabled:opacity-40">
+          <button @click="historyStore.redo(); closeDropdowns()" :disabled="historyStore.redoStack.length === 0" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between disabled:opacity-40">
             <span class="flex items-center gap-2"><Redo2 class="w-3.5 h-3.5 text-ui-textMuted" /> Redo</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+Y</span>
           </button>
           <div class="h-px bg-ui-borderSubtle my-1"></div>
-          <button @click="projectStore.duplicateSelection(toolStore.selectMode); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-amber-300">
+          <button @click="projectStore.duplicateSelection(toolStore.selectMode); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between text-amber-400">
             <span class="flex items-center gap-2"><CopyPlus class="w-3.5 h-3.5 text-ui-textMuted" /> Duplicate</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Shift+D</span>
           </button>
-          <button @click="projectStore.copySelection(toolStore.selectMode); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+          <button @click="projectStore.copySelection(toolStore.selectMode); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
             <span class="flex items-center gap-2"><Copy class="w-3.5 h-3.5 text-ui-textMuted" /> Copy</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+C</span>
           </button>
-          <button @click="projectStore.pasteClipboard(); closeDropdowns()" :disabled="!projectStore.clipboard" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between disabled:opacity-40">
+          <button @click="projectStore.pasteClipboard(); closeDropdowns()" :disabled="!projectStore.clipboard" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between disabled:opacity-40">
             <span class="flex items-center gap-2"><ClipboardPaste class="w-3.5 h-3.5 text-ui-textMuted" /> Paste</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+V</span>
           </button>
@@ -371,7 +371,7 @@ function handleExitProject() {
         >
           Add
         </button>
-        <div v-if="activeDropdown === 'add'" class="absolute left-0 top-full mt-0.5 w-64 bg-[#181a1f] opacity-100 border border-ui-borderStrong rounded-xs shadow-2xl py-1.5 z-50 text-xs max-h-[85vh] overflow-y-auto">
+        <div v-if="activeDropdown === 'add'" class="absolute left-0 top-full mt-0.5 w-64 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1.5 z-50 text-xs max-h-[85vh] overflow-y-auto">
           <!-- Placement Mode Selector -->
           <div class="px-2.5 py-1 border-b border-ui-borderSubtle mb-1 bg-ui-input/60">
             <div class="text-[10px] font-semibold text-ui-textMuted uppercase mb-1">Placement Mode</div>
@@ -472,17 +472,17 @@ function handleExitProject() {
         >
           Mesh
         </button>
-        <div v-if="activeDropdown === 'mesh'" class="absolute left-0 top-full mt-0.5 w-60 bg-[#181a1f] opacity-100 border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+        <div v-if="activeDropdown === 'mesh'" class="absolute left-0 top-full mt-0.5 w-60 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
           <div class="px-3 py-1 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">Transform & Extrude</div>
-          <button @click="projectStore.performExtrude(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+          <button @click="projectStore.performExtrude(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
             <span>Extrude Region</span>
             <span class="text-ui-textMuted font-mono text-[10px]">E</span>
           </button>
-          <button @click="projectStore.performInset(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+          <button @click="projectStore.performInset(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
             <span>Inset Faces</span>
             <span class="text-ui-textMuted font-mono text-[10px]">I</span>
           </button>
-          <button @click="projectStore.performBevel(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+          <button @click="projectStore.performBevel(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
             <span>Bevel / Chamfer</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+B</span>
           </button>
@@ -490,32 +490,32 @@ function handleExitProject() {
           <div class="h-px bg-ui-borderSubtle my-1"></div>
 
           <div class="px-3 py-1 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">Topology & Cut</div>
-          <button @click="handleStartLoopCut(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+          <button @click="handleStartLoopCut(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
             <span>Loop Cut and Slide</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+R</span>
           </button>
-          <button @click="handleStartKnife(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+          <button @click="handleStartKnife(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
             <span>Knife Tool</span>
             <span class="text-ui-textMuted font-mono text-[10px]">K</span>
           </button>
-          <button @click="projectStore.performSubdivide(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+          <button @click="projectStore.performSubdivide(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
             <span>Subdivide</span>
           </button>
-          <button @click="projectStore.performBridgeEdges(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+          <button @click="projectStore.performBridgeEdges(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
             <span>Bridge Edge Loops</span>
           </button>
-          <button @click="projectStore.performGridFill(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+          <button @click="projectStore.performGridFill(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
             <span>Grid Fill</span>
           </button>
 
           <div class="h-px bg-ui-borderSubtle my-1"></div>
 
           <div class="px-3 py-1 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">Normals & Cleanup</div>
-          <button @click="projectStore.performFlipNormals(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+          <button @click="projectStore.performFlipNormals(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
             <span>Recalculate Outside Normals</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Shift+N</span>
           </button>
-          <button @click="projectStore.performCleanupMesh(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+          <button @click="projectStore.performCleanupMesh(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
             <span>Clean Degenerate Geometry</span>
           </button>
         </div>
@@ -531,7 +531,7 @@ function handleExitProject() {
         >
           View
         </button>
-        <div v-if="activeDropdown === 'view'" class="absolute left-0 top-full mt-0.5 w-64 bg-[#181a1f] opacity-100 border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+        <div v-if="activeDropdown === 'view'" class="absolute left-0 top-full mt-0.5 w-64 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
           <!-- Panels Toggle -->
           <div class="px-3 py-1 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">Panels & Windows</div>
           <button @click="layoutStore.toggleLeftToolbar(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
