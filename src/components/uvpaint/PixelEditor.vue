@@ -651,46 +651,6 @@ function zoomIn() {
   renderCanvas()
 }
 
-function startLightWavePan(e: MouseEvent) {
-  e.preventDefault()
-  e.stopPropagation()
-  isPanning.value = true
-  panStart = { x: e.clientX - panOffset.value.x, y: e.clientY - panOffset.value.y }
-  const onMove = (moveEvt: MouseEvent) => {
-    panOffset.value = {
-      x: moveEvt.clientX - panStart.x,
-      y: moveEvt.clientY - panStart.y
-    }
-    renderCanvas()
-  }
-  const onUp = () => {
-    isPanning.value = false
-    window.removeEventListener('mousemove', onMove)
-    window.removeEventListener('mouseup', onUp)
-  }
-  window.addEventListener('mousemove', onMove)
-  window.addEventListener('mouseup', onUp)
-}
-
-function startLightWaveZoom(e: MouseEvent) {
-  e.preventDefault()
-  e.stopPropagation()
-  let prevY = e.clientY
-  const onMove = (moveEvt: MouseEvent) => {
-    const dy = moveEvt.clientY - prevY
-    prevY = moveEvt.clientY
-    const zoomFactor = Math.pow(0.985, dy)
-    zoom.value = Math.max(0.1, Math.min(64, Math.round(zoom.value * zoomFactor * 100) / 100))
-    renderCanvas()
-  }
-  const onUp = () => {
-    window.removeEventListener('mousemove', onMove)
-    window.removeEventListener('mouseup', onUp)
-  }
-  window.addEventListener('mousemove', onMove)
-  window.addEventListener('mouseup', onUp)
-}
-
 function resetPanZoom() {
   if (!containerRef.value) return
   const w = containerRef.value.clientWidth
@@ -1032,23 +992,7 @@ defineExpose({
         @pointercancel="onPointerUp"
       >
         <!-- Top Right Floating View Controls -->
-        <!-- Top Right Floating LightWave View Controls (Move, Search, Crosshair, X-Ray, Grid, Fit) -->
         <div class="uv-view-group" aria-label="Canvas View Controls">
-          <button
-            @mousedown="startLightWavePan"
-            class="uv-view-icon cursor-move"
-            title="LightWave Pan (Drag to pan canvas)"
-          ><Move class="w-3.5 h-3.5" /></button>
-          <button
-            @mousedown="startLightWaveZoom"
-            class="uv-view-icon cursor-ns-resize"
-            title="LightWave Zoom (Drag up/down to zoom)"
-          ><Search class="w-3.5 h-3.5" /></button>
-          <button
-            @click="resetPanZoom"
-            class="uv-view-icon"
-            title="Center View on Canvas (Crosshair)"
-          ><Crosshair class="w-3.5 h-3.5" /></button>
           <button
             @click="showUvOverlay = !showUvOverlay"
             class="uv-view-icon"
