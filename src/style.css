@@ -119,33 +119,41 @@
 }
 
 /* ==========================================================================
-   AUTHENTIC RETRO 3D THEMES (Windows 95 Classic)
+   AUTHENTIC RETRO 3D THEMES & OS IMMERSIVE STYLES
    ========================================================================== */
 
+/* --------------------------------------------------------------------------
+   1. WINDOWS 95 / 98 CLASSIC (Pixel-Perfect 98.css Bevels)
+   -------------------------------------------------------------------------- */
 [data-theme="win95_classic"] {
-  font-family: "Segoe UI", Tahoma, "MS Sans Serif", Arial, sans-serif;
+  font-family: "MS Sans Serif", Tahoma, "Segoe UI", Arial, sans-serif;
   --ui-radius-xs: 0px;
   --ui-radius-sm: 0px;
   --ui-radius-md: 0px;
 }
 
-/* Classic Windows 95 3D Raised/Beveled Panels */
+/* Classic Windows 95 3D Outer Raised Frame on Main Panels */
 [data-theme="win95_classic"] aside,
-[data-theme="win95_classic"] .bg-ui-panel {
-  border: 2px solid !important;
-  border-color: #dfdfdf #808080 #808080 #dfdfdf !important;
-  box-shadow: inset 1px 1px 0px #ffffff, inset -1px -1px 0px #000000 !important;
+[data-theme="win95_classic"] .modal-content,
+[data-theme="win95_classic"] .win95-window {
+  border-top: 2px solid #ffffff !important;
+  border-left: 2px solid #ffffff !important;
+  border-right: 2px solid #000000 !important;
+  border-bottom: 2px solid #000000 !important;
+  box-shadow: inset 1px 1px 0px #dfdfdf, inset -1px -1px 0px #808080 !important;
+  background-color: #c0c0c0 !important;
 }
 
 /* Classic Windows 95 Window Header / Titlebar Gradient */
 [data-theme="win95_classic"] aside > div:first-child,
-[data-theme="win95_classic"] .modal-header {
+[data-theme="win95_classic"] .modal-header,
+[data-theme="win95_classic"] header:first-child {
   background: linear-gradient(90deg, #000080 0%, #1084d0 100%) !important;
   color: #ffffff !important;
   font-weight: bold !important;
   padding-left: 6px;
   padding-right: 6px;
-  border-bottom: 2px solid #808080 !important;
+  border-bottom: 1px solid #808080 !important;
 }
 
 [data-theme="win95_classic"] aside > div:first-child *,
@@ -154,32 +162,59 @@
 }
 
 /* Classic Windows 95 3D Raised Buttons */
-[data-theme="win95_classic"] button:not(.bg-ui-active) {
-  border: 1px solid !important;
-  border-color: #ffffff #808080 #808080 #ffffff !important;
-  box-shadow: inset 1px 1px 0px #dfdfdf, inset -1px -1px 0px #000000 !important;
+[data-theme="win95_classic"] button:not(.no-win95-btn):not(.bg-ui-accent) {
+  background-color: #c0c0c0 !important;
+  color: #000000 !important;
+  border-top: 1px solid #ffffff !important;
+  border-left: 1px solid #ffffff !important;
+  border-right: 1px solid #000000 !important;
+  border-bottom: 1px solid #000000 !important;
+  box-shadow: inset 1px 1px 0px #dfdfdf, inset -1px -1px 0px #808080 !important;
+  border-radius: 0px !important;
 }
 
-/* Classic Windows 95 Sunken Pressed / Selected Button State */
-[data-theme="win95_classic"] button:active,
-[data-theme="win95_classic"] .bg-ui-active,
-[data-theme="win95_classic"] button.bg-ui-active {
+/* Classic Windows 95 Sunken Pressed Button State */
+[data-theme="win95_classic"] button:not(.no-win95-btn):active,
+[data-theme="win95_classic"] button.bg-ui-active:not(.no-win95-btn) {
+  background-color: #c0c0c0 !important;
+  color: #000000 !important;
+  border-top: 1px solid #000000 !important;
+  border-left: 1px solid #000000 !important;
+  border-right: 1px solid #ffffff !important;
+  border-bottom: 1px solid #ffffff !important;
+  box-shadow: inset 1px 1px 0px #808080, inset -1px -1px 0px #dfdfdf !important;
+}
+
+/* Primary Accent Buttons & Active Selections (Navy Blue) */
+[data-theme="win95_classic"] button.bg-ui-accent,
+[data-theme="win95_classic"] .bg-ui-active {
   background-color: #000080 !important;
   color: #ffffff !important;
-  border: 1px solid !important;
-  border-color: #000000 #ffffff #ffffff #000000 !important;
-  box-shadow: inset 1px 1px 0px #808080 !important;
+  border-top: 1px solid #000000 !important;
+  border-left: 1px solid #000000 !important;
+  border-right: 1px solid #ffffff !important;
+  border-bottom: 1px solid #ffffff !important;
+  box-shadow: inset 1px 1px 0px #000040 !important;
 }
 
-/* Classic Windows 95 Sunken Inset Tree & Input Fields */
-[data-theme="win95_classic"] input,
+[data-theme="win95_classic"] button.bg-ui-accent *,
+[data-theme="win95_classic"] .bg-ui-active * {
+  color: #ffffff !important;
+}
+
+/* Classic Windows 95 Sunken Inset Input Fields & Dropdowns */
+[data-theme="win95_classic"] input[type="text"],
+[data-theme="win95_classic"] input[type="number"],
 [data-theme="win95_classic"] select,
-[data-theme="win95_classic"] .bg-ui-input {
-  border: 2px solid !important;
-  border-color: #808080 #ffffff #ffffff #808080 !important;
-  box-shadow: inset 1px 1px 0px #000000 !important;
+[data-theme="win95_classic"] textarea {
   background-color: #ffffff !important;
   color: #000000 !important;
+  border-top: 1px solid #808080 !important;
+  border-left: 1px solid #808080 !important;
+  border-right: 1px solid #ffffff !important;
+  border-bottom: 1px solid #ffffff !important;
+  box-shadow: inset 1px 1px 0px #000000, inset -1px -1px 0px #dfdfdf !important;
+  border-radius: 0px !important;
 }
 
 /* Classic Windows 95 Property Sheet Tabs in Header */
@@ -192,8 +227,9 @@
 [data-theme="win95_classic"] header .bg-ui-input button {
   background-color: #c0c0c0 !important;
   color: #000000 !important;
-  border: 2px solid !important;
-  border-color: #ffffff #808080 #c0c0c0 #ffffff !important;
+  border-top: 2px solid #ffffff !important;
+  border-left: 2px solid #ffffff !important;
+  border-right: 2px solid #808080 !important;
   border-bottom: none !important;
   border-radius: 3px 3px 0 0 !important;
   box-shadow: inset 1px 1px 0px #dfdfdf !important;
@@ -204,22 +240,100 @@
   background-color: #c0c0c0 !important;
   color: #000000 !important;
   font-weight: bold !important;
-  border-color: #ffffff #808080 #c0c0c0 #ffffff !important;
+  border-right: 2px solid #808080 !important;
   margin-top: 0px;
   padding-bottom: 3px;
   box-shadow: inset 1px 1px 0px #ffffff !important;
+}
+
+[data-theme="win95_classic"] header .bg-ui-input button.bg-ui-accent * {
+  color: #000000 !important;
 }
 
 /* Classic Windows 95 Status Bar Sunken Segments */
 [data-theme="win95_classic"] footer {
   border-top: 2px solid #dfdfdf !important;
   background-color: #c0c0c0 !important;
+  color: #000000 !important;
 }
 
 [data-theme="win95_classic"] footer > div {
-  border: 1px solid !important;
-  border-color: #808080 #ffffff #ffffff #808080 !important;
+  border-top: 1px solid #808080 !important;
+  border-left: 1px solid #808080 !important;
+  border-right: 1px solid #ffffff !important;
+  border-bottom: 1px solid #ffffff !important;
   padding: 1px 6px !important;
   margin-right: 4px;
+}
+
+/* Authentic Windows 95 Scrollbar */
+[data-theme="win95_classic"] ::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+
+[data-theme="win95_classic"] ::-webkit-scrollbar-track {
+  background-color: #dfdfdf;
+  background-image: repeating-linear-gradient(45deg, #c0c0c0 25%, transparent 25%, transparent 75%, #c0c0c0 75%, #c0c0c0), repeating-linear-gradient(45deg, #c0c0c0 25%, #dfdfdf 25%, #dfdfdf 75%, #c0c0c0 75%, #c0c0c0);
+  background-position: 0 0, 2px 2px;
+  background-size: 4px 4px;
+}
+
+[data-theme="win95_classic"] ::-webkit-scrollbar-thumb {
+  background-color: #c0c0c0;
+  border-top: 1px solid #ffffff;
+  border-left: 1px solid #ffffff;
+  border-right: 1px solid #000000;
+  border-bottom: 1px solid #000000;
+  box-shadow: inset 1px 1px 0px #dfdfdf, inset -1px -1px 0px #808080;
+  border-radius: 0;
+}
+
+/* --------------------------------------------------------------------------
+   2. WINDOWS XP LUNA (Luna Blue Headers & Bliss Accents)
+   -------------------------------------------------------------------------- */
+[data-theme="win_xp_luna"] aside > div:first-child,
+[data-theme="win_xp_luna"] .modal-header {
+  background: linear-gradient(180deg, #0055ea 0%, #0040b8 100%) !important;
+  color: #ffffff !important;
+  border-radius: 4px 4px 0 0 !important;
+  border-bottom: 1px solid #003c74 !important;
+}
+
+[data-theme="win_xp_luna"] aside > div:first-child *,
+[data-theme="win_xp_luna"] .modal-header * {
+  color: #ffffff !important;
+}
+
+/* --------------------------------------------------------------------------
+   3. AMIGA WORKBENCH 2.0 (Topaz Sapphire & Steel Bevels)
+   -------------------------------------------------------------------------- */
+[data-theme="amiga_workbench"] aside > div:first-child,
+[data-theme="amiga_workbench"] .modal-header {
+  background: #0055aa !important;
+  color: #ffffff !important;
+  border-bottom: 2px solid #000000 !important;
+}
+
+[data-theme="amiga_workbench"] aside > div:first-child *,
+[data-theme="amiga_workbench"] .modal-header * {
+  color: #ffffff !important;
+}
+
+/* --------------------------------------------------------------------------
+   4. BEOS / HAIKU (Sunflower Golden Tabs)
+   -------------------------------------------------------------------------- */
+[data-theme="beos_haiku"] header .bg-ui-input button.bg-ui-accent {
+  background-color: #ffc600 !important;
+  color: #111111 !important;
+  border: 1px solid #333333 !important;
+  border-bottom: none !important;
+}
+
+/* --------------------------------------------------------------------------
+   5. LIGHTWAVE 3D CLASSIC (Warm Amber Highlights & Slate Docks)
+   -------------------------------------------------------------------------- */
+[data-theme="lightwave_3d"] aside > div:first-child {
+  border-left: 3px solid #d9822b !important;
 }
 

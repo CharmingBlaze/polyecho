@@ -185,7 +185,7 @@ onUnmounted(() => {
               :class="activeTab === 'themes' ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/50 shadow-xs' : 'text-ui-textSecondary hover:bg-ui-hover'"
             >
               <Palette class="w-3.5 h-3.5" />
-              <span>Themes (20)</span>
+              <span>Themes ({{ THEME_PRESETS.length }})</span>
             </button>
 
             <button 
@@ -249,7 +249,7 @@ onUnmounted(() => {
               <div>
                 <h3 class="font-bold text-sm text-ui-textPrimary flex items-center gap-1.5">
                   <Palette class="w-4 h-4 text-amber-400" />
-                  <span>Color Themes & Visual Styles (20 Curated Presets)</span>
+                  <span>Color Themes & Visual Styles ({{ THEME_PRESETS.length }} Curated Presets)</span>
                 </h3>
                 <p class="text-[11px] text-ui-textMuted mt-0.5">Switch entire DCC application colors instantly.</p>
               </div>
