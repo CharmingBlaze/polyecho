@@ -1020,8 +1020,8 @@ function rgbToHex(r: number, g: number, b: number): string {
       v-if="showImportModal && pendingImportFile" 
       :file="pendingImportFile" 
       :target-material-id="activeMaterial?.id"
-      @close="showImportModal = false"
-      @imported="showImportModal = false"
+      @close="() => { showImportModal = false; pendingImportFile = null }"
+      @imported="() => { showImportModal = false; pendingImportFile = null }"
     />
   </div>
 </template>

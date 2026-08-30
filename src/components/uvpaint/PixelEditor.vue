@@ -928,9 +928,10 @@ defineExpose({
     <ImportTextureModal 
       v-if="showImportModal && pendingImportFile" 
       :file="pendingImportFile" 
-      @close="showImportModal = false"
+      @close="() => { showImportModal = false; pendingImportFile = null }"
       @imported="() => {
         showImportModal = false
+        pendingImportFile = null
         nextTick(() => {
           resetPanZoom()
           renderCanvas()

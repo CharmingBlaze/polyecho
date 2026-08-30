@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import { PixelBuffer } from '../../core/painting/PixelCanvas'
@@ -217,8 +217,28 @@ watch([fitMode, filterMode, selectedRes, extractPalette], () => {
   updateLivePreview()
 })
 
+function handleClose() {
+  emit('close')
+}
+
+function handleKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    e.stopPropagation()
+    handleClose()
+  } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault()
+    handleImport()
+  }
+}
+
 onMounted(() => {
+  window.addEventListener('keydown', handleKeydown)
   updateLivePreview()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown)
 })
 
 async function handleImport() {
@@ -272,7 +292,10 @@ async function handleImport() {
 </script>
 
 <template>
-  <div class="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center z-50 select-none p-4 animate-in fade-in duration-150">
+  <div 
+    class="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center z-50 select-none p-4 animate-in fade-in duration-150"
+    @click.self="handleClose"
+  >
     <div class="bg-ui-surface border border-ui-borderDefault rounded-xs w-[640px] shadow-2xl overflow-hidden flex flex-col text-ui-textPrimary font-sans">
       
       <!-- Modal Header -->
@@ -284,7 +307,7 @@ async function handleImport() {
           <span class="font-bold text-xs text-ui-textPrimary tracking-wide">Import Texture Map</span>
         </div>
         <button 
-          @click="$emit('close')" 
+          @click="handleClose" 
           class="p-1 rounded-xs text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer"
         >
           <X class="w-3.5 h-3.5" />
@@ -487,7 +510,7 @@ async function handleImport() {
       <!-- Modal Footer -->
       <div class="h-11 bg-ui-panel px-3.5 flex items-center justify-end gap-2">
         <button 
-          @click="$emit('close')" 
+          @click="handleClose" 
           class="px-3.5 py-1 rounded-xs text-[11px] font-medium text-ui-textSecondary hover:text-ui-textPrimary bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle transition cursor-pointer"
         >
           Cancel
