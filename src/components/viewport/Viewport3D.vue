@@ -51,11 +51,15 @@ const animationStore = useAnimationStore()
 const themeStore = useThemeStore()
 
 const containerRef = ref<HTMLDivElement | null>(null)
+const isWebGLContextLost = ref(false)
+const rendererInitError = ref<string | null>(null)
+const isRendererStarting = ref(false)
 
 let scene: THREE.Scene
 let renderer: THREE.WebGLRenderer
 let animationFrameId: number
 let resizeObserver: ResizeObserver | null = null
+let contextRecoveryTimer: number | null = null
 
 // Viewport Cameras
 let cameraPersp: THREE.PerspectiveCamera
@@ -124,11 +128,71 @@ const marqueeRect = computed(() => {
   return { x, y, width, height }
 })
 
+function createRobustWebGLRenderer(canvas: HTMLCanvasElement): THREE.WebGLRenderer {
+  const configs: THREE.WebGLRendererParameters[] = [
+    // 1. Standard default power preference (works with both integrated and discrete GPUs)
+    { canvas, antialias: true, alpha: true, powerPreference: 'default', failIfMajorPerformanceCaveat: false },
+    // 2. High performance
+    { canvas, antialias: true, alpha: true, powerPreference: 'high-performance', failIfMajorPerformanceCaveat: false },
+    // 3. Fallback without antialiasing for sandboxed or limited WebGL environments
+    { canvas, antialias: false, alpha: true, powerPreference: 'default', failIfMajorPerformanceCaveat: false, precision: 'mediump' },
+    // 4. Low-power / software fallback
+    { canvas, antialias: false, alpha: true, powerPreference: 'low-power', failIfMajorPerformanceCaveat: false, precision: 'lowp' }
+  ]
+
+  for (const config of configs) {
+    try {
+      const r = new THREE.WebGLRenderer(config)
+      return r
+    } catch (_) {
+      // Continue to next fallback configuration
+    }
+  }
+
+  // 5. Try manual context binding for strict sandboxes / disabled flags
+  const contextTypes = ['webgl2', 'webgl', 'experimental-webgl']
+  for (const ctxType of contextTypes) {
+    try {
+      const gl = canvas.getContext(ctxType as any, {
+        alpha: true,
+        antialias: false,
+        failIfMajorPerformanceCaveat: false
+      })
+      if (gl) {
+        return new THREE.WebGLRenderer({ canvas, context: gl as WebGLRenderingContext, alpha: true })
+      }
+    } catch (_) {}
+  }
+
+  throw new Error('WebGL is currently disabled or unavailable in this browser.')
+}
+
 function initThree() {
   if (!containerRef.value) return
 
+  // Dispose previous renderer if exists
+  if (renderer) {
+    try {
+      renderer.dispose()
+      renderer.forceContextLoss()
+    } catch (_) {}
+    renderer = null as any
+  }
+
+  // Clear previous canvases from container
+  while (containerRef.value.firstChild) {
+    containerRef.value.removeChild(containerRef.value.firstChild)
+  }
+
   const width = containerRef.value.clientWidth || window.innerWidth
   const height = containerRef.value.clientHeight || window.innerHeight
+
+  // Create a clean dedicated canvas
+  const canvas = document.createElement('canvas')
+  canvas.style.display = 'block'
+  canvas.style.width = '100%'
+  canvas.style.height = '100%'
+  containerRef.value.appendChild(canvas)
 
   // Scene
   scene = new THREE.Scene()
@@ -173,25 +237,29 @@ function initThree() {
 
   activeCamera = cameraPersp
 
-  // Renderer with Soft Shadows
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+  // Multi-Strategy Resilient WebGL Renderer Creation
+  renderer = createRobustWebGLRenderer(canvas)
   renderer.setSize(width, height)
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
   renderer.toneMapping = THREE.NoToneMapping
   renderer.autoClear = false
-  renderer.shadowMap.enabled = true
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap
-  containerRef.value.appendChild(renderer.domElement)
+  try {
+    renderer.shadowMap.enabled = true
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap
+  } catch (_) {}
+
+  canvas.addEventListener('webglcontextlost', handleWebGLContextLost, false)
+  canvas.addEventListener('webglcontextrestored', handleWebGLContextRestored, false)
 
   // Orbit Controls (Strictly for Perspective Camera)
-  orbitControls = new OrbitControls(cameraPersp, renderer.domElement)
+  orbitControls = new OrbitControls(cameraPersp, canvas)
   orbitControls.enableDamping = true
   orbitControls.dampingFactor = 0.08
   orbitControls.zoomSpeed = toolStore.viewport.invertZoom ? -1.0 : 1.0
   orbitControls.target.set(0, 0.5, 0)
 
   // Transform Controls
-  transformControls = new TransformControls(cameraPersp, renderer.domElement)
+  transformControls = new TransformControls(cameraPersp, canvas)
   transformControls.size = 0.55
   scene.add(transformControls.getHelper())
   scene.add(transformProxy)
@@ -282,11 +350,11 @@ function initThree() {
   }
 
   // Events (Using Capture Phase to prevent OrbitControls from rotating camera when drawing on 3D meshes)
-  renderer.domElement.addEventListener('pointerdown', onPointerDown, { capture: true })
-  renderer.domElement.addEventListener('pointermove', onPointerMove, { capture: true })
-  renderer.domElement.addEventListener('pointerup', onPointerUp, { capture: true })
-  renderer.domElement.addEventListener('pointerleave', onPointerUp, { capture: true })
-  renderer.domElement.addEventListener('wheel', onWheel, { passive: false })
+  canvas.addEventListener('pointerdown', onPointerDown, { capture: true })
+  canvas.addEventListener('pointermove', onPointerMove, { capture: true })
+  canvas.addEventListener('pointerup', onPointerUp, { capture: true })
+  canvas.addEventListener('pointerleave', onPointerUp, { capture: true })
+  canvas.addEventListener('wheel', onWheel, { passive: false })
   window.addEventListener('resize', onWindowResize)
 
   animate()
@@ -914,7 +982,7 @@ function rebuildBones() {
 }
 
 function updateTransformGizmo() {
-  if (isGizmoDragging) return
+  if (isGizmoDragging || !transformControls || !scene) return
 
   // Socket Gizmo in Rig / Animation workspace
   if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
@@ -3043,6 +3111,78 @@ function setCameraView(view: 'persp' | 'top' | 'front' | 'right' | 'iso') {
   orbitControls.target.set(0, 0.5, 0)
 }
 
+async function startViewportRenderer() {
+  if (isRendererStarting.value || renderer) return
+
+  isRendererStarting.value = true
+  rendererInitError.value = null
+
+  await nextTick()
+  try {
+    initThree()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    rendererInitError.value = message.includes('WebGL context')
+      ? 'WebGL is disabled or unavailable in this browser.'
+      : `The 3D renderer could not start: ${message}`
+    console.error('3D viewport initialization failed:', error)
+  } finally {
+    isRendererStarting.value = false
+  }
+}
+
+function recoverViewportRenderer() {
+  if (!renderer) {
+    void startViewportRenderer()
+    return
+  }
+  if (!containerRef.value || !scene || !cameraPersp) return
+
+  try {
+    const context = renderer.getContext()
+    if (context.isContextLost()) {
+      isWebGLContextLost.value = true
+      renderer.forceContextRestore()
+      return
+    }
+
+    isWebGLContextLost.value = false
+    renderer.resetState()
+    onWindowResize()
+    rebuildMeshes()
+    if (threeTexture) threeTexture.needsUpdate = true
+    renderer.clear()
+    renderer.render(scene, cameraPersp)
+  } catch (error) {
+    console.warn('Viewport renderer recovery deferred:', error)
+  }
+}
+
+function handleWebGLContextLost(event: Event) {
+  event.preventDefault()
+  isWebGLContextLost.value = true
+
+  if (contextRecoveryTimer !== null) window.clearTimeout(contextRecoveryTimer)
+  contextRecoveryTimer = window.setTimeout(() => {
+    contextRecoveryTimer = null
+    recoverViewportRenderer()
+  }, 250)
+}
+
+function handleWebGLContextRestored() {
+  isWebGLContextLost.value = false
+  nextTick(() => recoverViewportRenderer())
+}
+
+function handleViewportFocus() {
+  if (rendererInitError.value && !renderer) void startViewportRenderer()
+  else recoverViewportRenderer()
+}
+
+function handleViewportVisibilityChange() {
+  if (!document.hidden) recoverViewportRenderer()
+}
+
 function onWindowResize() {
   if (!containerRef.value || !renderer) return
   const width = containerRef.value.clientWidth
@@ -3084,6 +3224,10 @@ function animate() {
   }
 
   if (!renderer || !containerRef.value) return
+  if (renderer.getContext().isContextLost()) {
+    isWebGLContextLost.value = true
+    return
+  }
   const width = containerRef.value.clientWidth
   const height = containerRef.value.clientHeight
 
@@ -3131,8 +3275,12 @@ watch(() => projectStore.textureRevision, () => {
 watch(() => toolStore.appMode, async () => {
   rebuildMeshes()
   await nextTick()
-  setTimeout(() => onWindowResize(), 50)
-  setTimeout(() => onWindowResize(), 150)
+  setTimeout(() => recoverViewportRenderer(), 50)
+  setTimeout(() => recoverViewportRenderer(), 150)
+})
+watch(() => toolStore.uvWorkspaceTab, async () => {
+  await nextTick()
+  setTimeout(() => recoverViewportRenderer(), 50)
 })
 watch(() => toolStore.selectMode, rebuildMeshes)
 watch(() => toolStore.modelTool, updateTransformGizmo)
@@ -3487,7 +3635,7 @@ watch(() => themeStore.currentThemeId, () => {
 })
 
 onMounted(() => {
-  initThree()
+  void startViewportRenderer()
   window.addEventListener('set-camera-view', handleCameraViewEvent)
   window.addEventListener('blender-modal-op', handleBlenderModalEvent)
   window.addEventListener('primitive-created', handlePrimitiveCreatedEvent)
@@ -3497,6 +3645,8 @@ onMounted(() => {
   window.addEventListener('keydown', handleGlobalKeyDown, true)
   window.addEventListener('wheel', handleGlobalWheel, { passive: false })
   window.addEventListener('pointerdown', handleGlobalPointerDown, true)
+  window.addEventListener('focus', handleViewportFocus)
+  document.addEventListener('visibilitychange', handleViewportVisibilityChange)
 })
 
 onUnmounted(() => {
@@ -3509,6 +3659,12 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeyDown, true)
   window.removeEventListener('wheel', handleGlobalWheel)
   window.removeEventListener('pointerdown', handleGlobalPointerDown, true)
+  window.removeEventListener('focus', handleViewportFocus)
+  document.removeEventListener('visibilitychange', handleViewportVisibilityChange)
+  if (contextRecoveryTimer !== null) {
+    window.clearTimeout(contextRecoveryTimer)
+    contextRecoveryTimer = null
+  }
   cancelAnimationFrame(animationFrameId)
   if (resizeObserver && containerRef.value) {
     resizeObserver.unobserve(containerRef.value)
@@ -3516,6 +3672,8 @@ onUnmounted(() => {
   }
   if (renderer && renderer.domElement && containerRef.value) {
     renderer.domElement.removeEventListener('wheel', onWheel)
+    renderer.domElement.removeEventListener('webglcontextlost', handleWebGLContextLost)
+    renderer.domElement.removeEventListener('webglcontextrestored', handleWebGLContextRestored)
     containerRef.value.removeChild(renderer.domElement)
     renderer.dispose()
   }
@@ -3533,6 +3691,28 @@ onUnmounted(() => {
   <div class="relative w-full h-full overflow-hidden bg-ui-root flex flex-col">
     <!-- 3D Canvas Container -->
     <div ref="containerRef" class="w-full h-full cursor-crosshair flex-1 min-h-0 relative">
+      <div
+        v-if="isWebGLContextLost || rendererInitError"
+        class="absolute inset-0 z-40 flex items-center justify-center bg-ui-root/90 backdrop-blur-sm"
+      >
+        <div class="max-w-xs flex flex-col items-center gap-2 rounded border border-ui-borderStrong bg-ui-panel px-5 py-4 shadow-xl text-center">
+          <span class="text-[11px] font-bold text-ui-textPrimary">
+            {{ rendererInitError ? '3D rendering is unavailable' : 'Restoring 3D viewport…' }}
+          </span>
+          <span class="text-[9px] leading-relaxed text-ui-textMuted">
+            <template v-if="rendererInitError">
+              {{ rendererInitError }} Enable hardware acceleration and WebGL in your browser, restart it, then retry.
+            </template>
+            <template v-else>The browser released the graphics context.</template>
+          </span>
+          <button
+            @click="rendererInitError ? startViewportRenderer() : recoverViewportRenderer()"
+            :disabled="isRendererStarting"
+            class="mt-1 rounded-xs border border-ui-accent/50 bg-ui-active px-3 py-1 text-[9px] font-bold text-ui-textAccent hover:bg-ui-hover"
+          >{{ isRendererStarting ? 'Starting…' : 'Retry renderer' }}</button>
+        </div>
+      </div>
+
       <!-- 1. SINGLE VIEWPORT LIGHTWAVE CONTROLS -->
       <template v-if="!toolStore.viewport.quadView">
         <!-- Top-Right LightWave Nav Cluster (Move, Rotate, Zoom, Center, Maximize) -->

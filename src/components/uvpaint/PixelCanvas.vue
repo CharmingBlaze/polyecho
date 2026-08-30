@@ -51,10 +51,10 @@ const activeTab = computed({
       </div>
     </div>
 
-    <!-- Active Component View -->
-    <div class="flex-1 min-h-0 relative">
-      <UVEditor v-show="activeTab === 'uv'" />
-      <PixelEditor v-show="activeTab === 'paint'" />
+    <!-- Active Component View: only one canvas editor is mounted at a time. -->
+    <div class="flex-1 min-h-0 relative overflow-hidden">
+      <UVEditor v-if="activeTab === 'uv'" key="uv-editor" />
+      <PixelEditor v-else key="pixel-editor" />
     </div>
   </div>
 </template>

@@ -1654,16 +1654,16 @@ defineExpose({
 </script>
 
 <template>
-  <div class="h-full w-full bg-ui-panel flex flex-col select-none overflow-hidden relative font-mono text-xs touch-none">
+  <div class="uv-editor h-full w-full bg-ui-panel flex flex-col select-none overflow-hidden relative font-mono text-xs touch-none">
     <input ref="fileInputRef" type="file" accept="image/*" @change="handleImageImport" class="hidden" />
 
     <!-- 1. TOP DUAL-ROW BLENDER/BLOCKBENCH UV TOOLBAR -->
     <!-- Row 1: Selection Modes, Unwrapping, Island Layout, Align, File I/O, Snap & Zoom -->
-    <div class="h-7 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between gap-1 text-ui-textSecondary shrink-0 font-mono text-xs">
+    <div class="uv-primary-bar">
       <!-- Left: Selection Modes, Unwrap & Island Tools -->
-      <div class="flex items-center gap-1.5 shrink-0">
+      <div class="uv-primary-grid">
         <!-- Active 3D Object Selector -->
-        <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle px-1.5 py-0.5 text-[10px] space-x-1">
+        <div class="uv-object-control uv-control-shell">
           <span class="text-ui-textMuted font-semibold text-[9px]">OBJ:</span>
           <select 
             v-model="projectStore.activeMeshId" 
@@ -1676,7 +1676,7 @@ defineExpose({
         </div>
 
         <!-- Selection Mode Switcher -->
-        <div class="flex items-center bg-ui-input rounded-xs p-0.5 border border-ui-borderSubtle">
+        <div class="uv-selection-modes">
           <button 
             @click="uvSelectMode = 'vertex'"
             class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs text-[10px] transition"
@@ -1719,7 +1719,7 @@ defineExpose({
         </div>
 
         <!-- 3D Unwrapping Dropdown -->
-        <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle px-1.5 py-0.5 text-[10px]">
+        <div class="uv-dropdown-control uv-unwrap-control">
           <select 
             @change="(e) => {
               const val = (e.target as HTMLSelectElement).value
@@ -1752,7 +1752,7 @@ defineExpose({
         </div>
 
         <!-- Islands & Layout Operations Dropdown -->
-        <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle px-1.5 py-0.5 text-[10px]">
+        <div class="uv-dropdown-control uv-layout-control">
           <select 
             @change="(e) => {
               const val = (e.target as HTMLSelectElement).value
@@ -1777,7 +1777,7 @@ defineExpose({
         </div>
 
         <!-- UV Alignment Dropdown -->
-        <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle px-1.5 py-0.5 text-[10px]">
+        <div class="uv-dropdown-control uv-align-control">
           <select 
             @change="(e) => {
               const val = (e.target as HTMLSelectElement).value
@@ -1798,9 +1798,9 @@ defineExpose({
       </div>
 
       <!-- Right: Texture Selector, Image Import/Export, Snap, Grid & Zoom -->
-      <div class="flex items-center space-x-1 shrink-0">
+      <div class="uv-document-bar">
         <!-- Texture Selector Dropdown -->
-        <div class="flex items-center space-x-1 mr-1">
+        <div class="uv-texture-control">
           <span class="text-[10px] text-ui-textMuted font-semibold">Tex:</span>
           <select 
             v-model="projectStore.activeTextureId" 
@@ -1831,53 +1831,13 @@ defineExpose({
           <span>Export</span>
         </button>
 
-        <div class="h-3.5 w-px bg-ui-borderSubtle mx-0.5"></div>
-
-        <button 
-          @click="snapToPixels = !snapToPixels" 
-          class="flex items-center space-x-0.5 px-1.5 py-0.5 rounded-xs text-[10px] transition border cursor-pointer"
-          :class="snapToPixels ? 'bg-ui-active text-ui-textAccent border-ui-accent/40 font-bold shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:bg-ui-hover'"
-          title="Snap to Pixel Grid"
-        >
-          <Magnet class="w-3 h-3" />
-          <span>Snap</span>
-        </button>
-
-        <button 
-          @click="showPixelGrid = !showPixelGrid" 
-          class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary border border-ui-borderSubtle bg-ui-input cursor-pointer"
-          :class="{ 'text-ui-textAccent bg-ui-active border-ui-accent/40': showPixelGrid }"
-          title="Toggle Pixel Grid"
-        >
-          <Grid class="w-3 h-3" />
-        </button>
-
-        <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs">
-          <button @click="zoomOut" class="p-1 hover:bg-ui-hover rounded-l-xs text-ui-textMuted hover:text-ui-textPrimary cursor-pointer" title="Zoom Out (-)">
-            <ZoomOut class="w-3 h-3" />
-          </button>
-          <span @dblclick="resetPanZoom" class="text-[9px] text-ui-textPrimary px-1.5 text-center cursor-pointer font-mono select-none" title="Double click to fit view (F)">
-            {{ Math.round(zoom * 100) }}%
-          </span>
-          <button @click="zoomIn" class="p-1 hover:bg-ui-hover rounded-r-xs text-ui-textMuted hover:text-ui-textPrimary cursor-pointer" title="Zoom In (+)">
-            <ZoomIn class="w-3 h-3" />
-          </button>
-        </div>
-
-        <button 
-          @click="resetPanZoom" 
-          class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary border border-ui-borderSubtle bg-ui-input cursor-pointer"
-          title="Frame / Fit to Viewport (F)"
-        >
-          <Maximize class="w-3 h-3" />
-        </button>
       </div>
     </div>
 
     <!-- Row 2: Trim Sheet Snapping, Visual Diagnostics & Transforms -->
-    <div class="h-7 bg-ui-panel border-b border-ui-borderSubtle px-2 flex items-center justify-between text-xs text-ui-textSecondary shrink-0 font-mono">
+    <div class="uv-secondary-bar">
       <!-- Left: Modular Trim Sheet & Multi-Grid Snapping -->
-      <div class="flex items-center space-x-1.5">
+      <div class="uv-trim-diagnostics">
         <span class="text-[10px] text-ui-textMuted font-semibold">Trim Snap:</span>
         <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle px-1.5 py-0.5 text-[10px]">
           <select 
@@ -1937,7 +1897,7 @@ defineExpose({
       </div>
 
       <!-- Right: Transform Presets -->
-      <div class="flex items-center space-x-1.5">
+      <div class="uv-transform-presets">
         <span class="text-[10px] text-ui-textMuted font-semibold">Transforms:</span>
         <div class="flex items-center space-x-0.5 bg-ui-input rounded-xs p-0.5 border border-ui-borderSubtle">
           <button @click="rotateUVs(-90)" class="p-1 hover:bg-ui-hover rounded-xs text-ui-textSecondary hover:text-ui-textPrimary transition" title="Rotate 90° CCW">
@@ -1967,9 +1927,32 @@ defineExpose({
     <!-- 2. INFINITE STAGING CANVAS VIEWPORT (Desktop, Laptop, Tablet, Stylus) -->
     <div 
       ref="containerRef" 
-      class="flex-1 min-h-0 relative overflow-hidden bg-ui-root cursor-crosshair select-none touch-none"
+      class="uv-canvas-viewport"
       @wheel="onWheel"
     >
+      <div class="uv-view-group" aria-label="UV canvas view controls">
+        <button
+          @click="snapToPixels = !snapToPixels"
+          class="uv-view-toggle"
+          :class="{ 'is-active': snapToPixels }"
+          title="Snap to pixel grid"
+        ><Magnet class="w-3.5 h-3.5" /><span>Snap</span></button>
+        <button
+          @click="showPixelGrid = !showPixelGrid"
+          class="uv-view-icon"
+          :class="{ 'is-active': showPixelGrid }"
+          title="Toggle pixel grid"
+        ><Grid class="w-3.5 h-3.5" /></button>
+        <div class="uv-zoom-control">
+          <button @click="zoomOut" title="Zoom out"><ZoomOut class="w-3.5 h-3.5" /></button>
+          <span @dblclick="resetPanZoom" title="Double-click to fit view">{{ Math.round(zoom * 100) }}%</span>
+          <button @click="zoomIn" title="Zoom in"><ZoomIn class="w-3.5 h-3.5" /></button>
+        </div>
+        <button @click="resetPanZoom" class="uv-view-icon" title="Fit UV canvas to view">
+          <Maximize class="w-3.5 h-3.5" />
+        </button>
+      </div>
+
       <canvas 
         ref="canvasRef" 
         @pointerdown="onPointerDown" 
@@ -1981,7 +1964,7 @@ defineExpose({
       ></canvas>
 
       <!-- Quick Info HUD at Bottom Left -->
-      <div class="absolute bottom-3 left-3 bg-ui-panel/95 backdrop-blur-md px-2.5 py-1 rounded-xs border border-ui-borderStrong shadow-md text-[10px] font-mono text-ui-textMuted flex items-center space-x-3 select-none pointer-events-none z-10">
+      <div class="uv-status-hud">
         <span class="flex items-center gap-1">Mode: <strong class="text-ui-textAccent uppercase font-bold">{{ uvSelectMode }}</strong></span>
         <span>Res: <strong class="text-ui-textPrimary font-bold">{{ projectStore.pixelBuffer.width }}x{{ projectStore.pixelBuffer.height }}</strong></span>
         <span v-if="selectionBounds" class="text-ui-textAccent font-bold">
@@ -1992,3 +1975,401 @@ defineExpose({
     </div>
   </div>
 </template>
+
+<style scoped>
+.uv-editor {
+  container-type: inline-size;
+}
+
+.uv-primary-bar {
+  flex: none;
+  padding: 5px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--ui-text-secondary);
+  background: var(--ui-bg-header);
+  border-bottom: 1px solid var(--ui-border-subtle);
+  box-shadow: 0 1px 0 rgb(0 0 0 / 18%);
+  z-index: 5;
+}
+
+.uv-primary-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, .85fr) auto repeat(3, minmax(105px, 1fr));
+  gap: 5px;
+  align-items: center;
+  min-width: 0;
+}
+
+.uv-object-control { grid-area: object; }
+.uv-selection-modes { grid-area: selection; }
+.uv-unwrap-control { grid-area: unwrap; }
+.uv-layout-control { grid-area: layout; }
+.uv-align-control { grid-area: align; }
+
+.uv-control-shell,
+.uv-dropdown-control,
+.uv-texture-control,
+.uv-selection-modes {
+  min-width: 0;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  background: var(--ui-bg-input);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: 3px;
+}
+
+.uv-control-shell,
+.uv-texture-control {
+  gap: 5px;
+  padding: 0 7px;
+}
+
+.uv-control-shell select,
+.uv-dropdown-control select,
+.uv-texture-control select {
+  min-width: 0;
+  width: 100%;
+  height: 25px;
+  color: var(--ui-text-primary);
+  background: transparent;
+  border: 0;
+  outline: none;
+  font: inherit;
+  font-size: 10px;
+  text-overflow: ellipsis;
+}
+
+.uv-dropdown-control {
+  padding: 0 5px;
+}
+
+.uv-unwrap-control select { color: var(--ui-text-accent); font-weight: 700; }
+.uv-layout-control select { color: #34d399; font-weight: 700; }
+
+.uv-selection-modes {
+  padding: 2px;
+}
+
+.uv-selection-modes button {
+  height: 22px;
+  min-width: 42px;
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--ui-text-muted);
+  border-radius: 2px;
+  font-size: 9px;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.uv-selection-modes button:hover {
+  color: var(--ui-text-primary);
+  background: var(--ui-bg-hover);
+}
+
+.uv-document-bar {
+  min-height: 31px;
+  padding-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border-top: 1px solid var(--ui-border-subtle);
+}
+
+.uv-texture-control {
+  flex: 1;
+  max-width: 340px;
+}
+
+.uv-document-bar > button {
+  height: 27px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  white-space: nowrap;
+  color: var(--ui-text-secondary);
+  background: var(--ui-bg-input);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.uv-document-bar > button:hover {
+  color: var(--ui-text-primary);
+  background: var(--ui-bg-hover);
+  border-color: var(--ui-border-default);
+}
+
+.uv-document-bar > button:first-of-type { color: var(--ui-text-accent); }
+.uv-document-bar > button:last-of-type:hover { color: #34d399; }
+
+.uv-secondary-bar {
+  min-height: 38px;
+  padding: 5px 8px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--ui-text-secondary);
+  background: var(--ui-bg-panel);
+  border-bottom: 1px solid var(--ui-border-subtle);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
+  z-index: 4;
+}
+
+.uv-trim-diagnostics,
+.uv-transform-presets {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.uv-trim-diagnostics > span,
+.uv-transform-presets > span,
+.uv-object-control > span,
+.uv-texture-control > span {
+  flex: none;
+  color: var(--ui-text-muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.uv-trim-diagnostics > div:nth-of-type(1) {
+  height: 27px;
+  min-width: 135px;
+  flex: 1;
+  padding: 0 5px;
+  display: flex;
+  align-items: center;
+  background: var(--ui-bg-input);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: 3px;
+}
+
+.uv-trim-diagnostics select {
+  width: 100%;
+  min-width: 0;
+  color: var(--ui-text-accent);
+  background: transparent;
+  border: 0;
+  outline: none;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.uv-trim-diagnostics > button {
+  height: 27px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  color: var(--ui-text-muted);
+  background: var(--ui-bg-input);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: 3px;
+  font-size: 9px;
+}
+
+.uv-trim-diagnostics > button:hover {
+  color: var(--ui-text-primary);
+  background: var(--ui-bg-hover);
+}
+
+.uv-transform-presets > div {
+  height: 27px;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  background: var(--ui-bg-input);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: 3px;
+}
+
+.uv-transform-presets button {
+  height: 21px;
+  min-width: 23px;
+  padding: 0 5px;
+  display: grid;
+  place-items: center;
+  color: var(--ui-text-muted);
+  border-radius: 2px;
+  font-size: 9px;
+}
+
+.uv-transform-presets button:hover {
+  color: var(--ui-text-primary);
+  background: var(--ui-bg-hover);
+}
+
+.uv-canvas-viewport {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  color: var(--ui-text-secondary);
+  background: var(--ui-bg-root);
+  cursor: crosshair;
+  user-select: none;
+  touch-action: none;
+}
+
+.uv-view-group {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 10;
+  height: 36px;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: color-mix(in srgb, var(--ui-bg-header) 94%, transparent);
+  border: 1px solid var(--ui-border-strong);
+  border-radius: 4px;
+  box-shadow: 0 5px 18px rgb(0 0 0 / 30%);
+  backdrop-filter: blur(8px);
+}
+
+.uv-view-toggle,
+.uv-view-icon,
+.uv-zoom-control {
+  height: 26px;
+  color: var(--ui-text-muted);
+  background: var(--ui-bg-input);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: 3px;
+}
+
+.uv-view-toggle,
+.uv-view-icon {
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.uv-view-icon { width: 26px; padding: 0; }
+.uv-view-toggle:hover,
+.uv-view-icon:hover { color: var(--ui-text-primary); background: var(--ui-bg-hover); }
+.uv-view-toggle.is-active,
+.uv-view-icon.is-active { color: var(--ui-text-accent); background: var(--ui-bg-active); border-color: var(--ui-accent); }
+
+.uv-zoom-control {
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.uv-zoom-control button {
+  width: 25px;
+  display: grid;
+  place-items: center;
+}
+
+.uv-zoom-control button:hover { color: var(--ui-text-primary); background: var(--ui-bg-hover); }
+
+.uv-zoom-control span {
+  min-width: 48px;
+  display: grid;
+  place-items: center;
+  color: var(--ui-text-primary);
+  font-size: 9px;
+  font-weight: 700;
+  border-inline: 1px solid var(--ui-border-subtle);
+}
+
+.uv-status-hud {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 10;
+  min-height: 26px;
+  max-width: calc(100% - 24px);
+  padding: 0 9px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ui-text-muted);
+  background: color-mix(in srgb, var(--ui-bg-panel) 94%, transparent);
+  border: 1px solid var(--ui-border-strong);
+  border-radius: 3px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 28%);
+  backdrop-filter: blur(8px);
+  font-size: 9px;
+  pointer-events: none;
+}
+
+@container (min-width: 801px) {
+  .uv-primary-grid {
+    grid-template-areas: "object selection unwrap layout align";
+  }
+}
+
+@container (max-width: 800px) {
+  .uv-primary-grid {
+    grid-template-columns: minmax(120px, 1fr) auto auto;
+    grid-template-areas:
+      "object selection selection"
+      "unwrap layout align";
+  }
+
+  .uv-secondary-bar {
+    flex-wrap: wrap;
+  }
+
+  .uv-trim-diagnostics,
+  .uv-transform-presets {
+    width: 100%;
+  }
+
+  .uv-transform-presets {
+    padding-top: 4px;
+    justify-content: flex-end;
+    border-top: 1px solid var(--ui-border-subtle);
+  }
+}
+
+@container (max-width: 560px) {
+  .uv-selection-modes button span { display: none; }
+  .uv-selection-modes button { min-width: 28px; padding-inline: 5px; }
+  .uv-document-bar > button span { display: none; }
+  .uv-document-bar > button { width: 28px; padding: 0; }
+  .uv-texture-control { max-width: none; }
+  .uv-trim-diagnostics > span,
+  .uv-transform-presets > span { display: none; }
+  .uv-trim-diagnostics > button span { display: none; }
+  .uv-trim-diagnostics > button { width: 28px; padding: 0; justify-content: center; }
+  .uv-status-hud > span:last-child { display: none; }
+}
+
+@container (max-width: 420px) {
+  .uv-primary-grid {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "object selection"
+      "unwrap layout"
+      "align align";
+  }
+
+  .uv-view-toggle span { display: none; }
+  .uv-view-toggle { width: 26px; padding: 0; }
+}
+</style>
