@@ -8,6 +8,7 @@ import { useToolStore } from '../../stores/toolStore'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useThemeStore, type ThemeColors } from '../../stores/themeStore'
 import { meshToThreeGeometry, computeBoneWorldMatrix } from '../../core/geometry/Converters'
+import { solveCCDIK } from '../../core/animation/IKSolver'
 import { createPSXMaterial } from '../../core/shaders/PSXShader'
 import { computeCentroid } from '../../utils/math'
 import { getMeshEdges } from '../../core/geometry/EdgeUtils'
@@ -959,6 +960,8 @@ function applyTheme(colors: ThemeColors) {
   }
 }
 
+const dragStartBonesMap = new Map<string, { head: Vector3D; tail: Vector3D; position: Vector3D; rotation: Vector3D; scale: Vector3D }>()
+
 function onGizmoDragStart() {
   transformProxy.updateMatrixWorld()
   dragStartProxyMatrix.copy(transformProxy.matrixWorld)
@@ -966,6 +969,17 @@ function onGizmoDragStart() {
 
   dragStartVertexMap.clear()
   dragStartMultiMeshMap.clear()
+  dragStartBonesMap.clear()
+
+  for (const b of animationStore.armature.bones) {
+    dragStartBonesMap.set(b.id, {
+      head: { ...b.head },
+      tail: { ...b.tail },
+      position: { ...b.position },
+      rotation: { ...b.rotation },
+      scale: { ...b.scale }
+    })
+  }
 
   const targetMeshes = projectStore.meshes.filter(m => projectStore.selectedMeshIds.includes(m.id) || m.id === projectStore.activeMeshId)
   for (const m of targetMeshes) {
@@ -1000,7 +1014,9 @@ function onGizmoObjectChange() {
     const bone = animationStore.selectedBone
     if (bone) {
       if (animationStore.isTestPoseActive) {
-        if (transformControls.getMode() === 'rotate') {
+        if (transformControls.getMode() === 'translate' && (bone.parentId || bone.childrenIds.length > 0)) {
+          solveCCDIK(bone.id, transformProxy.position, animationStore.armature.bones, 2)
+        } else if (transformControls.getMode() === 'rotate') {
           bone.rotation.x = Number(THREE.MathUtils.radToDeg(transformProxy.rotation.x).toFixed(2))
           bone.rotation.y = Number(THREE.MathUtils.radToDeg(transformProxy.rotation.y).toFixed(2))
           bone.rotation.z = Number(THREE.MathUtils.radToDeg(transformProxy.rotation.z).toFixed(2))
@@ -1018,24 +1034,76 @@ function onGizmoObjectChange() {
         return
       }
 
-      if (transformControls.getMode() === 'rotate') {
-        const baseVec = new THREE.Vector3(bone.tail.x - bone.head.x, bone.tail.y - bone.head.y, bone.tail.z - bone.head.z)
-        const length = baseVec.length() || 1.2
-        const rotEuler = transformProxy.rotation
-        const newDir = new THREE.Vector3(0, 1, 0).applyEuler(rotEuler).normalize()
-        bone.tail.x = Number((bone.head.x + newDir.x * length).toFixed(3))
-        bone.tail.y = Number((bone.head.y + newDir.y * length).toFixed(3))
-        bone.tail.z = Number((bone.head.z + newDir.z * length).toFixed(3))
-      } else {
-        const deltaX = transformProxy.position.x - bone.head.x
-        const deltaY = transformProxy.position.y - bone.head.y
-        const deltaZ = transformProxy.position.z - bone.head.z
-        bone.head.x = transformProxy.position.x
-        bone.head.y = transformProxy.position.y
-        bone.head.z = transformProxy.position.z
-        bone.tail.x += deltaX
-        bone.tail.y += deltaY
-        bone.tail.z += deltaZ
+      const origBone = dragStartBonesMap.get(bone.id)
+      if (origBone) {
+        if (transformControls.getMode() === 'rotate') {
+          const pivot = new THREE.Vector3(origBone.head.x, origBone.head.y, origBone.head.z)
+          const rotEuler = transformProxy.rotation
+          const rotQuat = new THREE.Quaternion().setFromEuler(rotEuler)
+
+          const origTailVec = new THREE.Vector3(origBone.tail.x - pivot.x, origBone.tail.y - pivot.y, origBone.tail.z - pivot.z)
+          const newTail = origTailVec.applyQuaternion(rotQuat).add(pivot)
+          bone.tail.x = Number(newTail.x.toFixed(3))
+          bone.tail.y = Number(newTail.y.toFixed(3))
+          bone.tail.z = Number(newTail.z.toFixed(3))
+
+          // Recursively rotate all descendant child bones around the parent pivot in Edit Rig mode
+          function rotateChildren(parentId: string) {
+            const pBone = animationStore.armature.bones.find(b => b.id === parentId)
+            if (!pBone) return
+            for (const cId of pBone.childrenIds) {
+              const child = animationStore.armature.bones.find(b => b.id === cId)
+              const origChild = dragStartBonesMap.get(cId)
+              if (!child || !origChild) continue
+
+              const newHead = new THREE.Vector3(origChild.head.x - pivot.x, origChild.head.y - pivot.y, origChild.head.z - pivot.z)
+                .applyQuaternion(rotQuat).add(pivot)
+              const newChildTail = new THREE.Vector3(origChild.tail.x - pivot.x, origChild.tail.y - pivot.y, origChild.tail.z - pivot.z)
+                .applyQuaternion(rotQuat).add(pivot)
+
+              child.head.x = Number(newHead.x.toFixed(3))
+              child.head.y = Number(newHead.y.toFixed(3))
+              child.head.z = Number(newHead.z.toFixed(3))
+              child.tail.x = Number(newChildTail.x.toFixed(3))
+              child.tail.y = Number(newChildTail.y.toFixed(3))
+              child.tail.z = Number(newChildTail.z.toFixed(3))
+
+              rotateChildren(cId)
+            }
+          }
+          rotateChildren(bone.id)
+        } else {
+          const deltaX = transformProxy.position.x - origBone.head.x
+          const deltaY = transformProxy.position.y - origBone.head.y
+          const deltaZ = transformProxy.position.z - origBone.head.z
+          bone.head.x = Number(transformProxy.position.x.toFixed(3))
+          bone.head.y = Number(transformProxy.position.y.toFixed(3))
+          bone.head.z = Number(transformProxy.position.z.toFixed(3))
+          bone.tail.x = Number((origBone.tail.x + deltaX).toFixed(3))
+          bone.tail.y = Number((origBone.tail.y + deltaY).toFixed(3))
+          bone.tail.z = Number((origBone.tail.z + deltaZ).toFixed(3))
+
+          // Recursively translate all descendant child bones in Edit Rig mode
+          function translateChildren(parentId: string) {
+            const pBone = animationStore.armature.bones.find(b => b.id === parentId)
+            if (!pBone) return
+            for (const cId of pBone.childrenIds) {
+              const child = animationStore.armature.bones.find(b => b.id === cId)
+              const origChild = dragStartBonesMap.get(cId)
+              if (!child || !origChild) continue
+
+              child.head.x = Number((origChild.head.x + deltaX).toFixed(3))
+              child.head.y = Number((origChild.head.y + deltaY).toFixed(3))
+              child.head.z = Number((origChild.head.z + deltaZ).toFixed(3))
+              child.tail.x = Number((origChild.tail.x + deltaX).toFixed(3))
+              child.tail.y = Number((origChild.tail.y + deltaY).toFixed(3))
+              child.tail.z = Number((origChild.tail.z + deltaZ).toFixed(3))
+
+              translateChildren(cId)
+            }
+          }
+          translateChildren(bone.id)
+        }
       }
       rebuildBones()
       rebuildMeshes()
@@ -1046,7 +1114,9 @@ function onGizmoObjectChange() {
   if (toolStore.appMode === 'animate') {
     const bone = animationStore.selectedBone
     if (bone) {
-      if (transformControls.getMode() === 'rotate') {
+      if (transformControls.getMode() === 'translate' && (bone.parentId || bone.childrenIds.length > 0)) {
+        solveCCDIK(bone.id, transformProxy.position, animationStore.armature.bones, 2)
+      } else if (transformControls.getMode() === 'rotate') {
         bone.rotation.x = Number(THREE.MathUtils.radToDeg(transformProxy.rotation.x).toFixed(2))
         bone.rotation.y = Number(THREE.MathUtils.radToDeg(transformProxy.rotation.y).toFixed(2))
         bone.rotation.z = Number(THREE.MathUtils.radToDeg(transformProxy.rotation.z).toFixed(2))
