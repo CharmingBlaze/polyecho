@@ -1657,65 +1657,20 @@ defineExpose({
   <div class="uv-editor h-full w-full bg-ui-panel flex flex-col select-none overflow-hidden relative font-mono text-xs touch-none">
     <input ref="fileInputRef" type="file" accept="image/*" @change="handleImageImport" class="hidden" />
 
-    <!-- 1. TOP DUAL-ROW BLENDER/BLOCKBENCH UV TOOLBAR -->
-    <!-- Row 1: Selection Modes, Unwrapping, Island Layout, Align, File I/O, Snap & Zoom -->
+    <!-- 1. TOP COMPACT UV HEADER BAR -->
     <div class="uv-primary-bar">
-      <!-- Left: Selection Modes, Unwrap & Island Tools -->
       <div class="uv-primary-grid">
         <!-- Active 3D Object Selector -->
         <div class="uv-object-control uv-control-shell">
           <span class="text-ui-textMuted font-semibold text-[9px]">OBJ:</span>
           <select 
             v-model="projectStore.activeMeshId" 
-            class="bg-transparent text-ui-textPrimary font-bold focus:outline-none cursor-pointer max-w-[100px] truncate"
+            class="bg-transparent text-ui-textPrimary font-bold focus:outline-none cursor-pointer max-w-[120px] truncate"
           >
             <option v-for="m in projectStore.meshes" :key="m.id" :value="m.id" class="bg-ui-panel text-ui-textPrimary">
               {{ m.name }} ({{ m.faces.length }}f)
             </option>
           </select>
-        </div>
-
-        <!-- Selection Mode Switcher -->
-        <div class="uv-selection-modes">
-          <button 
-            @click="uvSelectMode = 'vertex'"
-            class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs text-[10px] transition"
-            :class="uvSelectMode === 'vertex' ? 'bg-ui-active text-ui-textAccent font-bold shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
-            title="UV Vertex Select (1)"
-          >
-            <BlenderIcon name="vertex-select" :size="11" />
-            <span>Vert</span>
-          </button>
-
-          <button 
-            @click="uvSelectMode = 'edge'"
-            class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs text-[10px] transition"
-            :class="uvSelectMode === 'edge' ? 'bg-ui-active text-ui-textAccent font-bold shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
-            title="UV Edge Select (2)"
-          >
-            <BlenderIcon name="edge-select" :size="11" />
-            <span>Edge</span>
-          </button>
-
-          <button 
-            @click="uvSelectMode = 'face'"
-            class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs text-[10px] transition"
-            :class="uvSelectMode === 'face' ? 'bg-ui-active text-ui-textAccent font-bold shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
-            title="UV Face Select (3)"
-          >
-            <BlenderIcon name="face-select" :size="11" />
-            <span>Face</span>
-          </button>
-
-          <button 
-            @click="uvSelectMode = 'island'"
-            class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs text-[10px] transition"
-            :class="uvSelectMode === 'island' ? 'bg-ui-active text-ui-textAccent font-bold shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
-            title="UV Island Select (4)"
-          >
-            <BlenderIcon name="object-mode" :size="11" />
-            <span>Island</span>
-          </button>
         </div>
 
         <!-- 3D Unwrapping Dropdown -->
@@ -1767,10 +1722,10 @@ defineExpose({
             class="bg-transparent text-emerald-500 font-bold focus:outline-none cursor-pointer"
           >
             <option value="default" disabled selected class="bg-ui-panel text-ui-textMuted">Islands & Layout...</option>
-            <option value="bake-atlas" class="bg-ui-panel text-amber-400 font-bold">Bake Scene Texture Atlas (All Meshes)</option>
-            <option value="pack-2" class="bg-ui-panel text-emerald-500 font-medium">Auto-Pack Islands (2px Margin)</option>
-            <option value="pack-0" class="bg-ui-panel text-ui-textPrimary">Auto-Pack Islands (0px Tight)</option>
-            <option value="pack-4" class="bg-ui-panel text-ui-textPrimary">Auto-Pack Islands (4px Margin)</option>
+            <option value="bake-atlas" class="bg-ui-panel text-amber-400 font-bold">Bake Scene Texture Atlas</option>
+            <option value="pack-2" class="bg-ui-panel text-emerald-500 font-medium">Auto-Pack Islands (2px)</option>
+            <option value="pack-0" class="bg-ui-panel text-ui-textPrimary">Auto-Pack Islands (0px)</option>
+            <option value="pack-4" class="bg-ui-panel text-ui-textPrimary">Auto-Pack Islands (4px)</option>
             <option value="gridify" class="bg-ui-panel text-ui-textAccent font-medium">Gridify Quad Loops</option>
             <option value="equalize" class="bg-ui-panel text-sky-500 font-medium">Equalize Texel Density</option>
           </select>
@@ -1797,7 +1752,7 @@ defineExpose({
         </div>
       </div>
 
-      <!-- Right: Texture Selector, Image Import/Export, Snap, Grid & Zoom -->
+      <!-- Right: Texture Selector, Image Import/Export -->
       <div class="uv-document-bar">
         <!-- Texture Selector Dropdown -->
         <div class="uv-texture-control">
@@ -1830,7 +1785,6 @@ defineExpose({
           <Download class="w-3 h-3 text-emerald-500" />
           <span>Export</span>
         </button>
-
       </div>
     </div>
 
@@ -1858,25 +1812,23 @@ defineExpose({
           >
             <option value="default" disabled selected class="bg-ui-panel text-ui-textMuted">Trim / Atlas Snapping...</option>
             <option value="full" class="bg-ui-panel text-ui-textAccent font-bold">Fit to Full (0..1)</option>
-            <option value="q1" class="bg-ui-panel text-ui-textPrimary">Quadrant 1 (Top-Left 2x2)</option>
-            <option value="q2" class="bg-ui-panel text-ui-textPrimary">Quadrant 2 (Top-Right 2x2)</option>
-            <option value="q3" class="bg-ui-panel text-ui-textPrimary">Quadrant 3 (Bottom-Left 2x2)</option>
-            <option value="q4" class="bg-ui-panel text-ui-textPrimary">Quadrant 4 (Bottom-Right 2x2)</option>
-            <option value="grid-0-0-4-4" class="bg-ui-panel text-ui-textSecondary">Tile 1/16 (4x4 Grid)</option>
-            <option value="grid-0-0-8-8" class="bg-ui-panel text-ui-textSecondary">Tile 1/64 (8x8 Grid)</option>
-            <option value="grid-0-0-1-2" class="bg-ui-panel text-sky-500">Horizontal Trim Top 1/2</option>
-            <option value="grid-0-1-1-2" class="bg-ui-panel text-sky-500">Horizontal Trim Bottom 1/2</option>
-            <option value="grid-0-0-1-4" class="bg-ui-panel text-sky-500">Horizontal Trim 1/4 Band</option>
-            <option value="grid-0-0-1-8" class="bg-ui-panel text-sky-500">Horizontal Trim 1/8 Strip</option>
-            <option value="grid-0-0-4-1" class="bg-ui-panel text-sky-500">Vertical Trim 1/4 Column</option>
+            <option value="q1" class="bg-ui-panel text-ui-textPrimary">Top-Left Quadrant (Q1)</option>
+            <option value="q2" class="bg-ui-panel text-ui-textPrimary">Top-Right Quadrant (Q2)</option>
+            <option value="q3" class="bg-ui-panel text-ui-textPrimary">Bottom-Left Quadrant (Q3)</option>
+            <option value="q4" class="bg-ui-panel text-ui-textPrimary">Bottom-Right Quadrant (Q4)</option>
+            <option disabled class="bg-ui-panel text-ui-textMuted font-bold">--- Modular Trim Grid Presets ---</option>
+            <option value="grid-0-0-2-2" class="bg-ui-panel text-ui-textPrimary">2x2 Grid: Cell (1,1)</option>
+            <option value="grid-1-0-2-2" class="bg-ui-panel text-ui-textPrimary">2x2 Grid: Cell (2,1)</option>
+            <option value="grid-0-1-2-2" class="bg-ui-panel text-ui-textPrimary">2x2 Grid: Cell (1,2)</option>
+            <option value="grid-1-1-2-2" class="bg-ui-panel text-ui-textPrimary">2x2 Grid: Cell (2,2)</option>
+            <option value="grid-0-0-4-4" class="bg-ui-panel text-ui-textPrimary">4x4 Grid: Top-Left (1,1)</option>
+            <option value="grid-3-3-4-4" class="bg-ui-panel text-ui-textPrimary">4x4 Grid: Bottom-Right (4,4)</option>
+            <option value="grid-0-0-8-8" class="bg-ui-panel text-ui-textPrimary">8x8 Tile: Top-Left (1,1)</option>
           </select>
         </div>
 
-        <div class="h-3.5 w-px bg-ui-borderSubtle mx-0.5"></div>
-
-        <!-- Visual Diagnostics: Checkerboard & Stretch Heatmap -->
         <button 
-          @click="showCheckerboard = !showCheckerboard"
+          @click="showCheckerboard = !showCheckerboard" 
           class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs text-[10px] font-bold border transition"
           :class="showCheckerboard ? 'bg-ui-active text-ui-textAccent border-ui-accent/40 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Toggle Calibration Checkerboard Test Grid"
@@ -1886,7 +1838,7 @@ defineExpose({
         </button>
 
         <button 
-          @click="showHeatmap = !showHeatmap"
+          @click="showHeatmap = !showHeatmap" 
           class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs text-[10px] font-bold border transition"
           :class="showHeatmap ? 'bg-ui-active text-ui-textAccent border-ui-accent/40 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Toggle UV Stretch & Distortion Heatmap (Green = 1:1, Blue = Compressed, Red = Stretched)"
@@ -1924,12 +1876,76 @@ defineExpose({
       </div>
     </div>
 
-    <!-- 2. INFINITE STAGING CANVAS VIEWPORT (Desktop, Laptop, Tablet, Stylus) -->
+    <!-- 2. INFINITE STAGING CANVAS VIEWPORT -->
     <div 
       ref="containerRef" 
       class="uv-canvas-viewport"
       @wheel="onWheel"
     >
+      <!-- Sleek Vertical Toolbar inside UV Canvas Window (Left Pinned) -->
+      <div class="uv-vertical-toolbar" aria-label="UV Selection & Quick Tools">
+        <!-- UV Selection Mode Icons -->
+        <div class="uv-vert-tool-group">
+          <button 
+            @click="uvSelectMode = 'vertex'"
+            class="uv-vert-tool-btn"
+            :class="{ 'is-active': uvSelectMode === 'vertex' }"
+            title="UV Vertex Select (1)"
+          >
+            <BlenderIcon name="vertex-select" :size="15" />
+          </button>
+          <button 
+            @click="uvSelectMode = 'edge'"
+            class="uv-vert-tool-btn"
+            :class="{ 'is-active': uvSelectMode === 'edge' }"
+            title="UV Edge Select (2)"
+          >
+            <BlenderIcon name="edge-select" :size="15" />
+          </button>
+          <button 
+            @click="uvSelectMode = 'face'"
+            class="uv-vert-tool-btn"
+            :class="{ 'is-active': uvSelectMode === 'face' }"
+            title="UV Face Select (3)"
+          >
+            <BlenderIcon name="face-select" :size="15" />
+          </button>
+          <button 
+            @click="uvSelectMode = 'island'"
+            class="uv-vert-tool-btn"
+            :class="{ 'is-active': uvSelectMode === 'island' }"
+            title="UV Island Select (4)"
+          >
+            <BlenderIcon name="object-mode" :size="15" />
+          </button>
+        </div>
+
+        <div class="uv-vert-divider"></div>
+
+        <!-- Quick Transform & UV Operations -->
+        <div class="uv-vert-tool-group">
+          <button @click="rotateUVs(-90)" class="uv-vert-tool-btn" title="Rotate 90° CCW">
+            <RotateCcw class="w-3.5 h-3.5" />
+          </button>
+          <button @click="rotateUVs(90)" class="uv-vert-tool-btn" title="Rotate 90° CW">
+            <RotateCw class="w-3.5 h-3.5" />
+          </button>
+          <button @click="flipUVs('u')" class="uv-vert-tool-btn" title="Flip Horizontal">
+            <FlipHorizontal class="w-3.5 h-3.5" />
+          </button>
+          <button @click="flipUVs('v')" class="uv-vert-tool-btn" title="Flip Vertical">
+            <FlipVertical class="w-3.5 h-3.5" />
+          </button>
+          <button @click="handlePackIslands(2)" class="uv-vert-tool-btn text-emerald-400 hover:text-emerald-300" title="Auto-Pack Islands (2px)">
+            <Maximize class="w-3.5 h-3.5" />
+          </button>
+          <button @click="handleSeamUnwrap" class="uv-vert-tool-btn text-amber-400 hover:text-amber-300" title="Unwrap Along Seams (LSCM)">
+            <BlenderIcon name="uv" :size="14" />
+          </button>
+        </div>
+      </div>
+
+      <!-- Top Right View & Zoom Controls -->
       <div class="uv-view-group" aria-label="UV canvas view controls">
         <button
           @click="snapToPixels = !snapToPixels"
@@ -1996,22 +2012,20 @@ defineExpose({
 
 .uv-primary-grid {
   display: grid;
-  grid-template-columns: minmax(120px, .85fr) auto repeat(3, minmax(105px, 1fr));
+  grid-template-columns: minmax(110px, auto) repeat(3, minmax(100px, 1fr));
   gap: 5px;
   align-items: center;
   min-width: 0;
 }
 
-.uv-object-control { grid-area: object; }
-.uv-selection-modes { grid-area: selection; }
-.uv-unwrap-control { grid-area: unwrap; }
-.uv-layout-control { grid-area: layout; }
-.uv-align-control { grid-area: align; }
+.uv-object-control { grid-area: auto; }
+.uv-unwrap-control { grid-area: auto; }
+.uv-layout-control { grid-area: auto; }
+.uv-align-control { grid-area: auto; }
 
 .uv-control-shell,
 .uv-dropdown-control,
-.uv-texture-control,
-.uv-selection-modes {
+.uv-texture-control {
   min-width: 0;
   height: 28px;
   display: flex;
@@ -2048,29 +2062,6 @@ defineExpose({
 
 .uv-unwrap-control select { color: var(--ui-text-accent); font-weight: 700; }
 .uv-layout-control select { color: #34d399; font-weight: 700; }
-
-.uv-selection-modes {
-  padding: 2px;
-}
-
-.uv-selection-modes button {
-  height: 22px;
-  min-width: 42px;
-  padding: 0 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  color: var(--ui-text-muted);
-  border-radius: 2px;
-  font-size: 9px;
-  transition: color 120ms ease, background 120ms ease;
-}
-
-.uv-selection-modes button:hover {
-  color: var(--ui-text-primary);
-  background: var(--ui-bg-hover);
-}
 
 .uv-document-bar {
   min-height: 31px;
@@ -2158,25 +2149,15 @@ defineExpose({
   border-radius: 3px;
 }
 
-.uv-trim-diagnostics select {
+.uv-trim-diagnostics > div:nth-of-type(1) select {
   width: 100%;
-  min-width: 0;
-  color: var(--ui-text-accent);
-  background: transparent;
   border: 0;
-  outline: none;
-  font: inherit;
   font-size: 10px;
-  font-weight: 700;
 }
 
 .uv-trim-diagnostics > button {
   height: 27px;
   padding: 0 8px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  white-space: nowrap;
   color: var(--ui-text-muted);
   background: var(--ui-bg-input);
   border: 1px solid var(--ui-border-subtle);
@@ -2228,6 +2209,62 @@ defineExpose({
   touch-action: none;
 }
 
+/* Vertical Toolbar Inside UV Canvas Window */
+.uv-vertical-toolbar {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px;
+  background: color-mix(in srgb, var(--ui-bg-header) 92%, transparent);
+  border: 1px solid var(--ui-border-strong);
+  border-radius: 4px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(8px);
+}
+
+.uv-vert-tool-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.uv-vert-tool-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  color: var(--ui-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  transition: all 120ms ease;
+  cursor: pointer;
+}
+
+.uv-vert-tool-btn:hover {
+  color: var(--ui-text-primary);
+  background: var(--ui-bg-hover);
+  border-color: var(--ui-border-subtle);
+}
+
+.uv-vert-tool-btn.is-active {
+  color: var(--ui-text-accent);
+  background: var(--ui-bg-active);
+  border-color: var(--ui-border-default);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.uv-vert-divider {
+  height: 1px;
+  margin: 2px 0;
+  background: var(--ui-border-subtle);
+}
+
 .uv-view-group {
   position: absolute;
   top: 10px;
@@ -2260,116 +2297,60 @@ defineExpose({
   padding: 0 7px;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
   gap: 4px;
   font-size: 9px;
   font-weight: 700;
 }
 
-.uv-view-icon { width: 26px; padding: 0; }
-.uv-view-toggle:hover,
-.uv-view-icon:hover { color: var(--ui-text-primary); background: var(--ui-bg-hover); }
 .uv-view-toggle.is-active,
-.uv-view-icon.is-active { color: var(--ui-text-accent); background: var(--ui-bg-active); border-color: var(--ui-accent); }
+.uv-view-icon.is-active {
+  color: var(--ui-text-accent);
+  background: var(--ui-bg-active);
+  border-color: var(--ui-border-default);
+}
 
 .uv-zoom-control {
   display: flex;
-  align-items: stretch;
-  overflow: hidden;
+  align-items: center;
+  padding: 0 2px;
 }
 
 .uv-zoom-control button {
-  width: 25px;
+  width: 22px;
+  height: 22px;
   display: grid;
   place-items: center;
+  color: var(--ui-text-muted);
+  border-radius: 2px;
 }
 
-.uv-zoom-control button:hover { color: var(--ui-text-primary); background: var(--ui-bg-hover); }
+.uv-zoom-control button:hover {
+  color: var(--ui-text-primary);
+  background: var(--ui-bg-hover);
+}
 
 .uv-zoom-control span {
-  min-width: 48px;
-  display: grid;
-  place-items: center;
-  color: var(--ui-text-primary);
+  min-width: 42px;
+  text-align: center;
   font-size: 9px;
   font-weight: 700;
-  border-inline: 1px solid var(--ui-border-subtle);
+  color: var(--ui-text-secondary);
 }
 
 .uv-status-hud {
   position: absolute;
-  left: 12px;
-  bottom: 12px;
-  z-index: 10;
-  min-height: 26px;
-  max-width: calc(100% - 24px);
-  padding: 0 9px;
+  bottom: 8px;
+  left: 10px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  color: var(--ui-text-muted);
-  background: color-mix(in srgb, var(--ui-bg-panel) 94%, transparent);
-  border: 1px solid var(--ui-border-strong);
+  gap: 12px;
+  font-size: 10px;
+  color: var(--ui-text-secondary);
+  background: color-mix(in srgb, var(--ui-bg-header) 92%, transparent);
+  border: 1px solid var(--ui-border-subtle);
+  padding: 3px 8px;
   border-radius: 3px;
-  box-shadow: 0 4px 16px rgb(0 0 0 / 28%);
-  backdrop-filter: blur(8px);
-  font-size: 9px;
+  backdrop-filter: blur(6px);
   pointer-events: none;
-}
-
-@container (min-width: 801px) {
-  .uv-primary-grid {
-    grid-template-areas: "object selection unwrap layout align";
-  }
-}
-
-@container (max-width: 800px) {
-  .uv-primary-grid {
-    grid-template-columns: minmax(120px, 1fr) auto auto;
-    grid-template-areas:
-      "object selection selection"
-      "unwrap layout align";
-  }
-
-  .uv-secondary-bar {
-    flex-wrap: wrap;
-  }
-
-  .uv-trim-diagnostics,
-  .uv-transform-presets {
-    width: 100%;
-  }
-
-  .uv-transform-presets {
-    padding-top: 4px;
-    justify-content: flex-end;
-    border-top: 1px solid var(--ui-border-subtle);
-  }
-}
-
-@container (max-width: 560px) {
-  .uv-selection-modes button span { display: none; }
-  .uv-selection-modes button { min-width: 28px; padding-inline: 5px; }
-  .uv-document-bar > button span { display: none; }
-  .uv-document-bar > button { width: 28px; padding: 0; }
-  .uv-texture-control { max-width: none; }
-  .uv-trim-diagnostics > span,
-  .uv-transform-presets > span { display: none; }
-  .uv-trim-diagnostics > button span { display: none; }
-  .uv-trim-diagnostics > button { width: 28px; padding: 0; justify-content: center; }
-  .uv-status-hud > span:last-child { display: none; }
-}
-
-@container (max-width: 420px) {
-  .uv-primary-grid {
-    grid-template-columns: 1fr 1fr;
-    grid-template-areas:
-      "object selection"
-      "unwrap layout"
-      "align align";
-  }
-
-  .uv-view-toggle span { display: none; }
-  .uv-view-toggle { width: 26px; padding: 0; }
 }
 </style>
