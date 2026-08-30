@@ -814,6 +814,7 @@ function onPointerMove(e: PointerEvent) {
         face.uvs[sv.vertIndex].v = orig.origV + deltaV
       }
     })
+    projectStore.markGeometryUpdated()
     renderCanvas()
   }
 
@@ -839,6 +840,7 @@ function onPointerMove(e: PointerEvent) {
         }
       }
     })
+    projectStore.markGeometryUpdated()
     renderCanvas()
   }
 
@@ -1254,6 +1256,7 @@ function applyUVTransform(transformFn: (origU: number, origV: number) => { u: nu
       face.uvs[d.vertIndex].v = res.v
     }
   })
+  projectStore.markGeometryUpdated()
   renderCanvas()
 }
 
@@ -1389,6 +1392,7 @@ function applyBulkTransform(fn: (u: number, v: number) => { u: number; v: number
       uv.v = res.v
     })
   })
+  projectStore.markGeometryUpdated()
   scheduleRender()
 }
 
@@ -1399,6 +1403,7 @@ function handleSeamUnwrap() {
   if (!activeMesh.value) return
   projectStore.recordState('Unwrap Along Seams')
   SeamUnwrapper.unwrapMesh(activeMesh.value)
+  projectStore.markGeometryUpdated()
   scheduleRender()
 }
 
@@ -1407,6 +1412,7 @@ function handleBoxUnwrap() {
   projectStore.recordState('Box Unwrap')
   const unwrapped = boxUnwrap(activeMesh.value)
   activeMesh.value.faces = unwrapped.faces
+  projectStore.markGeometryUpdated()
   scheduleRender()
 }
 
@@ -1415,6 +1421,7 @@ function handlePlanarUnwrap(axis: 'x' | 'y' | 'z') {
   projectStore.recordState(`Planar Unwrap (${axis.toUpperCase()})`)
   const unwrapped = planarUnwrap(activeMesh.value, axis)
   activeMesh.value.faces = unwrapped.faces
+  projectStore.markGeometryUpdated()
   scheduleRender()
 }
 
@@ -1423,6 +1430,7 @@ function handleCylinderUnwrap() {
   projectStore.recordState('Cylindrical Unwrap')
   const unwrapped = cylinderUnwrap(activeMesh.value)
   activeMesh.value.faces = unwrapped.faces
+  projectStore.markGeometryUpdated()
   scheduleRender()
 }
 
@@ -1431,6 +1439,7 @@ function handleSphereUnwrap() {
   projectStore.recordState('Spherical Unwrap')
   const unwrapped = sphereUnwrap(activeMesh.value)
   activeMesh.value.faces = unwrapped.faces
+  projectStore.markGeometryUpdated()
   scheduleRender()
 }
 
@@ -1439,6 +1448,7 @@ function handleConeUnwrap() {
   projectStore.recordState('Conical Fan Unwrap')
   const unwrapped = coneUnwrap(activeMesh.value)
   activeMesh.value.faces = unwrapped.faces
+  projectStore.markGeometryUpdated()
   scheduleRender()
 }
 
@@ -1447,6 +1457,7 @@ function handleCubemapCross() {
   projectStore.recordState('Cubemap Cross Unwrap')
   const unwrapped = cubemapCrossUnwrap(activeMesh.value)
   activeMesh.value.faces = unwrapped.faces
+  projectStore.markGeometryUpdated()
   scheduleRender()
 }
 
@@ -1455,6 +1466,7 @@ function handlePackIslands(marginPx = 2) {
   projectStore.recordState(`Auto-Pack UV Islands (${marginPx}px)`)
   const unwrapped = packUVIslands(activeMesh.value, marginPx, projectStore.pixelBuffer.width)
   activeMesh.value.faces = unwrapped.faces
+  projectStore.markGeometryUpdated()
   scheduleRender()
 }
 
@@ -1464,6 +1476,7 @@ function handleGridify() {
   const targetFaces = getTargetFaces()
   const unwrapped = gridifyQuadIslands(activeMesh.value, targetFaces)
   activeMesh.value.faces = unwrapped.faces
+  projectStore.markGeometryUpdated()
   scheduleRender()
 }
 
@@ -1472,6 +1485,7 @@ function handleEqualizeTexels() {
   projectStore.recordState('Equalize Texel Density')
   const unwrapped = equalizeTexelDensity(activeMesh.value)
   activeMesh.value.faces = unwrapped.faces
+  projectStore.markGeometryUpdated()
   scheduleRender()
 }
 
@@ -1493,6 +1507,7 @@ function alignSelection(alignment: 'left' | 'right' | 'top' | 'bottom' | 'center
       else if (alignment === 'center_v') uv.v = b.cV
     }
   }
+  projectStore.markGeometryUpdated()
   scheduleRender()
 }
 
@@ -1517,14 +1532,23 @@ function snapToTrimCell(col: number, row: number, totalCols: number, totalRows: 
       uv.v = Math.max(0, Math.min(1, targetV0 + normV * cellH))
     }
   }
+  projectStore.markGeometryUpdated()
   scheduleRender()
 }
 
 watch(() => projectStore.textureRevision, scheduleRender)
 watch(() => projectStore.activeTextureId, scheduleRender)
+watch(() => projectStore.geometryRevision, scheduleRender)
 watch(zoom, scheduleRender)
 watch(showPixelGrid, scheduleRender)
-watch(() => projectStore.activeMeshId, scheduleRender)
+watch(() => projectStore.activeMeshId, () => {
+  selectedFaceIndices.value = []
+  selectedUvVerts.value = []
+  selectedUvEdges.value = []
+  nextTick(() => {
+    scheduleRender()
+  })
+})
 watch(() => projectStore.meshes, scheduleRender, { deep: true })
 watch(() => projectStore.selectedFaceIds, scheduleRender)
 watch(() => projectStore.selectedVertexIds, scheduleRender)

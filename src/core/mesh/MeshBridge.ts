@@ -93,10 +93,29 @@ export class MeshBridge {
       const strFaceId = faceMap?.get(fId) || `f_${fId}`
       const faceVertStrIds = f.vertexIds.map(numId => vertexIdMap.get(numId)!).filter(Boolean)
 
+      // Ensure every vertex of the face has a corresponding UV coordinate
+      let uvs = f.uvs && f.uvs.length === faceVertStrIds.length 
+        ? f.uvs.map(u => ({ u: u.x, v: u.y }))
+        : []
+
+      if (uvs.length !== faceVertStrIds.length) {
+        // Fallback procedural UV generation per polygon
+        if (faceVertStrIds.length === 3) {
+          uvs = [{ u: 0.5, v: 1.0 }, { u: 0.0, v: 0.0 }, { u: 1.0, v: 0.0 }]
+        } else if (faceVertStrIds.length === 4) {
+          uvs = [{ u: 0.0, v: 0.0 }, { u: 1.0, v: 0.0 }, { u: 1.0, v: 1.0 }, { u: 0.0, v: 1.0 }]
+        } else {
+          uvs = faceVertStrIds.map((_, i) => {
+            const angle = (i / faceVertStrIds.length) * Math.PI * 2
+            return { u: 0.5 + 0.5 * Math.cos(angle), v: 0.5 + 0.5 * Math.sin(angle) }
+          })
+        }
+      }
+
       faces.push({
         id: strFaceId,
         vertexIds: faceVertStrIds,
-        uvs: f.uvs.map(u => ({ u: u.x, v: u.y })),
+        uvs,
         normal: { x: f.normal.x, y: f.normal.y, z: f.normal.z },
         materialIndex: f.materialIndex
       })

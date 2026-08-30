@@ -49,9 +49,10 @@ export const useProjectStore = defineStore('project', () => {
   const selectedEdgeIds = ref<string[]>([])
   const selectedFaceIds = ref<string[]>([])
 
-  // Textures & Materials
+  // Textures & Materials & Geometry
   const activePalette = ref<Palette>(DEFAULT_PALETTES[0])
   const textureRevision = ref<number>(0)
+  const geometryRevision = ref<number>(0)
   const activeTextureId = ref<string>('tex_default')
 
   // Create default 64x64 pixel buffer atlas
@@ -604,6 +605,10 @@ export const useProjectStore = defineStore('project', () => {
     return false
   }
 
+  function markGeometryUpdated() {
+    geometryRevision.value++
+  }
+
   function markTextureUpdated(targetTexId?: string) {
     textureRevision.value++
     const tex = targetTexId ? textures.value.find(t => t.id === targetTexId) : activeTexture.value
@@ -867,6 +872,8 @@ export const useProjectStore = defineStore('project', () => {
     replaceMesh,
     setShadeMode,
     toggleShadeMode,
+    geometryRevision,
+    markGeometryUpdated,
     markTextureUpdated,
     addTexture,
     deleteTexture,

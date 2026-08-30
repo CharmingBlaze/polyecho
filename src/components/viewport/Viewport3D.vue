@@ -3417,7 +3417,7 @@ watch(() => projectStore.materials, () => {
   rebuildMeshes()
 }, { deep: true })
 
-watch(() => projectStore.meshes, () => {
+watch(() => [projectStore.meshes, projectStore.geometryRevision, projectStore.activeMeshId, projectStore.selectedMeshIds], () => {
   rebuildMeshes()
 }, { deep: true })
 
