@@ -18,6 +18,16 @@ import {
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
 
+const activeDropdown = ref<string | null>(null)
+
+function toggleDropdown(name: string) {
+  activeDropdown.value = activeDropdown.value === name ? null : name
+}
+
+function closeDropdowns() {
+  activeDropdown.value = null
+}
+
 const showImportModal = ref(false)
 const pendingImportFile = ref<File | null>(null)
 
@@ -534,6 +544,7 @@ watch(showPixelGrid, renderCanvas)
 watch(showUvOverlay, renderCanvas)
 
 onMounted(() => {
+  window.addEventListener('click', closeDropdowns)
   nextTick(() => {
     resetPanZoom()
     if (containerRef.value) {
@@ -546,6 +557,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('click', closeDropdowns)
   containerResizeObserver?.disconnect()
 })
 
@@ -565,47 +577,51 @@ defineExpose({
   <div class="pixel-editor h-full w-full bg-ui-panel flex flex-col select-none overflow-hidden touch-none relative font-mono text-xs">
     <input ref="fileInputRef" type="file" accept="image/*" @change="handleTextureUpload" class="hidden" />
 
-    <!-- Stable document and view controls -->
-    <div class="pixel-document-bar">
-      <div class="pixel-document-group">
-        <!-- Main 2D Workspace Tabs: UV Editor vs Pixel Paint -->
-        <div class="flex items-center bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle shrink-0 mr-1">
-          <button 
-            @click="toolStore.uvWorkspaceTab = 'uv'"
-            class="flex items-center space-x-1 px-2 py-0.5 rounded-xs text-[10px] font-bold transition"
-            :class="toolStore.uvWorkspaceTab === 'uv' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
-            title="UV Unwrapping, Seams & Quadrant Atlas Mapping"
-          >
-            <BlenderIcon name="uv" :size="11" />
-            <span>UV Editor</span>
-          </button>
+    <!-- 1. ROW 1: WORKSPACE TABS & TEXTURE / CANVAS DOCUMENT BAR -->
+    <div class="pixel-header-row-1 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between gap-2 shrink-0 z-30 select-none h-8 min-h-[32px]">
+      <!-- Main 2D Workspace Tabs: UV Editor vs Pixel Paint -->
+      <div class="flex items-center bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle shrink-0">
+        <button 
+          @click="toolStore.uvWorkspaceTab = 'uv'"
+          class="flex items-center space-x-1.5 px-3 py-0.5 rounded-xs text-[10px] font-bold transition cursor-pointer"
+          :class="toolStore.uvWorkspaceTab === 'uv' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          title="UV Unwrapping, Seams & Quadrant Atlas Mapping"
+        >
+          <BlenderIcon name="uv" :size="12" />
+          <span>UV Editor</span>
+        </button>
 
-          <button 
-            @click="toolStore.uvWorkspaceTab = 'paint'"
-            class="flex items-center space-x-1 px-2 py-0.5 rounded-xs text-[10px] font-bold transition"
-            :class="toolStore.uvWorkspaceTab === 'paint' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
-            title="Pixel & Texture Paint Studio"
+        <button 
+          @click="toolStore.uvWorkspaceTab = 'paint'"
+          class="flex items-center space-x-1.5 px-3 py-0.5 rounded-xs text-[10px] font-bold transition cursor-pointer"
+          :class="toolStore.uvWorkspaceTab === 'paint' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          title="Pixel & Texture Paint Studio"
+        >
+          <BlenderIcon name="brush" :size="11" />
+          <span>Pixel Paint</span>
+        </button>
+      </div>
+
+      <!-- Right: Texture Selector, Canvas Size, Import & Export -->
+      <div class="flex items-center gap-1.5 shrink-0">
+        <!-- Texture Selector -->
+        <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px]">
+          <span class="text-ui-textMuted font-bold text-[9px]">TEX:</span>
+          <select 
+            v-model="projectStore.activeTextureId" 
+            @change="onTextureChanged"
+            class="bg-transparent text-ui-textPrimary font-mono focus:outline-none cursor-pointer max-w-[130px] truncate"
           >
-            <BlenderIcon name="brush" :size="10" />
-            <span>Pixel Paint</span>
-          </button>
+            <option v-for="t in projectStore.textures" :key="t.id" :value="t.id" class="bg-ui-panel">
+              {{ t.name }} ({{ t.width }}x{{ t.height }})
+            </option>
+          </select>
         </div>
 
-        <span class="pixel-group-label">Texture</span>
-        <select
-          v-model="projectStore.activeTextureId"
-          @change="onTextureChanged"
-          class="pixel-texture-select pixel-control"
-          title="Active texture"
-        >
-          <option v-for="t in projectStore.textures" :key="t.id" :value="t.id">
-            {{ t.name }} ({{ t.width }}x{{ t.height }})
-          </option>
-        </select>
-
-        <div class="pixel-resolution-control pixel-control">
-          <span class="pixel-group-label">Canvas</span>
-          <select
+        <!-- Canvas Resolution Selector -->
+        <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px]">
+          <span class="text-ui-textMuted font-bold text-[9px]">RES:</span>
+          <select 
             @change="(e) => {
               const val = (e.target as HTMLSelectElement).value
               if (val === 'custom') {
@@ -618,255 +634,323 @@ defineExpose({
               }
               ;(e.target as HTMLSelectElement).value = 'default'
             }"
+            class="bg-transparent text-amber-400 font-bold focus:outline-none cursor-pointer"
           >
-            <option value="default" disabled selected>{{ projectStore.pixelBuffer.width }} × {{ projectStore.pixelBuffer.height }}</option>
-            <option value="64x64">64 × 64 · PSX Retro</option>
-            <option value="128x128">128 × 128 · Low-Poly</option>
-            <option value="256x256">256 × 256 · Detailed Atlas</option>
-            <option value="512x512">512 × 512 · HD Trim Sheet</option>
-            <option value="1024x1024">1024 × 1024 · 2K Model</option>
-            <option value="2048x2048">2048 × 2048 · 4K Atlas</option>
-            <option value="custom">Custom canvas size…</option>
+            <option value="default" disabled selected class="bg-ui-panel">{{ projectStore.pixelBuffer.width }}x{{ projectStore.pixelBuffer.height }}</option>
+            <option value="64x64" class="bg-ui-panel text-ui-textPrimary">64 × 64 (PSX)</option>
+            <option value="128x128" class="bg-ui-panel text-ui-textPrimary">128 × 128 (Low-Poly)</option>
+            <option value="256x256" class="bg-ui-panel text-ui-textPrimary">256 × 256 (Atlas)</option>
+            <option value="512x512" class="bg-ui-panel text-ui-textPrimary">512 × 512 (HD)</option>
+            <option value="custom" class="bg-ui-panel text-ui-textAccent font-bold">Custom Size...</option>
           </select>
         </div>
 
-        <button @click="fileInputRef?.click()" class="pixel-action-button" title="Import texture image">
-          <Upload class="w-3.5 h-3.5" />
+        <button 
+          @click="fileInputRef?.click()" 
+          class="flex items-center gap-1 px-2 py-0.5 rounded-xs bg-ui-input hover:bg-ui-hover text-ui-textAccent text-[10px] font-bold border border-ui-borderSubtle transition cursor-pointer"
+          title="Import Texture Image"
+        >
+          <Upload class="w-3 h-3 text-ui-accent" />
           <span>Import</span>
         </button>
-        <button @click="downloadTexturePng" class="pixel-action-button pixel-action-export" title="Export texture as PNG">
-          <Download class="w-3.5 h-3.5" />
+
+        <button 
+          @click="downloadTexturePng" 
+          class="flex items-center gap-1 px-2 py-0.5 hover:bg-ui-hover rounded-xs text-emerald-400 border border-ui-borderSubtle bg-ui-input text-[10px] font-bold transition cursor-pointer"
+          title="Export Texture PNG"
+        >
+          <Download class="w-3 h-3 text-emerald-400" />
           <span>Export</span>
         </button>
       </div>
-
     </div>
 
-    <div class="pixel-workspace">
-      <!-- Dedicated tool rail keeps tools stable and scannable -->
-      <aside class="pixel-tool-rail" aria-label="Pixel paint tools">
-        <div class="pixel-tool-stack">
+    <!-- 2. ROW 2: DCC MENUS, BRUSH SIZE & COLOR SWATCHES -->
+    <div class="pixel-header-row-2 bg-ui-panel border-b border-ui-borderSubtle px-2 flex items-center justify-between gap-2 shrink-0 z-20 select-none h-8 min-h-[32px] overflow-visible">
+      <!-- Left: DCC Menus & Brush Controls -->
+      <div class="flex items-center gap-1.5 min-w-0">
+        <!-- Image Menu Dropdown -->
+        <div class="relative" @click.stop>
+          <button 
+            @click="toggleDropdown('image')"
+            class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1"
+            :class="activeDropdown === 'image' ? 'bg-ui-hover text-ui-textAccent shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+          >
+            <span>Image</span>
+            <span class="text-[8px] opacity-70">▼</span>
+          </button>
+
+          <div v-if="activeDropdown === 'image'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-52 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+            <div class="px-3 py-0.5 text-[9px] font-bold text-ui-textMuted uppercase">Adjustments</div>
+            <button @click="applyAdjustment('brighten'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Brightness (+10%)</button>
+            <button @click="applyAdjustment('darken'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Darkness (-10%)</button>
+            <button @click="applyAdjustment('grayscale'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Desaturate (Grayscale)</button>
+            <button @click="applyAdjustment('invert'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Invert Colors</button>
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <div class="px-3 py-0.5 text-[9px] font-bold text-ui-textMuted uppercase">Transforms</div>
+            <button @click="applyAdjustment('flipH'); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover">Flip Horizontal</button>
+            <button @click="applyAdjustment('flipV'); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover">Flip Vertical</button>
+            <button @click="applyAdjustment('rot90'); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover">Rotate 90° CW</button>
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="resetRetroAtlas(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover text-amber-400 font-bold">Generate Retro Atlas</button>
+            <button @click="clearTexture(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-rose-950/60 hover:text-rose-300 text-rose-400">Clear Canvas</button>
+          </div>
+        </div>
+
+        <!-- Effects Menu Dropdown -->
+        <div class="relative" @click.stop>
+          <button 
+            @click="toggleDropdown('effects')"
+            class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1"
+            :class="activeDropdown === 'effects' ? 'bg-ui-hover text-emerald-400 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+          >
+            <span>Effects</span>
+            <span class="text-[8px] opacity-70">▼</span>
+          </button>
+
+          <div v-if="activeDropdown === 'effects'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-52 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+            <button @click="applyAdjustment('outline'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover text-emerald-400 font-bold">1px Outline Effect</button>
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="resizeW = projectStore.pixelBuffer.width; resizeH = projectStore.pixelBuffer.height; showResizeModal = true; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover text-ui-textAccent">
+              Resize / Resample Canvas...
+            </button>
+          </div>
+        </div>
+
+        <!-- Palette Menu Dropdown -->
+        <div class="relative" @click.stop>
+          <button 
+            @click="toggleDropdown('palette')"
+            class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1"
+            :class="activeDropdown === 'palette' ? 'bg-ui-hover text-amber-400 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+          >
+            <span>Palette</span>
+            <span class="text-[8px] opacity-70">▼</span>
+          </button>
+
+          <div v-if="activeDropdown === 'palette'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-56 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+            <div class="px-3 py-0.5 text-[9px] font-bold text-ui-textMuted uppercase">Preset Palettes</div>
+            <button 
+              v-for="name in Object.keys(palettePresets)" 
+              :key="name" 
+              @click="switchPalette(name); closeDropdowns()"
+              class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between"
+              :class="{ 'text-amber-400 font-bold': selectedPaletteName === name }"
+            >
+              <span>{{ name }}</span>
+              <span v-if="selectedPaletteName === name" class="text-xs">✓</span>
+            </button>
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="extractPaletteFromTexture(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover text-emerald-400 font-bold">
+              Extract from Current Texture
+            </button>
+          </div>
+        </div>
+
+        <div class="h-4 w-px bg-ui-borderSubtle mx-1"></div>
+
+        <!-- Brush Size Segmented Buttons -->
+        <div class="flex items-center gap-1">
+          <span class="text-[9px] text-ui-textMuted font-bold uppercase">Size:</span>
+          <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle p-0.5">
+            <button
+              v-for="s in [1, 2, 4, 8, 16, 32]"
+              :key="s"
+              @click="toolStore.brushSize = s"
+              class="px-1.5 py-0.5 text-[9px] font-bold rounded-xs transition cursor-pointer"
+              :class="toolStore.brushSize === s ? 'bg-ui-active text-ui-textAccent shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+            >{{ s }}</button>
+          </div>
+
+          <button
+            v-if="toolStore.paintTool === 'rect' || toolStore.paintTool === 'circle'"
+            @click="toolStore.brushFilled = !toolStore.brushFilled"
+            class="px-1.5 py-0.5 text-[9px] font-bold rounded-xs border border-ui-borderSubtle bg-ui-input transition cursor-pointer"
+            :class="toolStore.brushFilled ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textMuted'"
+          >{{ toolStore.brushFilled ? 'Filled' : 'Outline' }}</button>
+          <button
+            v-else
+            @click="toolStore.brushShape = toolStore.brushShape === 'square' ? 'circle' : 'square'"
+            class="px-1.5 py-0.5 text-[9px] font-bold rounded-xs border border-ui-borderSubtle bg-ui-input text-ui-textSecondary hover:text-ui-textPrimary transition cursor-pointer"
+            title="Toggle Square / Round Brush Shape"
+          >{{ toolStore.brushShape === 'square' ? 'Square' : 'Round' }}</button>
+        </div>
+      </div>
+
+      <!-- Right: Color Preview Chip & Hex Code -->
+      <div class="flex items-center gap-1.5 shrink-0">
+        <span class="text-[9px] text-ui-textMuted font-bold uppercase">Color:</span>
+        <label class="w-5 h-5 rounded-xs border border-ui-borderStrong cursor-pointer shadow-xs relative overflow-hidden block" :style="{ backgroundColor: toolStore.primaryColor }">
+          <input type="color" v-model="toolStore.primaryColor" class="opacity-0 absolute inset-0 w-full h-full cursor-pointer" />
+        </label>
+        <input 
+          type="text" 
+          v-model="toolStore.primaryColor" 
+          class="w-16 px-1.5 py-0.5 bg-ui-input text-ui-textPrimary font-mono text-[10px] font-bold border border-ui-borderSubtle rounded-xs focus:outline-none focus:border-ui-accent uppercase" 
+          aria-label="Color hex" 
+        />
+      </div>
+    </div>
+
+    <!-- 3. MAIN WORKSPACE WITH TOOL RAIL, CANVAS & FLOATING OVERLAYS -->
+    <div class="pixel-workspace relative flex-1 min-h-0 flex overflow-hidden">
+      <!-- Left Dedicated Paint Tool Rail -->
+      <aside class="pixel-tool-rail flex flex-col justify-between items-center py-2 px-1 bg-ui-header border-r border-ui-borderSubtle z-10 select-none" aria-label="Pixel paint tools">
+        <!-- Tools Stack -->
+        <div class="flex flex-col gap-1">
           <button
             v-for="tool in paintTools"
             :key="tool.id"
             @click="toolStore.setPaintTool(tool.id)"
-            class="pixel-tool-button"
-            :class="{ 'is-active': toolStore.paintTool === tool.id }"
-            :title="`${tool.title} (${tool.key})`"
+            class="w-7 h-7 flex flex-col items-center justify-center rounded-xs transition cursor-pointer relative group"
+            :class="toolStore.paintTool === tool.id ? 'bg-ui-active text-ui-textAccent font-bold border border-ui-borderDefault shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+            :title="tool.title + ' (' + tool.key + ')'"
           >
-            <BlenderIcon :name="tool.icon" :size="15" />
-            <span>{{ tool.key }}</span>
+            <BlenderIcon :name="tool.icon" :size="14" />
+            <span class="text-[7px] leading-none opacity-60 mt-0.5 font-mono">{{ tool.key }}</span>
           </button>
         </div>
 
-        <div class="pixel-rail-colors" title="Primary and secondary colors">
-          <label class="pixel-rail-swatch pixel-rail-swatch-primary" :style="{ backgroundColor: toolStore.primaryColor }">
-            <input type="color" v-model="toolStore.primaryColor" />
-          </label>
-          <label class="pixel-rail-swatch pixel-rail-swatch-secondary" :style="{ backgroundColor: toolStore.secondaryColor }">
-            <input type="color" v-model="toolStore.secondaryColor" />
-          </label>
-          <button @click="swapColors" title="Swap colors (X)"><ArrowLeftRight class="w-3 h-3" /></button>
+        <!-- Overlapping Color Swatch Box at Rail Bottom -->
+        <div class="flex flex-col items-center gap-1 pt-2 border-t border-ui-borderSubtle w-full" title="Primary & Secondary Colors (X to Swap)">
+          <div class="relative w-6 h-6 my-1">
+            <!-- Secondary Swatch (Bottom-Right) -->
+            <label 
+              class="absolute bottom-0 right-0 w-4 h-4 rounded-xs border border-ui-borderStrong shadow-xs cursor-pointer overflow-hidden block z-0" 
+              :style="{ backgroundColor: toolStore.secondaryColor }"
+              title="Secondary Color (Right-Click Swatch)"
+            >
+              <input type="color" v-model="toolStore.secondaryColor" class="opacity-0 absolute inset-0 w-full h-full cursor-pointer" />
+            </label>
+            <!-- Primary Swatch (Top-Left) -->
+            <label 
+              class="absolute top-0 left-0 w-4 h-4 rounded-xs border border-ui-borderStrong shadow-xs cursor-pointer overflow-hidden block z-10" 
+              :style="{ backgroundColor: toolStore.primaryColor }"
+              title="Primary Color (Left-Click Swatch)"
+            >
+              <input type="color" v-model="toolStore.primaryColor" class="opacity-0 absolute inset-0 w-full h-full cursor-pointer" />
+            </label>
+          </div>
+          <button @click="swapColors" class="p-1 hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary rounded-xs transition cursor-pointer" title="Swap Colors (X)">
+            <ArrowLeftRight class="w-3 h-3" />
+          </button>
         </div>
       </aside>
 
-      <div class="pixel-stage">
-        <!-- Contextual controls stay grouped by purpose -->
-        <div class="pixel-context-bar">
-          <div class="pixel-context-row pixel-brush-row">
-            <div class="pixel-context-group">
-              <span class="pixel-group-label">Brush size</span>
-              <div class="pixel-segmented-control">
-                <button
-                  v-for="s in [1, 2, 4, 8, 16, 32]"
-                  :key="s"
-                  @click="toolStore.brushSize = s"
-                  :class="{ 'is-active': toolStore.brushSize === s }"
-                >{{ s }}</button>
-              </div>
-              <button
-                v-if="toolStore.paintTool === 'rect' || toolStore.paintTool === 'circle'"
-                @click="toolStore.brushFilled = !toolStore.brushFilled"
-                class="pixel-context-button"
-                :class="{ 'is-active': toolStore.brushFilled }"
-              >{{ toolStore.brushFilled ? 'Filled' : 'Outline' }}</button>
-              <button
-                v-else
-                @click="toolStore.brushShape = toolStore.brushShape === 'square' ? 'circle' : 'square'"
-                class="pixel-context-button"
-                title="Toggle square or round brush"
-              >{{ toolStore.brushShape === 'square' ? 'Square' : 'Round' }}</button>
-            </div>
-
-            <div class="pixel-color-control">
-              <span class="pixel-group-label">Color</span>
-              <label class="pixel-color-chip" :style="{ backgroundColor: toolStore.primaryColor }">
-                <input type="color" v-model="toolStore.primaryColor" />
-              </label>
-              <input type="text" v-model="toolStore.primaryColor" class="pixel-hex-input" aria-label="Primary color hex" />
-            </div>
-
-            <div class="pixel-adjustments">
-              <span class="pixel-group-label">Effects</span>
-              <select
-                class="pixel-control"
-                @change="(e) => {
-                  const val = (e.target as HTMLSelectElement).value
-                  if (val === 'retro-atlas') resetRetroAtlas()
-                  else if (val === 'clear') clearTexture()
-                  else applyAdjustment(val)
-                  ;(e.target as HTMLSelectElement).value = 'default'
-                }"
-              >
-                <option value="default" disabled selected>Adjust image…</option>
-                <option value="outline">1px Outline Effect</option>
-                <option value="brighten">Brightness +10%</option>
-                <option value="darken">Darkness −10%</option>
-                <option value="grayscale">Desaturate</option>
-                <option value="invert">Invert Colors</option>
-                <option value="flipH">Flip Horizontal</option>
-                <option value="flipV">Flip Vertical</option>
-                <option value="rot90">Rotate 90° CW</option>
-                <option value="retro-atlas">Generate Retro Atlas</option>
-                <option value="clear">Clear Canvas</option>
-              </select>
-            </div>
+      <!-- Drawing Stage & Infinite Canvas Viewport -->
+      <div 
+        ref="containerRef" 
+        class="pixel-stage flex-1 min-w-0 min-h-0 relative overflow-hidden bg-ui-root cursor-crosshair select-none"
+        @wheel="onWheel"
+        @pointerdown="onPointerDown"
+        @pointermove="onPointerMove"
+        @pointerup="onPointerUp"
+        @pointerleave="onPointerUp"
+        @pointercancel="onPointerUp"
+      >
+        <!-- Top Right Floating View Controls -->
+        <div class="pixel-view-group" aria-label="Canvas View Controls">
+          <button
+            @click="showUvOverlay = !showUvOverlay"
+            class="pixel-view-toggle"
+            :class="{ 'is-active': showUvOverlay }"
+            title="Toggle UV Wireframe Overlay"
+          >
+            <span>UV</span>
+          </button>
+          <button
+            @click="showPixelGrid = !showPixelGrid"
+            class="pixel-view-icon"
+            :class="{ 'is-active': showPixelGrid }"
+            title="Toggle Pixel Grid Lines"
+          >
+            <Grid class="w-3.5 h-3.5" />
+          </button>
+          <div class="pixel-zoom-control">
+            <button @click="zoomOut" title="Zoom out"><ZoomOut class="w-3 h-3" /></button>
+            <span @dblclick="resetPanZoom" title="Double-click to fit">{{ Math.round(zoom * 100) }}%</span>
+            <button @click="zoomIn" title="Zoom in"><ZoomIn class="w-3 h-3" /></button>
           </div>
+          <button @click="resetPanZoom" class="pixel-view-icon" title="Fit to screen">
+            <Maximize class="w-3.5 h-3.5" />
+          </button>
+        </div>
 
-          <div class="pixel-context-row pixel-palette-row">
-            <span class="pixel-group-label">Palette</span>
-            <select
-              :value="selectedPaletteName"
-              @change="(e) => switchPalette((e.target as HTMLSelectElement).value)"
-              class="pixel-palette-select pixel-control"
-            >
-              <option v-for="name in Object.keys(palettePresets)" :key="name" :value="name">{{ name }}</option>
-              <option v-if="!palettePresets[selectedPaletteName]" :value="selectedPaletteName">{{ selectedPaletteName }}</option>
+        <canvas 
+          ref="canvasRef" 
+          class="w-full h-full block touch-none"
+        ></canvas>
+
+        <!-- Docked Bottom Swatch Strip (Quick Palette Bar) -->
+        <div class="pixel-palette-dock absolute bottom-8 left-3 z-10 flex items-center gap-1.5 p-1 bg-ui-header/90 backdrop-blur-md border border-ui-borderStrong rounded-xs shadow-lg max-w-[calc(100%-24px)] overflow-x-auto">
+          <span class="text-[9px] font-bold text-ui-textMuted uppercase whitespace-nowrap pl-1">{{ selectedPaletteName }}:</span>
+          <div class="flex items-center gap-0.5 flex-wrap max-h-6 overflow-hidden">
+            <button
+              v-for="c in activePalette"
+              :key="c"
+              @click="toolStore.primaryColor = c"
+              @contextmenu.prevent="toolStore.secondaryColor = c"
+              class="w-4 h-4 rounded-xxs border border-black/40 hover:scale-110 transition shrink-0 cursor-pointer"
+              :style="{ backgroundColor: c }"
+              :title="'Primary: ' + c + ' · Right-Click for Secondary'"
+            ></button>
+          </div>
+          <button @click="extractPaletteFromTexture" class="px-1.5 py-0.5 bg-ui-input hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary text-[9px] font-bold rounded-xs border border-ui-borderSubtle whitespace-nowrap transition cursor-pointer" title="Extract Palette from Texture">
+            Extract
+          </button>
+        </div>
+
+        <!-- Quick Info Status HUD at Bottom Left -->
+        <div class="pixel-status-hud">
+          <span>{{ projectStore.pixelBuffer.width }} × {{ projectStore.pixelBuffer.height }}</span>
+          <span class="text-ui-textAccent font-bold uppercase">{{ toolStore.paintTool }}</span>
+          <span v-if="cursorCoords" class="text-ui-textMuted font-mono">
+            X:{{ cursorCoords.x }} Y:{{ cursorCoords.y }} [{{ cursorCoords.hex }}]
+          </span>
+          <span class="text-ui-textMuted hidden md:inline">Space+Drag / MMB to Pan | Wheel to Zoom</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Custom Canvas Resize Modal Dialog -->
+    <div v-if="showResizeModal" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+      <div class="bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-4 w-80 flex flex-col gap-3 font-mono text-xs text-ui-textPrimary">
+        <div class="flex items-center justify-between pb-2 border-b border-ui-borderSubtle">
+          <span class="font-bold text-ui-textAccent uppercase text-xs">Resize Texture Canvas</span>
+          <button @click="showResizeModal = false" class="text-ui-textMuted hover:text-white font-bold">✕</button>
+        </div>
+
+        <div class="flex flex-col gap-2">
+          <div class="flex items-center justify-between">
+            <span class="text-ui-textMuted">Width:</span>
+            <input type="number" v-model.number="resizeW" min="8" max="4096" step="8" class="w-24 bg-ui-input border border-ui-borderSubtle px-2 py-1 text-right rounded-xs text-ui-textPrimary font-bold" />
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-ui-textMuted">Height:</span>
+            <input type="number" v-model.number="resizeH" min="8" max="4096" step="8" class="w-24 bg-ui-input border border-ui-borderSubtle px-2 py-1 text-right rounded-xs text-ui-textPrimary font-bold" />
+          </div>
+          <div class="flex items-center justify-between pt-1">
+            <span class="text-ui-textMuted">Mode:</span>
+            <select v-model="resizeMode" class="bg-ui-input border border-ui-borderSubtle px-2 py-1 rounded-xs text-ui-textPrimary">
+              <option value="crop">Crop / Extend (Anchor)</option>
+              <option value="resample">Nearest Resample (Scale)</option>
             </select>
-            <div class="pixel-palette-swatches">
-              <button
-                v-for="c in activePalette"
-                :key="c"
-                @click="toolStore.primaryColor = c"
-                @contextmenu.prevent="toolStore.secondaryColor = c"
-                :style="{ backgroundColor: c }"
-                :title="`Primary: ${c} · Right-click for secondary`"
-              ></button>
-            </div>
-            <button @click="extractPaletteFromTexture" class="pixel-context-button" title="Extract colors from texture">Extract</button>
           </div>
         </div>
 
-        <!-- Canvas Scroll & Pan Viewport -->
-        <div
-          ref="containerRef"
-          class="pixel-canvas-viewport"
-          @wheel="onWheel"
-        >
-          <div class="pixel-view-group" aria-label="Canvas view controls">
-            <button
-              @click="showUvOverlay = !showUvOverlay"
-              class="pixel-toggle-button"
-              :class="{ 'is-active': showUvOverlay }"
-              title="Toggle UV wireframe overlay"
-            >UV</button>
-            <button
-              @click="showPixelGrid = !showPixelGrid"
-              class="pixel-icon-button"
-              :class="{ 'is-active': showPixelGrid }"
-              title="Toggle pixel grid"
-            ><Grid class="w-3.5 h-3.5" /></button>
-            <div class="pixel-zoom-control">
-              <button @click="zoomOut" title="Zoom out"><ZoomOut class="w-3.5 h-3.5" /></button>
-              <span @dblclick="resetPanZoom" title="Double-click to fit">{{ Math.round(zoom * 100) }}%</span>
-              <button @click="zoomIn" title="Zoom in"><ZoomIn class="w-3.5 h-3.5" /></button>
-            </div>
-            <button @click="resetPanZoom" class="pixel-icon-button" title="Fit canvas to view">
-              <Maximize class="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          <div :style="{ transform: `translate(${panOffset.x}px, ${panOffset.y}px)` }" class="transition-transform duration-75">
-            <canvas
-              ref="canvasRef"
-              @pointerdown="onPointerDown"
-              @pointermove="onPointerMove"
-              @pointerup="onPointerUp"
-              @pointerleave="onPointerUp"
-              @pointercancel="onPointerUp"
-              class="shadow-2xl border border-ui-borderStrong image-rendering-pixelated touch-none"
-            ></canvas>
-          </div>
-
-          <div class="pixel-status-hud">
-            <span>{{ projectStore.pixelBuffer.width }} × {{ projectStore.pixelBuffer.height }}</span>
-            <span v-if="cursorCoords">X {{ cursorCoords.x }} · Y {{ cursorCoords.y }}</span>
-            <span class="pixel-status-tool">{{ toolStore.paintTool }}</span>
-            <span class="pixel-status-help">Space + drag to pan · Wheel to zoom</span>
-          </div>
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-ui-borderSubtle">
+          <button @click="showResizeModal = false" class="px-3 py-1 rounded-xs bg-ui-input hover:bg-ui-hover text-ui-textSecondary">Cancel</button>
+          <button @click="applyCustomResize" class="px-3 py-1 rounded-xs bg-ui-accent hover:bg-ui-accent/80 text-white font-bold">Apply Resize</button>
         </div>
       </div>
     </div>
 
-    <!-- Custom Canvas Resize Modal -->
-    <div v-if="showResizeModal" class="absolute inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-      <div class="bg-ui-panel border border-ui-borderStrong rounded-xs p-4 max-w-sm w-full space-y-3 shadow-2xl font-mono text-xs text-ui-textPrimary">
-        <div class="flex items-center justify-between border-b border-ui-borderSubtle pb-2">
-          <span class="font-bold text-ui-textPrimary uppercase tracking-wide">Resize Texture Canvas</span>
-          <button @click="showResizeModal = false" class="text-ui-textMuted hover:text-ui-textPrimary">&times;</button>
-        </div>
-
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-[10px] text-ui-textMuted mb-1">Width (px):</label>
-            <input type="number" v-model.number="resizeW" min="8" max="8192" class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-ui-textPrimary font-bold focus:outline-none focus:border-ui-accent" />
-          </div>
-          <div>
-            <label class="block text-[10px] text-ui-textMuted mb-1">Height (px):</label>
-            <input type="number" v-model.number="resizeH" min="8" max="8192" class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-ui-textPrimary font-bold focus:outline-none focus:border-ui-accent" />
-          </div>
-        </div>
-
-        <div>
-          <label class="block text-[10px] text-ui-textMuted mb-1">Mode:</label>
-          <div class="grid grid-cols-2 gap-2">
-            <button 
-              @click="resizeMode = 'crop'" 
-              class="py-1 px-2 rounded-xs border text-center font-bold text-[10px] transition"
-              :class="resizeMode === 'crop' ? 'bg-ui-active border-ui-accent/40 text-ui-textAccent' : 'bg-ui-input border-ui-borderSubtle text-ui-textMuted hover:bg-ui-hover'"
-            >
-              Extend / Crop
-            </button>
-            <button 
-              @click="resizeMode = 'resample'" 
-              class="py-1 px-2 rounded-xs border text-center font-bold text-[10px] transition"
-              :class="resizeMode === 'resample' ? 'bg-ui-active border-ui-accent/40 text-ui-textAccent' : 'bg-ui-input border-ui-borderSubtle text-ui-textMuted hover:bg-ui-hover'"
-            >
-              Resample / Scale
-            </button>
-          </div>
-        </div>
-
-        <div class="flex justify-end space-x-2 pt-2 border-t border-ui-borderSubtle">
-          <button @click="showResizeModal = false" class="px-3 py-1 bg-ui-input hover:bg-ui-hover rounded-xs text-ui-textMuted hover:text-ui-textPrimary text-[10px]">Cancel</button>
-          <button @click="applyCustomResize" class="px-3 py-1 bg-ui-accent hover:bg-ui-accentHover rounded-xs text-white font-bold text-[10px]">Apply Resize</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Import Image Texture Modal -->
+    <!-- Import Texture Modal -->
     <ImportTextureModal 
       v-if="showImportModal && pendingImportFile" 
       :file="pendingImportFile" 
-      @close="() => { showImportModal = false; pendingImportFile = null }"
-      @imported="() => {
-        showImportModal = false
-        pendingImportFile = null
-        nextTick(() => {
-          resetPanZoom()
-          renderCanvas()
-        })
-      }"
+      @imported="() => { showImportModal = false; pendingImportFile = null; onTextureChanged(); }" 
+      @close="showImportModal = false; pendingImportFile = null" 
     />
   </div>
 </template>
@@ -876,167 +960,91 @@ defineExpose({
   container-type: inline-size;
 }
 
-.pixel-document-bar {
-  min-height: 38px;
-  padding: 5px 8px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex: none;
-  color: var(--ui-text-secondary);
-  background: var(--ui-bg-header);
-  border-bottom: 1px solid var(--ui-border-subtle);
-  box-shadow: 0 1px 0 rgb(0 0 0 / 18%);
+.pixel-header-row-1,
+.pixel-header-row-2 {
+  height: 32px;
+  min-height: 32px;
 }
 
-.pixel-document-group,
-.pixel-view-group,
-.pixel-context-group,
-.pixel-color-control,
-.pixel-adjustments {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
+.header-dropdown-menu {
+  animation: dropdownIn 100ms ease-out forwards;
 }
 
-.pixel-document-group {
-  flex: 1;
+@keyframes dropdownIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.pixel-tool-rail {
+  width: 36px;
+  min-width: 36px;
 }
 
 .pixel-view-group {
   position: absolute;
   top: 10px;
   right: 10px;
-  z-index: 8;
-  flex: none;
-  padding: 4px;
+  z-index: 10;
+  height: 32px;
+  padding: 3px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   background: color-mix(in srgb, var(--ui-bg-header) 94%, transparent);
   border: 1px solid var(--ui-border-strong);
   border-radius: 4px;
-  box-shadow: 0 5px 18px rgb(0 0 0 / 28%);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
   backdrop-filter: blur(8px);
 }
 
-.pixel-group-label {
-  flex: none;
+.pixel-view-toggle,
+.pixel-view-icon,
+.pixel-zoom-control {
+  height: 24px;
   color: var(--ui-text-muted);
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-}
-
-.pixel-control,
-.pixel-resolution-control,
-.pixel-action-button,
-.pixel-toggle-button,
-.pixel-icon-button,
-.pixel-context-button,
-.pixel-zoom-control,
-.pixel-segmented-control,
-.pixel-hex-input {
-  height: 26px;
-  color: var(--ui-text-primary);
   background: var(--ui-bg-input);
   border: 1px solid var(--ui-border-subtle);
   border-radius: 3px;
 }
 
-.pixel-control,
-.pixel-resolution-control select {
-  padding: 0 7px;
-  font: inherit;
-  font-size: 10px;
-  outline: none;
-}
-
-.pixel-control:focus,
-.pixel-resolution-control:focus-within,
-.pixel-hex-input:focus {
-  border-color: var(--ui-border-focus);
-}
-
-.pixel-texture-select {
-  width: clamp(138px, 26cqw, 238px);
-  min-width: 110px;
-  text-overflow: ellipsis;
-}
-
-.pixel-resolution-control {
-  display: flex;
-  align-items: center;
-  padding-left: 7px;
-}
-
-.pixel-resolution-control select {
-  width: 88px;
-  padding-left: 4px;
-  color: var(--ui-text-accent);
-  font-weight: 700;
-  background: transparent;
-  border: 0;
-}
-
-.pixel-action-button,
-.pixel-toggle-button,
-.pixel-icon-button,
-.pixel-context-button {
+.pixel-view-toggle,
+.pixel-view-icon {
+  padding: 0 6px;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 5px;
-  padding: 0 8px;
-  color: var(--ui-text-secondary);
-  font-size: 10px;
+  gap: 4px;
+  font-size: 9px;
   font-weight: 700;
-  white-space: nowrap;
-  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+  cursor: pointer;
 }
 
-.pixel-action-button:hover,
-.pixel-toggle-button:hover,
-.pixel-icon-button:hover,
-.pixel-context-button:hover {
-  color: var(--ui-text-primary);
-  background: var(--ui-bg-hover);
-  border-color: var(--ui-border-default);
-}
-
-.pixel-action-button:first-of-type {
-  color: var(--ui-text-accent);
-}
-
-.pixel-action-export:hover {
-  color: #34d399;
-}
-
-.pixel-icon-button {
-  width: 26px;
-  padding: 0;
-}
-
-.pixel-toggle-button.is-active,
-.pixel-icon-button.is-active,
-.pixel-context-button.is-active {
+.pixel-view-toggle.is-active,
+.pixel-view-icon.is-active {
   color: var(--ui-text-accent);
   background: var(--ui-bg-active);
-  border-color: var(--ui-accent);
+  border-color: var(--ui-border-default);
 }
 
 .pixel-zoom-control {
   display: flex;
-  align-items: stretch;
-  overflow: hidden;
+  align-items: center;
+  padding: 0 2px;
 }
 
 .pixel-zoom-control button {
-  width: 25px;
+  width: 20px;
+  height: 20px;
   display: grid;
   place-items: center;
   color: var(--ui-text-muted);
+  border-radius: 2px;
+  cursor: pointer;
 }
 
 .pixel-zoom-control button:hover {
@@ -1045,306 +1053,27 @@ defineExpose({
 }
 
 .pixel-zoom-control span {
-  min-width: 48px;
-  display: grid;
-  place-items: center;
-  color: var(--ui-text-primary);
+  min-width: 38px;
+  text-align: center;
   font-size: 9px;
   font-weight: 700;
-  border-inline: 1px solid var(--ui-border-subtle);
-}
-
-.pixel-workspace {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  overflow: hidden;
-}
-
-.pixel-tool-rail {
-  width: 44px;
-  padding: 7px 5px;
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  background: var(--ui-bg-header);
-  border-right: 1px solid var(--ui-border-subtle);
-  box-shadow: 1px 0 0 rgb(0 0 0 / 14%);
-  z-index: 5;
-}
-
-.pixel-tool-stack {
-  display: grid;
-  gap: 3px;
-}
-
-.pixel-tool-button {
-  position: relative;
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  color: var(--ui-text-muted);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 3px;
-  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
-}
-
-.pixel-tool-button:hover {
-  color: var(--ui-text-primary);
-  background: var(--ui-bg-hover);
-  border-color: var(--ui-border-subtle);
-}
-
-.pixel-tool-button.is-active {
-  color: var(--ui-text-accent);
-  background: var(--ui-bg-active);
-  border-color: var(--ui-accent);
-  box-shadow: inset 2px 0 0 var(--ui-accent);
-}
-
-.pixel-tool-button span {
-  position: absolute;
-  right: 2px;
-  bottom: 0;
-  color: var(--ui-text-muted);
-  font-size: 7px;
-  opacity: .7;
-}
-
-.pixel-rail-colors {
-  position: relative;
-  height: 50px;
-  border-top: 1px solid var(--ui-border-subtle);
-  padding-top: 8px;
-}
-
-.pixel-rail-swatch {
-  position: absolute;
-  width: 21px;
-  height: 21px;
-  overflow: hidden;
-  border: 2px solid var(--ui-border-strong);
-  border-radius: 3px;
-  box-shadow: 0 1px 4px rgb(0 0 0 / 35%);
-  cursor: pointer;
-}
-
-.pixel-rail-swatch-primary { left: 1px; top: 9px; z-index: 2; }
-.pixel-rail-swatch-secondary { right: 1px; top: 20px; }
-.pixel-rail-swatch input { opacity: 0; width: 100%; height: 100%; cursor: pointer; }
-.pixel-rail-colors button { position: absolute; left: 0; bottom: -2px; color: var(--ui-text-muted); }
-
-.pixel-stage {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.pixel-context-bar {
-  flex: none;
-  padding: 5px 8px;
-  background: var(--ui-bg-panel);
-  border-bottom: 1px solid var(--ui-border-subtle);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
-  z-index: 4;
-}
-
-.pixel-context-row {
-  min-height: 28px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.pixel-brush-row {
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--ui-border-subtle);
-}
-
-.pixel-palette-row {
-  padding-top: 4px;
-}
-
-.pixel-segmented-control {
-  display: flex;
-  overflow: hidden;
-}
-
-.pixel-segmented-control button {
-  min-width: 25px;
-  padding: 0 5px;
-  color: var(--ui-text-muted);
-  font-size: 9px;
-  font-weight: 700;
-  border-right: 1px solid var(--ui-border-subtle);
-}
-
-.pixel-segmented-control button:last-child { border-right: 0; }
-.pixel-segmented-control button:hover { color: var(--ui-text-primary); background: var(--ui-bg-hover); }
-.pixel-segmented-control button.is-active { color: var(--ui-text-accent); background: var(--ui-bg-active); }
-
-.pixel-color-control {
-  margin-left: 4px;
-  padding-left: 10px;
-  border-left: 1px solid var(--ui-border-subtle);
-}
-
-.pixel-color-chip {
-  width: 24px;
-  height: 24px;
-  overflow: hidden;
-  border: 2px solid var(--ui-border-strong);
-  border-radius: 3px;
-  cursor: pointer;
-}
-
-.pixel-color-chip input { opacity: 0; width: 100%; height: 100%; cursor: pointer; }
-
-.pixel-hex-input {
-  width: 68px;
-  padding: 0 6px;
-  font-size: 9px;
-  font-weight: 700;
-  text-transform: uppercase;
-  outline: none;
-}
-
-.pixel-adjustments {
-  margin-left: auto;
-}
-
-.pixel-adjustments .pixel-control {
-  width: 132px;
-  color: var(--ui-text-accent);
-  font-weight: 700;
-}
-
-.pixel-palette-select {
-  width: 148px;
-  flex: none;
-}
-
-.pixel-palette-swatches {
-  height: 26px;
-  padding: 3px;
-  flex: 1;
-  min-width: 80px;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  overflow: hidden;
-  background: var(--ui-bg-input);
-  border: 1px solid var(--ui-border-subtle);
-  border-radius: 3px;
-}
-
-.pixel-palette-swatches button {
-  width: 14px;
-  height: 17px;
-  flex: 1 1 10px;
-  min-width: 9px;
-  max-width: 20px;
-  border: 1px solid rgb(0 0 0 / 50%);
-  border-radius: 2px;
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 5%);
-  transition: transform 100ms ease, border-color 100ms ease;
-}
-
-.pixel-palette-swatches button:hover {
-  z-index: 1;
-  transform: translateY(-1px) scale(1.08);
-  border-color: white;
-}
-
-.pixel-canvas-viewport {
-  flex: 1;
-  min-height: 0;
-  position: relative;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: crosshair;
-  touch-action: none;
-  background-color: var(--ui-bg-root);
-  background-image: radial-gradient(circle, rgb(255 255 255 / 3%) 1px, transparent 1px);
-  background-size: 16px 16px;
+  color: var(--ui-text-secondary);
 }
 
 .pixel-status-hud {
   position: absolute;
-  left: 12px;
-  bottom: 12px;
-  min-height: 25px;
-  max-width: calc(100% - 24px);
-  padding: 0 9px;
+  bottom: 8px;
+  left: 10px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  color: var(--ui-text-muted);
-  font-size: 9px;
-  background: color-mix(in srgb, var(--ui-bg-panel) 94%, transparent);
-  border: 1px solid var(--ui-border-strong);
+  gap: 12px;
+  font-size: 10px;
+  color: var(--ui-text-secondary);
+  background: color-mix(in srgb, var(--ui-bg-header) 92%, transparent);
+  border: 1px solid var(--ui-border-subtle);
+  padding: 3px 8px;
   border-radius: 3px;
-  box-shadow: 0 4px 16px rgb(0 0 0 / 28%);
+  backdrop-filter: blur(6px);
   pointer-events: none;
-}
-
-.pixel-status-tool {
-  color: var(--ui-text-accent);
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.pixel-status-help {
-  padding-left: 10px;
-  border-left: 1px solid var(--ui-border-subtle);
-}
-
-@container (max-width: 720px) {
-  .pixel-document-bar {
-    min-height: 38px;
-  }
-
-  .pixel-document-group {
-    width: 100%;
-  }
-
-  .pixel-texture-select { flex: 1; width: auto; }
-  .pixel-brush-row { flex-wrap: wrap; }
-  .pixel-adjustments { margin-left: 0; }
-}
-
-@container (max-width: 560px) {
-  .pixel-document-group > .pixel-group-label,
-  .pixel-resolution-control .pixel-group-label,
-  .pixel-color-control .pixel-group-label,
-  .pixel-adjustments .pixel-group-label {
-    display: none;
-  }
-
-  .pixel-action-button span { display: none; }
-  .pixel-action-button { width: 26px; padding: 0; }
-  .pixel-resolution-control { padding-left: 2px; }
-  .pixel-resolution-control select { width: 76px; }
-  .pixel-context-group { width: 100%; }
-  .pixel-color-control { margin-left: 0; padding-left: 0; border-left: 0; }
-  .pixel-adjustments { margin-left: auto; }
-  .pixel-palette-select { width: 115px; }
-  .pixel-status-help { display: none; }
-}
-
-@container (max-width: 420px) {
-  .pixel-tool-rail { width: 40px; padding-inline: 4px; }
-  .pixel-hex-input { display: none; }
-  .pixel-adjustments .pixel-control { width: 108px; }
-  .pixel-palette-row > .pixel-group-label { display: none; }
-  .pixel-palette-select { width: 104px; }
-  .pixel-palette-row { gap: 4px; }
 }
 </style>
