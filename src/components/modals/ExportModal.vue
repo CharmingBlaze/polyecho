@@ -6,6 +6,7 @@ import { exportToOBJ, exportToMTL } from '../../core/export/ObjExport'
 import { exportToGLTF } from '../../core/export/GltfExport'
 import { renderSpriteSheet } from '../../core/export/SpriteSheet'
 import { useAnimationStore } from '../../stores/animationStore'
+import { Download, X, Box, Sparkles, Image, Film } from 'lucide-vue-next'
 
 const projectStore = useProjectStore()
 const animationStore = useAnimationStore()
@@ -14,7 +15,13 @@ const emit = defineEmits<{
   (e: 'close'): void
 }>()
 
-const activeTab = ref<'gltf' | 'obj' | 'spritesheet' | 'texture'>('gltf')
+const activeTab = ref<'gltf' | 'obj' | 'spritesheet' | 'texture' | 'turntable'>('gltf')
+
+// Turntable Video options
+const turntableDuration = ref<number>(3)
+const turntableFps = ref<number>(30)
+const isRecordingTurntable = ref<boolean>(false)
+const turntableProgress = ref<number>(0)
 
 // Sprite sheet options
 const spriteSize = ref<number>(64)
@@ -108,6 +115,48 @@ function handleExportSpriteSheet() {
     }
   })
 }
+
+async function handleExportTurntable() {
+  const canvas = document.querySelector('canvas') as HTMLCanvasElement
+  if (!canvas) {
+    alert('3D viewport canvas not found')
+    return
+  }
+
+  isRecordingTurntable.value = true
+  turntableProgress.value = 0
+
+  const stream = canvas.captureStream(turntableFps.value)
+  const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm'
+  const recorder = new MediaRecorder(stream, { mimeType })
+  const chunks: Blob[] = []
+
+  recorder.ondataavailable = (e) => {
+    if (e.data.size > 0) chunks.push(e.data)
+  }
+
+  recorder.onstop = () => {
+    const blob = new Blob(chunks, { type: 'video/webm' })
+    downloadFile(blob, `${projectStore.projectName}_turntable_360.webm`)
+    isRecordingTurntable.value = false
+    emit('close')
+  }
+
+  recorder.start()
+
+  const totalTime = turntableDuration.value * 1000
+  const intervalTime = 100
+  let elapsed = 0
+
+  const progressInterval = setInterval(() => {
+    elapsed += intervalTime
+    turntableProgress.value = Math.min(100, Math.round((elapsed / totalTime) * 100))
+    if (elapsed >= totalTime) {
+      clearInterval(progressInterval)
+      recorder.stop()
+    }
+  }, intervalTime)
+}
 </script>
 
 <template>
@@ -125,21 +174,21 @@ function handleExportSpriteSheet() {
       </div>
 
       <!-- Format Tabs -->
-      <div class="grid grid-cols-4 bg-dcc-800 border-b border-dcc-750 text-xs font-mono">
+      <div class="grid grid-cols-5 bg-dcc-800 border-b border-dcc-750 text-xs font-mono">
         <button 
           @click="activeTab = 'gltf'" 
           class="py-2.5 flex items-center justify-center gap-1.5 transition"
           :class="activeTab === 'gltf' ? 'bg-dcc-850 text-white font-bold border-b-2 border-indigo-500' : 'text-slate-400 hover:text-slate-200'"
         >
           <Box class="w-3.5 h-3.5" />
-          <span>GLTF / GLB</span>
+          <span>GLTF/GLB</span>
         </button>
         <button 
           @click="activeTab = 'obj'" 
           class="py-2.5 flex items-center justify-center gap-1.5 transition"
           :class="activeTab === 'obj' ? 'bg-dcc-850 text-white font-bold border-b-2 border-indigo-500' : 'text-slate-400 hover:text-slate-200'"
         >
-          <span>OBJ + MTL</span>
+          <span>OBJ+MTL</span>
         </button>
         <button 
           @click="activeTab = 'spritesheet'" 
@@ -147,7 +196,7 @@ function handleExportSpriteSheet() {
           :class="activeTab === 'spritesheet' ? 'bg-dcc-850 text-white font-bold border-b-2 border-indigo-500' : 'text-slate-400 hover:text-slate-200'"
         >
           <Sparkles class="w-3.5 h-3.5 text-amber-400" />
-          <span>Sprite Sheet</span>
+          <span>Sprites</span>
         </button>
         <button 
           @click="activeTab = 'texture'" 
@@ -155,7 +204,15 @@ function handleExportSpriteSheet() {
           :class="activeTab === 'texture' ? 'bg-dcc-850 text-white font-bold border-b-2 border-indigo-500' : 'text-slate-400 hover:text-slate-200'"
         >
           <Image class="w-3.5 h-3.5" />
-          <span>Texture PNG</span>
+          <span>Texture</span>
+        </button>
+        <button 
+          @click="activeTab = 'turntable'" 
+          class="py-2.5 flex items-center justify-center gap-1.5 transition"
+          :class="activeTab === 'turntable' ? 'bg-dcc-850 text-white font-bold border-b-2 border-indigo-500' : 'text-slate-400 hover:text-slate-200'"
+        >
+          <Film class="w-3.5 h-3.5 text-rose-400" />
+          <span>Turntable</span>
         </button>
       </div>
 
@@ -285,6 +342,51 @@ function handleExportSpriteSheet() {
             class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold shadow transition"
           >
             Download Texture PNG
+          </button>
+        </div>
+
+        <!-- Turntable Video Section -->
+        <div v-else-if="activeTab === 'turntable'" class="flex flex-col space-y-4">
+          <p class="text-slate-400 leading-relaxed">
+            Records a 360-degree turntable video of your 3D model directly from the canvas into high-quality WebM video.
+          </p>
+          <div class="grid grid-cols-2 gap-3">
+            <label class="flex flex-col space-y-1">
+              <span class="font-mono text-slate-400">Duration:</span>
+              <select v-model="turntableDuration" class="bg-dcc-900 border border-dcc-700 rounded p-1.5 font-mono text-xs">
+                <option :value="2">2 Seconds (Fast)</option>
+                <option :value="3">3 Seconds (Standard)</option>
+                <option :value="4">4 Seconds (Smooth)</option>
+                <option :value="6">6 Seconds (Slow Pan)</option>
+              </select>
+            </label>
+
+            <label class="flex flex-col space-y-1">
+              <span class="font-mono text-slate-400">Frame Rate:</span>
+              <select v-model="turntableFps" class="bg-dcc-900 border border-dcc-700 rounded p-1.5 font-mono text-xs">
+                <option :value="24">24 FPS (Cinematic)</option>
+                <option :value="30">30 FPS (Smooth)</option>
+                <option :value="60">60 FPS (Ultra Smooth)</option>
+              </select>
+            </label>
+          </div>
+
+          <div v-if="isRecordingTurntable" class="p-3 bg-dcc-900 rounded border border-indigo-500/40 flex flex-col space-y-2">
+            <div class="flex justify-between text-xs font-mono text-indigo-300">
+              <span>Recording 360 Turntable...</span>
+              <span>{{ turntableProgress }}%</span>
+            </div>
+            <div class="w-full bg-dcc-800 rounded-full h-1.5 overflow-hidden">
+              <div class="bg-indigo-500 h-full transition-all duration-100" :style="{ width: `${turntableProgress}%` }"></div>
+            </div>
+          </div>
+
+          <button 
+            @click="handleExportTurntable"
+            :disabled="isRecordingTurntable"
+            class="w-full py-2.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-lg font-semibold shadow transition"
+          >
+            {{ isRecordingTurntable ? 'Recording Turntable Video...' : 'Record & Download 360 Turntable Video (.webm)' }}
           </button>
         </div>
       </div>

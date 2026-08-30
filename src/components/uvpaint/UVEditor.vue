@@ -32,6 +32,7 @@ import {
   Layers,
   Maximize
 } from 'lucide-vue-next'
+import { SeamUnwrapper } from '../../core/uv/SeamUnwrapper'
 
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
@@ -1394,6 +1395,13 @@ function applyBulkTransform(fn: (u: number, v: number) => { u: number; v: number
 // ----------------------------------------------------
 // UNIVERSAL UNWRAPPING ACTIONS
 // ----------------------------------------------------
+function handleSeamUnwrap() {
+  if (!activeMesh.value) return
+  projectStore.recordState('Unwrap Along Seams')
+  SeamUnwrapper.unwrapMesh(activeMesh.value)
+  scheduleRender()
+}
+
 function handleBoxUnwrap() {
   if (!activeMesh.value) return
   projectStore.recordState('Box Unwrap')
@@ -1649,7 +1657,8 @@ defineExpose({
           <select 
             @change="(e) => {
               const val = (e.target as HTMLSelectElement).value
-              if (val === 'cubemap') handleCubemapCross()
+              if (val === 'seams') handleSeamUnwrap()
+              else if (val === 'cubemap') handleCubemapCross()
               else if (val === 'box') handleBoxUnwrap()
               else if (val === 'cylinder') handleCylinderUnwrap()
               else if (val === 'sphere') handleSphereUnwrap()
@@ -1663,6 +1672,7 @@ defineExpose({
             class="bg-transparent text-ui-textAccent font-bold focus:outline-none cursor-pointer"
           >
             <option value="default" disabled selected class="bg-ui-panel text-ui-textMuted">Unwrap 3D...</option>
+            <option value="seams" class="bg-ui-panel text-amber-400 font-bold">Unwrap Along Seams (LSCM)</option>
             <option value="reset" class="bg-ui-panel text-rose-500 font-semibold">Reset UVs (0..1 Full)</option>
             <option value="cubemap" class="bg-ui-panel text-ui-textAccent">Cubemap Cross (Blockbench)</option>
             <option value="box" class="bg-ui-panel text-ui-textPrimary">Smart Box Unwrap</option>

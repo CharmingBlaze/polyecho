@@ -369,10 +369,45 @@ const allCommands = computed<CommandItem[]>(() => [
     action: () => { toolStore.viewport.shadeMode = 'smooth' }
   },
 
-  // 7. EXPORT
+  // 7. UV & UNWRAPPING
+  {
+    id: 'mark-seam',
+    title: 'Mark Seam on Selected Edges',
+    category: 'Topology',
+    action: () => projectStore.markSelectedEdgesAsSeam()
+  },
+  {
+    id: 'clear-seam',
+    title: 'Clear Seams on Selected Edges',
+    category: 'Topology',
+    action: () => projectStore.clearSelectedEdgesSeam()
+  },
+  {
+    id: 'unwrap-seams',
+    title: 'Unwrap UVs Along Seams',
+    category: 'Topology',
+    shortcut: 'U',
+    action: () => projectStore.performSeamUnwrap()
+  },
+  {
+    id: 'pack-islands',
+    title: 'Pack UV Islands',
+    category: 'Topology',
+    action: () => projectStore.performPackUVIslands()
+  },
+
+  // 8. RIGGING & ANIMATION
+  {
+    id: 'toggle-bones-vis',
+    title: 'Toggle Skeleton Bones Visibility',
+    category: 'Shading',
+    action: () => { toolStore.viewport.showBones = !toolStore.viewport.showBones }
+  },
+
+  // 9. EXPORT
   {
     id: 'export-glb',
-    title: 'Export GLTF / GLB Model',
+    title: 'Export GLTF / GLB Model (Blender Compatible)',
     category: 'Export',
     shortcut: 'Ctrl+E',
     action: () => window.dispatchEvent(new CustomEvent('open-export-modal', { detail: 'glb' }))

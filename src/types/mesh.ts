@@ -32,6 +32,7 @@ export interface Edge {
   v1: string
   v2: string
   selected?: boolean
+  seam?: boolean
 }
 
 export interface MirrorModifier {
@@ -82,4 +83,5 @@ export interface MeshObject {
   solidify?: SolidifyModifier
   bevelModifier?: BevelModifierConfig
   shadeMode?: 'flat' | 'smooth'
+  seamEdgeIds?: string[]
 }

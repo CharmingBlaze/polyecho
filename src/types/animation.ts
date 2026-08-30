@@ -9,6 +9,16 @@ export interface BoneSocket {
   scale: Vector3D
 }
 
+export interface IKConstraint {
+  enabled: boolean
+  targetBoneId?: string
+  poleTargetBoneId?: string
+  poleAngle?: number // degrees
+  chainLength: number // 2 by default
+  iterations?: number
+  weight?: number // 0..1
+}
+
 export interface Bone {
   id: string
   name: string
@@ -19,8 +29,10 @@ export interface Bone {
   position: Vector3D // Local translation offset (Pose)
   rotation: Vector3D // Euler angles in degrees (Pose)
   scale: Vector3D
+  roll?: number // Bone roll in degrees
   childrenIds: string[]
   sockets?: BoneSocket[]
+  ikConstraint?: IKConstraint
 }
 
 export type BindingType = 'object' | 'rigid_vertex' | 'smooth_vertex'
@@ -41,7 +53,7 @@ export interface SkinBinding {
 
 export type Binding = ObjectBoneBinding | SkinBinding
 
-export type InterpolationType = 'step' | 'linear' | 'cubic'
+export type InterpolationType = 'step' | 'linear' | 'cubic' | 'bezier'
 
 export interface Keyframe<T> {
   id: string
@@ -56,6 +68,7 @@ export interface AnimationTrack {
   targetId: string // Mesh ID or Bone ID
   targetType: TrackTargetType
   targetName?: string
+  interpolation?: InterpolationType
   positionKeys: Keyframe<Vector3D>[]
   rotationKeys: Keyframe<Vector3D>[]
   scaleKeys: Keyframe<Vector3D>[]
@@ -68,6 +81,16 @@ export interface AnimationMarker {
   id: string
   name: string
   frame: number
+}
+
+export interface OnionSkinningSettings {
+  enabled: boolean
+  framesBefore: number
+  framesAfter: number
+  step: number
+  opacity: number
+  colorBefore: string
+  colorAfter: string
 }
 
 export interface AnimationClip {
@@ -89,3 +112,4 @@ export interface Armature {
   clips: AnimationClip[]
   activeClipId: string | null
 }
+

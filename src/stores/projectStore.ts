@@ -28,6 +28,10 @@ import { PrimitiveType, PrimitiveParameters } from '../core/primitives/Primitive
 import { PrimitiveBuilder } from '../core/primitives/PrimitiveBuilder'
 import { MeshBridge } from '../core/mesh/MeshBridge'
 import { PrimitiveTransform } from '../core/history/commands/CreatePrimitiveCommand'
+import { SeamUnwrapper } from '../core/uv/SeamUnwrapper'
+import { UVIslandPacker } from '../core/uv/UVIslandPacker'
+import { computeFaceNormal } from '../utils/math'
+import { Vector3D } from '../types/mesh'
 import { useHistoryStore } from './historyStore'
 
 export const useProjectStore = defineStore('project', () => {
@@ -762,6 +766,65 @@ export const useProjectStore = defineStore('project', () => {
     setShadeMode(current === 'flat' ? 'smooth' : 'flat')
   }
 
+  function markSelectedEdgesAsSeam() {
+    if (!activeMesh.value) return
+    recordState('Mark Seam')
+    if (!activeMesh.value.seamEdgeIds) {
+      activeMesh.value.seamEdgeIds = []
+    }
+    for (const eId of selectedEdgeIds.value) {
+      if (!activeMesh.value.seamEdgeIds.includes(eId)) {
+        activeMesh.value.seamEdgeIds.push(eId)
+      }
+    }
+  }
+
+  function clearSelectedEdgesSeam() {
+    if (!activeMesh.value || !activeMesh.value.seamEdgeIds) return
+    recordState('Clear Seam')
+    activeMesh.value.seamEdgeIds = activeMesh.value.seamEdgeIds.filter(id => !selectedEdgeIds.value.includes(id))
+  }
+
+  function clearAllSeams() {
+    if (!activeMesh.value) return
+    recordState('Clear All Seams')
+    activeMesh.value.seamEdgeIds = []
+  }
+
+  function performSeamUnwrap() {
+    if (!activeMesh.value) return
+    recordState('Unwrap Along Seams')
+    SeamUnwrapper.unwrapMesh(activeMesh.value)
+  }
+
+  function performPackUVIslands(padding = 0.02) {
+    if (!activeMesh.value) return
+    recordState('Pack UV Islands')
+    UVIslandPacker.packIslands(activeMesh.value, padding)
+  }
+
+  function generateBoxUVs() {
+    if (!activeMesh.value) return
+    recordState('Box UV Projection')
+    for (const f of activeMesh.value.faces) {
+      const verts = f.vertexIds.map(id => activeMesh.value!.vertices.find(v => v.id === id)?.position).filter(Boolean)
+      if (verts.length < 3) continue
+      const fn = f.normal || computeFaceNormal(verts as Vector3D[])
+      const ax = Math.abs(fn.x), ay = Math.abs(fn.y), az = Math.abs(fn.z)
+      
+      f.uvs = f.vertexIds.map(vId => {
+        const v = activeMesh.value!.vertices.find(vert => vert.id === vId)?.position || { x: 0, y: 0, z: 0 }
+        if (ax >= ay && ax >= az) {
+          return { u: Number(((v.z + 2) / 4).toFixed(4)), v: Number(((v.y + 2) / 4).toFixed(4)) }
+        } else if (ay >= ax && ay >= az) {
+          return { u: Number(((v.x + 2) / 4).toFixed(4)), v: Number(((v.z + 2) / 4).toFixed(4)) }
+        } else {
+          return { u: Number(((v.x + 2) / 4).toFixed(4)), v: Number(((v.y + 2) / 4).toFixed(4)) }
+        }
+      })
+    }
+  }
+
   return {
     projectName,
     meshes,
@@ -821,6 +884,12 @@ export const useProjectStore = defineStore('project', () => {
     deleteMaterial,
     assignMaterialToActiveMesh,
     assignMaterialToSelectedMeshes,
+    markSelectedEdgesAsSeam,
+    clearSelectedEdgesSeam,
+    clearAllSeams,
+    performSeamUnwrap,
+    performPackUVIslands,
+    generateBoxUVs,
     recordState,
   }
 })

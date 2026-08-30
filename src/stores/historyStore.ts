@@ -37,11 +37,33 @@ export const useHistoryStore = defineStore('history', () => {
     }
   }
 
+  function jumpToUndoIndex(targetIndex: number) {
+    while (undoStack.value.length - 1 > targetIndex) {
+      undo()
+    }
+  }
+
+  function jumpToRedoIndex(targetIndex: number) {
+    const steps = targetIndex + 1
+    for (let i = 0; i < steps; i++) {
+      redo()
+    }
+  }
+
+  function clearHistory() {
+    undoStack.value = []
+    redoStack.value = []
+  }
+
   return {
     undoStack,
     redoStack,
     pushAction,
     undo,
     redo,
+    jumpToUndoIndex,
+    jumpToRedoIndex,
+    clearHistory
   }
 })
+

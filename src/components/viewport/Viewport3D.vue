@@ -9,6 +9,7 @@ import { useAnimationStore } from '../../stores/animationStore'
 import { useThemeStore, type ThemeColors } from '../../stores/themeStore'
 import { meshToThreeGeometry, computeBoneWorldMatrix } from '../../core/geometry/Converters'
 import { solveCCDIK } from '../../core/animation/IKSolver'
+import { sampleTrack } from '../../core/animation/Armature'
 import { createPSXMaterial } from '../../core/shaders/PSXShader'
 import { computeCentroid } from '../../utils/math'
 import { getMeshEdges } from '../../core/geometry/EdgeUtils'
@@ -596,6 +597,41 @@ function rebuildMeshes() {
       layers.wireframeGroup.add(wire)
     }
 
+    // Seam Edges Overlay (Bright Red #ef4444)
+    if (meshObj.seamEdgeIds && meshObj.seamEdgeIds.length > 0) {
+      const seamPositions: number[] = []
+      const vertMap = new Map<string, { x: number; y: number; z: number }>()
+      meshObj.vertices.forEach(v => vertMap.set(v.id, v.position))
+
+      for (const eId of meshObj.seamEdgeIds) {
+        const parts = eId.split('_')
+        if (parts.length >= 2) {
+          const p1 = vertMap.get(parts[0])
+          const p2 = vertMap.get(parts[1])
+          if (p1 && p2) {
+            seamPositions.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z)
+          }
+        }
+      }
+
+      if (seamPositions.length > 0) {
+        const seamGeom = new THREE.BufferGeometry()
+        seamGeom.setAttribute('position', new THREE.Float32BufferAttribute(seamPositions, 3))
+        const seamMat = new THREE.LineBasicMaterial({
+          color: 0xef4444,
+          linewidth: 3,
+          depthTest: false,
+          transparent: true,
+          opacity: 0.95
+        })
+        const seamLines = new THREE.LineSegments(seamGeom, seamMat)
+        seamLines.position.copy(threeMesh.position)
+        seamLines.rotation.copy(threeMesh.rotation)
+        seamLines.scale.copy(threeMesh.scale)
+        layers.wireframeGroup.add(seamLines)
+      }
+    }
+
     const isSelectionAllowed = toolStore.appMode === 'model' || (toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'uv')
 
     // PASS 4: Face Mode Selection Overlay
@@ -680,6 +716,70 @@ function rebuildMeshes() {
       crosshair.position.copy(originMesh.position)
       crosshair.renderOrder = 998
       layers.gizmoGroup.add(crosshair)
+    }
+  }
+
+  // Onion Skinning Ghost Frames Overlay
+  if (animationStore.onionSkin && toolStore.appMode === 'animate' && animationStore.activeClip) {
+    const curF = animationStore.currentFrame
+    const maxF = animationStore.activeClip.durationFrames || 24
+    const count = animationStore.onionFramesCount || 2
+    const baseOpacity = animationStore.onionOpacity || 0.35
+
+    const offsets: { frame: number; color: number; factor: number }[] = []
+    for (let k = 1; k <= count; k++) {
+      if (curF - k >= 0) offsets.push({ frame: curF - k, color: 0xef4444, factor: (count - k + 1) / count })
+      if (curF + k <= maxF) offsets.push({ frame: curF + k, color: 0x22c55e, factor: (count - k + 1) / count })
+    }
+
+    for (const ghost of offsets) {
+      const ghostBones = animationStore.armature.bones.map(b => ({
+        ...b,
+        position: { ...b.position },
+        rotation: { ...b.rotation },
+        scale: { ...b.scale }
+      }))
+
+      for (const track of animationStore.activeClip.tracks) {
+        if (track.targetType === 'bone') {
+          const b = ghostBones.find(x => x.id === track.targetId)
+          if (b) {
+            const sampled = sampleTrack(track, ghost.frame)
+            b.position = sampled.position
+            b.rotation = sampled.rotation
+            b.scale = sampled.scale
+          }
+        }
+      }
+
+      for (const meshObj of projectStore.meshes) {
+        if (!meshObj.visible) continue
+        const { geometry } = meshToThreeGeometry(
+          meshObj,
+          [],
+          [],
+          'flat',
+          { isPoseMode: true, bones: ghostBones }
+        )
+
+        const ghostMat = new THREE.MeshBasicMaterial({
+          color: ghost.color,
+          transparent: true,
+          opacity: baseOpacity * ghost.factor * 0.45,
+          wireframe: true,
+          depthTest: false
+        })
+
+        const ghostMesh = new THREE.Mesh(geometry, ghostMat)
+        ghostMesh.position.set(meshObj.position.x, meshObj.position.y, meshObj.position.z)
+        ghostMesh.rotation.set(
+          THREE.MathUtils.degToRad(meshObj.rotation.x),
+          THREE.MathUtils.degToRad(meshObj.rotation.y),
+          THREE.MathUtils.degToRad(meshObj.rotation.z)
+        )
+        ghostMesh.scale.set(meshObj.scale.x, meshObj.scale.y, meshObj.scale.z)
+        layers.gizmoGroup.add(ghostMesh)
+      }
     }
   }
 

@@ -96,6 +96,65 @@ function commitRenameBone(id: string) {
   editingItemId.value = null
 }
 
+const draggedMeshId = ref<string | null>(null)
+const dragOverTargetId = ref<string | null>(null)
+
+function onDragStartMesh(e: DragEvent, meshId: string) {
+  draggedMeshId.value = meshId
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', meshId)
+  }
+}
+
+function onDragOverMesh(e: DragEvent, targetId: string) {
+  e.preventDefault()
+  if (draggedMeshId.value && draggedMeshId.value !== targetId) {
+    dragOverTargetId.value = targetId
+  }
+}
+
+function onDragLeaveMesh() {
+  dragOverTargetId.value = null
+}
+
+function onDropOnMesh(e: DragEvent, targetId: string) {
+  e.preventDefault()
+  if (!draggedMeshId.value || draggedMeshId.value === targetId) {
+    draggedMeshId.value = null
+    dragOverTargetId.value = null
+    return
+  }
+
+  const child = projectStore.meshes.find(m => m.id === draggedMeshId.value)
+  const parent = projectStore.meshes.find(m => m.id === targetId)
+
+  if (child && parent) {
+    projectStore.recordState(`Parent ${child.name} to ${parent.name}`)
+    child.parentId = parent.id
+  }
+
+  draggedMeshId.value = null
+  dragOverTargetId.value = null
+}
+
+function unparentMesh(meshId: string) {
+  const mesh = projectStore.meshes.find(m => m.id === meshId)
+  if (mesh && mesh.parentId) {
+    projectStore.recordState(`Clear Parent for ${mesh.name}`)
+    mesh.parentId = undefined
+  }
+}
+
+function getParentMeshName(parentId?: string): string {
+  if (!parentId) return ''
+  const m = projectStore.meshes.find(x => x.id === parentId)
+  if (m) return m.name
+  const b = animationStore.armature.bones.find(x => x.id === parentId)
+  if (b) return b.name
+  return parentId
+}
+
 function handleAddBone() {
   if (animationStore.selectedBoneId) {
     animationStore.addChildBone(animationStore.selectedBoneId, `Bone_${animationStore.armature.bones.length + 1}`)
@@ -199,9 +258,18 @@ function handleAddBone() {
         <div 
           v-for="mesh in filteredMeshes" 
           :key="mesh.id"
+          draggable="true"
+          @dragstart="onDragStartMesh($event, mesh.id)"
+          @dragover="onDragOverMesh($event, mesh.id)"
+          @dragleave="onDragLeaveMesh"
+          @drop="onDropOnMesh($event, mesh.id)"
           @click="selectMesh(mesh.id, $event)"
           class="flex items-center justify-between px-2.5 py-1.5 rounded-xs cursor-pointer transition border text-xs"
-          :class="projectStore.selectedMeshIds.includes(mesh.id) ? 'bg-ui-active border-ui-accent/40 text-ui-textAccent' : 'bg-ui-surface/60 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover hover:text-ui-textAccent'"
+          :class="[
+            projectStore.selectedMeshIds.includes(mesh.id) ? 'bg-ui-active border-ui-accent/40 text-ui-textAccent' : 'bg-ui-surface/60 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover hover:text-ui-textAccent',
+            dragOverTargetId === mesh.id ? 'ring-2 ring-ui-accent bg-ui-accent/20' : '',
+            mesh.parentId ? 'ml-3' : ''
+          ]"
         >
           <div class="flex items-center space-x-2 flex-1 min-w-0 mr-1.5">
             <BlenderIcon name="mesh-cube" :size="14" :color="projectStore.selectedMeshIds.includes(mesh.id) ? 'currentColor' : '#8d939d'" />
@@ -215,9 +283,16 @@ function handleAddBone() {
               autoFocus
             />
             <div v-else class="flex flex-col min-w-0" @dblclick="startRename(mesh.id, mesh.name)">
-              <span class="font-mono font-bold text-[11px] truncate select-none">
-                {{ mesh.name }}
-              </span>
+              <div class="flex items-center gap-1.5 truncate">
+                <span class="font-mono font-bold text-[11px] truncate select-none">
+                  {{ mesh.name }}
+                </span>
+                <span v-if="mesh.parentId" class="text-[9px] text-amber-400/80 font-mono flex items-center gap-0.5">
+                  <span>↳</span>
+                  <span class="truncate">{{ getParentMeshName(mesh.parentId) }}</span>
+                  <button @click.stop="unparentMesh(mesh.id)" class="hover:text-rose-400 ml-0.5 font-bold" title="Unparent Object">×</button>
+                </span>
+              </div>
               <span 
                 class="font-mono text-[9px]"
                 :class="projectStore.selectedMeshIds.includes(mesh.id) ? 'opacity-80' : 'text-ui-textMuted'"
