@@ -83,6 +83,31 @@ const parentBoneName = computed(() => {
 
 const activeMesh = computed(() => projectStore.activeMesh)
 
+function startScrubVector(e: MouseEvent, targetObj: { x: number; y: number; z: number }, axis: 'x' | 'y' | 'z', step = 0.05, precision = 2) {
+  e.preventDefault()
+  const startX = e.clientX
+  const startVal = Number(targetObj[axis]) || 0
+
+  const onMouseMove = (moveEvent: MouseEvent) => {
+    const deltaX = moveEvent.clientX - startX
+    const mult = moveEvent.shiftKey ? 0.1 : 1.0
+    const newVal = Number((startVal + deltaX * step * mult).toFixed(precision))
+    targetObj[axis] = newVal
+    if (animationStore.autoKey) {
+      animationStore.recordCurrentKeyframe()
+    }
+  }
+
+  const onMouseUp = () => {
+    window.removeEventListener('mousemove', onMouseMove)
+    window.removeEventListener('mouseup', onMouseUp)
+    projectStore.recordState(`Adjust ${axis.toUpperCase()}`)
+  }
+
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('mouseup', onMouseUp)
+}
+
 const boneLength = computed({
   get: () => {
     if (!selectedBone.value) return 1.0
@@ -315,58 +340,67 @@ function setClipFps(fps: number) {
         </div>
 
         <!-- Position (world) -->
-        <div class="bg-ui-surface p-2 rounded-xs border border-ui-borderSubtle space-y-1.5">
-          <span class="text-[10px] text-ui-textMuted font-bold">Position (world):</span>
-          <div class="space-y-1">
-            <div class="flex items-center justify-between bg-ui-input px-2 py-1 rounded-xs border border-ui-borderDefault">
-              <span class="text-rose-500 font-bold text-[10px] w-4">X</span>
-              <input type="number" step="0.01" v-model.number="selectedBone.head.x" class="w-20 bg-transparent text-right text-ui-textPrimary focus:outline-none font-mono" />
+        <div class="bg-ui-surface p-2 rounded-xs border border-ui-borderSubtle space-y-1 font-sans">
+          <div class="flex items-center justify-between text-[10px]">
+            <span class="text-ui-textMuted font-semibold uppercase tracking-wider">Position (world)</span>
+            <span class="text-ui-textMuted/70 text-[9px]">Drag label</span>
+          </div>
+          <div class="grid grid-cols-3 gap-1">
+            <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault px-1.5 py-0.5 transition group">
+              <span @mousedown="startScrubVector($event, selectedBone.head, 'x', 0.05, 2)" class="text-rose-400 font-bold text-[10px] pr-1 cursor-ew-resize select-none hover:text-rose-300" title="Click and drag to scrub X">X</span>
+              <input type="number" step="0.01" v-model.number="selectedBone.head.x" class="w-full bg-transparent text-right text-ui-textPrimary focus:outline-none font-mono text-[11px]" />
             </div>
-            <div class="flex items-center justify-between bg-ui-input px-2 py-1 rounded-xs border border-ui-borderDefault">
-              <span class="text-emerald-500 font-bold text-[10px] w-4">Y</span>
-              <input type="number" step="0.01" v-model.number="selectedBone.head.y" class="w-20 bg-transparent text-right text-ui-textPrimary focus:outline-none font-mono" />
+            <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault px-1.5 py-0.5 transition group">
+              <span @mousedown="startScrubVector($event, selectedBone.head, 'y', 0.05, 2)" class="text-emerald-400 font-bold text-[10px] pr-1 cursor-ew-resize select-none hover:text-emerald-300" title="Click and drag to scrub Y">Y</span>
+              <input type="number" step="0.01" v-model.number="selectedBone.head.y" class="w-full bg-transparent text-right text-ui-textPrimary focus:outline-none font-mono text-[11px]" />
             </div>
-            <div class="flex items-center justify-between bg-ui-input px-2 py-1 rounded-xs border border-ui-borderDefault">
-              <span class="text-sky-500 font-bold text-[10px] w-4">Z</span>
-              <input type="number" step="0.01" v-model.number="selectedBone.head.z" class="w-20 bg-transparent text-right text-ui-textPrimary focus:outline-none font-mono" />
+            <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault px-1.5 py-0.5 transition group">
+              <span @mousedown="startScrubVector($event, selectedBone.head, 'z', 0.05, 2)" class="text-sky-400 font-bold text-[10px] pr-1 cursor-ew-resize select-none hover:text-sky-300" title="Click and drag to scrub Z">Z</span>
+              <input type="number" step="0.01" v-model.number="selectedBone.head.z" class="w-full bg-transparent text-right text-ui-textPrimary focus:outline-none font-mono text-[11px]" />
             </div>
           </div>
         </div>
 
         <!-- Rotation (°) -->
-        <div class="bg-ui-surface p-2 rounded-xs border border-ui-borderSubtle space-y-1.5">
-          <span class="text-[10px] text-ui-textMuted font-bold">Rotation (°):</span>
-          <div class="space-y-1">
-            <div class="flex items-center justify-between bg-ui-input px-2 py-1 rounded-xs border border-ui-borderDefault">
-              <span class="text-rose-500 font-bold text-[10px] w-4">X</span>
-              <input type="number" step="1" v-model.number="selectedBone.rotation.x" class="w-20 bg-transparent text-right text-ui-textPrimary focus:outline-none font-mono" />
+        <div class="bg-ui-surface p-2 rounded-xs border border-ui-borderSubtle space-y-1 font-sans">
+          <div class="flex items-center justify-between text-[10px]">
+            <span class="text-ui-textMuted font-semibold uppercase tracking-wider">Rotation (°)</span>
+            <span class="text-ui-textMuted/70 text-[9px]">Drag label</span>
+          </div>
+          <div class="grid grid-cols-3 gap-1">
+            <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault px-1.5 py-0.5 transition group">
+              <span @mousedown="startScrubVector($event, selectedBone.rotation, 'x', 0.5, 1)" class="text-rose-400 font-bold text-[10px] pr-1 cursor-ew-resize select-none hover:text-rose-300" title="Click and drag to scrub X">X</span>
+              <input type="number" step="1" v-model.number="selectedBone.rotation.x" class="w-full bg-transparent text-right text-ui-textPrimary focus:outline-none font-mono text-[11px]" />
             </div>
-            <div class="flex items-center justify-between bg-ui-input px-2 py-1 rounded-xs border border-ui-borderDefault">
-              <span class="text-emerald-500 font-bold text-[10px] w-4">Y</span>
-              <input type="number" step="1" v-model.number="selectedBone.rotation.y" class="w-20 bg-transparent text-right text-ui-textPrimary focus:outline-none font-mono" />
+            <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault px-1.5 py-0.5 transition group">
+              <span @mousedown="startScrubVector($event, selectedBone.rotation, 'y', 0.5, 1)" class="text-emerald-400 font-bold text-[10px] pr-1 cursor-ew-resize select-none hover:text-emerald-300" title="Click and drag to scrub Y">Y</span>
+              <input type="number" step="1" v-model.number="selectedBone.rotation.y" class="w-full bg-transparent text-right text-ui-textPrimary focus:outline-none font-mono text-[11px]" />
             </div>
-            <div class="flex items-center justify-between bg-ui-input px-2 py-1 rounded-xs border border-ui-borderDefault">
-              <span class="text-sky-500 font-bold text-[10px] w-4">Z</span>
-              <input type="number" step="1" v-model.number="selectedBone.rotation.z" class="w-20 bg-transparent text-right text-ui-textPrimary focus:outline-none font-mono" />
+            <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault px-1.5 py-0.5 transition group">
+              <span @mousedown="startScrubVector($event, selectedBone.rotation, 'z', 0.5, 1)" class="text-sky-400 font-bold text-[10px] pr-1 cursor-ew-resize select-none hover:text-sky-300" title="Click and drag to scrub Z">Z</span>
+              <input type="number" step="1" v-model.number="selectedBone.rotation.z" class="w-full bg-transparent text-right text-ui-textPrimary focus:outline-none font-mono text-[11px]" />
             </div>
           </div>
         </div>
 
         <!-- Translation Offsets (T.X, T.Y, T.Z) -->
-        <div class="bg-ui-surface p-2 rounded-xs border border-ui-borderSubtle space-y-1.5">
-          <span class="text-[10px] text-ui-textMuted font-bold">Translation Offsets (T):</span>
-          <div class="space-y-1">
-            <div class="flex items-center justify-between bg-ui-input px-2 py-1 rounded-xs border border-ui-borderDefault">
-              <span class="text-ui-textMuted text-[10px] w-8">T.X</span>
-              <input type="number" step="0.01" v-model.number="selectedBone.position.x" class="w-20 bg-transparent text-right text-ui-textPrimary focus:outline-none font-mono" />
+        <div class="bg-ui-surface p-2 rounded-xs border border-ui-borderSubtle space-y-1 font-sans">
+          <div class="flex items-center justify-between text-[10px]">
+            <span class="text-ui-textMuted font-semibold uppercase tracking-wider">Translation Offsets (T)</span>
+            <span class="text-ui-textMuted/70 text-[9px]">Drag label</span>
+          </div>
+          <div class="grid grid-cols-3 gap-1">
+            <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault px-1.5 py-0.5 transition group">
+              <span @mousedown="startScrubVector($event, selectedBone.position, 'x', 0.05, 2)" class="text-rose-400 font-bold text-[10px] pr-1 cursor-ew-resize select-none hover:text-rose-300" title="Click and drag to scrub T.X">X</span>
+              <input type="number" step="0.01" v-model.number="selectedBone.position.x" class="w-full bg-transparent text-right text-ui-textPrimary focus:outline-none font-mono text-[11px]" />
             </div>
-            <div class="flex items-center justify-between bg-ui-input px-2 py-1 rounded-xs border border-ui-borderDefault">
-              <span class="text-ui-textMuted text-[10px] w-8">T.Y</span>
-              <input type="number" step="0.01" v-model.number="selectedBone.position.y" class="w-20 bg-transparent text-right text-ui-textPrimary focus:outline-none font-mono" />
+            <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault px-1.5 py-0.5 transition group">
+              <span @mousedown="startScrubVector($event, selectedBone.position, 'y', 0.05, 2)" class="text-emerald-400 font-bold text-[10px] pr-1 cursor-ew-resize select-none hover:text-emerald-300" title="Click and drag to scrub T.Y">Y</span>
+              <input type="number" step="0.01" v-model.number="selectedBone.position.y" class="w-full bg-transparent text-right text-ui-textPrimary focus:outline-none font-mono text-[11px]" />
             </div>
-            <div class="flex items-center justify-between bg-ui-input px-2 py-1 rounded-xs border border-ui-borderDefault">
-              <span class="text-ui-textMuted text-[10px] w-8">T.Z</span>
-              <input type="number" step="0.01" v-model.number="selectedBone.position.z" class="w-20 bg-transparent text-right text-ui-textPrimary focus:outline-none font-mono" />
+            <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault px-1.5 py-0.5 transition group">
+              <span @mousedown="startScrubVector($event, selectedBone.position, 'z', 0.05, 2)" class="text-sky-400 font-bold text-[10px] pr-1 cursor-ew-resize select-none hover:text-sky-300" title="Click and drag to scrub T.Z">Z</span>
+              <input type="number" step="0.01" v-model.number="selectedBone.position.z" class="w-full bg-transparent text-right text-ui-textPrimary focus:outline-none font-mono text-[11px]" />
             </div>
           </div>
         </div>

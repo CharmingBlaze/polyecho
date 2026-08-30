@@ -91,6 +91,28 @@ function handleRemoveSocket(socketId: string) {
   projectStore.recordState('Remove Socket')
   animationStore.removeSocket(selectedBone.value.id, socketId)
 }
+
+function startScrubVector(e: MouseEvent, targetObj: { x: number; y: number; z: number }, axis: 'x' | 'y' | 'z', step = 0.05, precision = 2) {
+  e.preventDefault()
+  const startX = e.clientX
+  const startVal = Number(targetObj[axis]) || 0
+
+  const onMouseMove = (moveEvent: MouseEvent) => {
+    const deltaX = moveEvent.clientX - startX
+    const mult = moveEvent.shiftKey ? 0.1 : 1.0
+    const newVal = Number((startVal + deltaX * step * mult).toFixed(precision))
+    targetObj[axis] = newVal
+  }
+
+  const onMouseUp = () => {
+    window.removeEventListener('mousemove', onMouseMove)
+    window.removeEventListener('mouseup', onMouseUp)
+    projectStore.recordState(`Adjust ${axis.toUpperCase()}`)
+  }
+
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('mouseup', onMouseUp)
+}
 </script>
 
 <template>
@@ -174,18 +196,21 @@ function handleRemoveSocket(socketId: string) {
 
       <!-- Head Position -->
       <div class="space-y-1">
-        <div class="text-[10px] text-ui-textMuted font-semibold uppercase">Head Pivot</div>
+        <div class="flex items-center justify-between text-[10px]">
+          <span class="text-ui-textMuted font-semibold uppercase">Head Pivot</span>
+          <span class="text-ui-textMuted/70 text-[9px]">Drag label</span>
+        </div>
         <div class="grid grid-cols-3 gap-1">
-          <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5">
-            <span class="text-[10px] text-rose-400 font-bold mr-1">X</span>
+          <div class="flex items-center bg-ui-input border border-ui-borderSubtle hover:border-ui-borderDefault rounded-xs px-1.5 py-0.5 transition">
+            <span @mousedown="startScrubVector($event, selectedBone.head, 'x', 0.05, 2)" class="text-[10px] text-rose-400 font-bold mr-1 cursor-ew-resize select-none hover:text-rose-300" title="Click and drag to scrub X">X</span>
             <input type="number" step="0.1" v-model.number="selectedBone.head.x" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none font-mono" />
           </div>
-          <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5">
-            <span class="text-[10px] text-emerald-400 font-bold mr-1">Y</span>
+          <div class="flex items-center bg-ui-input border border-ui-borderSubtle hover:border-ui-borderDefault rounded-xs px-1.5 py-0.5 transition">
+            <span @mousedown="startScrubVector($event, selectedBone.head, 'y', 0.05, 2)" class="text-[10px] text-emerald-400 font-bold mr-1 cursor-ew-resize select-none hover:text-emerald-300" title="Click and drag to scrub Y">Y</span>
             <input type="number" step="0.1" v-model.number="selectedBone.head.y" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none font-mono" />
           </div>
-          <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5">
-            <span class="text-[10px] text-sky-400 font-bold mr-1">Z</span>
+          <div class="flex items-center bg-ui-input border border-ui-borderSubtle hover:border-ui-borderDefault rounded-xs px-1.5 py-0.5 transition">
+            <span @mousedown="startScrubVector($event, selectedBone.head, 'z', 0.05, 2)" class="text-[10px] text-sky-400 font-bold mr-1 cursor-ew-resize select-none hover:text-sky-300" title="Click and drag to scrub Z">Z</span>
             <input type="number" step="0.1" v-model.number="selectedBone.head.z" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none font-mono" />
           </div>
         </div>
@@ -193,18 +218,21 @@ function handleRemoveSocket(socketId: string) {
 
       <!-- Tail Position -->
       <div class="space-y-1">
-        <div class="text-[10px] text-ui-textMuted font-semibold uppercase">Tail Pivot</div>
+        <div class="flex items-center justify-between text-[10px]">
+          <span class="text-ui-textMuted font-semibold uppercase">Tail Pivot</span>
+          <span class="text-ui-textMuted/70 text-[9px]">Drag label</span>
+        </div>
         <div class="grid grid-cols-3 gap-1">
-          <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5">
-            <span class="text-[10px] text-rose-400 font-bold mr-1">X</span>
+          <div class="flex items-center bg-ui-input border border-ui-borderSubtle hover:border-ui-borderDefault rounded-xs px-1.5 py-0.5 transition">
+            <span @mousedown="startScrubVector($event, selectedBone.tail, 'x', 0.05, 2)" class="text-[10px] text-rose-400 font-bold mr-1 cursor-ew-resize select-none hover:text-rose-300" title="Click and drag to scrub X">X</span>
             <input type="number" step="0.1" v-model.number="selectedBone.tail.x" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none font-mono" />
           </div>
-          <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5">
-            <span class="text-[10px] text-emerald-400 font-bold mr-1">Y</span>
+          <div class="flex items-center bg-ui-input border border-ui-borderSubtle hover:border-ui-borderDefault rounded-xs px-1.5 py-0.5 transition">
+            <span @mousedown="startScrubVector($event, selectedBone.tail, 'y', 0.05, 2)" class="text-[10px] text-emerald-400 font-bold mr-1 cursor-ew-resize select-none hover:text-emerald-300" title="Click and drag to scrub Y">Y</span>
             <input type="number" step="0.1" v-model.number="selectedBone.tail.y" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none font-mono" />
           </div>
-          <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5">
-            <span class="text-[10px] text-sky-400 font-bold mr-1">Z</span>
+          <div class="flex items-center bg-ui-input border border-ui-borderSubtle hover:border-ui-borderDefault rounded-xs px-1.5 py-0.5 transition">
+            <span @mousedown="startScrubVector($event, selectedBone.tail, 'z', 0.05, 2)" class="text-[10px] text-sky-400 font-bold mr-1 cursor-ew-resize select-none hover:text-sky-300" title="Click and drag to scrub Z">Z</span>
             <input type="number" step="0.1" v-model.number="selectedBone.tail.z" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none font-mono" />
           </div>
         </div>
