@@ -52,6 +52,7 @@ const animationStore = useAnimationStore()
 const themeStore = useThemeStore()
 
 const containerRef = ref<HTMLDivElement | null>(null)
+const canvasMountRef = ref<HTMLDivElement | null>(null)
 const isWebGLContextLost = ref(false)
 const rendererInitError = ref<string | null>(null)
 const isRendererStarting = ref(false)
@@ -3730,6 +3731,8 @@ onUnmounted(() => {
   <div class="relative w-full h-full overflow-hidden bg-ui-root flex flex-col">
     <!-- 3D Canvas Container -->
     <div ref="containerRef" class="w-full h-full cursor-crosshair flex-1 min-h-0 relative">
+      <!-- Dedicated 3D Canvas Mount (Preserves Vue UI overlay and LightWave controls) -->
+      <div ref="canvasMountRef" class="absolute inset-0 w-full h-full z-0 pointer-events-auto"></div>
       <div
         v-if="isWebGLContextLost || rendererInitError"
         class="absolute inset-0 z-40 flex items-center justify-center bg-ui-root/90 backdrop-blur-sm"
