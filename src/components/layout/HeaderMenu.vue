@@ -267,15 +267,15 @@ function handleExitProject() {
       <!-- File Menu -->
       <div class="relative" @click.stop>
         <button 
-          class="px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
-          :class="{ 'bg-ui-hover text-ui-textPrimary': activeDropdown === 'file' }"
+          class="header-menu-btn px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
+          :class="{ 'bg-ui-hover text-ui-textPrimary is-active': activeDropdown === 'file' }"
           @click="toggleDropdown('file')"
           @mouseenter="activeDropdown && (activeDropdown = 'file')"
         >
           File
         </button>
 
-        <div v-if="activeDropdown === 'file'" class="absolute left-0 top-full mt-0.5 w-56 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+        <div v-if="activeDropdown === 'file'" class="header-dropdown-menu absolute left-0 top-full mt-0.5 w-56 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
           <button @click="$emit('new-project'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
             <span class="flex items-center gap-2"><Plus class="w-3.5 h-3.5 text-ui-accent" /> New Project...</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+N</span>
@@ -329,14 +329,14 @@ function handleExitProject() {
       <!-- Edit Menu -->
       <div class="relative" @click.stop>
         <button 
-          class="px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
-          :class="{ 'bg-ui-hover text-ui-textPrimary': activeDropdown === 'edit' }"
+          class="header-menu-btn px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
+          :class="{ 'bg-ui-hover text-ui-textPrimary is-active': activeDropdown === 'edit' }"
           @click="toggleDropdown('edit')"
           @mouseenter="activeDropdown && (activeDropdown = 'edit')"
         >
           Edit
         </button>
-        <div v-if="activeDropdown === 'edit'" class="absolute left-0 top-full mt-0.5 w-52 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+        <div v-if="activeDropdown === 'edit'" class="header-dropdown-menu absolute left-0 top-full mt-0.5 w-52 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
           <button @click="historyStore.undo(); closeDropdowns()" :disabled="historyStore.undoStack.length === 0" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between disabled:opacity-40">
             <span class="flex items-center gap-2"><Undo2 class="w-3.5 h-3.5 text-ui-textMuted" /> Undo</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+Z</span>
@@ -364,14 +364,14 @@ function handleExitProject() {
       <!-- Add Primitive & CAD Menu -->
       <div class="relative" @click.stop>
         <button 
-          class="px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
-          :class="{ 'bg-ui-hover text-ui-textPrimary': activeDropdown === 'add' }"
+          class="header-menu-btn px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
+          :class="{ 'bg-ui-hover text-ui-textPrimary is-active': activeDropdown === 'add' }"
           @click="toggleDropdown('add')"
           @mouseenter="activeDropdown && (activeDropdown = 'add')"
         >
           Add
         </button>
-        <div v-if="activeDropdown === 'add'" class="absolute left-0 top-full mt-0.5 w-64 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1.5 z-50 text-xs max-h-[85vh] overflow-y-auto">
+        <div v-if="activeDropdown === 'add'" class="header-dropdown-menu absolute left-0 top-full mt-0.5 w-64 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1.5 z-50 text-xs max-h-[85vh] overflow-y-auto">
           <!-- Placement Mode Selector -->
           <div class="px-2.5 py-1 border-b border-ui-borderSubtle mb-1 bg-ui-input/60">
             <div class="text-[10px] font-semibold text-ui-textMuted uppercase mb-1">Placement Mode</div>
@@ -465,14 +465,14 @@ function handleExitProject() {
       <!-- Mesh Topology & Modeling Menu -->
       <div class="relative" @click.stop>
         <button 
-          class="px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
-          :class="{ 'bg-ui-hover text-ui-textPrimary': activeDropdown === 'mesh' }"
+          class="header-menu-btn px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
+          :class="{ 'bg-ui-hover text-ui-textPrimary is-active': activeDropdown === 'mesh' }"
           @click="toggleDropdown('mesh')"
           @mouseenter="activeDropdown && (activeDropdown = 'mesh')"
         >
           Mesh
         </button>
-        <div v-if="activeDropdown === 'mesh'" class="absolute left-0 top-full mt-0.5 w-60 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+        <div v-if="activeDropdown === 'mesh'" class="header-dropdown-menu absolute left-0 top-full mt-0.5 w-60 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
           <div class="px-3 py-1 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">Transform & Extrude</div>
           <button @click="projectStore.performExtrude(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
             <span>Extrude Region</span>
@@ -524,14 +524,14 @@ function handleExitProject() {
       <!-- View & Window Menu (Panels, Layout, Cameras) -->
       <div class="relative" @click.stop>
         <button 
-          class="px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
-          :class="{ 'bg-ui-hover text-ui-textPrimary': activeDropdown === 'view' }"
+          class="header-menu-btn px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
+          :class="{ 'bg-ui-hover text-ui-textPrimary is-active': activeDropdown === 'view' }"
           @click="toggleDropdown('view')"
           @mouseenter="activeDropdown && (activeDropdown = 'view')"
         >
           View
         </button>
-        <div v-if="activeDropdown === 'view'" class="absolute left-0 top-full mt-0.5 w-64 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+        <div v-if="activeDropdown === 'view'" class="header-dropdown-menu absolute left-0 top-full mt-0.5 w-64 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
           <!-- Panels Toggle -->
           <div class="px-3 py-1 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">Panels & Windows</div>
           <button @click="layoutStore.toggleLeftToolbar(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">

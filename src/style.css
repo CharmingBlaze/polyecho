@@ -202,6 +202,85 @@
   color: #ffffff !important;
 }
 
+/* Classic Windows 95 Menu Bar Buttons (File, Edit, Add, etc.) */
+[data-theme="win95_classic"] .header-menu-btn {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  box-shadow: none !important;
+  color: #000000 !important;
+  border-radius: 0px !important;
+  padding: 2px 6px !important;
+}
+
+[data-theme="win95_classic"] .header-menu-btn:hover {
+  background: #d4d4d4 !important;
+}
+
+[data-theme="win95_classic"] .header-menu-btn.is-active,
+[data-theme="win95_classic"] .header-menu-btn:active {
+  border-top: 1px solid #808080 !important;
+  border-left: 1px solid #808080 !important;
+  border-right: 1px solid #ffffff !important;
+  border-bottom: 1px solid #ffffff !important;
+  box-shadow: inset 1px 1px 0px #000000 !important;
+  background-color: #c0c0c0 !important;
+  color: #000000 !important;
+}
+
+/* Classic Windows 95 Popup / Dropdown Menus (File Menu, Edit Menu, etc.) */
+[data-theme="win95_classic"] .header-dropdown-menu,
+[data-theme="win95_classic"] .dcc-dropdown-menu,
+[data-theme="win95_classic"] .context-menu {
+  background-color: #c0c0c0 !important;
+  border-top: 1px solid #ffffff !important;
+  border-left: 1px solid #ffffff !important;
+  border-right: 1px solid #000000 !important;
+  border-bottom: 1px solid #000000 !important;
+  box-shadow: inset 1px 1px 0px #dfdfdf, inset -1px -1px 0px #808080 !important;
+  padding: 2px !important;
+  border-radius: 0px !important;
+}
+
+[data-theme="win95_classic"] .header-dropdown-menu button,
+[data-theme="win95_classic"] .dcc-dropdown-menu button,
+[data-theme="win95_classic"] .context-menu button {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  box-shadow: none !important;
+  color: #000000 !important;
+  border-radius: 0px !important;
+  padding: 3px 12px 3px 6px !important;
+  margin: 0 !important;
+  font-family: "MS Sans Serif", Tahoma, "Segoe UI", Arial, sans-serif !important;
+  font-size: 11px !important;
+}
+
+[data-theme="win95_classic"] .header-dropdown-menu button:hover,
+[data-theme="win95_classic"] .dcc-dropdown-menu button:hover,
+[data-theme="win95_classic"] .context-menu button:hover {
+  background-color: #000080 !important;
+  color: #ffffff !important;
+  border: 1px solid transparent !important;
+  box-shadow: none !important;
+}
+
+[data-theme="win95_classic"] .header-dropdown-menu button:hover *,
+[data-theme="win95_classic"] .dcc-dropdown-menu button:hover *,
+[data-theme="win95_classic"] .context-menu button:hover * {
+  color: #ffffff !important;
+  fill: currentColor !important;
+}
+
+[data-theme="win95_classic"] .header-dropdown-menu .h-px,
+[data-theme="win95_classic"] .dcc-dropdown-menu .h-px,
+[data-theme="win95_classic"] .context-menu .h-px {
+  height: 0px !important;
+  border-top: 1px solid #808080 !important;
+  border-bottom: 1px solid #ffffff !important;
+  background: transparent !important;
+  margin: 3px 2px !important;
+}
+
 /* Classic Windows 95 Sunken Inset Input Fields & Dropdowns */
 [data-theme="win95_classic"] input[type="text"],
 [data-theme="win95_classic"] input[type="number"],
