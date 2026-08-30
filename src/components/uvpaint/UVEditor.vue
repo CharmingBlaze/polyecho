@@ -841,50 +841,141 @@ function onPointerMove(e: PointerEvent) {
     renderCanvas()
   }
 
-  // Scale Corners
+  // Scale Corners (Anchored at opposite corner, or center if Alt is held)
   else if (activeDrag === 'scale_corner') {
     const b = dragStartBounds
-    let factorX = 1, factorY = 1
+    const w = b.width || 0.0001
+    const h = b.height || 0.0001
 
-    if (activeCornerHandle === 0) {
-      factorX = (b.maxU - uv.u) / b.width
-      factorY = (uv.v - b.minV) / b.height
-    } else if (activeCornerHandle === 1) {
-      factorX = (uv.u - b.minU) / b.width
-      factorY = (uv.v - b.minV) / b.height
-    } else if (activeCornerHandle === 2) {
-      factorX = (uv.u - b.minU) / b.width
-      factorY = (b.maxV - uv.v) / b.height
-    } else if (activeCornerHandle === 3) {
-      factorX = (b.maxU - uv.u) / b.width
-      factorY = (b.maxV - uv.v) / b.height
+    if (e.altKey) {
+      // Symmetrical scale from Center
+      let factorX = 1, factorY = 1
+      if (activeCornerHandle === 0) {
+        factorX = (b.maxU - uv.u) / w
+        factorY = (uv.v - b.minV) / h
+      } else if (activeCornerHandle === 1) {
+        factorX = (uv.u - b.minU) / w
+        factorY = (uv.v - b.minV) / h
+      } else if (activeCornerHandle === 2) {
+        factorX = (uv.u - b.minU) / w
+        factorY = (b.maxV - uv.v) / h
+      } else if (activeCornerHandle === 3) {
+        factorX = (b.maxU - uv.u) / w
+        factorY = (b.maxV - uv.v) / h
+      }
+      if (e.shiftKey) {
+        const uniform = Math.max(Math.abs(factorX), Math.abs(factorY))
+        factorX = Math.sign(factorX || 1) * uniform
+        factorY = Math.sign(factorY || 1) * uniform
+      }
+      applyUVTransform((origU, origV) => ({
+        u: b.cU + (origU - b.cU) * factorX,
+        v: b.cV + (origV - b.cV) * factorY
+      }))
+    } else {
+      // Natural resize anchored at opposite corner
+      if (activeCornerHandle === 0) {
+        // Top-Left handle -> Anchor is Bottom-Right (b.maxU, b.minV)
+        let factorX = (b.maxU - uv.u) / w
+        let factorY = (uv.v - b.minV) / h
+        if (e.shiftKey) {
+          const uniform = Math.max(factorX, factorY)
+          factorX = uniform; factorY = uniform
+        }
+        applyUVTransform((origU, origV) => ({
+          u: b.maxU - (b.maxU - origU) * factorX,
+          v: b.minV + (origV - b.minV) * factorY
+        }))
+      } else if (activeCornerHandle === 1) {
+        // Top-Right handle -> Anchor is Bottom-Left (b.minU, b.minV)
+        let factorX = (uv.u - b.minU) / w
+        let factorY = (uv.v - b.minV) / h
+        if (e.shiftKey) {
+          const uniform = Math.max(factorX, factorY)
+          factorX = uniform; factorY = uniform
+        }
+        applyUVTransform((origU, origV) => ({
+          u: b.minU + (origU - b.minU) * factorX,
+          v: b.minV + (origV - b.minV) * factorY
+        }))
+      } else if (activeCornerHandle === 2) {
+        // Bottom-Right handle -> Anchor is Top-Left (b.minU, b.maxV)
+        let factorX = (uv.u - b.minU) / w
+        let factorY = (b.maxV - uv.v) / h
+        if (e.shiftKey) {
+          const uniform = Math.max(factorX, factorY)
+          factorX = uniform; factorY = uniform
+        }
+        applyUVTransform((origU, origV) => ({
+          u: b.minU + (origU - b.minU) * factorX,
+          v: b.maxV - (b.maxV - origV) * factorY
+        }))
+      } else if (activeCornerHandle === 3) {
+        // Bottom-Left handle -> Anchor is Top-Right (b.maxU, b.maxV)
+        let factorX = (b.maxU - uv.u) / w
+        let factorY = (b.maxV - uv.v) / h
+        if (e.shiftKey) {
+          const uniform = Math.max(factorX, factorY)
+          factorX = uniform; factorY = uniform
+        }
+        applyUVTransform((origU, origV) => ({
+          u: b.maxU - (b.maxU - origU) * factorX,
+          v: b.maxV - (b.maxV - origV) * factorY
+        }))
+      }
     }
-
-    if (e.shiftKey) {
-      const uniform = Math.max(factorX, factorY)
-      factorX = uniform; factorY = uniform
-    }
-
-    applyUVTransform((origU, origV) => ({
-      u: b.cU + (origU - b.cU) * factorX,
-      v: b.cV + (origV - b.cV) * factorY
-    }))
   }
 
-  // Stretch Edges
+  // Stretch Edges (Anchored at opposite edge, or center if Alt is held)
   else if (activeDrag === 'scale_edge') {
     const b = dragStartBounds
-    let factorX = 1, factorY = 1
+    const w = b.width || 0.0001
+    const h = b.height || 0.0001
 
-    if (activeEdgeHandle === 'top') factorY = (uv.v - b.minV) / b.height
-    else if (activeEdgeHandle === 'bottom') factorY = (b.maxV - uv.v) / b.height
-    else if (activeEdgeHandle === 'left') factorX = (b.maxU - uv.u) / b.width
-    else if (activeEdgeHandle === 'right') factorX = (uv.u - b.minU) / b.width
+    if (e.altKey) {
+      // Symmetrical scale from Center
+      let factorX = 1, factorY = 1
+      if (activeEdgeHandle === 'top') factorY = (uv.v - b.minV) / h
+      else if (activeEdgeHandle === 'bottom') factorY = (b.maxV - uv.v) / h
+      else if (activeEdgeHandle === 'left') factorX = (b.maxU - uv.u) / w
+      else if (activeEdgeHandle === 'right') factorX = (uv.u - b.minU) / w
 
-    applyUVTransform((origU, origV) => ({
-      u: b.cU + (origU - b.cU) * factorX,
-      v: b.cV + (origV - b.cV) * factorY
-    }))
+      applyUVTransform((origU, origV) => ({
+        u: b.cU + (origU - b.cU) * factorX,
+        v: b.cV + (origV - b.cV) * factorY
+      }))
+    } else {
+      // Natural edge resize anchored at opposite edge
+      if (activeEdgeHandle === 'right') {
+        // Anchor left edge (b.minU), stretch right edge
+        const factorX = (uv.u - b.minU) / w
+        applyUVTransform((origU, origV) => ({
+          u: b.minU + (origU - b.minU) * factorX,
+          v: origV
+        }))
+      } else if (activeEdgeHandle === 'left') {
+        // Anchor right edge (b.maxU), stretch left edge
+        const factorX = (b.maxU - uv.u) / w
+        applyUVTransform((origU, origV) => ({
+          u: b.maxU - (b.maxU - origU) * factorX,
+          v: origV
+        }))
+      } else if (activeEdgeHandle === 'top') {
+        // Anchor bottom edge (b.minV), stretch top edge
+        const factorY = (uv.v - b.minV) / h
+        applyUVTransform((origU, origV) => ({
+          u: origU,
+          v: b.minV + (origV - b.minV) * factorY
+        }))
+      } else if (activeEdgeHandle === 'bottom') {
+        // Anchor top edge (b.maxV), stretch bottom edge
+        const factorY = (b.maxV - uv.v) / h
+        applyUVTransform((origU, origV) => ({
+          u: origU,
+          v: b.maxV - (b.maxV - origV) * factorY
+        }))
+      }
+    }
   }
 
   // Rotate Selection
@@ -1030,7 +1121,7 @@ function onWheel(e: WheelEvent) {
   const oldZoom = zoom.value
   let newZoom = oldZoom * zoomFactor
   if (newZoom < 1) {
-    newZoom = Math.max(0.02, Math.round(newZoom * 100) / 100)
+    newZoom = Math.max(0.005, Math.round(newZoom * 1000) / 1000)
   } else {
     newZoom = Math.min(64, Math.round(newZoom * 10) / 10)
   }
@@ -1047,9 +1138,9 @@ function zoomOut() {
   const oldZoom = zoom.value
   let newZoom = oldZoom * 0.8
   if (newZoom < 1) {
-    newZoom = Math.max(0.02, Math.round(newZoom * 100) / 100)
+    newZoom = Math.max(0.005, Math.round(newZoom * 1000) / 1000)
   } else {
-    newZoom = Math.max(0.02, Math.round(newZoom * 10) / 10)
+    newZoom = Math.max(0.005, Math.round(newZoom * 10) / 10)
   }
   zoom.value = newZoom
   scheduleRender()
@@ -1059,7 +1150,7 @@ function zoomIn() {
   const oldZoom = zoom.value
   let newZoom = oldZoom * 1.25
   if (newZoom < 1) {
-    newZoom = Math.round(newZoom * 100) / 100
+    newZoom = Math.round(newZoom * 1000) / 1000
   } else {
     newZoom = Math.min(64, Math.round(newZoom * 10) / 10)
   }
@@ -1081,7 +1172,7 @@ function resetPanZoom() {
   if (fitZoom >= 1) {
     fitZoom = Math.min(32, Math.floor(fitZoom))
   } else {
-    fitZoom = Math.max(0.02, Math.round(fitZoom * 100) / 100)
+    fitZoom = Math.max(0.005, Math.round(fitZoom * 1000) / 1000)
   }
   zoom.value = fitZoom
 

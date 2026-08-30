@@ -465,7 +465,7 @@ function onWheel(e: WheelEvent) {
   const oldZoom = zoom.value
   let newZoom = oldZoom * zoomFactor
   if (newZoom < 1) {
-    newZoom = Math.max(0.02, Math.round(newZoom * 100) / 100)
+    newZoom = Math.max(0.005, Math.round(newZoom * 1000) / 1000)
   } else {
     newZoom = Math.min(64, Math.round(newZoom * 10) / 10)
   }
@@ -481,9 +481,9 @@ function zoomOut() {
   const oldZoom = zoom.value
   let newZoom = oldZoom * 0.8
   if (newZoom < 1) {
-    newZoom = Math.max(0.02, Math.round(newZoom * 100) / 100)
+    newZoom = Math.max(0.005, Math.round(newZoom * 1000) / 1000)
   } else {
-    newZoom = Math.max(0.02, Math.round(newZoom * 10) / 10)
+    newZoom = Math.max(0.005, Math.round(newZoom * 10) / 10)
   }
   zoom.value = newZoom
 }
@@ -492,7 +492,7 @@ function zoomIn() {
   const oldZoom = zoom.value
   let newZoom = oldZoom * 1.25
   if (newZoom < 1) {
-    newZoom = Math.round(newZoom * 100) / 100
+    newZoom = Math.round(newZoom * 1000) / 1000
   } else {
     newZoom = Math.min(64, Math.round(newZoom * 10) / 10)
   }
@@ -513,7 +513,7 @@ function resetPanZoom() {
   if (fitZoom >= 1) {
     fitZoom = Math.min(32, Math.floor(fitZoom))
   } else {
-    fitZoom = Math.max(0.02, Math.round(fitZoom * 100) / 100)
+    fitZoom = Math.max(0.005, Math.round(fitZoom * 1000) / 1000)
   }
   zoom.value = fitZoom
   panOffset.value = { x: 0, y: 0 }

@@ -33,11 +33,26 @@ function downloadFile(blob: Blob, filename: string) {
 }
 
 async function handleExportGLTF(binary: boolean) {
-  const tex = new THREE.CanvasTexture(projectStore.pixelBuffer.canvas)
   const textureMap = new Map<string, THREE.Texture>()
-  textureMap.set('default_material', tex)
+  for (const mat of projectStore.materials) {
+    const texObj = projectStore.getTextureForMaterial(mat.id)
+    if (texObj && texObj.pixelBuffer) {
+      const tex = new THREE.CanvasTexture(texObj.pixelBuffer.canvas)
+      textureMap.set(mat.id, tex)
+    }
+  }
+  if (textureMap.size === 0) {
+    const tex = new THREE.CanvasTexture(projectStore.pixelBuffer.canvas)
+    textureMap.set('default_material', tex)
+  }
 
-  const blob = await exportToGLTF(projectStore.meshes, textureMap, animationStore.armature.clips, binary)
+  const blob = await exportToGLTF(
+    projectStore.meshes, 
+    textureMap, 
+    animationStore.armature.clips, 
+    binary,
+    animationStore.armature
+  )
   downloadFile(blob, `${projectStore.projectName}.${binary ? 'glb' : 'gltf'}`)
   emit('close')
 }

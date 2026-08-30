@@ -66,6 +66,8 @@ export interface MeshObject {
   id: string
   name: string
   parentId?: string
+  parentBoneId?: string
+  parentType?: 'object' | 'bone' | 'vertex' | 'edge' | 'face'
   vertices: Vertex[]
   faces: Face[]
   position: Vector3D
