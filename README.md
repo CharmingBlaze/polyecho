@@ -24,7 +24,9 @@ PolyEcho combines four integrated workspaces:
 ## Features
 
 ### 1. Essential Low-Poly Modeling
-- **Selection Modes**: Object (`4`), Origin/Pivot (`5`), Vertex (`1`), Edge (`2`), Face (`3`).
+- **Selection Modes**: Object (`4`), Origin/Pivot (`5`), Bone Mode (`6`), Vertex (`1`), Edge (`2`), Face (`3`).
+- **Marquee Selection**: Perforated one-shot Box Select (`B` / `Ctrl+LMB Drag`) across 3D viewport, bones, and UV Editor.
+- **Viewport Shading & X-Ray**: Clean Textured, Solid, Wireframe, Retro PSX affine/jitter shaders, and Blender-style **X-Ray Mode (`Alt+Z`)** with in-viewport glassmorphic toggle and `Z` pie menu.
 - **Modal Operators**: Move (`G`), Rotate (`R`), Scale (`S`), Extrude (`E`), Inset (`I`), Bevel (`Ctrl+B`), Knife Topology (`K`), Loop Cut & Slide (`Ctrl+R`).
 - **Topology Operations**:
   - Merge at Center (`M`), First, Last, and Distance (Weld).
