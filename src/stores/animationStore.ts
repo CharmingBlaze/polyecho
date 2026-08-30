@@ -46,6 +46,8 @@ export const useAnimationStore = defineStore('animation', () => {
   const loopMode = ref<'loop' | 'once' | 'pingpong'>('loop')
   const showBones = ref<boolean>(true)
   const xrayBones = ref<boolean>(true)
+  const isTestPoseActive = ref<boolean>(false)
+  const clickToPlaceMode = ref<boolean>(false)
   const autoKey = ref<boolean>(true)
   const interpolationMode = ref<InterpolationType>('cubic')
   const onionSkin = ref<boolean>(false)
@@ -394,6 +396,204 @@ export const useAnimationStore = defineStore('animation', () => {
     let t = ((p.x - v1.x) * dx + (p.y - v1.y) * dy + (p.z - v1.z) * dz) / l2
     t = Math.max(0, Math.min(1, t))
     return Math.hypot(p.x - (v1.x + t * dx), p.y - (v1.y + t * dy), p.z - (v1.z + t * dz))
+  }
+
+  function getMeshBoundingBox(mesh: MeshObject) {
+    if (!mesh.vertices.length) {
+      return {
+        min: { x: mesh.position.x - 0.5, y: mesh.position.y - 0.5, z: mesh.position.z - 0.5 },
+        max: { x: mesh.position.x + 0.5, y: mesh.position.y + 0.5, z: mesh.position.z + 0.5 },
+        center: { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z },
+        size: { x: 1, y: 1, z: 1 }
+      }
+    }
+    let minX = Infinity, minY = Infinity, minZ = Infinity
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+    for (const v of mesh.vertices) {
+      const wx = mesh.position.x + v.position.x
+      const wy = mesh.position.y + v.position.y
+      const wz = mesh.position.z + v.position.z
+      if (wx < minX) minX = wx
+      if (wy < minY) minY = wy
+      if (wz < minZ) minZ = wz
+      if (wx > maxX) maxX = wx
+      if (wy > maxY) maxY = wy
+      if (wz > maxZ) maxZ = wz
+    }
+    return {
+      min: { x: minX, y: minY, z: minZ },
+      max: { x: maxX, y: maxY, z: maxZ },
+      center: { x: (minX + maxX) / 2, y: (minY + maxY) / 2, z: (minZ + maxZ) / 2 },
+      size: { x: Math.max(0.1, maxX - minX), y: Math.max(0.1, maxY - minY), z: Math.max(0.1, maxZ - minZ) }
+    }
+  }
+
+  function addBoneFromPoints(head: Vector3D, tail: Vector3D, parentId?: string | null, name = 'Bone'): Bone {
+    const newBone: Bone = {
+      id: genId('bone'),
+      name,
+      parentId: parentId || null,
+      head: { ...head },
+      tail: { ...tail },
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      childrenIds: []
+    }
+    armature.value.bones.push(newBone)
+    if (parentId) {
+      const p = armature.value.bones.find(b => b.id === parentId)
+      if (p && !p.childrenIds.includes(newBone.id)) {
+        p.childrenIds.push(newBone.id)
+      }
+    } else {
+      armature.value.rootBoneIds.push(newBone.id)
+    }
+    selectedBoneId.value = newBone.id
+    return newBone
+  }
+
+  function autoRigProp(meshId?: string): Bone | null {
+    const targetMesh = meshId ? projectStore.meshes.find(m => m.id === meshId) : projectStore.activeMesh || projectStore.meshes[0]
+    if (!targetMesh) return null
+
+    clearArmature()
+    const bbox = getMeshBoundingBox(targetMesh)
+    const height = Math.max(0.4, bbox.size.y)
+    
+    const rootBone = addBoneFromPoints(
+      { x: Number(bbox.center.x.toFixed(3)), y: Number(bbox.min.y.toFixed(3)), z: Number(bbox.center.z.toFixed(3)) },
+      { x: Number(bbox.center.x.toFixed(3)), y: Number((bbox.min.y + height).toFixed(3)), z: Number(bbox.center.z.toFixed(3)) },
+      null,
+      `${targetMesh.name}_Root`
+    )
+
+    parentMeshToBone(targetMesh.id, rootBone.id)
+    autoWeightMeshToBones(targetMesh)
+    return rootBone
+  }
+
+  function autoRigChain(meshId?: string, segments = 3): Bone[] {
+    const targetMesh = meshId ? projectStore.meshes.find(m => m.id === meshId) : projectStore.activeMesh || projectStore.meshes[0]
+    if (!targetMesh) return []
+
+    clearArmature()
+    const bbox = getMeshBoundingBox(targetMesh)
+    const segCount = Math.max(2, Math.min(6, segments))
+    const totalHeight = Math.max(0.6, bbox.size.y)
+    const segHeight = totalHeight / segCount
+
+    const createdBones: Bone[] = []
+    let prevBoneId: string | null = null
+
+    for (let i = 0; i < segCount; i++) {
+      const y0 = bbox.min.y + i * segHeight
+      const y1 = bbox.min.y + (i + 1) * segHeight
+      const boneName = i === 0 ? `${targetMesh.name}_Base` : `${targetMesh.name}_Seg_${i + 1}`
+
+      const bone = addBoneFromPoints(
+        { x: Number(bbox.center.x.toFixed(3)), y: Number(y0.toFixed(3)), z: Number(bbox.center.z.toFixed(3)) },
+        { x: Number(bbox.center.x.toFixed(3)), y: Number(y1.toFixed(3)), z: Number(bbox.center.z.toFixed(3)) },
+        prevBoneId,
+        boneName
+      )
+      createdBones.push(bone)
+      prevBoneId = bone.id
+    }
+
+    if (createdBones.length > 0) {
+      parentMeshToBone(targetMesh.id, createdBones[0].id)
+      autoWeightMeshToBones(targetMesh)
+      selectedBoneId.value = createdBones[0].id
+    }
+    return createdBones
+  }
+
+  function autoRigHinge(meshId?: string, edge: 'bottom-back' | 'left' | 'bottom' = 'bottom-back'): Bone | null {
+    const targetMesh = meshId ? projectStore.meshes.find(m => m.id === meshId) : projectStore.activeMesh || projectStore.meshes[0]
+    if (!targetMesh) return null
+
+    clearArmature()
+    const bbox = getMeshBoundingBox(targetMesh)
+    let head: Vector3D
+    let tail: Vector3D
+
+    if (edge === 'bottom-back') {
+      head = { x: Number(bbox.min.x.toFixed(3)), y: Number(bbox.min.y.toFixed(3)), z: Number(bbox.min.z.toFixed(3)) }
+      tail = { x: Number(bbox.max.x.toFixed(3)), y: Number(bbox.min.y.toFixed(3)), z: Number(bbox.min.z.toFixed(3)) }
+    } else if (edge === 'left') {
+      head = { x: Number(bbox.min.x.toFixed(3)), y: Number(bbox.min.y.toFixed(3)), z: Number(bbox.center.z.toFixed(3)) }
+      tail = { x: Number(bbox.min.x.toFixed(3)), y: Number(bbox.max.y.toFixed(3)), z: Number(bbox.center.z.toFixed(3)) }
+    } else {
+      head = { x: Number(bbox.min.x.toFixed(3)), y: Number(bbox.min.y.toFixed(3)), z: Number(bbox.center.z.toFixed(3)) }
+      tail = { x: Number(bbox.max.x.toFixed(3)), y: Number(bbox.min.y.toFixed(3)), z: Number(bbox.center.z.toFixed(3)) }
+    }
+
+    const hingeBone = addBoneFromPoints(head, tail, null, `${targetMesh.name}_Hinge`)
+    parentMeshToBone(targetMesh.id, hingeBone.id)
+    autoWeightMeshToBones(targetMesh)
+    return hingeBone
+  }
+
+  function autoRigMultiPart(): Bone[] {
+    const meshes = projectStore.meshes
+    if (meshes.length === 0) return []
+
+    clearArmature()
+    const sortedMeshes = [...meshes].sort((a, b) => {
+      const boxA = getMeshBoundingBox(a)
+      const boxB = getMeshBoundingBox(b)
+      const volA = boxA.size.x * boxA.size.y * boxA.size.z
+      const volB = boxB.size.x * boxB.size.y * boxB.size.z
+      return volB - volA // Largest volume first (main torso / root)
+    })
+
+    const rootMesh = sortedMeshes[0]
+    const rootBbox = getMeshBoundingBox(rootMesh)
+    const rootBone = addBoneFromPoints(
+      { x: Number(rootBbox.center.x.toFixed(3)), y: Number(rootBbox.min.y.toFixed(3)), z: Number(rootBbox.center.z.toFixed(3)) },
+      { x: Number(rootBbox.center.x.toFixed(3)), y: Number(rootBbox.max.y.toFixed(3)), z: Number(rootBbox.center.z.toFixed(3)) },
+      null,
+      `${rootMesh.name}_Root`
+    )
+    parentMeshToBone(rootMesh.id, rootBone.id)
+
+    const createdBones: Bone[] = [rootBone]
+
+    for (let i = 1; i < sortedMeshes.length; i++) {
+      const m = sortedMeshes[i]
+      const mBbox = getMeshBoundingBox(m)
+      const bone = addBoneFromPoints(
+        { x: Number(mBbox.center.x.toFixed(3)), y: Number(mBbox.min.y.toFixed(3)), z: Number(mBbox.center.z.toFixed(3)) },
+        { x: Number(mBbox.center.x.toFixed(3)), y: Number(mBbox.max.y.toFixed(3)), z: Number(mBbox.center.z.toFixed(3)) },
+        rootBone.id,
+        `${m.name}_Bone`
+      )
+      parentMeshToBone(m.id, bone.id)
+      createdBones.push(bone)
+    }
+
+    selectedBoneId.value = rootBone.id
+    return createdBones
+  }
+
+  function resetAllBonesToRest() {
+    for (const b of armature.value.bones) {
+      b.position = { x: 0, y: 0, z: 0 }
+      b.rotation = { x: 0, y: 0, z: 0 }
+      b.scale = { x: 1, y: 1, z: 1 }
+    }
+  }
+
+  function toggleTestPose(active?: boolean) {
+    if (active !== undefined) {
+      isTestPoseActive.value = active
+    } else {
+      isTestPoseActive.value = !isTestPoseActive.value
+    }
+    if (!isTestPoseActive.value) {
+      resetAllBonesToRest()
+    }
   }
 
   function clearArmature() {
@@ -1119,6 +1319,15 @@ export const useAnimationStore = defineStore('animation', () => {
     generateDoorOpenClose,
     generateTailWiggle,
     generateImpactShake,
+    isTestPoseActive,
+    clickToPlaceMode,
+    toggleTestPose,
+    resetAllBonesToRest,
+    autoRigProp,
+    autoRigChain,
+    autoRigHinge,
+    autoRigMultiPart,
+    addBoneFromPoints,
     setClipDuration,
     togglePlay,
     setFrame,

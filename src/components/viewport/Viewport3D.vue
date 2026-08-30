@@ -577,15 +577,18 @@ function rebuildBones() {
   }
   boneGroup.visible = true
 
+  const isPoseMode = toolStore.appMode === 'animate' || (toolStore.appMode === 'rig' && animationStore.isTestPoseActive)
+  const isXRay = animationStore.xrayBones !== false
+
   for (const bone of animationStore.armature.bones) {
     const start = new THREE.Vector3(
-      bone.head.x + (toolStore.appMode === 'animate' ? bone.position.x : 0),
-      bone.head.y + (toolStore.appMode === 'animate' ? bone.position.y : 0),
-      bone.head.z + (toolStore.appMode === 'animate' ? bone.position.z : 0)
+      bone.head.x + (isPoseMode ? bone.position.x : 0),
+      bone.head.y + (isPoseMode ? bone.position.y : 0),
+      bone.head.z + (isPoseMode ? bone.position.z : 0)
     )
 
     const baseVec = new THREE.Vector3(bone.tail.x - bone.head.x, bone.tail.y - bone.head.y, bone.tail.z - bone.head.z)
-    if (toolStore.appMode === 'animate') {
+    if (isPoseMode) {
       const rotEuler = new THREE.Euler(
         THREE.MathUtils.degToRad(bone.rotation.x),
         THREE.MathUtils.degToRad(bone.rotation.y),
@@ -632,9 +635,9 @@ function rebuildBones() {
     const octMat = new THREE.MeshBasicMaterial({
       color: isSelected ? 0xf59e0b : 0x06b6d4,
       transparent: true,
-      opacity: isSelected ? 0.65 : 0.35,
+      opacity: isSelected ? 0.75 : 0.4,
       side: THREE.DoubleSide,
-      depthTest: false,
+      depthTest: !isXRay,
       depthWrite: false
     })
     const octMesh = new THREE.Mesh(octGeom, octMat)
@@ -645,7 +648,7 @@ function rebuildBones() {
     const wireGeom = new THREE.WireframeGeometry(octGeom)
     const wireMat = new THREE.LineBasicMaterial({
       color: isSelected ? 0xfef08a : 0x38bdf8,
-      depthTest: false,
+      depthTest: !isXRay,
       depthWrite: false
     })
     const wire = new THREE.LineSegments(wireGeom, wireMat)
@@ -655,7 +658,7 @@ function rebuildBones() {
     const jointGeom = new THREE.SphereGeometry(Math.max(0.08, radius * 0.75), 8, 8)
     const jointMat = new THREE.MeshBasicMaterial({
       color: isSelected ? 0xf59e0b : 0x06b6d4,
-      depthTest: false,
+      depthTest: !isXRay,
       depthWrite: false
     })
     const jointMesh = new THREE.Mesh(jointGeom, jointMat)
@@ -672,6 +675,24 @@ function updateTransformGizmo() {
   if (toolStore.appMode === 'rig') {
     const bone = animationStore.selectedBone
     if (bone) {
+      if (animationStore.isTestPoseActive) {
+        transformProxy.position.set(
+          bone.head.x + bone.position.x,
+          bone.head.y + bone.position.y,
+          bone.head.z + bone.position.z
+        )
+        transformProxy.rotation.set(
+          THREE.MathUtils.degToRad(bone.rotation.x),
+          THREE.MathUtils.degToRad(bone.rotation.y),
+          THREE.MathUtils.degToRad(bone.rotation.z)
+        )
+        transformProxy.scale.set(bone.scale.x, bone.scale.y, bone.scale.z)
+        transformProxy.updateMatrixWorld()
+        transformControls.attach(transformProxy)
+        transformControls.setMode(toolStore.modelTool === 'rotate' ? 'rotate' : toolStore.modelTool === 'scale' ? 'scale' : 'translate')
+        return
+      }
+
       transformProxy.position.set(bone.head.x, bone.head.y, bone.head.z)
       transformProxy.rotation.set(0, 0, 0)
       transformProxy.scale.set(1, 1, 1)
@@ -951,6 +972,25 @@ function onGizmoObjectChange() {
   if (toolStore.appMode === 'rig') {
     const bone = animationStore.selectedBone
     if (bone) {
+      if (animationStore.isTestPoseActive) {
+        if (transformControls.getMode() === 'rotate') {
+          bone.rotation.x = Number(THREE.MathUtils.radToDeg(transformProxy.rotation.x).toFixed(2))
+          bone.rotation.y = Number(THREE.MathUtils.radToDeg(transformProxy.rotation.y).toFixed(2))
+          bone.rotation.z = Number(THREE.MathUtils.radToDeg(transformProxy.rotation.z).toFixed(2))
+        } else if (transformControls.getMode() === 'scale') {
+          bone.scale.x = Number(transformProxy.scale.x.toFixed(3))
+          bone.scale.y = Number(transformProxy.scale.y.toFixed(3))
+          bone.scale.z = Number(transformProxy.scale.z.toFixed(3))
+        } else {
+          bone.position.x = Number((transformProxy.position.x - bone.head.x).toFixed(3))
+          bone.position.y = Number((transformProxy.position.y - bone.head.y).toFixed(3))
+          bone.position.z = Number((transformProxy.position.z - bone.head.z).toFixed(3))
+        }
+        rebuildBones()
+        rebuildMeshes()
+        return
+      }
+
       if (transformControls.getMode() === 'rotate') {
         const baseVec = new THREE.Vector3(bone.tail.x - bone.head.x, bone.tail.y - bone.head.y, bone.tail.z - bone.head.z)
         const length = baseVec.length() || 1.2
@@ -1654,6 +1694,50 @@ function onPointerDown(event: PointerEvent) {
     }
     orbitControls.enabled = true
     return
+  }
+
+  if (toolStore.appMode === 'rig' && animationStore.clickToPlaceMode) {
+    const hits = raycaster.intersectObjects(layers.modelGroup.children, true)
+    let hitPoint: THREE.Vector3 | null = null
+    if (hits.length > 0) {
+      hitPoint = hits[0].point
+    } else {
+      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
+      const target = new THREE.Vector3()
+      if (raycaster.ray.intersectPlane(plane, target)) {
+        hitPoint = target
+      }
+    }
+
+    if (hitPoint) {
+      pointerDownHitMesh = true
+      const curBone = animationStore.selectedBone
+      if (!curBone) {
+        const rootBone = animationStore.addBoneFromPoints(
+          { x: Number(hitPoint.x.toFixed(3)), y: Number(hitPoint.y.toFixed(3)), z: Number(hitPoint.z.toFixed(3)) },
+          { x: Number(hitPoint.x.toFixed(3)), y: Number((hitPoint.y + 0.8).toFixed(3)), z: Number(hitPoint.z.toFixed(3)) },
+          null,
+          `Bone_${animationStore.armature.bones.length + 1}`
+        )
+        if (projectStore.activeMesh) {
+          animationStore.parentMeshToBone(projectStore.activeMesh.id, rootBone.id)
+          animationStore.autoWeightMeshToBones(projectStore.activeMesh)
+        }
+      } else {
+        animationStore.addBoneFromPoints(
+          { ...curBone.tail },
+          { x: Number(hitPoint.x.toFixed(3)), y: Number(hitPoint.y.toFixed(3)), z: Number(hitPoint.z.toFixed(3)) },
+          curBone.id,
+          `Bone_${animationStore.armature.bones.length + 1}`
+        )
+        if (projectStore.activeMesh) {
+          animationStore.autoWeightMeshToBones(projectStore.activeMesh)
+        }
+      }
+      rebuildBones()
+      rebuildMeshes()
+      return
+    }
   }
 
   if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate' || animationStore.showBones || toolStore.selectMode === 'bone') {
@@ -2575,6 +2659,12 @@ watch(() => toolStore.modelTool, updateTransformGizmo)
 watch(() => toolStore.viewport, rebuildMeshes, { deep: true })
 watch(() => animationStore.selectedBoneId, rebuildMeshes)
 watch(() => animationStore.showBones, rebuildBones)
+watch(() => animationStore.xrayBones, rebuildBones)
+watch(() => animationStore.isTestPoseActive, () => {
+  rebuildBones()
+  rebuildMeshes()
+  updateTransformGizmo()
+})
 watch(() => animationStore.currentFrame, rebuildMeshes)
 watch(() => toolStore.isBoxSelectActive, (active) => {
   if (orbitControls) {
