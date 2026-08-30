@@ -696,11 +696,60 @@ function rebuildBones() {
     jointMesh.renderOrder = 1001
     jointMesh.userData = { boneId: bone.id }
     boneGroup.add(jointMesh)
+
+    // Render Sockets on Bone
+    for (const s of bone.sockets || []) {
+      const isSockSelected = animationStore.selectedSocketId === s.id
+      const sockPos = start.clone().add(new THREE.Vector3(s.position.x, s.position.y, s.position.z))
+      
+      const sockGeom = new THREE.OctahedronGeometry(Math.max(0.06, radius * 0.5), 0)
+      const sockMat = new THREE.MeshBasicMaterial({
+        color: isSockSelected ? 0x38bdf8 : 0x0ea5e9,
+        wireframe: !isSockSelected,
+        depthTest: !isXRay,
+        depthWrite: false
+      })
+      const sockMesh = new THREE.Mesh(sockGeom, sockMat)
+      sockMesh.position.copy(sockPos)
+      sockMesh.renderOrder = 1002
+      sockMesh.userData = { socketId: s.id, boneId: bone.id }
+      boneGroup.add(sockMesh)
+    }
   }
 }
 
 function updateTransformGizmo() {
   if (isGizmoDragging) return
+
+  // Socket Gizmo in Rig / Animation workspace
+  if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
+    const selSock = animationStore.selectedSocket
+    if (selSock) {
+      const bone = selSock.bone
+      const s = selSock.socket
+      const isPoseMode = toolStore.appMode === 'animate' || animationStore.isTestPoseActive
+      let start: THREE.Vector3
+      if (isPoseMode) {
+        const boneMat = computeBoneWorldMatrix(bone, animationStore.armature.bones)
+        start = new THREE.Vector3(bone.head.x, bone.head.y, bone.head.z).applyMatrix4(boneMat)
+      } else {
+        start = new THREE.Vector3(bone.head.x, bone.head.y, bone.head.z)
+      }
+      const sockWorldPos = start.clone().add(new THREE.Vector3(s.position.x, s.position.y, s.position.z))
+
+      transformProxy.position.copy(sockWorldPos)
+      transformProxy.rotation.set(
+        THREE.MathUtils.degToRad(s.rotation.x),
+        THREE.MathUtils.degToRad(s.rotation.y),
+        THREE.MathUtils.degToRad(s.rotation.z)
+      )
+      transformProxy.scale.set(1, 1, 1)
+      transformProxy.updateMatrixWorld()
+      transformControls.attach(transformProxy)
+      transformControls.setMode(toolStore.modelTool === 'rotate' ? 'rotate' : 'translate')
+      return
+    }
+  }
 
   if (toolStore.appMode === 'rig') {
     const bone = animationStore.selectedBone
@@ -1009,6 +1058,34 @@ function onGizmoDragStart() {
 function onGizmoObjectChange() {
   const activeMesh = projectStore.activeMesh
   transformProxy.updateMatrixWorld()
+
+  // Socket gizmo drag in Rig / Animate
+  const selSock = animationStore.selectedSocket
+  if (selSock && (toolStore.appMode === 'rig' || toolStore.appMode === 'animate')) {
+    const bone = selSock.bone
+    const s = selSock.socket
+    const isPoseMode = toolStore.appMode === 'animate' || animationStore.isTestPoseActive
+    let start: THREE.Vector3
+    if (isPoseMode) {
+      const boneMat = computeBoneWorldMatrix(bone, animationStore.armature.bones)
+      start = new THREE.Vector3(bone.head.x, bone.head.y, bone.head.z).applyMatrix4(boneMat)
+    } else {
+      start = new THREE.Vector3(bone.head.x, bone.head.y, bone.head.z)
+    }
+
+    if (transformControls.getMode() === 'rotate') {
+      s.rotation.x = Number(THREE.MathUtils.radToDeg(transformProxy.rotation.x).toFixed(2))
+      s.rotation.y = Number(THREE.MathUtils.radToDeg(transformProxy.rotation.y).toFixed(2))
+      s.rotation.z = Number(THREE.MathUtils.radToDeg(transformProxy.rotation.z).toFixed(2))
+    } else {
+      s.position.x = Number((transformProxy.position.x - start.x).toFixed(3))
+      s.position.y = Number((transformProxy.position.y - start.y).toFixed(3))
+      s.position.z = Number((transformProxy.position.z - start.z).toFixed(3))
+    }
+    rebuildBones()
+    rebuildMeshes()
+    return
+  }
 
   if (toolStore.appMode === 'rig') {
     const bone = animationStore.selectedBone
@@ -2759,6 +2836,10 @@ watch(() => toolStore.selectMode, rebuildMeshes)
 watch(() => toolStore.modelTool, updateTransformGizmo)
 watch(() => toolStore.viewport, rebuildMeshes, { deep: true })
 watch(() => animationStore.selectedBoneId, rebuildMeshes)
+watch(() => animationStore.selectedSocketId, () => {
+  rebuildBones()
+  updateTransformGizmo()
+})
 watch(() => animationStore.showBones, rebuildBones)
 watch(() => animationStore.xrayBones, rebuildBones)
 watch(() => animationStore.isTestPoseActive, () => {

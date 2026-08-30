@@ -40,6 +40,7 @@ export const useAnimationStore = defineStore('animation', () => {
   })
 
   const selectedBoneId = ref<string | null>(null)
+  const selectedSocketId = ref<string | null>(null)
   const currentFrame = ref<number>(0)
   const isPlaying = ref<boolean>(false)
   const playbackSpeed = ref<number>(1)
@@ -79,6 +80,27 @@ export const useAnimationStore = defineStore('animation', () => {
   const selectedBone = computed(() => {
     return armature.value.bones.find(b => b.id === selectedBoneId.value) || null
   })
+
+  const selectedSocket = computed(() => {
+    if (!selectedSocketId.value) return null
+    for (const b of armature.value.bones) {
+      const s = (b.sockets || []).find(sock => sock.id === selectedSocketId.value)
+      if (s) return { socket: s, bone: b }
+    }
+    return null
+  })
+
+  function selectSocket(socketId: string | null) {
+    selectedSocketId.value = socketId
+    if (socketId) {
+      for (const b of armature.value.bones) {
+        if ((b.sockets || []).some(s => s.id === socketId)) {
+          selectedBoneId.value = b.id
+          break
+        }
+      }
+    }
+  }
 
   const currentTimeSeconds = computed({
     get: () => {
@@ -1314,6 +1336,9 @@ export const useAnimationStore = defineStore('animation', () => {
     deleteBone,
     renameBone,
     selectBone,
+    selectedSocketId,
+    selectedSocket,
+    selectSocket,
     getOrCreateTrack,
     addKeyframe,
     addChannelKeyframe,
