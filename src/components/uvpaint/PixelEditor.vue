@@ -54,6 +54,7 @@ const paintTools = [
 
 const cursorCoords = ref<{ x: number; y: number; hex: string } | null>(null)
 const panOffset = ref<{ x: number; y: number }>({ x: 0, y: 0 })
+const isSpacePressed = ref<boolean>(false)
 const isPanning = ref<boolean>(false)
 let panStart = { x: 0, y: 0 }
 let containerResizeObserver: ResizeObserver | null = null
@@ -183,49 +184,129 @@ function applyCustomResize() {
   renderCanvas()
 }
 
+function onKeyDown(e: KeyboardEvent) {
+  if (e.code === 'Space') {
+    isSpacePressed.value = true
+  }
+}
+
+function onKeyUp(e: KeyboardEvent) {
+  if (e.code === 'Space') {
+    isSpacePressed.value = false
+    isPanning.value = false
+  }
+}
+
+function applyAdjustment(action: string) {
+  const pb = projectStore.pixelBuffer
+  projectStore.recordState(`Apply ${action}`)
+
+  if (action === 'invert') pb.invertColors()
+  else if (action === 'brighten') pb.adjustBrightness(20)
+  else if (action === 'darken') pb.adjustBrightness(-20)
+  else if (action === 'grayscale') pb.desaturate()
+  else if (action === 'outline') pb.generateOutline(toolStore.primaryColor)
+  else if (action === 'flipH') pb.flip(true, false)
+  else if (action === 'flipV') pb.flip(false, true)
+  else if (action === 'rot90') pb.rotate(90)
+
+  projectStore.markTextureUpdated()
+  renderCanvas()
+}
+
 function getPixelCoords(e: PointerEvent): { x: number; y: number } | null {
   const canvas = canvasRef.value
   if (!canvas) return null
   const rect = canvas.getBoundingClientRect()
-  const px = Math.floor((e.clientX - rect.left) / zoom.value)
-  const py = Math.floor((e.clientY - rect.top) / zoom.value)
+  const mouseX = e.clientX - rect.left
+  const mouseY = e.clientY - rect.top
+  const ox = panOffset.value.x
+  const oy = panOffset.value.y
   const pb = projectStore.pixelBuffer
+
+  const px = Math.floor((mouseX - ox) / zoom.value)
+  const py = Math.floor((mouseY - oy) / zoom.value)
+
   if (px < 0 || px >= pb.width || py < 0 || py >= pb.height) return null
   return { x: px, y: py }
 }
 
 function renderCanvas() {
   const canvas = canvasRef.value
-  if (!canvas) return
+  const container = containerRef.value
+  if (!canvas || !container) return
   const ctx = canvas.getContext('2d')
   if (!ctx) return
 
-  const pb = projectStore.pixelBuffer
-  const width = pb.width * zoom.value
-  const height = pb.height * zoom.value
+  const w = container.clientWidth
+  const h = container.clientHeight
+  if (w <= 0 || h <= 0) return
 
-  if (canvas.width !== width || canvas.height !== height) {
-    canvas.width = width
-    canvas.height = height
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w
+    canvas.height = h
   }
 
-  ctx.imageSmoothingEnabled = false
-  ctx.clearRect(0, 0, width, height)
+  const pb = projectStore.pixelBuffer
 
-  // 1. Draw Checkerboard background for transparency
-  const checkSize = Math.max(6, Math.min(24, Math.round(zoom.value * 2)))
-  for (let y = 0; y < height; y += checkSize) {
-    for (let x = 0; x < width; x += checkSize) {
-      const isEven = (Math.floor(x / checkSize) + Math.floor(y / checkSize)) % 2 === 0
-      ctx.fillStyle = isEven ? '#1e2025' : '#141619'
-      ctx.fillRect(x, y, checkSize, checkSize)
+  // Initialize panOffset to center if uninitialized
+  if (panOffset.value.x === 0 && panOffset.value.y === 0) {
+    panOffset.value = {
+      x: Math.max(16, Math.round((w - pb.width * zoom.value) / 2)),
+      y: Math.max(16, Math.round((h - pb.height * zoom.value) / 2))
     }
   }
 
-  // 2. Draw actual pixel buffer
-  ctx.drawImage(pb.canvas, 0, 0, width, height)
+  const texW = pb.width * zoom.value
+  const texH = pb.height * zoom.value
+  const ox = panOffset.value.x
+  const oy = panOffset.value.y
 
-  // 3. Draw Interactive Live Shape Preview (Line, Rect, Circle)
+  ctx.imageSmoothingEnabled = false
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+  // 1. Draw Infinite Staging Yard Background
+  ctx.fillStyle = '#0b0d12'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+  // Subtle workspace background grid
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.025)'
+  ctx.lineWidth = 1
+  const stageGridSize = 32
+  const startX = (ox % stageGridSize + stageGridSize) % stageGridSize
+  const startY = (oy % stageGridSize + stageGridSize) % stageGridSize
+  for (let x = startX; x < canvas.width; x += stageGridSize) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke()
+  }
+  for (let y = startY; y < canvas.height; y += stageGridSize) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke()
+  }
+
+  // 2. Draw Checkerboard background for transparency
+  const checkSize = Math.max(4, Math.min(16, Math.round(zoom.value)))
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(ox, oy, texW, texH)
+  ctx.clip()
+
+  for (let y = 0; y < texH; y += checkSize) {
+    for (let x = 0; x < texW; x += checkSize) {
+      const isEven = (Math.floor(x / checkSize) + Math.floor(y / checkSize)) % 2 === 0
+      ctx.fillStyle = isEven ? '#1e2025' : '#141619'
+      ctx.fillRect(ox + x, oy + y, checkSize, checkSize)
+    }
+  }
+
+  // 3. Draw actual pixel buffer
+  ctx.drawImage(pb.canvas, ox, oy, texW, texH)
+  ctx.restore()
+
+  // 4. Draw Canvas Drop Shadow & Border Outline
+  ctx.strokeStyle = '#4f46e5'
+  ctx.lineWidth = 1.5
+  ctx.strokeRect(ox, oy, texW, texH)
+
+  // 5. Draw Interactive Live Shape Preview (Line, Rect, Circle)
   if (isDrawing && dragStartCoords && dragCurrentCoords) {
     const isSecondary = false
     const color = isSecondary ? toolStore.secondaryColor : toolStore.primaryColor
@@ -240,26 +321,26 @@ function renderCanvas() {
       ctx.strokeStyle = color
       ctx.lineWidth = Math.max(1, size * zoom.value)
       ctx.beginPath()
-      ctx.moveTo((dragStartCoords.x + 0.5) * zoom.value, (dragStartCoords.y + 0.5) * zoom.value)
-      ctx.lineTo((dragCurrentCoords.x + 0.5) * zoom.value, (dragCurrentCoords.y + 0.5) * zoom.value)
+      ctx.moveTo(ox + (dragStartCoords.x + 0.5) * zoom.value, oy + (dragStartCoords.y + 0.5) * zoom.value)
+      ctx.lineTo(ox + (dragCurrentCoords.x + 0.5) * zoom.value, oy + (dragCurrentCoords.y + 0.5) * zoom.value)
       ctx.stroke()
     } else if (toolStore.paintTool === 'rect') {
-      const minX = Math.min(dragStartCoords.x, dragCurrentCoords.x) * zoom.value
-      const minY = Math.min(dragStartCoords.y, dragCurrentCoords.y) * zoom.value
-      const w = (Math.abs(dragCurrentCoords.x - dragStartCoords.x) + 1) * zoom.value
-      const h = (Math.abs(dragCurrentCoords.y - dragStartCoords.y) + 1) * zoom.value
+      const minX = Math.min(dragStartCoords.x, dragCurrentCoords.x)
+      const minY = Math.min(dragStartCoords.y, dragCurrentCoords.y)
+      const rw = (Math.abs(dragCurrentCoords.x - dragStartCoords.x) + 1) * zoom.value
+      const rh = (Math.abs(dragCurrentCoords.y - dragStartCoords.y) + 1) * zoom.value
 
       if (filled) {
         ctx.fillStyle = color
-        ctx.fillRect(minX, minY, w, h)
+        ctx.fillRect(ox + minX * zoom.value, oy + minY * zoom.value, rw, rh)
       } else {
         ctx.strokeStyle = color
         ctx.lineWidth = Math.max(1, size * zoom.value)
-        ctx.strokeRect(minX, minY, w, h)
+        ctx.strokeRect(ox + minX * zoom.value, oy + minY * zoom.value, rw, rh)
       }
     } else if (toolStore.paintTool === 'circle') {
-      const cx = (dragStartCoords.x + 0.5) * zoom.value
-      const cy = (dragStartCoords.y + 0.5) * zoom.value
+      const cx = ox + (dragStartCoords.x + 0.5) * zoom.value
+      const cy = oy + (dragStartCoords.y + 0.5) * zoom.value
       const dx = (dragCurrentCoords.x - dragStartCoords.x) * zoom.value
       const dy = (dragCurrentCoords.y - dragStartCoords.y) * zoom.value
       const radius = Math.sqrt(dx * dx + dy * dy)
@@ -278,34 +359,34 @@ function renderCanvas() {
     ctx.restore()
   }
 
-  // 4. Pixel Grid (Only show when zoomed in enough)
+  // 6. Pixel Grid (Only show when zoomed in enough)
   if (showPixelGrid.value && zoom.value >= 4 && pb.width <= 512) {
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)'
     ctx.lineWidth = 1
     for (let x = 0; x <= pb.width; x++) {
       ctx.beginPath()
-      ctx.moveTo(x * zoom.value, 0)
-      ctx.lineTo(x * zoom.value, height)
+      ctx.moveTo(ox + x * zoom.value, oy)
+      ctx.lineTo(ox + x * zoom.value, oy + texH)
       ctx.stroke()
     }
     for (let y = 0; y <= pb.height; y++) {
       ctx.beginPath()
-      ctx.moveTo(0, y * zoom.value)
-      ctx.lineTo(width, y * zoom.value)
+      ctx.moveTo(ox, oy + y * zoom.value)
+      ctx.lineTo(ox + texW, oy + y * zoom.value)
       ctx.stroke()
     }
   }
 
-  // 5. UV Overlay
+  // 7. UV Wireframe Overlay
   if (showUvOverlay.value && projectStore.activeMesh) {
     ctx.strokeStyle = 'rgba(56, 189, 248, 0.85)'
     ctx.lineWidth = 1.2
     for (const face of projectStore.activeMesh.faces) {
       if (face.uvs.length < 3) continue
       ctx.beginPath()
-      ctx.moveTo(face.uvs[0].u * width, (1 - face.uvs[0].v) * height)
+      ctx.moveTo(ox + face.uvs[0].u * texW, oy + (1 - face.uvs[0].v) * texH)
       for (let i = 1; i < face.uvs.length; i++) {
-        ctx.lineTo(face.uvs[i].u * width, (1 - face.uvs[i].v) * height)
+        ctx.lineTo(ox + face.uvs[i].u * texW, oy + (1 - face.uvs[i].v) * texH)
       }
       ctx.closePath()
       ctx.stroke()
@@ -314,8 +395,8 @@ function renderCanvas() {
 }
 
 function onPointerDown(e: PointerEvent) {
-  // Middle click -> Pan
-  if (e.button === 1) {
+  // Middle click or Space+LMB -> Pan
+  if (e.button === 1 || (e.button === 0 && isSpacePressed.value)) {
     isPanning.value = true
     panStart = { x: e.clientX - panOffset.value.x, y: e.clientY - panOffset.value.y }
     return
@@ -335,7 +416,6 @@ function onPointerDown(e: PointerEvent) {
 
   const tool = toolStore.paintTool
   if (tool === 'line' || tool === 'rect' || tool === 'circle') {
-    // Shapes handle preview on drag, commit on pointerup
     renderCanvas()
     return
   }
@@ -350,6 +430,7 @@ function onPointerMove(e: PointerEvent) {
       x: e.clientX - panStart.x,
       y: e.clientY - panStart.y
     }
+    renderCanvas()
     return
   }
 
@@ -383,42 +464,41 @@ function onPointerUp(e: PointerEvent) {
     return
   }
 
-  if (isDrawing) {
-    isDrawing = false
+  if (!isDrawing) return
+  isDrawing = false
 
-    const tool = toolStore.paintTool
-    const pb = projectStore.pixelBuffer
+  const coords = getPixelCoords(e) || dragCurrentCoords
+  const tool = toolStore.paintTool
+
+  if (coords && dragStartCoords && (tool === 'line' || tool === 'rect' || tool === 'circle')) {
+    projectStore.recordState(`Draw ${tool}`)
     const isSecondary = e.button === 2
     const color = isSecondary ? toolStore.secondaryColor : toolStore.primaryColor
     const size = toolStore.brushSize
     const opacity = toolStore.brushOpacity
     const filled = toolStore.brushFilled
+    const pb = projectStore.pixelBuffer
 
-    if (dragStartCoords && dragCurrentCoords) {
-      if (tool === 'line') {
-        projectStore.recordState('Draw Line')
-        pb.drawLine(dragStartCoords.x, dragStartCoords.y, dragCurrentCoords.x, dragCurrentCoords.y, color, size, opacity)
-      } else if (tool === 'rect') {
-        projectStore.recordState('Draw Rectangle')
-        pb.drawRect(dragStartCoords.x, dragStartCoords.y, dragCurrentCoords.x, dragCurrentCoords.y, color, size, filled, opacity)
-      } else if (tool === 'circle') {
-        projectStore.recordState('Draw Circle')
-        const dx = dragCurrentCoords.x - dragStartCoords.x
-        const dy = dragCurrentCoords.y - dragStartCoords.y
-        const radius = Math.sqrt(dx * dx + dy * dy)
-        pb.drawCircle(dragStartCoords.x, dragStartCoords.y, radius, color, size, filled, opacity)
-      }
+    if (tool === 'line') {
+      pb.drawLine(dragStartCoords.x, dragStartCoords.y, coords.x, coords.y, color, size, opacity)
+    } else if (tool === 'rect') {
+      pb.drawRect(dragStartCoords.x, dragStartCoords.y, coords.x, coords.y, color, size, filled, opacity)
+    } else if (tool === 'circle') {
+      const dx = coords.x - dragStartCoords.x
+      const dy = coords.y - dragStartCoords.y
+      const radius = Math.round(Math.sqrt(dx * dx + dy * dy))
+      pb.drawCircle(dragStartCoords.x, dragStartCoords.y, radius, color, size, filled, opacity)
     }
-
-    dragStartCoords = null
-    dragCurrentCoords = null
 
     projectStore.markTextureUpdated()
     renderCanvas()
   }
+
+  dragStartCoords = null
+  dragCurrentCoords = null
 }
 
-function drawPixel(x: number, y: number, isSecondary: boolean = false) {
+function drawPixel(x: number, y: number, isSecondary = false) {
   const pb = projectStore.pixelBuffer
   const color = isSecondary ? toolStore.secondaryColor : toolStore.primaryColor
   const size = toolStore.brushSize
@@ -445,23 +525,6 @@ function drawPixel(x: number, y: number, isSecondary: boolean = false) {
   renderCanvas()
 }
 
-function applyAdjustment(action: string) {
-  const pb = projectStore.pixelBuffer
-  projectStore.recordState(`Apply ${action}`)
-
-  if (action === 'invert') pb.invertColors()
-  else if (action === 'brighten') pb.adjustBrightness(20)
-  else if (action === 'darken') pb.adjustBrightness(-20)
-  else if (action === 'grayscale') pb.desaturate()
-  else if (action === 'outline') pb.generateOutline(toolStore.primaryColor)
-  else if (action === 'flipH') pb.flip(true, false)
-  else if (action === 'flipV') pb.flip(false, true)
-  else if (action === 'rot90') pb.rotate(90)
-
-  projectStore.markTextureUpdated()
-  renderCanvas()
-}
-
 function onWheel(e: WheelEvent) {
   e.preventDefault()
   if (e.shiftKey) {
@@ -472,16 +535,16 @@ function onWheel(e: WheelEvent) {
   }
 
   const rect = containerRef.value?.getBoundingClientRect()
-  const mouseX = rect ? e.clientX - rect.left - rect.width / 2 : panOffset.value.x
-  const mouseY = rect ? e.clientY - rect.top - rect.height / 2 : panOffset.value.y
+  const mouseX = rect ? e.clientX - rect.left : panOffset.value.x
+  const mouseY = rect ? e.clientY - rect.top : panOffset.value.y
 
   const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85
   const oldZoom = zoom.value
-  let newZoom = oldZoom * zoomFactor
+  let newZoom = Math.max(0.25, Math.min(64, oldZoom * zoomFactor))
   if (newZoom < 1) {
-    newZoom = Math.max(0.005, Math.round(newZoom * 1000) / 1000)
+    newZoom = Math.max(0.1, Math.round(newZoom * 100) / 100)
   } else {
-    newZoom = Math.min(64, Math.round(newZoom * 10) / 10)
+    newZoom = Math.round(newZoom * 10) / 10
   }
 
   if (newZoom !== oldZoom) {
@@ -489,52 +552,52 @@ function onWheel(e: WheelEvent) {
     panOffset.value.x = mouseX - (mouseX - panOffset.value.x) * (newZoom / oldZoom)
     panOffset.value.y = mouseY - (mouseY - panOffset.value.y) * (newZoom / oldZoom)
     zoom.value = newZoom
+    renderCanvas()
   }
 }
 
 function zoomOut() {
   isFitToView.value = false
   const oldZoom = zoom.value
-  let newZoom = oldZoom * 0.8
-  if (newZoom < 1) {
-    newZoom = Math.max(0.005, Math.round(newZoom * 1000) / 1000)
-  } else {
-    newZoom = Math.max(0.005, Math.round(newZoom * 10) / 10)
-  }
+  let newZoom = Math.max(0.25, oldZoom * 0.8)
+  if (newZoom < 1) newZoom = Math.round(newZoom * 100) / 100
+  else newZoom = Math.round(newZoom * 10) / 10
   zoom.value = newZoom
+  renderCanvas()
 }
 
 function zoomIn() {
   isFitToView.value = false
   const oldZoom = zoom.value
-  let newZoom = oldZoom * 1.25
-  if (newZoom < 1) {
-    newZoom = Math.round(newZoom * 1000) / 1000
-  } else {
-    newZoom = Math.min(64, Math.round(newZoom * 10) / 10)
-  }
+  let newZoom = Math.min(64, oldZoom * 1.25)
+  if (newZoom < 1) newZoom = Math.round(newZoom * 100) / 100
+  else newZoom = Math.round(newZoom * 10) / 10
   zoom.value = newZoom
+  renderCanvas()
 }
 
 function resetPanZoom() {
-  if (!containerRef.value) {
-    panOffset.value = { x: 0, y: 0 }
-    return
-  }
+  if (!containerRef.value) return
   const w = containerRef.value.clientWidth
   const h = containerRef.value.clientHeight
+  const pb = projectStore.pixelBuffer
+  if (w <= 0 || h <= 0) return
+
   const targetW = w * 0.78
   const targetH = h * 0.78
-  const pb = projectStore.pixelBuffer
   let fitZoom = Math.min(targetW / pb.width, targetH / pb.height)
   if (fitZoom >= 1) {
-    fitZoom = Math.min(32, Math.floor(fitZoom))
+    fitZoom = Math.floor(fitZoom)
   } else {
-    fitZoom = Math.max(0.005, Math.round(fitZoom * 1000) / 1000)
+    fitZoom = Math.max(0.1, Math.round(fitZoom * 100) / 100)
   }
-  zoom.value = fitZoom
+
+  zoom.value = Math.max(1, fitZoom)
+  panOffset.value = {
+    x: Math.max(16, Math.round((w - pb.width * zoom.value) / 2)),
+    y: Math.max(16, Math.round((h - pb.height * zoom.value) / 2))
+  }
   isFitToView.value = true
-  panOffset.value = { x: 0, y: 0 }
   renderCanvas()
 }
 
@@ -545,6 +608,8 @@ watch(showUvOverlay, renderCanvas)
 
 onMounted(() => {
   window.addEventListener('click', closeDropdowns)
+  window.addEventListener('keydown', onKeyDown)
+  window.addEventListener('keyup', onKeyUp)
   nextTick(() => {
     resetPanZoom()
     if (containerRef.value) {
@@ -558,6 +623,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('click', closeDropdowns)
+  window.removeEventListener('keydown', onKeyDown)
+  window.removeEventListener('keyup', onKeyUp)
   containerResizeObserver?.disconnect()
 })
 
