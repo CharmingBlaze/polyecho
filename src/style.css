@@ -410,9 +410,148 @@
 }
 
 /* --------------------------------------------------------------------------
-   5. LIGHTWAVE 3D CLASSIC (Warm Amber Highlights & Slate Docks)
+   5. LIGHTWAVE 3D CLASSIC (NewTek Studio Slate & Amber Glow)
    -------------------------------------------------------------------------- */
-[data-theme="lightwave_3d"] aside > div:first-child {
+[data-theme="lightwave_3d"] {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --ui-radius-xs: 3px;
+  --ui-radius-sm: 4px;
+  --ui-radius-md: 5px;
+}
+
+/* LightWave Studio Panel & Toolbar Frames */
+[data-theme="lightwave_3d"] aside,
+[data-theme="lightwave_3d"] .bg-ui-panel {
+  background-color: #242831 !important;
+  border-color: #383f4e !important;
+}
+
+/* LightWave Header & Dock Bars */
+[data-theme="lightwave_3d"] header,
+[data-theme="lightwave_3d"] .bg-ui-header {
+  background: linear-gradient(180deg, #2a2f3b 0%, #20242d 100%) !important;
+  border-bottom: 1px solid #3d4554 !important;
+}
+
+/* LightWave Iconic Block Buttons */
+[data-theme="lightwave_3d"] button:not(.header-menu-btn):not(.bg-ui-accent) {
+  background: linear-gradient(180deg, #363c4a 0%, #2b313d 100%);
+  border: 1px solid #485264 !important;
+  border-radius: 3px !important;
+  color: #e4e8ee !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  font-weight: 500;
+  transition: all 0.1s ease-in-out;
+}
+
+[data-theme="lightwave_3d"] button:not(.header-menu-btn):hover {
+  background: linear-gradient(180deg, #444c5c 0%, #353c4b 100%) !important;
+  border-color: #606d84 !important;
+  color: #ffffff !important;
+}
+
+/* LightWave Active Tool Selection (Glowing Copper / Amber Gold) */
+[data-theme="lightwave_3d"] button.bg-ui-accent,
+[data-theme="lightwave_3d"] .bg-ui-active,
+[data-theme="lightwave_3d"] button.is-active,
+[data-theme="lightwave_3d"] button.bg-ui-active {
+  background: linear-gradient(180deg, #e68a2e 0%, #c46816 100%) !important;
+  border: 1px solid #f59e0b !important;
+  color: #ffffff !important;
+  font-weight: bold !important;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.4), 0 0 6px rgba(217, 130, 43, 0.4) !important;
+}
+
+[data-theme="lightwave_3d"] button.bg-ui-accent *,
+[data-theme="lightwave_3d"] .bg-ui-active * {
+  color: #ffffff !important;
+}
+
+/* LightWave Top Workspace Switcher Tabs (Layout, Modeling, UV/Paint, Rigging, Animation) */
+[data-theme="lightwave_3d"] header .bg-ui-input {
+  background: #1c1f26 !important;
+  border: 1px solid #383f4e !important;
+  padding: 2px !important;
+  border-radius: 4px !important;
+}
+
+[data-theme="lightwave_3d"] header .bg-ui-input button {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: #9aa5b6 !important;
+  box-shadow: none !important;
+  border-radius: 3px !important;
+  font-weight: 600 !important;
+}
+
+[data-theme="lightwave_3d"] header .bg-ui-input button.bg-ui-accent {
+  background: linear-gradient(180deg, #d9822b 0%, #b86618 100%) !important;
+  color: #ffffff !important;
+  border: 1px solid #f59e0b !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4), 0 0 8px rgba(217, 130, 43, 0.35) !important;
+}
+
+/* LightWave Viewport Navigation Dock Buttons (Top-Right Icons) */
+[data-theme="lightwave_3d"] [title*="Pan View"],
+[data-theme="lightwave_3d"] [title*="Orbit 3D View"],
+[data-theme="lightwave_3d"] [title*="Zoom View"],
+[data-theme="lightwave_3d"] [title*="Center View"] {
+  background: #252a34 !important;
+  border-color: #434b5c !important;
+}
+
+[data-theme="lightwave_3d"] [title*="Pan View"]:hover,
+[data-theme="lightwave_3d"] [title*="Orbit 3D View"]:hover,
+[data-theme="lightwave_3d"] [title*="Zoom View"]:hover,
+[data-theme="lightwave_3d"] [title*="Center View"]:hover {
+  background: #373e4d !important;
+  color: #00c4cc !important;
+}
+
+/* LightWave Dropdown Menus */
+[data-theme="lightwave_3d"] .header-dropdown-menu,
+[data-theme="lightwave_3d"] .dcc-dropdown-menu {
+  background-color: #21252d !important;
+  border: 1px solid #485264 !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(217, 130, 43, 0.15) !important;
+  border-radius: 4px !important;
+}
+
+[data-theme="lightwave_3d"] .header-dropdown-menu button:hover {
+  background: linear-gradient(90deg, #d9822b 0%, #b86618 100%) !important;
+  color: #ffffff !important;
+  border-radius: 2px !important;
+}
+
+/* LightWave Sunken Inputs & Property Numeric Controls */
+[data-theme="lightwave_3d"] input[type="text"],
+[data-theme="lightwave_3d"] input[type="number"],
+[data-theme="lightwave_3d"] select,
+[data-theme="lightwave_3d"] textarea {
+  background-color: #17191f !important;
+  border: 1px solid #3d4554 !important;
+  color: #f1f5f9 !important;
+  border-radius: 3px !important;
+}
+
+[data-theme="lightwave_3d"] input:focus,
+[data-theme="lightwave_3d"] select:focus {
+  border-color: #d9822b !important;
+  box-shadow: 0 0 0 1px rgba(217, 130, 43, 0.6) !important;
+}
+
+/* LightWave Section Headers (Orange / Amber Left Tag) */
+[data-theme="lightwave_3d"] aside > div:first-child,
+[data-theme="lightwave_3d"] .modal-header {
   border-left: 3px solid #d9822b !important;
+  background: linear-gradient(90deg, #2b313d 0%, #20242c 100%) !important;
+  color: #e4e8ee !important;
+}
+
+/* LightWave Status Bar */
+[data-theme="lightwave_3d"] footer {
+  background: #1e2127 !important;
+  border-top: 1px solid #363d4a !important;
+  color: #9aa5b6 !important;
 }
 
