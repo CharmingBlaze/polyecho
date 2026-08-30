@@ -203,8 +203,78 @@ function setClipFps(fps: number) {
       </div>
     </div>
 
-    <!-- TAB 1: BONE PROPERTIES (GLB Animator Style) -->
+    <!-- TAB 1: BONE PROPERTIES & POSE MODE -->
     <div v-show="activeTab === 'bone'" class="space-y-3">
+      <!-- Pose Actions Toolbar -->
+      <div class="bg-ui-surface p-2 rounded-xs border border-ui-borderSubtle space-y-1.5">
+        <div class="flex items-center justify-between text-[10px]">
+          <span class="text-ui-textMuted font-bold uppercase">Pose & Keying</span>
+          <span class="text-amber-400 font-bold">Pose Mode Active</span>
+        </div>
+        <div class="grid grid-cols-3 gap-1">
+          <button 
+            @click="animationStore.recordCurrentKeyframe()"
+            :disabled="!selectedBone"
+            class="py-1 px-1.5 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-bold text-[10px] flex items-center justify-center gap-1 shadow-xs transition disabled:opacity-40"
+            title="Insert keyframe for selected bone (K)"
+          >
+            <Plus class="w-3 h-3" />
+            <span>Key (K)</span>
+          </button>
+
+          <button 
+            @click="animationStore.recordAllBonesKeyframe()"
+            class="py-1 px-1.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textPrimary rounded-xs font-bold text-[10px] flex items-center justify-center gap-1 transition"
+            title="Insert keyframe for all bones in skeleton"
+          >
+            <span>Key All</span>
+          </button>
+
+          <button 
+            @click="animationStore.resetPose()"
+            class="py-1 px-1.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary rounded-xs font-bold text-[10px] flex items-center justify-center gap-1 transition"
+            title="Reset active bone pose (Alt+R)"
+          >
+            <span>Reset (Alt+R)</span>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-2 gap-1 pt-1 border-t border-ui-borderSubtle">
+          <button 
+            @click="animationStore.copyPose()"
+            class="py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary rounded-xs text-[9px] font-bold"
+          >
+            Copy Pose
+          </button>
+          <button 
+            @click="animationStore.pastePose()"
+            class="py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary rounded-xs text-[9px] font-bold"
+          >
+            Paste Pose
+          </button>
+        </div>
+      </div>
+
+      <!-- Skeleton Bone Quick Selector -->
+      <div v-if="animationStore.armature.bones.length > 0" class="bg-ui-surface p-2 rounded-xs border border-ui-borderSubtle space-y-1.5">
+        <span class="text-[10px] text-ui-textMuted font-bold uppercase flex items-center justify-between">
+          <span>Skeleton Bones</span>
+          <span class="text-ui-textSecondary">{{ animationStore.armature.bones.length }} Bones</span>
+        </span>
+        <div class="space-y-0.5 max-h-28 overflow-y-auto">
+          <button 
+            v-for="b in animationStore.armature.bones" 
+            :key="b.id"
+            @click="animationStore.selectBone(b.id)"
+            class="w-full px-2 py-1 rounded-xs text-left text-xs font-bold flex items-center gap-1.5 transition"
+            :class="animationStore.selectedBoneId === b.id ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40' : 'bg-ui-input text-ui-textSecondary hover:bg-ui-hover'"
+          >
+            <BlenderIcon name="bone" :size="11" :color="animationStore.selectedBoneId === b.id ? '#f59e0b' : '#94a3b8'" />
+            <span class="truncate">{{ b.name }}</span>
+          </button>
+        </div>
+      </div>
+
       <div v-if="selectedBone" class="space-y-2.5">
         <!-- Header: ▼ Bone: Name -->
         <div class="bg-ui-surface px-2.5 py-1.5 rounded-xs border border-ui-borderSubtle flex items-center justify-between text-ui-textAccent font-bold">

@@ -50,7 +50,9 @@ let startW = 320
 let startH = 560
 
 function updateWorkspaceDefaultTab() {
-  if (toolStore.appMode === 'uvpaint') {
+  if (toolStore.appMode === 'rig') {
+    activeTab.value = 'skeleton'
+  } else if (toolStore.appMode === 'uvpaint') {
     activeTab.value = 'material'
   } else if (toolStore.appMode === 'model') {
     if (toolStore.selectMode === 'object') {

@@ -267,10 +267,50 @@ function handleRemoveSocket(socketId: string) {
       </div>
     </div>
 
-    <!-- Empty State -->
-    <div v-else class="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-2 text-ui-textMuted italic text-[11px]">
-      <BlenderIcon name="bone" :size="24" color="#64748b" />
-      <span>Select a bone in the 3D viewport or Skeleton panel to view properties.</span>
+    <!-- Empty State / Quick Selector -->
+    <div v-else class="flex-1 flex flex-col p-3 space-y-3 bg-ui-surface rounded-xs border border-ui-borderSubtle">
+      <div class="text-center space-y-1.5 py-3 border-b border-ui-borderSubtle">
+        <BlenderIcon name="bone" :size="24" color="#f59e0b" class="mx-auto" />
+        <h4 class="font-bold text-xs text-ui-textPrimary">No Bone Selected</h4>
+        <p class="text-[10px] text-ui-textMuted leading-relaxed">
+          Select a bone from the list below or create a new bone to edit its properties.
+        </p>
+      </div>
+
+      <!-- Quick Actions -->
+      <div class="grid grid-cols-2 gap-1.5">
+        <button 
+          @click="animationStore.addRootBone(`Bone_Root_${animationStore.armature.bones.length + 1}`)"
+          class="py-1.5 px-2 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-bold text-xs flex items-center justify-center gap-1 shadow-xs transition"
+        >
+          <Plus class="w-3.5 h-3.5" />
+          <span>+ Add Bone</span>
+        </button>
+
+        <button 
+          @click="animationStore.clickToPlaceMode = !animationStore.clickToPlaceMode"
+          class="py-1.5 px-2 rounded-xs font-bold text-xs flex items-center justify-center gap-1 transition border"
+          :class="animationStore.clickToPlaceMode ? 'bg-amber-500 text-slate-950 border-amber-400 font-extrabold' : 'bg-ui-input border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
+        >
+          <span>Draw (B)</span>
+        </button>
+      </div>
+
+      <!-- Quick Bones List -->
+      <div v-if="animationStore.armature.bones.length > 0" class="space-y-1 flex-1 overflow-y-auto">
+        <span class="text-[10px] text-ui-textMuted font-bold uppercase">Armature Bones:</span>
+        <div class="space-y-0.5">
+          <button 
+            v-for="b in animationStore.armature.bones" 
+            :key="b.id"
+            @click="animationStore.selectBone(b.id)"
+            class="w-full px-2 py-1 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-left text-xs text-ui-textPrimary font-bold flex items-center gap-1.5 transition"
+          >
+            <BlenderIcon name="bone" :size="11" color="#f59e0b" />
+            <span class="truncate">{{ b.name }}</span>
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>

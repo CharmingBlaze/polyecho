@@ -3082,6 +3082,23 @@ onUnmounted(() => {
             <Maximize2 class="w-3.5 h-3.5 text-ui-textAccent" />
           </button>
         </div>
+
+        <!-- In-Viewport Rigging Mode Guidance Banner -->
+        <div 
+          v-if="toolStore.appMode === 'rig'"
+          class="absolute top-2 left-1/2 -translate-x-1/2 z-20 pointer-events-none flex items-center gap-2 px-3 py-1 bg-ui-panel/90 backdrop-blur-xs border border-ui-borderStrong rounded-full shadow-lg font-mono text-[11px]"
+        >
+          <div class="w-2 h-2 rounded-full" :class="animationStore.clickToPlaceMode ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'"></div>
+          <span v-if="animationStore.clickToPlaceMode" class="text-amber-300 font-bold">
+            Draw Bone Active: Click Head, then Click Tail in 3D (Press B or Esc to exit)
+          </span>
+          <span v-else-if="animationStore.armature.bones.length === 0" class="text-ui-textPrimary">
+            Rig Mode: Press <strong class="text-ui-textAccent">B</strong> or click <strong class="text-ui-textAccent">+ Add Bone</strong> to create your first bone
+          </span>
+          <span v-else class="text-ui-textSecondary">
+            Rig Mode: <strong class="text-ui-textPrimary">{{ animationStore.selectedBone ? animationStore.selectedBone.name : 'Select joint' }}</strong> · <span class="text-ui-textMuted">Extrude: E · Quick Bind: Ctrl+B</span>
+          </span>
+        </div>
       </template>
 
       <!-- 2. QUAD VIEWPORT LIGHTWAVE CONTROLS -->
