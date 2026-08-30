@@ -283,13 +283,17 @@ onUnmounted(() => {
               <div 
                 v-for="theme in filteredThemes"
                 :key="theme.id"
+                role="button"
+                tabindex="0"
                 @click="themeStore.setTheme(theme.id)"
-                class="p-2.5 rounded-xs border transition cursor-pointer flex flex-col justify-between"
-                :class="themeStore.currentThemeId === theme.id ? 'border-amber-500 bg-amber-500/10 shadow-md ring-1 ring-amber-400/40' : 'border-ui-borderDefault bg-ui-input/30 hover:border-ui-borderStrong hover:bg-ui-hover'"
+                @keydown.enter="themeStore.setTheme(theme.id)"
+                @keydown.space.prevent="themeStore.setTheme(theme.id)"
+                class="p-2.5 rounded-xs border transition cursor-pointer flex flex-col justify-between select-none group"
+                :class="themeStore.currentThemeId === theme.id ? 'border-amber-500 bg-amber-500/15 shadow-md ring-1 ring-amber-400/50' : 'border-ui-borderDefault bg-ui-input/30 hover:border-ui-borderStrong hover:bg-ui-hover'"
               >
                 <div>
                   <div class="flex items-center justify-between">
-                    <span class="font-bold text-xs" :class="themeStore.currentThemeId === theme.id ? 'text-amber-300' : 'text-ui-textPrimary'">
+                    <span class="font-bold text-xs" :class="themeStore.currentThemeId === theme.id ? 'text-amber-300' : 'text-ui-textPrimary group-hover:text-ui-textAccent'">
                       {{ theme.name }}
                     </span>
                     <span class="text-[9px] uppercase px-1 py-0.2 rounded-xs bg-ui-input border border-ui-borderSubtle text-ui-textMuted">
@@ -301,20 +305,24 @@ onUnmounted(() => {
                   </p>
                 </div>
 
-                <!-- Palette Color Chips Preview -->
+                <!-- Palette Color Chips Preview & Apply Action -->
                 <div class="mt-2.5 flex items-center justify-between pt-2 border-t border-ui-borderSubtle/40">
                   <div class="flex items-center gap-1">
-                    <span class="w-3.5 h-3.5 rounded-xs border border-black/30 shadow-xs" :style="{ backgroundColor: theme.colors.bgPanel }" title="Panel"></span>
-                    <span class="w-3.5 h-3.5 rounded-xs border border-black/30 shadow-xs" :style="{ backgroundColor: theme.colors.bgHeader }" title="Header"></span>
-                    <span class="w-3.5 h-3.5 rounded-xs border border-black/30 shadow-xs" :style="{ backgroundColor: theme.colors.accentColor }" title="Accent"></span>
-                    <span class="w-3.5 h-3.5 rounded-xs border border-black/30 shadow-xs" :style="{ backgroundColor: theme.colors.selectionColor }" title="Selection"></span>
-                    <span class="w-3.5 h-3.5 rounded-xs border border-black/30 shadow-xs" :style="{ backgroundColor: theme.colors.viewportBg }" title="Viewport"></span>
+                    <span class="w-3.5 h-3.5 rounded-xs border border-black/30 shadow-xs shrink-0" :style="{ backgroundColor: theme.colors.bgPanel }" title="Panel"></span>
+                    <span class="w-3.5 h-3.5 rounded-xs border border-black/30 shadow-xs shrink-0" :style="{ backgroundColor: theme.colors.bgHeader }" title="Header"></span>
+                    <span class="w-3.5 h-3.5 rounded-xs border border-black/30 shadow-xs shrink-0" :style="{ backgroundColor: theme.colors.accentColor }" title="Accent"></span>
+                    <span class="w-3.5 h-3.5 rounded-xs border border-black/30 shadow-xs shrink-0" :style="{ backgroundColor: theme.colors.selectionColor }" title="Selection"></span>
+                    <span class="w-3.5 h-3.5 rounded-xs border border-black/30 shadow-xs shrink-0" :style="{ backgroundColor: theme.colors.viewportBg }" title="Viewport"></span>
                   </div>
 
-                  <div v-if="themeStore.currentThemeId === theme.id" class="flex items-center gap-1 text-[10px] font-bold text-amber-400">
-                    <Check class="w-3 h-3" />
-                    <span>Active</span>
-                  </div>
+                  <button 
+                    @click.stop="themeStore.setTheme(theme.id)"
+                    class="px-2 py-0.5 rounded-xs text-[10px] font-bold transition flex items-center gap-1"
+                    :class="themeStore.currentThemeId === theme.id ? 'bg-amber-500 text-black shadow-xs' : 'bg-ui-input hover:bg-ui-hover text-ui-textSecondary border border-ui-borderSubtle'"
+                  >
+                    <Check v-if="themeStore.currentThemeId === theme.id" class="w-3 h-3" />
+                    <span>{{ themeStore.currentThemeId === theme.id ? 'Active' : 'Apply' }}</span>
+                  </button>
                 </div>
               </div>
             </div>

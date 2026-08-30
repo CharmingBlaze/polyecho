@@ -5,6 +5,7 @@ import { useToolStore } from '../../stores/toolStore'
 import { useHistoryStore } from '../../stores/historyStore'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useLayoutStore } from '../../stores/layoutStore'
+import { useThemeStore } from '../../stores/themeStore'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import { 
   Download, 
@@ -27,7 +28,9 @@ import {
   Tv,
   Eye,
   RotateCcw,
-  LayoutGrid
+  LayoutGrid,
+  Palette,
+  Sliders
 } from 'lucide-vue-next'
 
 import { PrimitiveType } from '../../core/primitives/PrimitiveTypes'
@@ -42,6 +45,7 @@ const toolStore = useToolStore()
 const historyStore = useHistoryStore()
 const animationStore = useAnimationStore()
 const layoutStore = useLayoutStore()
+const themeStore = useThemeStore()
 
 const currentPlacementMode = ref<PrimitivePlacementMode>(PrimitivePlacementMode.CAD_DRAW)
 const currentOrientation = ref<PlacementOrientation>('WORLD')
@@ -594,6 +598,14 @@ function handleExitProject() {
           <button @click="setCameraView('persp'); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center justify-between">
             <span>Perspective</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Home</span>
+          </button>
+
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+
+          <!-- Color Themes -->
+          <button @click="$emit('open-preferences'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-ui-textPrimary">
+            <span class="flex items-center gap-2"><Palette class="w-3.5 h-3.5 text-amber-400" /> Themes (26 Presets)...</span>
+            <span class="text-ui-textAccent font-medium text-[10px]">{{ themeStore.presets.find(t => t.id === themeStore.currentThemeId)?.name }}</span>
           </button>
 
           <div class="h-px bg-ui-borderSubtle my-1"></div>
