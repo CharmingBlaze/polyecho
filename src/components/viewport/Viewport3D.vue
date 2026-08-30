@@ -6,6 +6,7 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import { useAnimationStore } from '../../stores/animationStore'
+import { useThemeStore, type ThemeColors } from '../../stores/themeStore'
 import { meshToThreeGeometry } from '../../core/geometry/Converters'
 import { createPSXMaterial } from '../../core/shaders/PSXShader'
 import { computeCentroid } from '../../utils/math'
@@ -42,6 +43,7 @@ import BlenderIcon from '../icons/BlenderIcon.vue'
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
 const animationStore = useAnimationStore()
+const themeStore = useThemeStore()
 
 const containerRef = ref<HTMLDivElement | null>(null)
 
@@ -122,7 +124,7 @@ function initThree() {
 
   // Scene
   scene = new THREE.Scene()
-  scene.background = new THREE.Color(0x14161a)
+  scene.background = new THREE.Color(themeStore.activeColors.viewportBg)
 
   // 1. Perspective Camera
   cameraPersp = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000)
@@ -230,15 +232,20 @@ function initThree() {
   editorEnv = new EditorEnvironment(scene, layers.shadowGroup)
 
   // Pass 3: Grid & Axes
-  gridHelper = new THREE.GridHelper(20, 20, 0x6366f1, 0x282b33)
+  gridHelper = new THREE.GridHelper(
+    20, 
+    20, 
+    new THREE.Color(themeStore.activeColors.gridMajor), 
+    new THREE.Color(themeStore.activeColors.gridMinor)
+  )
   gridHelper.position.y = -0.001
   layers.gridGroup.add(gridHelper)
 
   axesHelper = new THREE.AxesHelper(1.5)
   axesHelper.setColors(
-    new THREE.Color(0xf43f5e), // X Axis Theme Rose
-    new THREE.Color(0x10b981), // Y Axis Theme Emerald
-    new THREE.Color(0x38bdf8)  // Z Axis Theme Sky
+    new THREE.Color(themeStore.activeColors.gizmoX), // X Axis
+    new THREE.Color(themeStore.activeColors.gizmoY), // Y Axis
+    new THREE.Color(themeStore.activeColors.gizmoZ)  // Z Axis
   )
   axesHelper.renderOrder = 1
   layers.gridGroup.add(axesHelper)
@@ -822,34 +829,73 @@ function updateTransformGizmo() {
   applyThemeToTransformGizmo(transformControls)
 }
 
-function applyThemeToTransformGizmo(tc: TransformControls) {
+function applyThemeToTransformGizmo(tc: TransformControls, customColors?: ThemeColors) {
   if (!tc) return
   const helper = tc.getHelper()
   if (!helper) return
+  const colors = customColors || themeStore.activeColors
 
   helper.traverse((child: any) => {
     if (child.material) {
       const mat = child.material
       const name = (child.name || '').toUpperCase()
 
-      // Primary Axes matching PSX/Blender Theme
       if (name.includes('X') && !name.includes('Y') && !name.includes('Z')) {
-        mat.color.setHex(0xf43f5e) // Theme Rose for X
+        mat.color.set(colors.gizmoX)
       } else if (name.includes('Y') && !name.includes('X') && !name.includes('Z')) {
-        mat.color.setHex(0x10b981) // Theme Emerald for Y
+        mat.color.set(colors.gizmoY)
       } else if (name.includes('Z') && !name.includes('X') && !name.includes('Y')) {
-        mat.color.setHex(0x38bdf8) // Theme Sky for Z
-      } else if (name.includes('XY')) {
-        mat.color.setHex(0x34d399) // Theme Spring Green for XY plane
-      } else if (name.includes('YZ')) {
-        mat.color.setHex(0x06b6d4) // Theme Cyan for YZ plane
-      } else if (name.includes('XZ')) {
-        mat.color.setHex(0xa855f7) // Theme Purple for XZ plane
+        mat.color.set(colors.gizmoZ)
+      } else if (name.includes('XY') || name.includes('YZ') || name.includes('XZ')) {
+        mat.color.set(colors.selectionColor)
       } else if (name === 'XYZ' || name === 'E' || name === 'START' || name === 'END' || name === 'DELTA') {
-        mat.color.setHex(0x818cf8) // Theme Indigo for Uniform Center Gizmo Handle
+        mat.color.set(colors.gizmoAccent)
       }
     }
   })
+}
+
+function applyTheme(colors: ThemeColors) {
+  if (scene) {
+    scene.background = new THREE.Color(colors.viewportBg)
+  }
+
+  if (layers && layers.gridGroup) {
+    if (gridHelper) {
+      layers.gridGroup.remove(gridHelper)
+      gridHelper.geometry.dispose()
+    }
+    gridHelper = new THREE.GridHelper(
+      20, 
+      20, 
+      new THREE.Color(colors.gridMajor), 
+      new THREE.Color(colors.gridMinor)
+    )
+    gridHelper.position.y = -0.001
+    layers.gridGroup.add(gridHelper)
+
+    if (axesHelper) {
+      axesHelper.setColors(
+        new THREE.Color(colors.gizmoX),
+        new THREE.Color(colors.gizmoY),
+        new THREE.Color(colors.gizmoZ)
+      )
+    }
+  }
+
+  if (transformControls) {
+    applyThemeToTransformGizmo(transformControls, colors)
+  }
+
+  if (hoverFaceMesh && hoverFaceMesh.material) {
+    (hoverFaceMesh.material as THREE.MeshBasicMaterial).color.set(colors.selectionColor)
+  }
+  if (hoverEdgeMesh && hoverEdgeMesh.material) {
+    (hoverEdgeMesh.material as THREE.LineBasicMaterial).color.set(colors.selectionColor)
+  }
+  if (hoverVertexMesh && hoverVertexMesh.material) {
+    (hoverVertexMesh.material as THREE.PointsMaterial).color.set(colors.selectionColor)
+  }
 }
 
 function onGizmoDragStart() {
@@ -2763,12 +2809,23 @@ watch(() => toolStore.viewport.wireframeOpacity, () => {
   rebuildMeshes()
 })
 
+function handleThemeChangedEvent(e: any) {
+  if (e && e.detail) {
+    applyTheme(e.detail)
+  }
+}
+
+watch(() => themeStore.currentThemeId, () => {
+  applyTheme(themeStore.activeColors)
+})
+
 onMounted(() => {
   initThree()
   window.addEventListener('set-camera-view', handleCameraViewEvent)
   window.addEventListener('blender-modal-op', handleBlenderModalEvent)
   window.addEventListener('primitive-created', handlePrimitiveCreatedEvent)
   window.addEventListener('start-primitive-placement', handleStartPrimitivePlacementEvent)
+  window.addEventListener('theme-changed', handleThemeChangedEvent)
   window.addEventListener('pointermove', handleGlobalPointerMove)
   window.addEventListener('keydown', handleGlobalKeyDown, true)
   window.addEventListener('wheel', handleGlobalWheel, { passive: false })
@@ -2780,6 +2837,7 @@ onUnmounted(() => {
   window.removeEventListener('blender-modal-op', handleBlenderModalEvent)
   window.removeEventListener('primitive-created', handlePrimitiveCreatedEvent)
   window.removeEventListener('start-primitive-placement', handleStartPrimitivePlacementEvent)
+  window.removeEventListener('theme-changed', handleThemeChangedEvent)
   window.removeEventListener('pointermove', handleGlobalPointerMove)
   window.removeEventListener('keydown', handleGlobalKeyDown, true)
   window.removeEventListener('wheel', handleGlobalWheel)

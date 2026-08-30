@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 
 export interface ThemeColors {
   bgBase: string
@@ -18,6 +18,12 @@ export interface ThemeColors {
   accentColor: string
   selectionColor: string
   viewportBg: string
+  gridMajor: string
+  gridMinor: string
+  gizmoX: string
+  gizmoY: string
+  gizmoZ: string
+  gizmoAccent: string
 }
 
 export interface ThemePreset {
@@ -34,7 +40,7 @@ export const THEME_PRESETS: ThemePreset[] = [
     id: 'polyecho_default',
     name: 'PolyEcho Default',
     category: 'DCC & Pro Studios',
-    description: 'The standard PolyEcho dark theme with warm charcoal panels and amber gold selections.',
+    description: 'The standard PolyEcho dark theme with warm charcoal panels, amber gold selections, and indigo grid.',
     colors: {
       bgBase: '#17191d',
       bgPanel: '#21252b',
@@ -51,14 +57,20 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#f59e0b',
       accentColor: '#f59e0b',
       selectionColor: '#f59e0b',
-      viewportBg: '#14161a'
+      viewportBg: '#14161a',
+      gridMajor: '#6366f1',
+      gridMinor: '#242831',
+      gizmoX: '#f43f5e',
+      gizmoY: '#10b981',
+      gizmoZ: '#38bdf8',
+      gizmoAccent: '#f59e0b'
     }
   },
   {
     id: 'maya_charcoal',
     name: 'Maya Charcoal',
     category: 'DCC & Pro Studios',
-    description: 'Autodesk Maya technical matte dark grey with electric cyan wireframes.',
+    description: 'Autodesk Maya technical matte dark grey with electric cyan wireframes and technical grid.',
     colors: {
       bgBase: '#1f1f1f',
       bgPanel: '#2b2b2b',
@@ -75,7 +87,13 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#00c0ff',
       accentColor: '#00c0ff',
       selectionColor: '#00e5ff',
-      viewportBg: '#1b1b1b'
+      viewportBg: '#1c1c1c',
+      gridMajor: '#00c0ff',
+      gridMinor: '#2c2c2c',
+      gizmoX: '#d63031',
+      gizmoY: '#00b894',
+      gizmoZ: '#0984e3',
+      gizmoAccent: '#00e5ff'
     }
   },
   {
@@ -99,7 +117,13 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#ff79c6',
       accentColor: '#bd93f9',
       selectionColor: '#50fa7b',
-      viewportBg: '#191a21'
+      viewportBg: '#1e1f29',
+      gridMajor: '#bd93f9',
+      gridMinor: '#343746',
+      gizmoX: '#ff5555',
+      gizmoY: '#50fa7b',
+      gizmoZ: '#8be9fd',
+      gizmoAccent: '#ff79c6'
     }
   },
   {
@@ -123,7 +147,13 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#b58900',
       accentColor: '#268bd2',
       selectionColor: '#cb4b16',
-      viewportBg: '#001a22'
+      viewportBg: '#001e26',
+      gridMajor: '#268bd2',
+      gridMinor: '#073642',
+      gizmoX: '#dc322f',
+      gizmoY: '#859900',
+      gizmoZ: '#268bd2',
+      gizmoAccent: '#b58900'
     }
   },
 
@@ -132,7 +162,7 @@ export const THEME_PRESETS: ThemePreset[] = [
     id: 'win95_classic',
     name: 'Windows 95 Classic',
     category: 'Operating Systems',
-    description: 'Classic 1995 desktop with beveled teal desktop, battleship grey, and navy titlebars.',
+    description: 'Classic 1995 desktop with beveled teal 3D desktop, battleship grey, and navy titlebars.',
     colors: {
       bgBase: '#008080',
       bgPanel: '#c0c0c0',
@@ -149,7 +179,13 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#000080',
       accentColor: '#000080',
       selectionColor: '#000080',
-      viewportBg: '#008080'
+      viewportBg: '#008080',
+      gridMajor: '#ffffff',
+      gridMinor: '#005858',
+      gizmoX: '#ff0000',
+      gizmoY: '#00ff00',
+      gizmoZ: '#0000ff',
+      gizmoAccent: '#ffff00'
     }
   },
   {
@@ -173,7 +209,13 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#388e3c',
       accentColor: '#0055ea',
       selectionColor: '#ff7700',
-      viewportBg: '#1e3f8a'
+      viewportBg: '#1e3f8a',
+      gridMajor: '#4b92db',
+      gridMinor: '#26509e',
+      gizmoX: '#e52521',
+      gizmoY: '#388e3c',
+      gizmoZ: '#0055ea',
+      gizmoAccent: '#ff7700'
     }
   },
   {
@@ -197,7 +239,13 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#0a84ff',
       accentColor: '#0a84ff',
       selectionColor: '#ff9f0a',
-      viewportBg: '#121214'
+      viewportBg: '#141416',
+      gridMajor: '#444450',
+      gridMinor: '#22222a',
+      gizmoX: '#ff453a',
+      gizmoY: '#32d74b',
+      gizmoZ: '#0a84ff',
+      gizmoAccent: '#ffd60a'
     }
   },
   {
@@ -221,7 +269,13 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#ff8800',
       accentColor: '#0055aa',
       selectionColor: '#ff8800',
-      viewportBg: '#004488'
+      viewportBg: '#004488',
+      gridMajor: '#ff8800',
+      gridMinor: '#003366',
+      gizmoX: '#ff4444',
+      gizmoY: '#44ff44',
+      gizmoZ: '#ffffff',
+      gizmoAccent: '#ffaa00'
     }
   },
   {
@@ -245,7 +299,13 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#2a5885',
       accentColor: '#ffc600',
       selectionColor: '#2a5885',
-      viewportBg: '#254b73'
+      viewportBg: '#254b73',
+      gridMajor: '#ffc600',
+      gridMinor: '#1b3653',
+      gizmoX: '#e74c3c',
+      gizmoY: '#2ecc71',
+      gizmoZ: '#3498db',
+      gizmoAccent: '#ffc600'
     }
   },
   {
@@ -269,7 +329,13 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#d4af37',
       accentColor: '#999999',
       selectionColor: '#d4af37',
-      viewportBg: '#1f1f1f'
+      viewportBg: '#1a1a1a',
+      gridMajor: '#555555',
+      gridMinor: '#2d2d2d',
+      gizmoX: '#cccccc',
+      gizmoY: '#999999',
+      gizmoZ: '#666666',
+      gizmoAccent: '#d4af37'
     }
   },
 
@@ -295,7 +361,13 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#00dfa2',
       accentColor: '#ff0055',
       selectionColor: '#00dfa2',
-      viewportBg: '#121216'
+      viewportBg: '#16161c',
+      gridMajor: '#ff0055',
+      gridMinor: '#2a2a38',
+      gizmoX: '#ff0055',
+      gizmoY: '#00dfa2',
+      gizmoZ: '#0088ff',
+      gizmoAccent: '#ffe600'
     }
   },
   {
@@ -319,7 +391,13 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#f5b324',
       accentColor: '#e52521',
       selectionColor: '#f5b324',
-      viewportBg: '#101018'
+      viewportBg: '#12121c',
+      gridMajor: '#f5b324',
+      gridMinor: '#232336',
+      gizmoX: '#e52521',
+      gizmoY: '#00a040',
+      gizmoZ: '#0066cc',
+      gizmoAccent: '#f5b324'
     }
   },
   {
@@ -343,7 +421,13 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#0f380f',
       accentColor: '#306230',
       selectionColor: '#0f380f',
-      viewportBg: '#8bac0f'
+      viewportBg: '#8bac0f',
+      gridMajor: '#0f380f',
+      gridMinor: '#306230',
+      gizmoX: '#0f380f',
+      gizmoY: '#306230',
+      gizmoZ: '#0f380f',
+      gizmoAccent: '#0f380f'
     }
   },
   {
@@ -367,7 +451,13 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#a78bfa',
       accentColor: '#8b5cf6',
       selectionColor: '#38bdf8',
-      viewportBg: '#141226'
+      viewportBg: '#16132b',
+      gridMajor: '#8b5cf6',
+      gridMinor: '#252044',
+      gizmoX: '#f43f5e',
+      gizmoY: '#10b981',
+      gizmoZ: '#a78bfa',
+      gizmoAccent: '#38bdf8'
     }
   },
   {
@@ -391,7 +481,13 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#fbbf24',
       accentColor: '#c084fc',
       selectionColor: '#fbbf24',
-      viewportBg: '#181232'
+      viewportBg: '#1a1338',
+      gridMajor: '#c084fc',
+      gridMinor: '#2b2058',
+      gizmoX: '#ef4444',
+      gizmoY: '#22c55e',
+      gizmoZ: '#3b82f6',
+      gizmoAccent: '#fbbf24'
     }
   },
   {
@@ -415,7 +511,13 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#ff5900',
       accentColor: '#ff5900',
       selectionColor: '#0088ff',
-      viewportBg: '#181a20'
+      viewportBg: '#181b22',
+      gridMajor: '#ff5900',
+      gridMinor: '#262d3a',
+      gizmoX: '#ff5900',
+      gizmoY: '#00ccff',
+      gizmoZ: '#ffcc00',
+      gizmoAccent: '#ff5900'
     }
   },
   {
@@ -439,7 +541,13 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#d4af37',
       accentColor: '#e60012',
       selectionColor: '#00e5ff',
-      viewportBg: '#0e0e10'
+      viewportBg: '#0d0d10',
+      gridMajor: '#d4af37',
+      gridMinor: '#202028',
+      gizmoX: '#e60012',
+      gizmoY: '#00e5ff',
+      gizmoZ: '#d4af37',
+      gizmoAccent: '#e60012'
     }
   },
   {
@@ -463,7 +571,13 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#38bdf8',
       accentColor: '#3b82f6',
       selectionColor: '#38bdf8',
-      viewportBg: '#080a0e'
+      viewportBg: '#080a0e',
+      gridMajor: '#38bdf8',
+      gridMinor: '#161f2e',
+      gizmoX: '#f43f5e',
+      gizmoY: '#2dd4bf',
+      gizmoZ: '#38bdf8',
+      gizmoAccent: '#38bdf8'
     }
   },
   {
@@ -487,7 +601,13 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#2563eb',
       accentColor: '#3b82f6',
       selectionColor: '#f59e0b',
-      viewportBg: '#1a1c22'
+      viewportBg: '#1c1e24',
+      gridMajor: '#3b82f6',
+      gridMinor: '#2a2d36',
+      gizmoX: '#ef4444',
+      gizmoY: '#10b981',
+      gizmoZ: '#3b82f6',
+      gizmoAccent: '#f59e0b'
     }
   },
   {
@@ -511,7 +631,13 @@ export const THEME_PRESETS: ThemePreset[] = [
       textAccent: '#00f0ff',
       accentColor: '#ff007f',
       selectionColor: '#ffe600',
-      viewportBg: '#080910'
+      viewportBg: '#090a12',
+      gridMajor: '#ff007f',
+      gridMinor: '#161a30',
+      gizmoX: '#ff007f',
+      gizmoY: '#00f0ff',
+      gizmoZ: '#ffe600',
+      gizmoAccent: '#00f0ff'
     }
   }
 ]
@@ -520,6 +646,11 @@ export const useThemeStore = defineStore('theme', () => {
   const currentThemeId = ref<string>('polyecho_default')
   const customColors = ref<Partial<ThemeColors>>({})
   const uiScale = ref<number>(100) // Percentage (80 to 140)
+
+  const activeColors = computed<ThemeColors>(() => {
+    const preset = THEME_PRESETS.find(t => t.id === currentThemeId.value) || THEME_PRESETS[0]
+    return { ...preset.colors, ...customColors.value }
+  })
 
   // Initialize from LocalStorage if available
   function initTheme() {
@@ -562,8 +693,7 @@ export const useThemeStore = defineStore('theme', () => {
   }
 
   function applyCurrentTheme() {
-    const preset = THEME_PRESETS.find(t => t.id === currentThemeId.value) || THEME_PRESETS[0]
-    const active = { ...preset.colors, ...customColors.value }
+    const active = activeColors.value
 
     const root = document.documentElement
     // Standard Tailwind UI Tokens
@@ -609,7 +739,7 @@ export const useThemeStore = defineStore('theme', () => {
 
     root.style.setProperty('--ui-scale-factor', `${uiScale.value / 100}`)
 
-    // Dispatch event so Three.js scene background updates immediately
+    // Dispatch event so Three.js scene background, grid, and gizmos update immediately
     window.dispatchEvent(new CustomEvent('theme-changed', { detail: active }))
   }
 
@@ -621,6 +751,7 @@ export const useThemeStore = defineStore('theme', () => {
     currentThemeId,
     customColors,
     uiScale,
+    activeColors,
     presets: THEME_PRESETS,
     initTheme,
     setTheme,
