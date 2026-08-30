@@ -7,6 +7,7 @@ import { useAnimationStore } from '../../stores/animationStore'
 import { useLayoutStore } from '../../stores/layoutStore'
 import { useThemeStore } from '../../stores/themeStore'
 import BlenderIcon from '../icons/BlenderIcon.vue'
+import PolyEchoLogo from '../icons/PolyEchoLogo.vue'
 import { 
   Download, 
   Upload,
@@ -262,11 +263,8 @@ function handleExitProject() {
 
     <!-- 1. LEFT: Brand & Application Dropdown Menus -->
     <div class="header-menu-container flex items-center space-x-1 shrink-0">
-      <!-- Brand Logo -->
-      <div class="flex items-center space-x-1.5 mr-2 px-1.5 py-0.5 bg-ui-input rounded-xs border border-ui-borderSubtle">
-        <BlenderIcon name="mesh-cube" :size="13" color="#f59e0b" />
-        <span class="font-bold tracking-wide text-xs uppercase text-ui-textPrimary font-mono">POLY<span class="text-ui-accent">ECHO</span></span>
-      </div>
+      <!-- Brand Logo (Clean, Transparent, Universal Across All Themes) -->
+      <PolyEchoLogo class="mr-3 ml-0.5" />
 
       <!-- File Menu -->
       <div class="relative" @click.stop>
