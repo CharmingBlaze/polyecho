@@ -1,11 +1,24 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { AppMode, SelectMode, ModelToolType, PaintToolType, RigToolType, AnimateToolType, SnappingSettings, ViewportSettings } from '../types/tools'
+import type { 
+  AppMode, 
+  SelectMode, 
+  ModelToolType, 
+  PaintToolType, 
+  RigToolType, 
+  AnimateToolType, 
+  SnappingSettings, 
+  ViewportSettings,
+  TransformOrientation,
+  PivotPoint
+} from '../types/tools'
 
 export const useToolStore = defineStore('tool', () => {
   const appMode = ref<AppMode>('model')
   const selectMode = ref<SelectMode>('object')
   const modelTool = ref<ModelToolType>('select')
+  const transformOrientation = ref<TransformOrientation>('global')
+  const pivotPoint = ref<PivotPoint>('median')
   const paintTool = ref<PaintToolType>('brush')
   const rigTool = ref<RigToolType>('select_bone')
   const animateTool = ref<AnimateToolType>('select_bone')
@@ -33,11 +46,14 @@ export const useToolStore = defineStore('tool', () => {
   const paintTarget = ref<'texture' | 'vertex'>('texture')
   const uvWorkspaceTab = ref<'uv' | 'paint' | 'vertex'>('uv')
 
-  // Snapping
+  // Snapping & Precision
   const snapping = ref<SnappingSettings>({
     grid: true,
     gridSize: 0.5,
     vertex: false,
+    edge: false,
+    face: false,
+    target: 'increment',
     angle: 15,
   })
 
@@ -51,6 +67,8 @@ export const useToolStore = defineStore('tool', () => {
     showAxes: true,
     showNormals: false,
     showBones: true,
+    faceOrientation: false,
+    wireframeOpacity: 0.6,
     psxJitter: false,
     psxAffine: false,
     dither: false,
@@ -59,6 +77,9 @@ export const useToolStore = defineStore('tool', () => {
     quadView: false,
     xray: false,
     shadeMode: 'flat',
+    symmetryX: false,
+    symmetryY: false,
+    symmetryZ: false,
     invertZoom: false,
   })
 
@@ -91,6 +112,8 @@ export const useToolStore = defineStore('tool', () => {
     appMode,
     selectMode,
     modelTool,
+    transformOrientation,
+    pivotPoint,
     isBoxSelectActive,
     paintTool,
     rigTool,

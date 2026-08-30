@@ -42,12 +42,19 @@ export type AnimateToolType =
   | 'select_bone'
   | 'add_bone'
   | 'pose'
-  | 'weight_paint'
+export type TransformOrientation = 'global' | 'local' | 'normal' | 'view' | 'cursor'
+
+export type PivotPoint = 'median' | 'individual' | 'cursor' | 'active'
+
+export type SnapTarget = 'increment' | 'vertex' | 'edge' | 'face'
 
 export interface SnappingSettings {
   grid: boolean
-  gridSize: number // e.g. 0.25, 0.5, 1.0
+  gridSize: number // e.g. 0.1, 0.25, 0.5, 1.0
   vertex: boolean
+  edge: boolean
+  face: boolean
+  target: SnapTarget
   angle: number // e.g. 15, 45, 90 deg
 }
 
@@ -57,6 +64,8 @@ export interface ViewportSettings {
   showAxes: boolean
   showNormals: boolean
   showBones: boolean
+  faceOrientation: boolean // Cobalt Blue (front) / Crimson Red (backface) diagnostic overlay
+  wireframeOpacity: number // 0 to 1
   psxJitter: boolean
   psxAffine: boolean
   dither: boolean
@@ -65,5 +74,8 @@ export interface ViewportSettings {
   quadView: boolean // Professional 4-split view (Top, Front, Right, Persp)
   xray: boolean // Blender X-Ray mode (transparent meshes, see through & select occluded elements)
   shadeMode: 'flat' | 'smooth' // 'flat' (face normals, default for low-poly) | 'smooth' (interpolated vertex normals)
+  symmetryX: boolean // Live X-axis mirror modeling
+  symmetryY: boolean
+  symmetryZ: boolean
   invertZoom: boolean // Invert trackpad / wheel zoom direction
 }

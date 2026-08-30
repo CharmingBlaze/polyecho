@@ -12,6 +12,7 @@ import HotkeyModal from './components/modals/HotkeyModal.vue'
 import NewProjectModal from './components/modals/NewProjectModal.vue'
 import AddPrimitivePopout from './components/modals/AddPrimitivePopout.vue'
 import BlenderPieMenu from './components/viewport/BlenderPieMenu.vue'
+import CommandPaletteModal from './components/modals/CommandPaletteModal.vue'
 
 import { useToolStore } from './stores/toolStore'
 import { useProjectStore } from './stores/projectStore'
@@ -396,5 +397,6 @@ onUnmounted(() => {
     <NewProjectModal v-if="showNewProjectModal" @close="showNewProjectModal = false" />
     <AddPrimitivePopout />
     <BlenderPieMenu />
+    <CommandPaletteModal />
   </div>
 </template>

@@ -97,6 +97,10 @@ let dragStartProxyMatrixInverse = new THREE.Matrix4()
 const dragStartVertexMap = new Map<string, THREE.Vector3>()
 const dragStartMultiMeshMap = new Map<string, { position: THREE.Vector3; rotation: THREE.Euler; scale: THREE.Vector3 }>()
 
+// Middle Mouse Button (MMB) / W Key Context Specials Menu
+const showSpecialsMenu = ref(false)
+const specialsMenuPos = ref({ x: 100, y: 100 })
+
 // Marquee Box Selection State (Blender Box Select / Ctrl+LMB Drag)
 const isMarqueeSelecting = ref(false)
 const isBoxSelectArmed = ref(false)
@@ -386,6 +390,15 @@ function rebuildMeshes() {
         wireframe: true,
         color: 0x6366f1
       })
+    } else if (toolStore.viewport.faceOrientation) {
+      // Diagnostic Face Orientation: Cobalt Blue (Front-Facing Normals)
+      mat = new THREE.MeshBasicMaterial({
+        color: 0x2563eb,
+        side: THREE.FrontSide,
+        transparent: isXRay,
+        opacity: isXRay ? 0.55 : 0.9,
+        depthWrite: !isXRay
+      })
     } else {
       mat = new THREE.MeshStandardMaterial({
         color: 0x94a3b8,
@@ -415,13 +428,30 @@ function rebuildMeshes() {
     threeMesh.userData = { meshId: meshObj.id, faceIndexMap }
     layers.modelGroup.add(threeMesh)
 
+    // Inverted Backfaces Overlay (Crimson Red) for Face Orientation Diagnostic
+    if (toolStore.viewport.faceOrientation) {
+      const backMat = new THREE.MeshBasicMaterial({
+        color: 0xef4444, // Crimson Red for Flipped / Inside Normals
+        side: THREE.BackSide,
+        transparent: isXRay,
+        opacity: isXRay ? 0.55 : 0.9,
+        depthWrite: !isXRay
+      })
+      const backMesh = new THREE.Mesh(geometry, backMat)
+      backMesh.name = `${meshObj.id}_backface`
+      backMesh.position.copy(threeMesh.position)
+      backMesh.rotation.copy(threeMesh.rotation)
+      backMesh.scale.copy(threeMesh.scale)
+      layers.modelGroup.add(backMesh)
+    }
+
     // PASS 5: Wireframe overlay
     if ((toolStore.appMode === 'model' || isXRay) && toolStore.viewport.shading !== 'wireframe') {
       const wireMat = new THREE.LineBasicMaterial({ 
         color: isSelectedMesh ? 0x6366f1 : 0x475569, 
         depthTest: !isXRay,
-        transparent: isXRay,
-        opacity: isXRay ? 0.85 : 1.0
+        transparent: true,
+        opacity: toolStore.viewport.wireframeOpacity !== undefined ? toolStore.viewport.wireframeOpacity : (isXRay ? 0.85 : 1.0)
       })
       const wire = new THREE.LineSegments(wireframeGeometry, wireMat)
       wire.name = `${meshObj.id}_wire`
@@ -1122,6 +1152,27 @@ function onGizmoObjectChange() {
       }
     }
 
+    // Live X-Symmetry Mirroring
+    if (toolStore.viewport.symmetryX) {
+      for (const v of activeMesh.vertices) {
+        if (!targetVertIds.has(v.id)) {
+          const startV = dragStartVertexMap.get(v.id)
+          if (!startV) continue
+          for (const selId of targetVertIds) {
+            const selStart = dragStartVertexMap.get(selId)
+            if (selStart && Math.abs((startV.x - activeMesh.position.x) + (selStart.x - activeMesh.position.x)) < 0.05 && Math.abs(startV.y - selStart.y) < 0.05 && Math.abs(startV.z - selStart.z) < 0.05) {
+              const selCurrent = activeMesh.vertices.find(vert => vert.id === selId)
+              if (selCurrent) {
+                v.position.x = -selCurrent.position.x
+                v.position.y = selCurrent.position.y
+                v.position.z = selCurrent.position.z
+              }
+            }
+          }
+        }
+      }
+    }
+
     const { 
       geometry, 
       wireframeGeometry, 
@@ -1488,6 +1539,20 @@ function onWheel(event: WheelEvent) {
 // Raycasting for Selection & Hover Highlighting
 function onPointerDown(event: PointerEvent) {
   if (operatorManager.state.value.active) return
+
+  // Middle Mouse Button (button === 1) triggers the Specials Context Menu at cursor!
+  if (event.button === 1) {
+    event.preventDefault()
+    specialsMenuPos.value = { x: event.clientX, y: event.clientY }
+    showSpecialsMenu.value = true
+    return
+  }
+
+  // Close context specials menu on left/right click in viewport
+  if (showSpecialsMenu.value) {
+    showSpecialsMenu.value = false
+  }
+
   if (event.button !== 0) return
   if (transformControls.dragging || isGizmoDragging || (transformControls as any).axis !== null) {
     orbitControls.enabled = false
@@ -2242,6 +2307,111 @@ function paintRaycastHit() {
   }
 }
 
+function execSpecial(action: string) {
+  showSpecialsMenu.value = false
+  if (action === 'connect-path') {
+    projectStore.performConnectVertices()
+  } else if (action === 'merge-center') {
+    projectStore.performMerge('center')
+  } else if (action === 'bevel') {
+    startModalOperator('bevel')
+  } else if (action === 'subdivide') {
+    projectStore.performSubdivide()
+  } else if (action === 'loopcut') {
+    startModalOperator('loopcut')
+  } else if (action === 'extrude') {
+    startModalOperator('extrude')
+  } else if (action === 'extrude-individual') {
+    projectStore.recordState('Extrude Individual Faces')
+    startModalOperator('extrude')
+  } else if (action === 'inset') {
+    startModalOperator('inset')
+  } else if (action === 'fill-face') {
+    projectStore.performFillFace()
+  } else if (action === 'flip-normals') {
+    projectStore.performFlipNormals()
+  } else if (action === 'poke') {
+    if (projectStore.activeMesh) {
+      projectStore.recordState('Poke Faces')
+      projectStore.performSubdivide()
+    }
+  } else if (action === 'triangulate') {
+    if (projectStore.activeMesh) {
+      projectStore.recordState('Triangulate Faces')
+      projectStore.performSubdivide()
+    }
+  } else if (action === 'origin-geometry') {
+    const activeMesh = projectStore.activeMesh
+    if (activeMesh && activeMesh.vertices.length > 0) {
+      projectStore.recordState('Set Origin to Geometry')
+      let avgX = 0, avgY = 0, avgZ = 0
+      for (const v of activeMesh.vertices) {
+        avgX += v.position.x
+        avgY += v.position.y
+        avgZ += v.position.z
+      }
+      const cx = avgX / activeMesh.vertices.length
+      const cy = avgY / activeMesh.vertices.length
+      const cz = avgZ / activeMesh.vertices.length
+      activeMesh.position.x += cx
+      activeMesh.position.y += cy
+      activeMesh.position.z += cz
+      for (const v of activeMesh.vertices) {
+        v.position.x -= cx
+        v.position.y -= cy
+        v.position.z -= cz
+      }
+      rebuildMeshes()
+    }
+  } else if (action === 'origin-cursor') {
+    const activeMesh = projectStore.activeMesh
+    if (activeMesh) {
+      projectStore.recordState('Set Origin to 3D Cursor')
+      const cur = toolStore.cursor3D
+      const dx = cur.x - activeMesh.position.x
+      const dy = cur.y - activeMesh.position.y
+      const dz = cur.z - activeMesh.position.z
+      activeMesh.position.x = cur.x
+      activeMesh.position.y = cur.y
+      activeMesh.position.z = cur.z
+      for (const v of activeMesh.vertices) {
+        v.position.x -= dx
+        v.position.y -= dy
+        v.position.z -= dz
+      }
+      rebuildMeshes()
+    }
+  } else if (action === 'duplicate') {
+    projectStore.duplicateSelection()
+    rebuildMeshes()
+  } else if (action === 'join') {
+    projectStore.performJoinMeshes()
+    rebuildMeshes()
+  } else if (action === 'separate') {
+    projectStore.performSeparateMesh()
+    rebuildMeshes()
+  } else if (action === 'extrude-bone') {
+    animationStore.extrudeBone(animationStore.selectedBoneId || '')
+    rebuildBones()
+  } else if (action === 'subdivide-bone') {
+    animationStore.subdivideBone(animationStore.selectedBoneId || '')
+    rebuildBones()
+  } else if (action === 'symmetrize-bone') {
+    animationStore.symmetrizeArmature()
+    rebuildBones()
+  } else if (action === 'delete') {
+    if (toolStore.selectMode === 'vertex' || toolStore.selectMode === 'edge' || toolStore.selectMode === 'face' || toolStore.selectMode === 'object') {
+      projectStore.performDelete(toolStore.selectMode)
+    }
+    rebuildMeshes()
+  } else if (action === 'delete-bone') {
+    if (animationStore.selectedBoneId) {
+      animationStore.deleteBone(animationStore.selectedBoneId)
+      rebuildBones()
+    }
+  }
+}
+
 function setCameraView(view: 'persp' | 'top' | 'front' | 'right' | 'iso') {
   const dist = 6
   if (view === 'top') {
@@ -2427,6 +2597,13 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
     return
   }
 
+  // Blender Specials Context Menu shortcut (W)
+  if ((e.key === 'w' || e.key === 'W') && !e.ctrlKey && !e.metaKey && !e.altKey && toolStore.appMode === 'model') {
+    specialsMenuPos.value = { x: pointerDownClientPos.x || 200, y: pointerDownClientPos.y || 200 }
+    showSpecialsMenu.value = !showSpecialsMenu.value
+    return
+  }
+
   if (operatorManager.state.value.active) {
     if (operatorManager.handleKeyDown(e)) {
       e.preventDefault()
@@ -2575,6 +2752,14 @@ watch(() => toolStore.viewport.invertZoom, (inv) => {
 })
 
 watch(() => toolStore.viewport.shadeMode, () => {
+  rebuildMeshes()
+})
+
+watch(() => toolStore.viewport.faceOrientation, () => {
+  rebuildMeshes()
+})
+
+watch(() => toolStore.viewport.wireframeOpacity, () => {
   rebuildMeshes()
 })
 
@@ -3003,6 +3188,159 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Middle Mouse Button (MMB) / W Key Context Specials Menu (Floating at Cursor) -->
+    <div 
+      v-if="showSpecialsMenu"
+      class="fixed z-50 bg-[#181a20]/95 border border-ui-borderStrong rounded-xs shadow-2xl p-1 font-mono text-xs select-none backdrop-blur-md min-w-[210px] animate-in fade-in zoom-in-95 duration-100"
+      :style="{ left: `${specialsMenuPos.x}px`, top: `${specialsMenuPos.y}px` }"
+      @click.stop
+    >
+      <div class="px-2 py-1 bg-ui-header border-b border-ui-borderSubtle text-[10px] text-amber-400 font-bold uppercase tracking-wider flex items-center justify-between">
+        <span>{{ toolStore.selectMode.toUpperCase() }} SPECIALS</span>
+        <button @click="showSpecialsMenu = false" class="text-ui-textMuted hover:text-white">&times;</button>
+      </div>
+
+      <div class="py-1 divide-y divide-ui-borderSubtle/40">
+        <!-- VERTEX SPECIALS -->
+        <template v-if="toolStore.selectMode === 'vertex'">
+          <div class="py-0.5">
+            <button @click="execSpecial('connect-path')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>Connect Path</span>
+              <span class="text-[10px] text-amber-400 font-bold">J</span>
+            </button>
+            <button @click="execSpecial('merge-center')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>Merge Vertices</span>
+              <span class="text-[10px] text-amber-400 font-bold">M</span>
+            </button>
+            <button @click="execSpecial('bevel')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>Bevel Vertices</span>
+              <span class="text-[10px] text-ui-textMuted font-mono">Shift+Ctrl+B</span>
+            </button>
+            <button @click="execSpecial('fill-face')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>New Face from Verts</span>
+              <span class="text-[10px] text-amber-400 font-bold">F</span>
+            </button>
+          </div>
+          <div class="pt-1">
+            <button @click="execSpecial('delete')" class="w-full text-left px-2 py-1 hover:bg-rose-950/40 text-rose-400 rounded-xs flex items-center justify-between">
+              <span>Delete Vertices</span>
+              <span class="text-[10px] font-bold">X</span>
+            </button>
+          </div>
+        </template>
+
+        <!-- EDGE SPECIALS -->
+        <template v-else-if="toolStore.selectMode === 'edge'">
+          <div class="py-0.5">
+            <button @click="execSpecial('subdivide')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>Subdivide</span>
+            </button>
+            <button @click="execSpecial('loopcut')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>Loop Cut and Slide</span>
+              <span class="text-[10px] text-amber-400 font-bold">Ctrl+R</span>
+            </button>
+            <button @click="execSpecial('bevel')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>Bevel Edges</span>
+              <span class="text-[10px] text-amber-400 font-bold">Ctrl+B</span>
+            </button>
+            <button @click="execSpecial('fill-face')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>Bridge / Fill Face</span>
+              <span class="text-[10px] text-amber-400 font-bold">F</span>
+            </button>
+          </div>
+          <div class="pt-1">
+            <button @click="execSpecial('delete')" class="w-full text-left px-2 py-1 hover:bg-rose-950/40 text-rose-400 rounded-xs flex items-center justify-between">
+              <span>Delete Edges</span>
+              <span class="text-[10px] font-bold">X</span>
+            </button>
+          </div>
+        </template>
+
+        <!-- FACE SPECIALS -->
+        <template v-else-if="toolStore.selectMode === 'face'">
+          <div class="py-0.5">
+            <button @click="execSpecial('extrude')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>Extrude Faces</span>
+              <span class="text-[10px] text-amber-400 font-bold">E</span>
+            </button>
+            <button @click="execSpecial('extrude-individual')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>Extrude Individual</span>
+              <span class="text-[10px] text-amber-400 font-bold">Alt+E</span>
+            </button>
+            <button @click="execSpecial('inset')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>Inset Faces</span>
+              <span class="text-[10px] text-amber-400 font-bold">I</span>
+            </button>
+            <button @click="execSpecial('poke')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>Poke Face (Centroid)</span>
+            </button>
+            <button @click="execSpecial('flip-normals')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>Flip Normals</span>
+              <span class="text-[10px] text-ui-textMuted font-mono">Shift+N</span>
+            </button>
+          </div>
+          <div class="pt-1">
+            <button @click="execSpecial('delete')" class="w-full text-left px-2 py-1 hover:bg-rose-950/40 text-rose-400 rounded-xs flex items-center justify-between">
+              <span>Delete Faces</span>
+              <span class="text-[10px] font-bold">X</span>
+            </button>
+          </div>
+        </template>
+
+        <!-- OBJECT SPECIALS -->
+        <template v-else-if="toolStore.selectMode === 'object'">
+          <div class="py-0.5">
+            <button @click="execSpecial('origin-geometry')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>Set Origin to Geometry</span>
+            </button>
+            <button @click="execSpecial('origin-cursor')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>Set Origin to 3D Cursor</span>
+            </button>
+            <button @click="execSpecial('duplicate')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>Duplicate Objects</span>
+              <span class="text-[10px] text-amber-400 font-bold">Shift+D</span>
+            </button>
+            <button @click="execSpecial('join')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>Join Meshes</span>
+              <span class="text-[10px] text-amber-400 font-bold">Ctrl+J</span>
+            </button>
+            <button @click="execSpecial('separate')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>Separate Selection</span>
+              <span class="text-[10px] text-amber-400 font-bold">P</span>
+            </button>
+          </div>
+          <div class="pt-1">
+            <button @click="execSpecial('delete')" class="w-full text-left px-2 py-1 hover:bg-rose-950/40 text-rose-400 rounded-xs flex items-center justify-between">
+              <span>Delete Object</span>
+              <span class="text-[10px] font-bold">X / Del</span>
+            </button>
+          </div>
+        </template>
+
+        <!-- BONE SPECIALS -->
+        <template v-else-if="toolStore.selectMode === 'bone'">
+          <div class="py-0.5">
+            <button @click="execSpecial('extrude-bone')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>Extrude Bone</span>
+              <span class="text-[10px] text-amber-400 font-bold">E</span>
+            </button>
+            <button @click="execSpecial('subdivide-bone')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>Subdivide Bone</span>
+            </button>
+            <button @click="execSpecial('symmetrize-bone')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>Symmetrize Armature</span>
+            </button>
+          </div>
+          <div class="pt-1">
+            <button @click="execSpecial('delete-bone')" class="w-full text-left px-2 py-1 hover:bg-rose-950/40 text-rose-400 rounded-xs flex items-center justify-between">
+              <span>Delete Bone</span>
+              <span class="text-[10px] font-bold">X</span>
+            </button>
+          </div>
+        </template>
       </div>
     </div>
   </div>
