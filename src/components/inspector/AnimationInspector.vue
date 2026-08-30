@@ -2,7 +2,6 @@
 import { ref, computed } from 'vue'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useProjectStore } from '../../stores/projectStore'
-import BlenderIcon from '../icons/BlenderIcon.vue'
 import { 
   Trash2, 
   Copy, 
@@ -17,7 +16,11 @@ import {
   ExternalLink,
   Key,
   RotateCcw,
-  Clipboard
+  Clipboard,
+  GitCommitVertical,
+  Box,
+  Film,
+  Sliders
 } from 'lucide-vue-next'
 
 const animationStore = useAnimationStore()
@@ -169,64 +172,65 @@ function setClipFps(fps: number) {
 </script>
 
 <template>
-  <div class="h-full w-full bg-ui-panel flex flex-col select-none overflow-y-auto p-3 text-ui-textPrimary space-y-3 font-mono text-xs">
-    <!-- Properties Header Tab Bar (Bone | Blend | Proc | Mesh | Anims | Settings) -->
+  <div class="h-full w-full bg-ui-panel flex flex-col select-none overflow-y-auto p-3 text-ui-textPrimary space-y-3 font-sans text-xs">
+    <!-- Properties Header Tab Bar (Bone | Clips | Generators | Mesh | Config) -->
     <div class="border-b border-ui-borderSubtle pb-2">
-      <div class="text-[10px] text-ui-textMuted font-bold mb-1.5 uppercase tracking-wider">Animation Properties</div>
-      <div class="grid grid-cols-6 gap-1 bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle text-[10px]">
+      <div class="flex items-center justify-between mb-1.5">
+        <span class="text-[10px] text-ui-textMuted font-bold uppercase tracking-wider">Animation Properties</span>
+        <span v-if="animationStore.activeClip" class="text-[9px] text-ui-textAccent font-mono bg-ui-input px-1.5 py-0.5 rounded-xs border border-ui-borderSubtle">
+          {{ animationStore.activeClip.name }}
+        </span>
+      </div>
+
+      <div class="grid grid-cols-5 gap-1 bg-ui-input/70 p-0.5 rounded-xs border border-ui-borderSubtle text-[10px]">
         <button 
           @click="activeTab = 'bone'"
-          class="py-1 rounded-xs text-center transition flex items-center justify-center gap-1"
-          :class="activeTab === 'bone' ? 'bg-ui-accent text-white font-bold shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          class="py-1.5 px-1 rounded-xs transition flex flex-col items-center justify-center gap-1 cursor-pointer"
+          :class="activeTab === 'bone' ? 'bg-ui-active text-ui-textAccent font-bold border border-ui-accent/40 shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          title="Active Bone & Joint Properties"
         >
-          <BlenderIcon name="bone" :size="11" />
+          <GitCommitVertical class="w-3.5 h-3.5 text-purple-400" />
           <span>Bone</span>
         </button>
 
         <button 
-          @click="activeTab = 'blend'"
-          class="py-1 rounded-xs text-center transition flex items-center justify-center gap-1"
-          :class="activeTab === 'blend' ? 'bg-ui-accent text-white font-bold shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
-          title="GLB Animator Blend Tool"
+          @click="activeTab = 'anims'"
+          class="py-1.5 px-1 rounded-xs transition flex flex-col items-center justify-center gap-1 cursor-pointer"
+          :class="activeTab === 'anims' ? 'bg-ui-active text-ui-textAccent font-bold border border-ui-accent/40 shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          title="Animation Clips & Actions"
         >
-          <Sparkles class="w-2.5 h-2.5" />
-          <span>Blend</span>
+          <Film class="w-3.5 h-3.5 text-sky-400" />
+          <span>Clips</span>
         </button>
 
         <button 
           @click="activeTab = 'proc'"
-          class="py-1 rounded-xs text-center transition flex items-center justify-center gap-1"
-          :class="activeTab === 'proc' ? 'bg-ui-accent text-white font-bold shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          class="py-1.5 px-1 rounded-xs transition flex flex-col items-center justify-center gap-1 cursor-pointer"
+          :class="activeTab === 'proc' || activeTab === 'blend' ? 'bg-ui-active text-ui-textAccent font-bold border border-ui-accent/40 shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          title="Procedural Animation Generators & Blending"
         >
-          <Wand2 class="w-2.5 h-2.5" />
-          <span>Proc</span>
+          <Sparkles class="w-3.5 h-3.5 text-amber-400" />
+          <span>Generators</span>
         </button>
 
         <button 
           @click="activeTab = 'mesh'"
-          class="py-1 rounded-xs text-center transition flex items-center justify-center gap-1"
-          :class="activeTab === 'mesh' ? 'bg-ui-accent text-white font-bold shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          class="py-1.5 px-1 rounded-xs transition flex flex-col items-center justify-center gap-1 cursor-pointer"
+          :class="activeTab === 'mesh' ? 'bg-ui-active text-ui-textAccent font-bold border border-ui-accent/40 shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          title="Mesh Rigid Parenting & Skinning"
         >
-          <BlenderIcon name="mesh-cube" :size="11" />
+          <Box class="w-3.5 h-3.5 text-emerald-400" />
           <span>Mesh</span>
         </button>
 
         <button 
-          @click="activeTab = 'anims'"
-          class="py-1 rounded-xs text-center transition flex items-center justify-center gap-1"
-          :class="activeTab === 'anims' ? 'bg-ui-accent text-white font-bold shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
-        >
-          <BlenderIcon name="pose" :size="11" />
-          <span>Anims</span>
-        </button>
-
-        <button 
           @click="activeTab = 'settings'"
-          class="py-1 rounded-xs text-center transition flex items-center justify-center gap-0.5"
-          :class="activeTab === 'settings' ? 'bg-ui-accent text-white font-bold shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
-          title="Animation Settings"
+          class="py-1.5 px-1 rounded-xs transition flex flex-col items-center justify-center gap-1 cursor-pointer"
+          :class="activeTab === 'settings' ? 'bg-ui-active text-ui-textAccent font-bold border border-ui-accent/40 shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          title="Armature Settings & Global Config"
         >
-          <Settings class="w-3 h-3" />
+          <Sliders class="w-3.5 h-3.5 text-ui-textMuted" />
+          <span>Config</span>
         </button>
       </div>
     </div>
@@ -309,7 +313,7 @@ function setClipFps(fps: number) {
             class="w-full px-2 py-1 rounded-xs text-left text-xs font-bold flex items-center gap-1.5 transition"
             :class="animationStore.selectedBoneId === b.id ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40' : 'bg-ui-input text-ui-textSecondary hover:bg-ui-hover'"
           >
-            <BlenderIcon name="bone" :size="11" :color="animationStore.selectedBoneId === b.id ? '#f59e0b' : '#94a3b8'" />
+            <GitCommitVertical class="w-3.5 h-3.5" :class="animationStore.selectedBoneId === b.id ? 'text-amber-400' : 'text-purple-400'" />
             <span class="truncate">{{ b.name }}</span>
           </button>
         </div>
@@ -474,20 +478,21 @@ function setClipFps(fps: number) {
       </div>
     </div>
 
-    <!-- TAB: ANIMATION BLEND TOOL (GLB Animator Style) -->
-    <div v-show="activeTab === 'blend'" class="space-y-3">
+    <!-- TAB 2: PROCEDURAL ANIMATIONS & MOTION BLENDING -->
+    <div v-show="activeTab === 'proc' || activeTab === 'blend'" class="space-y-3 font-sans">
+      <!-- Motion Blending Tool -->
       <div class="bg-ui-surface p-2.5 rounded-xs border border-ui-borderSubtle space-y-2">
         <span class="text-[11px] font-bold text-ui-textAccent uppercase tracking-wider flex items-center gap-1.5">
-          <Sparkles class="w-3.5 h-3.5" />
-          <span>Animation Blend Tool</span>
+          <Sparkles class="w-3.5 h-3.5 text-amber-400" />
+          <span>Motion Blend Tool</span>
         </span>
-        <p class="text-[10px] text-ui-textMuted">
+        <p class="text-[10px] text-ui-textMuted leading-relaxed">
           Preview real-time transition blending between any two animation clips using spherical interpolation.
         </p>
 
         <!-- Clip A Selector -->
         <div class="space-y-1">
-          <span class="text-[10px] text-ui-textPrimary font-bold">Clip A (Source):</span>
+          <span class="text-[10px] text-ui-textPrimary font-semibold">Clip A (Source):</span>
           <select v-model="blendClipAId" class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-ui-textPrimary text-xs focus:outline-none focus:border-ui-accent cursor-pointer">
             <option value="" class="bg-ui-panel text-ui-textMuted">-- Select Clip A --</option>
             <option v-for="c in animationStore.armature.clips" :key="c.id" :value="c.id" class="bg-ui-panel text-ui-textPrimary">{{ c.name }}</option>
@@ -496,7 +501,7 @@ function setClipFps(fps: number) {
 
         <!-- Clip B Selector -->
         <div class="space-y-1">
-          <span class="text-[10px] text-ui-textPrimary font-bold">Clip B (Target):</span>
+          <span class="text-[10px] text-ui-textPrimary font-semibold">Clip B (Target):</span>
           <select v-model="blendClipBId" class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-ui-textPrimary text-xs focus:outline-none focus:border-ui-accent cursor-pointer">
             <option value="" class="bg-ui-panel text-ui-textMuted">-- Select Clip B --</option>
             <option v-for="c in animationStore.armature.clips" :key="c.id" :value="c.id" class="bg-ui-panel text-ui-textPrimary">{{ c.name }}</option>
@@ -507,7 +512,7 @@ function setClipFps(fps: number) {
         <div class="space-y-1 pt-1">
           <div class="flex justify-between text-[10px] text-ui-textPrimary">
             <span>Blend Factor:</span>
-            <span class="text-ui-textAccent font-bold">{{ Math.round(blendFactor * 100) }}%</span>
+            <span class="text-ui-textAccent font-bold font-mono">{{ Math.round(blendFactor * 100) }}%</span>
           </div>
           <input 
             type="range" 
@@ -527,15 +532,11 @@ function setClipFps(fps: number) {
 
         <button 
           @click="applyBlendPreview"
-          class="w-full py-1.5 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white font-bold text-xs shadow-xs transition"
+          class="w-full py-1.5 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white font-bold text-xs shadow-xs transition cursor-pointer"
         >
           Update Live Blend Preview
         </button>
       </div>
-    </div>
-
-    <!-- TAB 2: PROCEDURAL ANIMATIONS (Proc) -->
-    <div v-show="activeTab === 'proc'" class="space-y-2.5">
       <!-- Characters & Creatures -->
       <div class="bg-ui-surface p-2.5 rounded-xs border border-ui-borderSubtle space-y-1.5">
         <span class="text-[11px] font-bold text-ui-textAccent flex items-center gap-1.5">
