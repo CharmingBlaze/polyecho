@@ -2869,31 +2869,31 @@ onUnmounted(() => {
       <!-- 1. SINGLE VIEWPORT LIGHTWAVE CONTROLS -->
       <template v-if="!toolStore.viewport.quadView">
         <!-- Top-Right LightWave Nav Cluster (Move, Rotate, Zoom, Center, Maximize) -->
-        <div class="absolute top-2.5 right-2.5 z-20 flex items-center bg-dcc-900/90 border border-dcc-700/80 rounded shadow-md divide-x divide-dcc-750">
+        <div class="absolute top-2.5 right-2.5 z-20 flex items-center bg-ui-panel/95 text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-md divide-x divide-ui-borderSubtle">
           <button 
             @mousedown="startLightWavePan('persp', $event)" 
-            class="p-1.5 hover:bg-dcc-750 text-slate-300 hover:text-white cursor-move transition"
+            class="p-1.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-move transition"
             title="LightWave Pan (Drag to pan view)"
           >
             <Move class="w-3.5 h-3.5" />
           </button>
           <button 
             @mousedown="startLightWaveRotate($event)" 
-            class="p-1.5 hover:bg-dcc-750 text-slate-300 hover:text-white cursor-grab transition"
+            class="p-1.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-grab transition"
             title="LightWave Orbit (Drag to rotate 3D view)"
           >
             <RotateCw class="w-3.5 h-3.5" />
           </button>
           <button 
             @mousedown="startLightWaveZoom('persp', $event)" 
-            class="p-1.5 hover:bg-dcc-750 text-slate-300 hover:text-white cursor-ns-resize transition"
+            class="p-1.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-ns-resize transition"
             title="LightWave Zoom (Drag up/down to zoom)"
           >
             <Search class="w-3.5 h-3.5" />
           </button>
           <button 
             @click="centerViewOnContents('persp')" 
-            class="p-1.5 hover:bg-dcc-750 text-slate-300 hover:text-amber-400 transition"
+            class="p-1.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition"
             title="Center View on Model (Frame Contents)"
           >
             <Crosshair class="w-3.5 h-3.5" />
@@ -2902,17 +2902,17 @@ onUnmounted(() => {
           <button 
             @click="toolStore.viewport.xray = !toolStore.viewport.xray" 
             class="p-1.5 transition flex items-center justify-center"
-            :class="toolStore.viewport.xray ? 'bg-amber-500/30 text-amber-300 font-bold shadow-inner' : 'hover:bg-dcc-750 text-slate-300 hover:text-white'"
+            :class="toolStore.viewport.xray ? 'bg-ui-active text-ui-textAccent font-bold shadow-inner' : 'hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent'"
             title="Toggle X-Ray Mode (Alt+Z)"
           >
-            <BlenderIcon name="xray" :size="14" :color="toolStore.viewport.xray ? '#f59e0b' : 'currentColor'" />
+            <BlenderIcon name="xray" :size="14" :color="toolStore.viewport.xray ? 'var(--ui-accent)' : 'currentColor'" />
           </button>
           <button 
             @click="toolStore.viewport.quadView = true" 
-            class="p-1.5 hover:bg-dcc-750 text-slate-300 hover:text-white transition"
+            class="p-1.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition"
             title="Split to Quad View (Ctrl+Alt+Q)"
           >
-            <Maximize2 class="w-3.5 h-3.5 text-amber-400" />
+            <Maximize2 class="w-3.5 h-3.5 text-ui-textAccent" />
           </button>
         </div>
       </template>
@@ -2920,30 +2920,30 @@ onUnmounted(() => {
       <!-- 2. QUAD VIEWPORT LIGHTWAVE CONTROLS -->
       <template v-else>
         <!-- Center Divider Lines -->
-        <div class="absolute inset-x-0 top-1/2 h-px bg-dcc-700/90 pointer-events-none z-10"></div>
-        <div class="absolute inset-y-0 left-1/2 w-px bg-dcc-700/90 pointer-events-none z-10"></div>
+        <div class="absolute inset-x-0 top-1/2 h-px bg-ui-borderStrong/60 pointer-events-none z-10"></div>
+        <div class="absolute inset-y-0 left-1/2 w-px bg-ui-borderStrong/60 pointer-events-none z-10"></div>
 
         <!-- QUADRANT 1: TOP-LEFT (Top Ortho) -->
         <div class="absolute top-2 left-2 z-20 flex items-center justify-between w-[calc(50%-16px)]">
           <!-- View Label -->
-          <div class="px-2 py-0.5 rounded bg-dcc-900/90 border border-dcc-700/80 text-[10px] font-mono text-cyan-300 flex items-center gap-1.5 shadow">
+          <div class="px-2 py-0.5 rounded-xs bg-ui-panel/95 border border-ui-borderStrong text-[10px] font-mono text-ui-textPrimary flex items-center gap-1.5 shadow-xs">
             <span class="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
             <span class="font-bold">Top Ortho</span>
-            <span class="text-slate-500">[Y+]</span>
+            <span class="text-ui-textMuted">[Y+]</span>
           </div>
 
           <!-- LightWave Nav Buttons (Pan, Zoom, Center, Maximize for 2D Ortho) -->
-          <div class="flex items-center bg-dcc-900/90 border border-dcc-700/80 rounded shadow divide-x divide-dcc-750">
-            <button @mousedown="startLightWavePan('top', $event)" class="p-1 hover:bg-dcc-750 text-slate-300 hover:text-white cursor-move" title="Pan Top View (Drag to pan)">
+          <div class="flex items-center bg-ui-panel/95 text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle">
+            <button @mousedown="startLightWavePan('top', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-move transition" title="Pan Top View (Drag to pan)">
               <Move class="w-3 h-3" />
             </button>
-            <button @mousedown="startLightWaveZoom('top', $event)" class="p-1 hover:bg-dcc-750 text-slate-300 hover:text-white cursor-ns-resize" title="Zoom Top View (Drag up/down to zoom)">
+            <button @mousedown="startLightWaveZoom('top', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-ns-resize transition" title="Zoom Top View (Drag up/down to zoom)">
               <Search class="w-3 h-3" />
             </button>
-            <button @click="centerViewOnContents('top')" class="p-1 hover:bg-dcc-750 text-slate-300 hover:text-cyan-300" title="Center Top View on Model">
+            <button @click="centerViewOnContents('top')" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Center Top View on Model">
               <Crosshair class="w-3 h-3" />
             </button>
-            <button @click="toolStore.viewport.quadView = false" class="p-1 hover:bg-dcc-750 text-slate-300 hover:text-white" title="Maximize View">
+            <button @click="toolStore.viewport.quadView = false" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Maximize View">
               <Maximize2 class="w-3 h-3" />
             </button>
           </div>
@@ -2951,36 +2951,36 @@ onUnmounted(() => {
 
         <!-- QUADRANT 2: TOP-RIGHT (Perspective) -->
         <div class="absolute top-2 right-2 z-20 flex items-center justify-between w-[calc(50%-16px)]">
-          <div class="px-2 py-0.5 rounded bg-dcc-900/90 border border-dcc-700/80 text-[10px] font-mono text-amber-300 flex items-center gap-1.5 shadow">
+          <div class="px-2 py-0.5 rounded-xs bg-ui-panel/95 border border-ui-borderStrong text-[10px] font-mono text-ui-textPrimary flex items-center gap-1.5 shadow-xs">
             <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
             <span class="font-bold">Perspective 3D</span>
-            <span class="text-slate-500">[User]</span>
+            <span class="text-ui-textMuted">[User]</span>
           </div>
 
           <!-- Full 3D Nav Buttons (Pan, Rotate, Zoom, Center, X-Ray, Maximize) -->
-          <div class="flex items-center bg-dcc-900/90 border border-dcc-700/80 rounded shadow divide-x divide-dcc-750">
-            <button @mousedown="startLightWavePan('persp', $event)" class="p-1 hover:bg-dcc-750 text-slate-300 hover:text-white cursor-move" title="Pan View">
+          <div class="flex items-center bg-ui-panel/95 text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle">
+            <button @mousedown="startLightWavePan('persp', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-move transition" title="Pan View">
               <Move class="w-3 h-3" />
             </button>
-            <button @mousedown="startLightWaveRotate($event)" class="p-1 hover:bg-dcc-750 text-slate-300 hover:text-white cursor-grab" title="Orbit 3D View">
+            <button @mousedown="startLightWaveRotate($event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-grab transition" title="Orbit 3D View">
               <RotateCw class="w-3 h-3" />
             </button>
-            <button @mousedown="startLightWaveZoom('persp', $event)" class="p-1 hover:bg-dcc-750 text-slate-300 hover:text-white cursor-ns-resize" title="Zoom View">
+            <button @mousedown="startLightWaveZoom('persp', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-ns-resize transition" title="Zoom View">
               <Search class="w-3 h-3" />
             </button>
-            <button @click="centerViewOnContents('persp')" class="p-1 hover:bg-dcc-750 text-slate-300 hover:text-amber-400" title="Center View on Model">
+            <button @click="centerViewOnContents('persp')" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Center View on Model">
               <Crosshair class="w-3 h-3" />
             </button>
             <!-- In-Viewport See-Through Glassmorphic X-Ray Button -->
             <button 
               @click="toolStore.viewport.xray = !toolStore.viewport.xray" 
               class="p-1 transition flex items-center justify-center"
-              :class="toolStore.viewport.xray ? 'bg-amber-500/30 text-amber-300 font-bold shadow-inner' : 'hover:bg-dcc-750 text-slate-300 hover:text-white'"
+              :class="toolStore.viewport.xray ? 'bg-ui-active text-ui-textAccent font-bold shadow-inner' : 'hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent'"
               title="Toggle X-Ray Mode (Alt+Z)"
             >
-              <BlenderIcon name="xray" :size="13" :color="toolStore.viewport.xray ? '#f59e0b' : 'currentColor'" />
+              <BlenderIcon name="xray" :size="13" :color="toolStore.viewport.xray ? 'var(--ui-accent)' : 'currentColor'" />
             </button>
-            <button @click="toolStore.viewport.quadView = false" class="p-1 hover:bg-dcc-750 text-slate-300 hover:text-white" title="Maximize View">
+            <button @click="toolStore.viewport.quadView = false" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Maximize View">
               <Maximize2 class="w-3 h-3" />
             </button>
           </div>
@@ -2988,24 +2988,24 @@ onUnmounted(() => {
 
         <!-- QUADRANT 3: BOTTOM-LEFT (Front Ortho) -->
         <div class="absolute top-[calc(50%+8px)] left-2 z-20 flex items-center justify-between w-[calc(50%-16px)]">
-          <div class="px-2 py-0.5 rounded bg-dcc-900/90 border border-dcc-700/80 text-[10px] font-mono text-emerald-300 flex items-center gap-1.5 shadow">
+          <div class="px-2 py-0.5 rounded-xs bg-ui-panel/95 border border-ui-borderStrong text-[10px] font-mono text-ui-textPrimary flex items-center gap-1.5 shadow-xs">
             <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
             <span class="font-bold">Front Ortho</span>
-            <span class="text-slate-500">[Z-]</span>
+            <span class="text-ui-textMuted">[Z-]</span>
           </div>
 
           <!-- LightWave Nav Buttons (Pan, Zoom, Center, Maximize for 2D Ortho) -->
-          <div class="flex items-center bg-dcc-900/90 border border-dcc-700/80 rounded shadow divide-x divide-dcc-750">
-            <button @mousedown="startLightWavePan('front', $event)" class="p-1 hover:bg-dcc-750 text-slate-300 hover:text-white cursor-move" title="Pan Front View (Drag to pan)">
+          <div class="flex items-center bg-ui-panel/95 text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle">
+            <button @mousedown="startLightWavePan('front', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-move transition" title="Pan Front View (Drag to pan)">
               <Move class="w-3 h-3" />
             </button>
-            <button @mousedown="startLightWaveZoom('front', $event)" class="p-1 hover:bg-dcc-750 text-slate-300 hover:text-white cursor-ns-resize" title="Zoom Front View (Drag up/down to zoom)">
+            <button @mousedown="startLightWaveZoom('front', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-ns-resize transition" title="Zoom Front View (Drag up/down to zoom)">
               <Search class="w-3 h-3" />
             </button>
-            <button @click="centerViewOnContents('front')" class="p-1 hover:bg-dcc-750 text-slate-300 hover:text-emerald-300" title="Center Front View on Model">
+            <button @click="centerViewOnContents('front')" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Center Front View on Model">
               <Crosshair class="w-3 h-3" />
             </button>
-            <button @click="toolStore.viewport.quadView = false" class="p-1 hover:bg-dcc-750 text-slate-300 hover:text-white" title="Maximize View">
+            <button @click="toolStore.viewport.quadView = false" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Maximize View">
               <Maximize2 class="w-3 h-3" />
             </button>
           </div>
@@ -3013,24 +3013,24 @@ onUnmounted(() => {
 
         <!-- QUADRANT 4: BOTTOM-RIGHT (Right Ortho) -->
         <div class="absolute top-[calc(50%+8px)] right-2 z-20 flex items-center justify-between w-[calc(50%-16px)]">
-          <div class="px-2 py-0.5 rounded bg-dcc-900/90 border border-dcc-700/80 text-[10px] font-mono text-indigo-300 flex items-center gap-1.5 shadow">
+          <div class="px-2 py-0.5 rounded-xs bg-ui-panel/95 border border-ui-borderStrong text-[10px] font-mono text-ui-textPrimary flex items-center gap-1.5 shadow-xs">
             <span class="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
             <span class="font-bold">Right Ortho</span>
-            <span class="text-slate-500">[X-]</span>
+            <span class="text-ui-textMuted">[X-]</span>
           </div>
 
           <!-- LightWave Nav Buttons (Pan, Zoom, Center, Maximize for 2D Ortho) -->
-          <div class="flex items-center bg-dcc-900/90 border border-dcc-700/80 rounded shadow divide-x divide-dcc-750">
-            <button @mousedown="startLightWavePan('right', $event)" class="p-1 hover:bg-dcc-750 text-slate-300 hover:text-white cursor-move" title="Pan Right View (Drag to pan)">
+          <div class="flex items-center bg-ui-panel/95 text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle">
+            <button @mousedown="startLightWavePan('right', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-move transition" title="Pan Right View (Drag to pan)">
               <Move class="w-3 h-3" />
             </button>
-            <button @mousedown="startLightWaveZoom('right', $event)" class="p-1 hover:bg-dcc-750 text-slate-300 hover:text-white cursor-ns-resize" title="Zoom Right View (Drag up/down to zoom)">
+            <button @mousedown="startLightWaveZoom('right', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-ns-resize transition" title="Zoom Right View (Drag up/down to zoom)">
               <Search class="w-3 h-3" />
             </button>
-            <button @click="centerViewOnContents('right')" class="p-1 hover:bg-dcc-750 text-slate-300 hover:text-indigo-300" title="Center Right View on Model">
+            <button @click="centerViewOnContents('right')" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Center Right View on Model">
               <Crosshair class="w-3 h-3" />
             </button>
-            <button @click="toolStore.viewport.quadView = false" class="p-1 hover:bg-dcc-750 text-slate-300 hover:text-white" title="Maximize View">
+            <button @click="toolStore.viewport.quadView = false" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Maximize View">
               <Maximize2 class="w-3 h-3" />
             </button>
           </div>
