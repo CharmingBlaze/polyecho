@@ -184,6 +184,13 @@ function applyCustomResize() {
   renderCanvas()
 }
 
+// Touch & Stylus Gesture Tracking
+const activePointers = new Map<number, { x: number; y: number; type: string }>()
+let initialPinchDist = 0
+let initialPinchZoom = 6
+let initialPinchPan = { x: 0, y: 0 }
+let activePenPointerId: number | null = null
+
 function onKeyDown(e: KeyboardEvent) {
   if (e.code === 'Space') {
     isSpacePressed.value = true
@@ -395,8 +402,33 @@ function renderCanvas() {
 }
 
 function onPointerDown(e: PointerEvent) {
-  // Middle click or Space+LMB -> Pan
-  if (e.button === 1 || (e.button === 0 && isSpacePressed.value)) {
+  (e.target as HTMLElement)?.setPointerCapture?.(e.pointerId)
+  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType })
+
+  if (e.pointerType === 'pen') {
+    activePenPointerId = e.pointerId
+  }
+
+  // Palm Rejection: Ignore touch events if pen is touching the screen
+  if (activePenPointerId !== null && e.pointerType === 'touch') {
+    return
+  }
+
+  // Two-Finger Pinch / Pan Gesture (Tablet / Touchscreen)
+  if (activePointers.size === 2) {
+    isDrawing = false
+    dragStartCoords = null
+    dragCurrentCoords = null
+    const pts = Array.from(activePointers.values())
+    initialPinchDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)
+    initialPinchZoom = zoom.value
+    initialPinchPan = { ...panOffset.value }
+    panStart = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 }
+    return
+  }
+
+  // Middle click, Space+LMB, Alt+LMB -> Pan Canvas
+  if (e.button === 1 || (e.button === 0 && isSpacePressed.value) || e.altKey) {
     isPanning.value = true
     panStart = { x: e.clientX - panOffset.value.x, y: e.clientY - panOffset.value.y }
     return
@@ -421,10 +453,37 @@ function onPointerDown(e: PointerEvent) {
   }
 
   projectStore.recordState('Pixel Paint')
-  drawPixel(coords.x, coords.y, e.button === 2)
+  drawPixel(coords.x, coords.y, e.button === 2, e.pressure)
 }
 
 function onPointerMove(e: PointerEvent) {
+  if (activePointers.has(e.pointerId)) {
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType })
+  }
+
+  // Two-Finger Pinch Zoom & Pan
+  if (activePointers.size === 2) {
+    const pts = Array.from(activePointers.values())
+    const curDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)
+    if (initialPinchDist > 0) {
+      const scale = curDist / initialPinchDist
+      zoom.value = Math.max(0.5, Math.min(64, Math.round(initialPinchZoom * scale * 10) / 10))
+      const midX = (pts[0].x + pts[1].x) / 2
+      const midY = (pts[0].y + pts[1].y) / 2
+      panOffset.value = {
+        x: initialPinchPan.x + (midX - panStart.x),
+        y: initialPinchPan.y + (midY - panStart.y)
+      }
+      renderCanvas()
+    }
+    return
+  }
+
+  // Palm rejection check
+  if (activePenPointerId !== null && e.pointerType === 'touch') {
+    return
+  }
+
   if (isPanning.value) {
     panOffset.value = {
       x: e.clientX - panStart.x,
@@ -453,12 +512,17 @@ function onPointerMove(e: PointerEvent) {
     if (tool === 'line' || tool === 'rect' || tool === 'circle') {
       renderCanvas()
     } else {
-      drawPixel(coords.x, coords.y, e.buttons === 2)
+      drawPixel(coords.x, coords.y, e.buttons === 2, e.pressure)
     }
   }
 }
 
 function onPointerUp(e: PointerEvent) {
+  activePointers.delete(e.pointerId)
+  if (e.pointerId === activePenPointerId) {
+    activePenPointerId = null
+  }
+
   if (isPanning.value) {
     isPanning.value = false
     return
@@ -498,11 +562,11 @@ function onPointerUp(e: PointerEvent) {
   dragCurrentCoords = null
 }
 
-function drawPixel(x: number, y: number, isSecondary = false) {
+function drawPixel(x: number, y: number, isSecondary = false, pressure = 1.0) {
   const pb = projectStore.pixelBuffer
   const color = isSecondary ? toolStore.secondaryColor : toolStore.primaryColor
   const size = toolStore.brushSize
-  const opacity = toolStore.brushOpacity
+  const opacity = toolStore.brushOpacity * (pressure > 0 ? pressure : 1.0)
   const shape = toolStore.brushShape
 
   if (toolStore.paintTool === 'eraser') {
@@ -527,9 +591,20 @@ function drawPixel(x: number, y: number, isSecondary = false) {
 
 function onWheel(e: WheelEvent) {
   e.preventDefault()
+
+  // Trackpad / Shift+wheel horizontal pan
   if (e.shiftKey) {
     isFitToView.value = false
     panOffset.value.x -= e.deltaY * 0.8
+    renderCanvas()
+    return
+  }
+
+  // Laptop Trackpad 2-finger pan (deltaX + deltaY with no ctrlKey pinch)
+  if (Math.abs(e.deltaX) > 0 && !e.ctrlKey) {
+    isFitToView.value = false
+    panOffset.value.x -= e.deltaX
+    panOffset.value.y -= e.deltaY
     renderCanvas()
     return
   }
@@ -600,6 +675,7 @@ function resetPanZoom() {
   isFitToView.value = true
   renderCanvas()
 }
+
 
 watch(() => projectStore.textureRevision, renderCanvas)
 watch(zoom, renderCanvas)

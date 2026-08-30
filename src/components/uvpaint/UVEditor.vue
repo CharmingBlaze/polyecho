@@ -1145,8 +1145,18 @@ function onPointerUp(e: PointerEvent) {
 
 function onWheel(e: WheelEvent) {
   e.preventDefault()
+
+  // Trackpad 2-finger scroll / Shift+wheel horizontal pan
   if (e.shiftKey) {
     panOffset.value.x -= e.deltaY * 0.8
+    renderCanvas()
+    return
+  }
+
+  // Laptop Trackpad 2-finger pan (deltaX + deltaY with no ctrlKey pinch)
+  if (Math.abs(e.deltaX) > 0 && !e.ctrlKey) {
+    panOffset.value.x -= e.deltaX
+    panOffset.value.y -= e.deltaY
     renderCanvas()
     return
   }
