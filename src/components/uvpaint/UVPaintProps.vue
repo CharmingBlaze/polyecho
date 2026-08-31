@@ -1,15 +1,21 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useToolStore } from '../../stores/toolStore'
 import { useProjectStore } from '../../stores/projectStore'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import { 
   Sliders, 
-  Check, 
   Zap, 
   Wand2, 
-  RotateCw 
+  RotateCw,
+  Plus,
+  Trash2,
+  Copy,
+  Sparkles,
+  Save
 } from 'lucide-vue-next'
+import { DEFAULT_GRADIENT_PRESETS, loadCustomGradients, saveCustomGradients, SavedGradient } from '../../utils/gradient'
+import { DITHER_PRESETS, DitherPreset, renderDitherCanvasPreview } from '../../utils/dithering'
 
 const toolStore = useToolStore()
 const projectStore = useProjectStore()
@@ -17,8 +23,53 @@ const projectStore = useProjectStore()
 const activeTab = ref<'material' | 'color' | 'gradient' | 'shading'>('material')
 
 // ----------------------------------------------------
-// 1. MATERIAL SYSTEM (Zero Emojis, Clean DCC Style)
+// 1. MATERIAL SYSTEM & REAL-TIME PLUMBING
 // ----------------------------------------------------
+const activeMaterialId = ref<string>(projectStore.activeMesh?.materialId || projectStore.materials[0]?.id || 'default_material')
+
+watch(() => projectStore.activeMesh?.materialId, (newId) => {
+  if (newId) activeMaterialId.value = newId
+}, { immediate: true })
+
+const activeMaterial = computed(() => {
+  return projectStore.materials.find(m => m.id === activeMaterialId.value) || projectStore.materials[0]
+})
+
+function selectMaterial(id: string) {
+  activeMaterialId.value = id
+  if (projectStore.activeMesh) {
+    projectStore.assignMaterialToActiveMesh(id)
+  }
+}
+
+function createNewMaterial() {
+  const newMat = projectStore.addMaterial()
+  selectMaterial(newMat.id)
+}
+
+function duplicateCurrentMaterial() {
+  if (!activeMaterial.value) return
+  const cur = activeMaterial.value
+  const cloned = projectStore.addMaterial(`${cur.name} Copy`, cur.textureId)
+  cloned.color = cur.color
+  cloned.roughness = cur.roughness
+  cloned.metalness = cur.metalness
+  cloned.emissive = cur.emissive
+  cloned.emissiveIntensity = cur.emissiveIntensity
+  cloned.shading = cur.shading
+  cloned.dither = cur.dither
+  cloned.ditherPattern = cur.ditherPattern
+  cloned.ditherLevel = cur.ditherLevel
+  cloned.colorDepth = cur.colorDepth
+  selectMaterial(cloned.id)
+}
+
+function deleteCurrentMaterial() {
+  if (projectStore.materials.length <= 1) return
+  projectStore.deleteMaterial(activeMaterialId.value)
+  activeMaterialId.value = projectStore.materials[0]?.id || 'default_material'
+}
+
 interface MaterialPreset {
   name: string
   color: string
@@ -41,34 +92,68 @@ const materialPresets: MaterialPreset[] = [
   { name: 'Glass Crystal', color: '#67e8f9', roughness: 0.05, metalness: 0.2, emissive: '#000000', emissiveIntensity: 0, opacity: 0.6, shading: 'textured' }
 ]
 
-const matColor = ref<string>('#ffffff')
-const matRoughness = ref<number>(0.5)
-const matMetalness = ref<number>(0.0)
-const matEmissive = ref<string>('#000000')
-const matEmissiveIntensity = ref<number>(0.0)
-const matOpacity = ref<number>(1.0)
-
 function applyPreset(preset: MaterialPreset) {
-  matColor.value = preset.color
-  matRoughness.value = preset.roughness
-  matMetalness.value = preset.metalness
-  matEmissive.value = preset.emissive
-  matEmissiveIntensity.value = preset.emissiveIntensity
-  matOpacity.value = preset.opacity
-  toolStore.viewport.shading = preset.shading
-  applyMaterialToMesh()
+  if (!activeMaterial.value) return
+  projectStore.recordState(`Apply Material Preset ${preset.name}`)
+  activeMaterial.value.color = preset.color
+  activeMaterial.value.roughness = preset.roughness
+  activeMaterial.value.metalness = preset.metalness
+  activeMaterial.value.emissive = preset.emissive
+  activeMaterial.value.emissiveIntensity = preset.emissiveIntensity
+  activeMaterial.value.shading = preset.shading === 'psx' ? 'psx' : 'textured'
+  projectStore.markGeometryUpdated()
 }
 
-function applyMaterialToMesh() {
-  const mesh = projectStore.activeMesh
-  if (!mesh) return
-  projectStore.recordState('Apply Material')
-  const mat = projectStore.materials.find(m => m.id === mesh.materialId) || projectStore.materials[0]
-  if (mat) {
-    mat.color = matColor.value
-    mat.shading = toolStore.viewport.shading === 'psx' ? 'psx' : 'textured'
-  }
+// ----------------------------------------------------
+// DITHERING PREVIEWS & PRESETS ENGINE
+// ----------------------------------------------------
+const ditherPreviewCanvasRef = ref<HTMLCanvasElement | null>(null)
+
+function updateDitherPreview() {
+  if (!ditherPreviewCanvasRef.value) return
+  const mat = activeMaterial.value
+  if (!mat) return
+  renderDitherCanvasPreview(
+    ditherPreviewCanvasRef.value,
+    mat.ditherPattern || 'bayer4x4',
+    mat.ditherLevel ?? 32,
+    mat.colorDepth ?? 32,
+    mat.ditherScale ?? 1,
+    mat.color || '#38bdf8'
+  )
 }
+
+function applyDitherPreset(preset: DitherPreset) {
+  if (!activeMaterial.value) return
+  projectStore.recordState(`Apply Dither Preset: ${preset.name}`)
+  activeMaterial.value.dither = true
+  activeMaterial.value.ditherPattern = preset.pattern
+  activeMaterial.value.ditherLevel = preset.ditherLevel
+  activeMaterial.value.colorDepth = preset.colorDepth
+  activeMaterial.value.ditherScale = preset.scale
+  projectStore.markGeometryUpdated()
+  nextTick(() => {
+    updateDitherPreview()
+  })
+}
+
+onMounted(() => {
+  customGradients.value = loadCustomGradients()
+  nextTick(() => {
+    updateDitherPreview()
+  })
+})
+
+watch([
+  () => activeMaterial.value?.dither,
+  () => activeMaterial.value?.ditherPattern,
+  () => activeMaterial.value?.ditherLevel,
+  () => activeMaterial.value?.colorDepth,
+  () => activeMaterial.value?.ditherScale,
+  () => activeMaterial.value?.color
+], () => {
+  updateDitherPreview()
+})
 
 // ----------------------------------------------------
 // 2. COLOR HARMONIES & PALETTES
@@ -244,6 +329,83 @@ function bakeGradientToActiveFace() {
   }))
 }
 
+// Custom Gradient Management
+const customGradients = ref<SavedGradient[]>([])
+const gradientName = ref<string>('Sunset Horizon')
+const selectedGradientId = ref<string>(DEFAULT_GRADIENT_PRESETS[0]?.id || 'sunset-horizon')
+
+const allGradients = computed<SavedGradient[]>(() => {
+  return [...DEFAULT_GRADIENT_PRESETS, ...customGradients.value]
+})
+
+function applySavedGradient(g: SavedGradient) {
+  gradientName.value = g.name
+  selectedGradientId.value = g.id
+  gradientType.value = g.type || 'Linear'
+  gradientAngle.value = g.angle || 90
+  gradientStops.value = g.stops.map((s, idx) => ({
+    id: String(idx + 1),
+    color: s.color,
+    offset: s.position
+  }))
+  selectedStopId.value = gradientStops.value[0]?.id || '1'
+}
+
+function saveCurrentCustomGradient() {
+  const name = gradientName.value.trim() || `Custom Gradient ${customGradients.value.length + 1}`
+  const existingIdx = customGradients.value.findIndex(g => g.id === selectedGradientId.value && g.isCustom)
+  const stopsToSave = gradientStops.value.map((s, idx) => ({
+    id: String(idx + 1),
+    color: s.color,
+    position: s.offset
+  }))
+
+  if (existingIdx >= 0) {
+    customGradients.value[existingIdx].name = name
+    customGradients.value[existingIdx].stops = stopsToSave
+    customGradients.value[existingIdx].type = gradientType.value
+    customGradients.value[existingIdx].angle = gradientAngle.value
+  } else {
+    const newG: SavedGradient = {
+      id: `custom_grad_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      name,
+      type: gradientType.value,
+      angle: gradientAngle.value,
+      stops: stopsToSave,
+      isCustom: true
+    }
+    customGradients.value.push(newG)
+    selectedGradientId.value = newG.id
+  }
+  saveCustomGradients(customGradients.value)
+}
+
+function createNewCustomGradient() {
+  const newName = `New Gradient ${customGradients.value.length + 1}`
+  gradientName.value = newName
+  const newG: SavedGradient = {
+    id: `custom_grad_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    name: newName,
+    type: 'Linear',
+    angle: 90,
+    stops: [
+      { id: '1', color: toolStore.primaryColor || '#1e1b4b', position: 0 },
+      { id: '2', color: toolStore.secondaryColor || '#fef08a', position: 100 }
+    ],
+    isCustom: true
+  }
+  customGradients.value.push(newG)
+  saveCustomGradients(customGradients.value)
+  applySavedGradient(newG)
+}
+
+function deleteCurrentCustomGradient() {
+  const curId = selectedGradientId.value
+  customGradients.value = customGradients.value.filter(g => g.id !== curId)
+  saveCustomGradients(customGradients.value)
+  applySavedGradient(DEFAULT_GRADIENT_PRESETS[0])
+}
+
 const gradientPresets = [
   { name: 'Ambient Occlusion', stops: [{ color: '#ffffff', offset: 0 }, { color: '#181a20', offset: 100 }], angle: 90 },
   { name: 'Warm Sunset', stops: [{ color: '#7c3aed', offset: 0 }, { color: '#f97316', offset: 60 }, { color: '#facc15', offset: 100 }], angle: 90 },
@@ -253,6 +415,7 @@ const gradientPresets = [
 ]
 
 function applyGradPreset(p: any) {
+  gradientName.value = p.name
   gradientStops.value = p.stops.map((s: any, idx: number) => ({ id: String(idx + 1), color: s.color, offset: s.offset }))
   selectedStopId.value = gradientStops.value[0].id
   gradientAngle.value = p.angle
@@ -404,13 +567,62 @@ function hslToRgb(h: number, s: number, l: number) {
       </div>
     </div>
 
-    <!-- TAB 1: 1-CLICK MATERIAL SYSTEM -->
+    <!-- TAB 1: MATERIAL MANAGER & REAL-TIME CONTROLS -->
     <div v-show="activeTab === 'material'" class="space-y-2">
+      <!-- Material Slot Selector & Toolbar -->
+      <div class="bg-ui-surface p-2 rounded-xs border border-ui-borderSubtle space-y-1.5">
+        <div class="flex items-center justify-between">
+          <span class="text-[10px] font-bold text-ui-textAccent uppercase tracking-wider flex items-center gap-1.5">
+            <BlenderIcon name="material" :size="12" />
+            <span>Active Material Slot</span>
+          </span>
+          <span class="text-[9px] font-mono text-ui-textMuted">{{ projectStore.materials.length }} Slots</span>
+        </div>
+
+        <div class="flex items-center gap-1">
+          <select 
+            :value="activeMaterialId"
+            @change="selectMaterial(($event.target as HTMLSelectElement).value)"
+            class="flex-1 bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-1 text-ui-textPrimary text-[11px] focus:outline-none focus:border-ui-accent cursor-pointer font-bold"
+          >
+            <option v-for="mat in projectStore.materials" :key="mat.id" :value="mat.id">
+              {{ mat.name }} ({{ (mat.shading || 'pbr').toUpperCase() }})
+            </option>
+          </select>
+
+          <button 
+            @click="createNewMaterial"
+            class="h-7 px-1.5 rounded-xs bg-ui-input hover:bg-ui-hover text-emerald-400 border border-ui-borderSubtle transition flex items-center gap-0.5 text-[10px] font-bold cursor-pointer"
+            title="Create New Material"
+          >
+            <Plus class="w-3 h-3" />
+            <span>New</span>
+          </button>
+
+          <button 
+            @click="duplicateCurrentMaterial"
+            class="h-7 px-1.5 rounded-xs bg-ui-input hover:bg-ui-hover text-sky-400 border border-ui-borderSubtle transition flex items-center text-[10px] cursor-pointer"
+            title="Duplicate Material"
+          >
+            <Copy class="w-3 h-3" />
+          </button>
+
+          <button 
+            v-if="projectStore.materials.length > 1"
+            @click="deleteCurrentMaterial"
+            class="h-7 px-1.5 rounded-xs bg-ui-input hover:bg-rose-950/40 text-ui-textMuted hover:text-rose-400 border border-ui-borderSubtle transition cursor-pointer"
+            title="Delete Material"
+          >
+            <Trash2 class="w-3 h-3" />
+          </button>
+        </div>
+      </div>
+
       <!-- 1-Click Material Presets Grid -->
       <div class="bg-ui-surface p-2 rounded-xs border border-ui-borderSubtle space-y-1.5">
-        <span class="text-[10px] font-bold text-ui-textAccent uppercase tracking-wider flex items-center gap-1.5">
-          <BlenderIcon name="material" :size="12" />
-          <span>Material Presets</span>
+        <span class="text-[10px] font-bold text-ui-textPrimary uppercase tracking-wider flex items-center gap-1.5">
+          <Zap class="w-3 h-3 text-amber-400" />
+          <span>Quick Presets</span>
         </span>
 
         <div class="grid grid-cols-2 gap-1 pt-0.5">
@@ -418,7 +630,7 @@ function hslToRgb(h: number, s: number, l: number) {
             v-for="preset in materialPresets" 
             :key="preset.name"
             @click="applyPreset(preset)"
-            class="p-1.5 rounded-xs bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle hover:border-ui-accent text-left flex items-center space-x-1.5 transition group"
+            class="p-1.5 rounded-xs bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle hover:border-ui-accent text-left flex items-center space-x-1.5 transition group cursor-pointer"
           >
             <div 
               class="w-2.5 h-2.5 rounded-full border border-white/40 shrink-0"
@@ -433,62 +645,217 @@ function hslToRgb(h: number, s: number, l: number) {
       </div>
 
       <!-- Material Properties Customizer -->
-      <div class="bg-ui-surface p-2 rounded-xs border border-ui-borderSubtle space-y-2">
+      <div v-if="activeMaterial" class="bg-ui-surface p-2 rounded-xs border border-ui-borderSubtle space-y-2">
         <span class="text-[10px] font-bold text-ui-textPrimary uppercase tracking-wider flex items-center gap-1.5">
           <Sliders class="w-3 h-3 text-ui-textMuted" />
-          <span>Material Parameters</span>
+          <span>Parameters: {{ activeMaterial.name }}</span>
         </span>
 
         <!-- Base Tint Color -->
         <div class="space-y-0.5">
           <div class="flex items-center justify-between text-[9px] text-ui-textMuted">
             <span>Base Tint:</span>
-            <span class="font-mono text-ui-textPrimary">{{ matColor }}</span>
+            <span class="font-mono text-ui-textPrimary">{{ activeMaterial.color }}</span>
           </div>
           <div class="flex items-center space-x-1.5">
-            <input type="color" v-model="matColor" @input="applyMaterialToMesh" class="w-6 h-6 rounded-xs border border-ui-borderDefault bg-transparent cursor-pointer" />
-            <input type="text" v-model="matColor" @change="applyMaterialToMesh" class="flex-1 bg-ui-input border border-ui-borderDefault rounded-xs px-1.5 py-0.5 text-ui-textPrimary text-[10px] focus:outline-none focus:border-ui-accent font-mono" />
+            <input 
+              type="color" 
+              v-model="activeMaterial.color" 
+              @change="projectStore.markGeometryUpdated()"
+              class="w-6 h-6 rounded-xs border border-ui-borderDefault bg-transparent cursor-pointer" 
+            />
+            <input 
+              type="text" 
+              v-model="activeMaterial.color" 
+              @change="projectStore.markGeometryUpdated()"
+              class="flex-1 bg-ui-input border border-ui-borderDefault rounded-xs px-1.5 py-0.5 text-ui-textPrimary text-[10px] focus:outline-none focus:border-ui-accent font-mono" 
+            />
           </div>
         </div>
 
         <!-- Roughness Slider -->
-        <div class="space-y-0.5">
+        <div class="space-y-0.5 pt-1 border-t border-ui-borderSubtle">
           <div class="flex items-center justify-between text-[9px] text-ui-textMuted">
             <span>Roughness / Matte:</span>
-            <span class="text-ui-textAccent font-bold">{{ Math.round(matRoughness * 100) }}%</span>
+            <span class="text-ui-textAccent font-bold">{{ Math.round((activeMaterial.roughness ?? 0.5) * 100) }}%</span>
           </div>
-          <input type="range" min="0" max="1" step="0.05" v-model.number="matRoughness" @input="applyMaterialToMesh" class="w-full accent-ui-accent bg-ui-input h-1.5 rounded-xs cursor-pointer" />
+          <input 
+            type="range" 
+            min="0" 
+            max="1" 
+            step="0.05" 
+            v-model.number="activeMaterial.roughness" 
+            @input="projectStore.markGeometryUpdated()" 
+            class="w-full accent-ui-accent bg-ui-input h-1.5 rounded-xs cursor-pointer" 
+          />
         </div>
 
         <!-- Metalness Slider -->
         <div class="space-y-0.5">
           <div class="flex items-center justify-between text-[9px] text-ui-textMuted">
             <span>Metalness:</span>
-            <span class="text-ui-textAccent font-bold">{{ Math.round(matMetalness * 100) }}%</span>
+            <span class="text-ui-textAccent font-bold">{{ Math.round((activeMaterial.metalness ?? 0.0) * 100) }}%</span>
           </div>
-          <input type="range" min="0" max="1" step="0.05" v-model.number="matMetalness" @input="applyMaterialToMesh" class="w-full accent-ui-accent bg-ui-input h-1.5 rounded-xs cursor-pointer" />
+          <input 
+            type="range" 
+            min="0" 
+            max="1" 
+            step="0.05" 
+            v-model.number="activeMaterial.metalness" 
+            @input="projectStore.markGeometryUpdated()" 
+            class="w-full accent-ui-accent bg-ui-input h-1.5 rounded-xs cursor-pointer" 
+          />
         </div>
 
         <!-- Emission Glow -->
         <div class="space-y-0.5">
           <div class="flex items-center justify-between text-[9px] text-ui-textMuted">
             <span>Emissive Glow:</span>
-            <span class="text-ui-textAccent font-bold">{{ matEmissiveIntensity }}x</span>
+            <span class="text-ui-textAccent font-bold">{{ (activeMaterial.emissiveIntensity || 0).toFixed(1) }}x</span>
           </div>
           <div class="flex items-center space-x-1.5">
-            <input type="color" v-model="matEmissive" @input="applyMaterialToMesh" class="w-6 h-6 rounded-xs border border-ui-borderDefault bg-transparent cursor-pointer" />
-            <input type="range" min="0" max="3" step="0.1" v-model.number="matEmissiveIntensity" @input="applyMaterialToMesh" class="flex-1 accent-ui-accent bg-ui-input h-1.5 rounded-xs cursor-pointer" />
+            <input 
+              type="color" 
+              v-model="activeMaterial.emissive" 
+              @change="projectStore.markGeometryUpdated()" 
+              class="w-6 h-6 rounded-xs border border-ui-borderDefault bg-transparent cursor-pointer" 
+            />
+            <input 
+              type="range" 
+              min="0" 
+              max="5" 
+              step="0.1" 
+              v-model.number="activeMaterial.emissiveIntensity" 
+              @input="projectStore.markGeometryUpdated()" 
+              class="flex-1 accent-ui-accent bg-ui-input h-1.5 rounded-xs cursor-pointer" 
+            />
           </div>
         </div>
 
-        <!-- Apply Button -->
-        <button 
-          @click="applyMaterialToMesh"
-          class="w-full py-1.5 px-2 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white font-bold text-[10px] shadow-xs flex items-center justify-center space-x-1.5 transition"
-        >
-          <Check class="w-3 h-3" />
-          <span>Apply Material to Mesh</span>
-        </button>
+        <!-- Real-Time Matrix Dithering Controls -->
+        <div class="space-y-1.5 pt-1.5 border-t border-ui-borderSubtle">
+          <div class="flex items-center justify-between">
+            <label class="flex items-center gap-1.5 text-[9.5px] font-semibold text-ui-textPrimary cursor-pointer">
+              <input 
+                type="checkbox" 
+                v-model="activeMaterial.dither"
+                @change="projectStore.markGeometryUpdated(); updateDitherPreview()"
+                class="rounded-xs text-amber-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" 
+              />
+              <span class="flex items-center gap-1">
+                <Sparkles class="w-3 h-3 text-amber-400" />
+                <span>Real-Time Matrix Dithering</span>
+              </span>
+            </label>
+            <span class="text-[8.5px] font-mono font-bold text-amber-400" v-if="activeMaterial.dither">LIVE</span>
+          </div>
+
+          <div v-if="activeMaterial.dither" class="p-1.5 bg-ui-input rounded-xs border border-ui-borderSubtle space-y-2">
+            <!-- Live Dithering Canvas Preview Window -->
+            <div class="space-y-1">
+              <div class="flex items-center justify-between text-[8.5px] text-amber-300 font-bold uppercase">
+                <span>Live Dither Preview</span>
+                <span class="text-[7.5px] text-ui-textMuted font-mono">Sphere & Ramp</span>
+              </div>
+              <canvas 
+                ref="ditherPreviewCanvasRef" 
+                width="240" 
+                height="80" 
+                class="w-full h-16 rounded-xs border border-ui-borderSubtle bg-black block shadow-inner"
+              ></canvas>
+            </div>
+
+            <!-- Dithering Presets Shelf -->
+            <div class="space-y-1 pt-1 border-t border-ui-borderSubtle">
+              <div class="flex items-center justify-between text-[8.5px] text-ui-textMuted font-semibold uppercase">
+                <span>Dither Presets</span>
+                <span class="text-[7.5px] font-mono text-amber-400">1-Click</span>
+              </div>
+              <div class="grid grid-cols-3 gap-1">
+                <button 
+                  v-for="dp in DITHER_PRESETS" 
+                  :key="dp.id"
+                  @click="applyDitherPreset(dp)"
+                  class="p-1 rounded-xs bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle hover:border-amber-400 text-left transition cursor-pointer flex flex-col"
+                  :title="dp.description"
+                >
+                  <span class="text-[8.5px] font-bold text-ui-textPrimary truncate">{{ dp.name }}</span>
+                  <span class="text-[7px] font-mono text-ui-textMuted uppercase truncate">{{ dp.pattern }} · {{ dp.colorDepth ? dp.colorDepth + 'lv' : '24b' }}</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Matrix Pattern -->
+            <div class="space-y-0.5 pt-1 border-t border-ui-borderSubtle">
+              <span class="text-[8.5px] text-ui-textMuted">Matrix Pattern:</span>
+              <select 
+                v-model="activeMaterial.ditherPattern"
+                @change="projectStore.markGeometryUpdated(); updateDitherPreview()"
+                class="w-full bg-ui-surface border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-ui-textPrimary text-[9.5px] focus:outline-none cursor-pointer font-medium"
+              >
+                <option value="bayer4x4">4x4 Bayer (PS1 Retro)</option>
+                <option value="bayer8x8">8x8 Bayer (Smooth)</option>
+                <option value="bayer2x2">2x2 Bayer (Coarse)</option>
+                <option value="checker">Checkerboard 50% (Weave)</option>
+                <option value="noise">Film Grain (Noise)</option>
+              </select>
+            </div>
+
+            <!-- Dither Strength -->
+            <div class="space-y-0.5">
+              <div class="flex items-center justify-between text-[8.5px] text-ui-textMuted">
+                <span>Dither Strength:</span>
+                <span class="font-mono text-amber-400 font-bold">{{ Math.round(((activeMaterial.ditherLevel ?? 32) / 32) * 100) }}%</span>
+              </div>
+              <input 
+                type="range" 
+                min="4" 
+                max="64" 
+                step="1" 
+                v-model.number="activeMaterial.ditherLevel" 
+                @input="projectStore.markGeometryUpdated(); updateDitherPreview()"
+                class="w-full accent-amber-500 bg-ui-surface h-1 rounded cursor-pointer" 
+              />
+            </div>
+
+            <!-- Color Quantization -->
+            <div class="space-y-0.5">
+              <div class="flex items-center justify-between text-[8.5px] text-ui-textMuted">
+                <span>Color Depth Quantizer:</span>
+                <span class="font-mono text-ui-textAccent text-[8px]">{{ activeMaterial.colorDepth ? activeMaterial.colorDepth + ' Levels' : '24-Bit Smooth' }}</span>
+              </div>
+              <select 
+                v-model.number="activeMaterial.colorDepth"
+                @change="projectStore.markGeometryUpdated(); updateDitherPreview()"
+                class="w-full bg-ui-surface border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-ui-textPrimary text-[9.5px] focus:outline-none cursor-pointer font-medium"
+              >
+                <option :value="32">15-Bit PSX RGB555 (32 lvls)</option>
+                <option :value="16">12-Bit Retro (16 lvls)</option>
+                <option :value="8">8-Bit Low-Fi (8 lvls)</option>
+                <option :value="4">4-Bit Posterize (4 lvls)</option>
+                <option :value="2">1-Bit / 2-Tone (2 lvls)</option>
+                <option :value="0">Full 24-Bit (Smooth)</option>
+              </select>
+            </div>
+
+            <!-- Pixel Grain Scale -->
+            <div class="space-y-0.5">
+              <div class="flex items-center justify-between text-[8.5px] text-ui-textMuted">
+                <span>Pixel Grain Scale:</span>
+                <span class="font-mono text-amber-400 font-bold">{{ activeMaterial.ditherScale || 1 }}x</span>
+              </div>
+              <input 
+                type="range" 
+                min="1" 
+                max="4" 
+                step="1" 
+                v-model.number="activeMaterial.ditherScale" 
+                @input="projectStore.markGeometryUpdated(); updateDitherPreview()"
+                class="w-full accent-amber-500 bg-ui-surface h-1 rounded cursor-pointer" 
+              />
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -605,12 +972,75 @@ function hslToRgb(h: number, s: number, l: number) {
 
     <!-- TAB 3: BLOCKBENCH MULTI-STOP INTERACTIVE GRADIENT STUDIO -->
     <div v-show="activeTab === 'gradient'" class="space-y-3">
+      <!-- Custom Gradient Manager: Name, Save, New, Delete, Selector -->
+      <div class="bg-ui-surface p-2.5 rounded-xs border border-ui-borderSubtle space-y-2">
+        <div class="flex items-center justify-between text-[10px] font-bold text-amber-300 uppercase">
+          <span>Custom Gradient Manager</span>
+          <span class="text-[9px] font-mono text-ui-textMuted font-normal">{{ allGradients.length }} Gradients</span>
+        </div>
+
+        <!-- Gradient Selector & Action Buttons -->
+        <div class="flex items-center gap-1.5">
+          <select 
+            v-model="selectedGradientId"
+            @change="(() => { const g = allGradients.find(x => x.id === selectedGradientId); if (g) applySavedGradient(g) })()"
+            class="flex-1 bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-ui-textPrimary text-[10px] font-medium focus:outline-none cursor-pointer"
+          >
+            <optgroup label="Saved Custom Gradients" v-if="customGradients.length > 0">
+              <option v-for="cg in customGradients" :key="cg.id" :value="cg.id">
+                * {{ cg.name }} (Custom)
+              </option>
+            </optgroup>
+            <optgroup label="Built-in Presets">
+              <option v-for="pg in DEFAULT_GRADIENT_PRESETS" :key="pg.id" :value="pg.id">
+                {{ pg.name }}
+              </option>
+            </optgroup>
+          </select>
+
+          <button 
+            @click="createNewCustomGradient"
+            class="p-1 px-1.5 rounded-xs bg-ui-input hover:bg-ui-hover text-emerald-400 border border-ui-borderSubtle hover:border-emerald-500/50 flex items-center gap-1 text-[10px] font-bold transition cursor-pointer"
+            title="Create New Custom Gradient"
+          >
+            <Plus class="w-3 h-3" />
+            <span>New</span>
+          </button>
+          <button 
+            @click="saveCurrentCustomGradient"
+            class="p-1 px-1.5 rounded-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/50 flex items-center gap-1 text-[10px] font-bold transition cursor-pointer"
+            title="Save current stops & name to custom gradients"
+          >
+            <Save class="w-3 h-3" />
+            <span>Save</span>
+          </button>
+          <button 
+            @click="deleteCurrentCustomGradient"
+            :disabled="!customGradients.some(g => g.id === selectedGradientId)"
+            class="p-1.5 rounded-xs bg-ui-input hover:bg-rose-950/40 text-ui-textMuted hover:text-rose-400 border border-ui-borderSubtle disabled:opacity-30 transition cursor-pointer"
+            title="Delete Selected Custom Gradient"
+          >
+            <Trash2 class="w-3 h-3" />
+          </button>
+        </div>
+
+        <!-- Gradient Name Input -->
+        <div class="flex items-center gap-1.5 pt-0.5">
+          <span class="text-[9px] text-ui-textMuted font-semibold">Name:</span>
+          <input 
+            v-model="gradientName" 
+            placeholder="Gradient Name..." 
+            class="flex-1 bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-0.5 text-ui-textPrimary text-[10px] focus:outline-none font-medium"
+          />
+        </div>
+      </div>
+
       <div class="bg-ui-surface p-3 rounded-xs border border-ui-borderSubtle space-y-3">
         <!-- Header Type Selector -->
         <div class="flex items-center justify-between">
           <span class="text-[11px] font-bold text-ui-textPrimary uppercase flex items-center gap-1.5">
             <BlenderIcon name="texture" :size="13" />
-            <span>Gradient</span>
+            <span>Gradient Stops & Angle</span>
           </span>
           <select 
             v-model="gradientType"

@@ -1,22 +1,71 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import { generateRetroAtlas } from '../../core/painting/DefaultTextures'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import ImportTextureModal from '../modals/ImportTextureModal.vue'
+import PaletteLibraryModal from '../modals/PaletteLibraryModal.vue'
+import { DEFAULT_PALETTES, loadCustomPalettes, saveCustomPalettes, snapColorToPalette, type Palette } from '../../utils/color'
 import { 
   ZoomIn, 
   ZoomOut, 
   Grid, 
   Upload, 
   Download, 
-  ArrowLeftRight,
-  Maximize
+  ArrowLeftRight, 
+  Maximize, 
+  Sparkles, 
+  Sun, 
+  Moon,
+  Plus
 } from 'lucide-vue-next'
+import { generateShadingRamp } from '../../utils/color'
 
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
+
+// ----------------------------------------------------
+// ACTIVE MESH, MATERIAL & TEXTURE BINDINGS
+// ----------------------------------------------------
+const showNewTextureModal = ref(false)
+const newTextureName = ref('')
+const newTextureSize = ref<number>(64)
+
+function handleTextureBindingChange(newTexId: string) {
+  if (projectStore.activeMesh) {
+    projectStore.assignTextureToActiveMesh(newTexId)
+  } else {
+    projectStore.activeTextureId = newTexId
+    projectStore.markTextureUpdated(newTexId)
+  }
+  nextTick(() => {
+    renderCanvas()
+  })
+}
+
+function handleCreateNewTexture() {
+  const name = newTextureName.value.trim() || `Texture_${projectStore.textures.length + 1}`
+  const newTex = projectStore.addTexture(name, newTextureSize.value, newTextureSize.value)
+  if (projectStore.activeMesh) {
+    projectStore.assignTextureToActiveMesh(newTex.id)
+  }
+  showNewTextureModal.value = false
+  newTextureName.value = ''
+  nextTick(() => {
+    renderCanvas()
+  })
+}
+
+// Shading Tool Options State
+const shadeMode = ref<'lighten' | 'darken'>('lighten')
+const shadeStep = ref<number>(15)
+const shadeHueShift = ref<boolean>(true)
+const shadePaletteConstraint = ref<boolean>(false)
+
+const activeShadingRamp = computed(() => {
+  return generateShadingRamp(toolStore.primaryColor || '#ffffff')
+})
 
 const activeDropdown = ref<string | null>(null)
 
@@ -70,49 +119,77 @@ const resizeW = ref(64)
 const resizeH = ref(64)
 const resizeMode = ref<'resample' | 'crop'>('crop')
 
-// Palette Presets Engine
-const selectedPaletteName = ref('Retro PSX (16)')
-const palettePresets: Record<string, string[]> = {
-  'Retro PSX (16)': [
-    '#000000', '#ffffff', '#181425', '#b13e53', '#ef7d57', '#ffcd75', 
-    '#38b764', '#257179', '#29366f', '#3b5dc9', '#41a6f6', '#73eff7',
-    '#94b0c2', '#566c86', '#333c57', '#1a1c23'
-  ],
-  'PICO-8 (16)': [
-    '#000000', '#1D2B53', '#7E2553', '#008751', '#AB5236', '#5F574F',
-    '#C2C3C7', '#FFF1E8', '#FF004D', '#FFA300', '#FFEC27', '#00E436',
-    '#29ADFF', '#83769C', '#FF77A8', '#FFCCAA'
-  ],
-  'Game Boy (4)': [
-    '#0f380f', '#306230', '#8bac0f', '#9bbc0f'
-  ],
-  'Cyberpunk (16)': [
-    '#080811', '#140c24', '#29103e', '#52145c', '#8a186b', '#c71f66',
-    '#f53d5a', '#ff735c', '#ffb369', '#ffe682', '#00f0ff', '#00a3ff',
-    '#0047ff', '#7000ff', '#e000ff', '#ffffff'
-  ],
-  'Earth & Foliage (16)': [
-    '#19100f', '#2e1814', '#472218', '#6b3620', '#9c532b', '#c77e3c',
-    '#e0aa53', '#f2d37c', '#202e1c', '#334825', '#49632d', '#668237',
-    '#8ea346', '#bcc259', '#e0df7b', '#f5f0b5'
-  ]
-}
-
-const activePalette = ref<string[]>([...palettePresets['Retro PSX (16)']])
-
-function switchPalette(name: string) {
-  selectedPaletteName.value = name
-  if (palettePresets[name]) {
-    activePalette.value = [...palettePresets[name]]
+// Palette Library & Presets Engine
+const showPaletteLibraryModal = ref(false)
+const selectedPaletteName = computed(() => projectStore.activePalette?.name || 'PSX Classic 16')
+const activePalette = computed<string[]>({
+  get: () => projectStore.activePalette?.colors || DEFAULT_PALETTES[0].colors,
+  set: (colors: string[]) => {
+    projectStore.activePalette.colors = colors
   }
+})
+
+function switchPalette(pal: Palette) {
+  projectStore.activePalette = pal
 }
 
 function extractPaletteFromTexture() {
   const extracted = projectStore.pixelBuffer.extractPalette(32)
   if (extracted.length > 0) {
-    activePalette.value = extracted
-    selectedPaletteName.value = 'Extracted (' + extracted.length + ')'
+    const newPal: Palette = {
+      id: `custom_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      name: `Extracted (${extracted.length})`,
+      category: 'Custom',
+      isCustom: true,
+      colors: extracted
+    }
+    const customPals = loadCustomPalettes()
+    customPals.push(newPal)
+    saveCustomPalettes(customPals)
+    projectStore.activePalette = newPal
   }
+}
+
+function addCurrentColorToActivePalette() {
+  const color = (toolStore.primaryColor || '#ffffff').toLowerCase()
+  const cur = projectStore.activePalette
+  if (!cur.colors.includes(color)) {
+    if (cur.isCustom) {
+      cur.colors.push(color)
+      const customPals = loadCustomPalettes()
+      const found = customPals.find(p => p.id === cur.id)
+      if (found) found.colors = cur.colors
+      saveCustomPalettes(customPals)
+    } else {
+      const newPal: Palette = {
+        id: `custom_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        name: `${cur.name} (Custom)`,
+        category: 'Custom',
+        isCustom: true,
+        colors: [...cur.colors, color]
+      }
+      const customPals = loadCustomPalettes()
+      customPals.push(newPal)
+      saveCustomPalettes(customPals)
+      projectStore.activePalette = newPal
+    }
+  }
+}
+
+function quantizeCanvasToCurrentPalette() {
+  const pb = projectStore.pixelBuffer
+  const colors = projectStore.activePalette?.colors || DEFAULT_PALETTES[0].colors
+  if (!pb || colors.length === 0) return
+
+  projectStore.recordState(`Quantize Texture (${projectStore.activePalette.name})`)
+  for (let y = 0; y < pb.height; y++) {
+    for (let x = 0; x < pb.width; x++) {
+      const curHex = pb.getPixelHex(x, y)
+      const closest = snapColorToPalette(curHex, colors)
+      pb.setPixel(x, y, closest)
+    }
+  }
+  projectStore.markTextureUpdated()
 }
 
 function swapColors() {
@@ -518,6 +595,10 @@ function onPointerMove(e: PointerEvent) {
 }
 
 function onPointerUp(e: PointerEvent) {
+  const el = e.target as HTMLElement
+  if (el?.hasPointerCapture?.(e.pointerId)) {
+    el.releasePointerCapture(e.pointerId)
+  }
   activePointers.delete(e.pointerId)
   if (e.pointerId === activePenPointerId) {
     activePenPointerId = null
@@ -580,7 +661,16 @@ function drawPixel(x: number, y: number, isSecondary = false, pressure = 1.0) {
   } else if (toolStore.paintTool === 'dither') {
     pb.drawDither(x, y, color, size)
   } else if (toolStore.paintTool === 'shade') {
-    pb.drawShade(x, y, 'lighten', size, 15)
+    const effectiveMode = isSecondary ? (shadeMode.value === 'lighten' ? 'darken' : 'lighten') : shadeMode.value
+    pb.drawShade(
+      x, 
+      y, 
+      effectiveMode, 
+      size, 
+      shadeStep.value, 
+      shadeHueShift.value, 
+      shadePaletteConstraint.value ? activePalette.value : undefined
+    )
   } else {
     pb.drawBrush(x, y, color, size, opacity, shape)
   }
@@ -720,50 +810,95 @@ defineExpose({
   <div class="pixel-editor h-full w-full bg-ui-panel flex flex-col select-none overflow-hidden touch-none relative font-mono text-xs">
     <input ref="fileInputRef" type="file" accept="image/*" @change="handleTextureUpload" class="hidden" />
 
-    <!-- 1. ROW 1: WORKSPACE TABS & TEXTURE / CANVAS DOCUMENT BAR -->
-    <div class="pixel-header-row-1 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between gap-2 shrink-0 z-30 select-none h-8 min-h-[32px]">
+    <!-- 1. ROW 1: WORKSPACE TABS & UNIFIED 3D ASSET BINDING HIERARCHY -->
+    <div class="pixel-header-row-1 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between gap-2 shrink-0 z-30 select-none h-8.5 min-h-[34px]">
       <!-- Main 2D Workspace Tabs: UV Editor vs Pixel Paint -->
-      <div class="flex items-center bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle shrink-0">
+      <div class="workspace-tabs flex items-center bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle shrink-0">
         <button 
           @click="toolStore.uvWorkspaceTab = 'uv'"
-          class="flex items-center space-x-1.5 px-3 py-0.5 rounded-xs text-[10px] font-bold transition cursor-pointer"
+          class="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-xs text-[10px] font-bold transition cursor-pointer"
           :class="toolStore.uvWorkspaceTab === 'uv' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="UV Unwrapping, Seams & Quadrant Atlas Mapping"
         >
           <BlenderIcon name="uv" :size="12" />
-          <span>UV Editor</span>
+          <span>UV</span>
         </button>
 
         <button 
           @click="toolStore.uvWorkspaceTab = 'paint'"
-          class="flex items-center space-x-1.5 px-3 py-0.5 rounded-xs text-[10px] font-bold transition cursor-pointer"
+          class="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-xs text-[10px] font-bold transition cursor-pointer"
           :class="toolStore.uvWorkspaceTab === 'paint' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Pixel & Texture Paint Studio"
         >
           <BlenderIcon name="brush" :size="11" />
-          <span>Pixel Paint</span>
+          <span>Paint</span>
         </button>
       </div>
 
-      <!-- Right: Texture Selector, Canvas Size, Import & Export -->
-      <div class="flex items-center gap-1.5 shrink-0">
-        <!-- Texture Selector -->
-        <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px]">
-          <span class="text-ui-textMuted font-bold text-[9px]">TEX:</span>
+      <!-- Center: Unified Asset Pipeline Hierarchy (OBJ -> MAT -> TEX) -->
+      <div class="asset-pipeline flex items-center gap-1.5 shrink-0 overflow-x-auto">
+        <!-- 1. Active 3D Object -->
+        <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px] text-ui-textSecondary shrink-0">
+          <span class="text-ui-textMuted font-bold text-[8.5px]">OBJ:</span>
           <select 
-            v-model="projectStore.activeTextureId" 
-            @change="onTextureChanged"
-            class="bg-transparent text-ui-textPrimary font-mono focus:outline-none cursor-pointer max-w-[130px] truncate"
+            v-model="projectStore.activeMeshId" 
+            class="bg-transparent text-ui-textPrimary font-bold focus:outline-none cursor-pointer max-w-[100px] truncate"
+            title="Active 3D Object"
           >
-            <option v-for="t in projectStore.textures" :key="t.id" :value="t.id" class="bg-ui-panel">
-              {{ t.name }} ({{ t.width }}x{{ t.height }})
+            <option v-for="m in projectStore.meshes" :key="m.id" :value="m.id" class="bg-ui-panel text-ui-textPrimary">
+              {{ m.name }} ({{ m.faces.length }}f)
             </option>
           </select>
         </div>
 
+        <span class="text-ui-textMuted text-[9px] font-bold shrink-0">→</span>
+
+        <!-- 2. Active Texture Map bound to this Object -->
+        <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px] text-ui-textSecondary shrink-0">
+          <span class="text-ui-textMuted font-bold text-[8.5px]">TEX:</span>
+          <select 
+            :value="projectStore.activeTextureId" 
+            @change="handleTextureBindingChange(($event.target as HTMLSelectElement).value)"
+            class="bg-transparent text-emerald-400 font-bold font-mono focus:outline-none cursor-pointer max-w-[125px] truncate"
+            title="Texture Map bound to Active Object"
+          >
+            <option v-for="t in projectStore.textures" :key="t.id" :value="t.id" class="bg-ui-panel text-ui-textPrimary">
+              {{ t.name }} ({{ t.width }}x{{ t.height }})
+            </option>
+          </select>
+          <button 
+            @click="showNewTextureModal = true"
+            class="p-0.5 hover:bg-ui-hover text-emerald-400 rounded-xs transition cursor-pointer"
+            title="Create New Texture Map for this Object"
+          >
+            <Plus class="w-3 h-3" />
+          </button>
+        </div>
+
+        <!-- Texture Import / Export Action Pill Group -->
+        <div class="flex items-center bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle shrink-0">
+          <button 
+            @click="fileInputRef?.click()" 
+            class="flex items-center gap-1 px-2 py-0.5 hover:bg-ui-hover text-ui-textAccent rounded-xs text-[10px] font-bold transition cursor-pointer whitespace-nowrap"
+            title="Import Texture Image"
+          >
+            <Upload class="w-3 h-3 text-ui-accent" />
+            <span>Import</span>
+          </button>
+
+          <button 
+            @click="downloadTexturePng" 
+            class="flex items-center gap-1 px-2 py-0.5 hover:bg-ui-hover text-emerald-400 rounded-xs text-[10px] font-bold transition cursor-pointer whitespace-nowrap"
+            title="Export Texture PNG"
+          >
+            <Download class="w-3 h-3 text-emerald-400" />
+            <span>Export</span>
+          </button>
+        </div>
+
         <!-- Canvas Resolution Selector -->
         <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px]">
-          <span class="text-ui-textMuted font-bold text-[9px]">RES:</span>
+          <span class="text-ui-textMuted font-bold text-[8.5px]">RES:</span>
           <select 
             @change="(e) => {
               const val = (e.target as HTMLSelectElement).value
@@ -787,31 +922,62 @@ defineExpose({
             <option value="custom" class="bg-ui-panel text-ui-textAccent font-bold">Custom Size...</option>
           </select>
         </div>
+      </div>
+    </div>
 
-        <button 
-          @click="fileInputRef?.click()" 
-          class="flex items-center gap-1 px-2 py-0.5 rounded-xs bg-ui-input hover:bg-ui-hover text-ui-textAccent text-[10px] font-bold border border-ui-borderSubtle transition cursor-pointer"
-          title="Import Texture Image"
-        >
-          <Upload class="w-3 h-3 text-ui-accent" />
-          <span>Import</span>
-        </button>
+    <!-- Mini-Modal: Create New Texture in Pixel Editor -->
+    <div v-if="showNewTextureModal" class="absolute inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+      <div class="bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-3 w-80 space-y-3" @click.stop>
+        <div class="flex items-center justify-between border-b border-ui-borderSubtle pb-1.5">
+          <span class="text-xs font-bold text-amber-300 uppercase">Create New Texture Map</span>
+          <button @click="showNewTextureModal = false" class="text-ui-textMuted hover:text-white transition">✕</button>
+        </div>
 
-        <button 
-          @click="downloadTexturePng" 
-          class="flex items-center gap-1 px-2 py-0.5 hover:bg-ui-hover rounded-xs text-emerald-400 border border-ui-borderSubtle bg-ui-input text-[10px] font-bold transition cursor-pointer"
-          title="Export Texture PNG"
-        >
-          <Download class="w-3 h-3 text-emerald-400" />
-          <span>Export</span>
-        </button>
+        <div class="space-y-1">
+          <label class="text-[10px] text-ui-textMuted font-bold uppercase">Texture Name:</label>
+          <input 
+            v-model="newTextureName" 
+            placeholder="e.g. Character_Armor_64" 
+            class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-1 text-ui-textPrimary text-xs focus:outline-none focus:border-amber-400 font-mono"
+          />
+        </div>
+
+        <div class="space-y-1">
+          <label class="text-[10px] text-ui-textMuted font-bold uppercase">Resolution:</label>
+          <div class="grid grid-cols-3 gap-1">
+            <button 
+              v-for="s in [16, 32, 64, 128, 256, 512]" 
+              :key="s"
+              @click="newTextureSize = s"
+              class="py-1 text-center rounded-xs border text-[10px] font-mono transition cursor-pointer"
+              :class="newTextureSize === s ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-bold' : 'bg-ui-input text-ui-textSecondary border-ui-borderSubtle hover:bg-ui-hover'"
+            >
+              {{ s }} × {{ s }}
+            </button>
+          </div>
+        </div>
+
+        <div class="flex gap-1 pt-1">
+          <button 
+            @click="handleCreateNewTexture"
+            class="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xs text-xs font-bold transition cursor-pointer shadow-xs"
+          >
+            Create & Assign
+          </button>
+          <button 
+            @click="showNewTextureModal = false"
+            class="px-3 py-1.5 bg-ui-input hover:bg-ui-hover text-ui-textSecondary rounded-xs text-xs transition cursor-pointer"
+          >
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
 
     <!-- 2. ROW 2: DCC MENUS, BRUSH SIZE & COLOR SWATCHES -->
     <div class="pixel-header-row-2 bg-ui-panel border-b border-ui-borderSubtle px-2 flex items-center justify-between gap-2 shrink-0 z-20 select-none h-8 min-h-[32px] overflow-visible">
       <!-- Left: DCC Menus & Brush Controls -->
-      <div class="flex items-center gap-1.5 min-w-0">
+      <div class="editor-command-strip flex items-center gap-1.5 min-w-0">
         <!-- Image Menu Dropdown -->
         <div class="relative" @click.stop>
           <button 
@@ -871,26 +1037,150 @@ defineExpose({
             <span class="text-[8px] opacity-70">▼</span>
           </button>
 
-          <div v-if="activeDropdown === 'palette'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-56 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
-            <div class="px-3 py-0.5 text-[9px] font-bold text-ui-textMuted uppercase">Preset Palettes</div>
+          <div v-if="activeDropdown === 'palette'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-64 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs max-h-[80vh] overflow-y-auto">
+            <!-- Open Pro Palette Library Modal -->
             <button 
-              v-for="name in Object.keys(palettePresets)" 
-              :key="name" 
-              @click="switchPalette(name); closeDropdowns()"
-              class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between"
-              :class="{ 'text-amber-400 font-bold': selectedPaletteName === name }"
+              @click="showPaletteLibraryModal = true; closeDropdowns()" 
+              class="w-full text-left px-3 py-1.5 hover:bg-ui-hover text-amber-400 font-bold flex items-center justify-between border-b border-ui-borderSubtle bg-ui-input/40"
             >
-              <span>{{ name }}</span>
-              <span v-if="selectedPaletteName === name" class="text-xs">✓</span>
+              <span class="flex items-center gap-1.5">
+                <Sparkles class="w-3.5 h-3.5" />
+                <span>Browse All 50+ Palettes...</span>
+              </span>
             </button>
+
+            <!-- Quick Popular Presets -->
+            <div class="px-3 py-1 text-[9px] font-bold text-ui-textMuted uppercase">Popular Presets</div>
+            <button 
+              v-for="p in DEFAULT_PALETTES.slice(0, 10)" 
+              :key="p.id" 
+              @click="switchPalette(p); closeDropdowns()"
+              class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center justify-between"
+              :class="{ 'text-amber-400 font-bold bg-ui-hover/30': projectStore.activePalette.id === p.id }"
+            >
+              <div class="flex items-center gap-2 truncate">
+                <div class="w-2.5 h-2.5 rounded-full shrink-0" :style="{ backgroundColor: p.colors[0] }"></div>
+                <span class="truncate">{{ p.name }}</span>
+              </div>
+              <span v-if="projectStore.activePalette.id === p.id" class="text-xs text-amber-400">✓</span>
+              <span v-else class="text-[10px] text-ui-textMuted font-mono">{{ p.colors.length }}c</span>
+            </button>
+
             <div class="h-px bg-ui-borderSubtle my-1"></div>
-            <button @click="extractPaletteFromTexture(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover text-emerald-400 font-bold">
-              Extract from Current Texture
+
+            <button @click="quantizeCanvasToCurrentPalette(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover text-sky-400 font-medium flex items-center gap-1.5">
+              <span>Quantize Texture to Palette</span>
+            </button>
+
+            <button @click="extractPaletteFromTexture(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover text-emerald-400 font-medium flex items-center gap-1.5">
+              <span>Extract from Current Texture</span>
             </button>
           </div>
         </div>
 
+        <!-- Shading Menu Dropdown -->
+        <div class="relative" @click.stop>
+          <button 
+            @click="toggleDropdown('shading')"
+            class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1"
+            :class="activeDropdown === 'shading' ? 'bg-ui-hover text-amber-300 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+          >
+            <Sparkles class="w-3 h-3 text-amber-400" />
+            <span>Shading</span>
+            <span class="text-[8px] opacity-70">▼</span>
+          </button>
+
+          <div v-if="activeDropdown === 'shading'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-60 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl p-2 z-50 text-xs space-y-2">
+            <div class="text-[9.5px] font-bold text-amber-300 uppercase tracking-wider flex items-center justify-between">
+              <span>Shading Brush Options</span>
+              <span class="text-ui-textMuted font-mono text-[8.5px]">Key: H</span>
+            </div>
+
+            <!-- Mode Selector -->
+            <div class="space-y-1">
+              <span class="text-[9px] text-ui-textMuted font-semibold">Mode:</span>
+              <div class="grid grid-cols-2 gap-1">
+                <button 
+                  @click="shadeMode = 'lighten'; toolStore.setPaintTool('shade'); closeDropdowns()"
+                  class="px-2 py-1 rounded-xs border text-[10px] font-bold flex items-center justify-center gap-1 transition cursor-pointer"
+                  :class="shadeMode === 'lighten' ? 'bg-amber-500/20 text-amber-300 border-amber-500/50' : 'bg-ui-input text-ui-textSecondary border-ui-borderSubtle hover:bg-ui-hover'"
+                >
+                  <Sun class="w-3 h-3 text-amber-400" />
+                  <span>Lighten (Dodge)</span>
+                </button>
+                <button 
+                  @click="shadeMode = 'darken'; toolStore.setPaintTool('shade'); closeDropdowns()"
+                  class="px-2 py-1 rounded-xs border text-[10px] font-bold flex items-center justify-center gap-1 transition cursor-pointer"
+                  :class="shadeMode === 'darken' ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/50' : 'bg-ui-input text-ui-textSecondary border-ui-borderSubtle hover:bg-ui-hover'"
+                >
+                  <Moon class="w-3 h-3 text-indigo-400" />
+                  <span>Darken (Burn)</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Step Sensitivity -->
+            <div class="space-y-1">
+              <div class="flex items-center justify-between text-[9px] text-ui-textMuted">
+                <span>Shade Step / Sensitivity:</span>
+                <span class="font-mono text-ui-textPrimary font-bold">{{ shadeStep }}</span>
+              </div>
+              <div class="flex items-center gap-1 bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle">
+                <button 
+                  v-for="st in [5, 10, 15, 25, 40]" 
+                  :key="st"
+                  @click="shadeStep = st"
+                  class="flex-1 py-0.5 text-[9px] font-bold rounded-xs transition cursor-pointer text-center"
+                  :class="shadeStep === st ? 'bg-ui-active text-ui-textAccent shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+                >{{ st }}</button>
+              </div>
+            </div>
+
+            <!-- Toggles -->
+            <div class="space-y-1 pt-1 border-t border-ui-borderSubtle text-[10px]">
+              <label class="flex items-center justify-between cursor-pointer p-1 rounded-xs hover:bg-ui-hover">
+                <span class="text-ui-textSecondary">Artistic Hue Shift</span>
+                <input type="checkbox" v-model="shadeHueShift" class="rounded-xs text-amber-500 bg-ui-input border-ui-borderDefault focus:ring-0 cursor-pointer" />
+              </label>
+              <label class="flex items-center justify-between cursor-pointer p-1 rounded-xs hover:bg-ui-hover">
+                <span class="text-ui-textSecondary">Lock to Palette Colors</span>
+                <input type="checkbox" v-model="shadePaletteConstraint" class="rounded-xs text-amber-500 bg-ui-input border-ui-borderDefault focus:ring-0 cursor-pointer" />
+              </label>
+            </div>
+          </div>
+        </div>
+
         <div class="h-4 w-px bg-ui-borderSubtle mx-1"></div>
+
+        <!-- Contextual Shading Quick Bar when Shading Brush Active -->
+        <div v-if="toolStore.paintTool === 'shade'" class="flex items-center gap-1 bg-amber-950/20 border border-amber-500/30 px-1.5 py-0.5 rounded-xs">
+          <span class="text-[9px] text-amber-400 font-bold uppercase">Shade:</span>
+          <button 
+            @click="shadeMode = 'lighten'"
+            class="px-1.5 py-0.5 text-[9px] font-bold rounded-xs transition cursor-pointer flex items-center gap-0.5"
+            :class="shadeMode === 'lighten' ? 'bg-amber-500/40 text-amber-200 border border-amber-400/60 shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          >
+            <Sun class="w-2.5 h-2.5" />
+            <span>Lighten</span>
+          </button>
+          <button 
+            @click="shadeMode = 'darken'"
+            class="px-1.5 py-0.5 text-[9px] font-bold rounded-xs transition cursor-pointer flex items-center gap-0.5"
+            :class="shadeMode === 'darken' ? 'bg-indigo-500/40 text-indigo-200 border border-indigo-400/60 shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          >
+            <Moon class="w-2.5 h-2.5" />
+            <span>Darken</span>
+          </button>
+          <div class="h-3 w-px bg-amber-500/30 mx-0.5"></div>
+          <button 
+            @click="shadeHueShift = !shadeHueShift"
+            class="px-1 py-0.5 text-[8.5px] font-bold rounded-xs border transition cursor-pointer"
+            :class="shadeHueShift ? 'bg-amber-500/30 text-amber-300 border-amber-500/50' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle'"
+            title="Warm Highlights / Cool Shadows"
+          >HueShift</button>
+        </div>
+
+        <div v-if="toolStore.paintTool === 'shade'" class="h-4 w-px bg-ui-borderSubtle mx-1"></div>
 
         <!-- Brush Size Segmented Buttons -->
         <div class="flex items-center gap-1">
@@ -921,7 +1211,7 @@ defineExpose({
       </div>
 
       <!-- Right: Color Preview Chip & Hex Code -->
-      <div class="flex items-center gap-1.5 shrink-0">
+      <div class="editor-color-strip flex items-center gap-1.5 shrink-0">
         <span class="text-[9px] text-ui-textMuted font-bold uppercase">Color:</span>
         <label class="w-5 h-5 rounded-xs border border-ui-borderStrong cursor-pointer shadow-xs relative overflow-hidden block" :style="{ backgroundColor: toolStore.primaryColor }">
           <input type="color" v-model="toolStore.primaryColor" class="opacity-0 absolute inset-0 w-full h-full cursor-pointer" />
@@ -1023,23 +1313,106 @@ defineExpose({
           class="w-full h-full block touch-none"
         ></canvas>
 
-        <!-- Docked Bottom Swatch Strip (Quick Palette Bar) -->
-        <div class="pixel-palette-dock absolute bottom-8 left-3 z-10 flex items-center gap-1.5 p-1 bg-ui-header/90 backdrop-blur-md border border-ui-borderStrong rounded-xs shadow-lg max-w-[calc(100%-24px)] overflow-x-auto">
-          <span class="text-[9px] font-bold text-ui-textMuted uppercase whitespace-nowrap pl-1">{{ selectedPaletteName }}:</span>
-          <div class="flex items-center gap-0.5 flex-wrap max-h-6 overflow-hidden">
-            <button
-              v-for="c in activePalette"
-              :key="c"
-              @click="toolStore.primaryColor = c"
-              @contextmenu.prevent="toolStore.secondaryColor = c"
-              class="w-4 h-4 rounded-xxs border border-black/40 hover:scale-110 transition shrink-0 cursor-pointer"
-              :style="{ backgroundColor: c }"
-              :title="'Primary: ' + c + ' · Right-Click for Secondary'"
-            ></button>
+        <!-- Docked Bottom Swatch Strip (Quick Palette Bar + Color Shading Bar) -->
+        <div class="pixel-palette-dock absolute bottom-8 left-3 z-10 flex items-center gap-2 p-1 bg-ui-header/95 backdrop-blur-md border border-ui-borderStrong rounded-xs shadow-lg max-w-[calc(100%-24px)] overflow-x-auto">
+          <!-- Palette Swatches -->
+          <div class="flex items-center gap-1.5 shrink-0">
+            <button 
+              @click="showPaletteLibraryModal = true"
+              class="flex items-center gap-1 px-1.5 py-0.5 bg-ui-input hover:bg-ui-hover text-amber-400 hover:text-amber-300 text-[9.5px] font-bold rounded-xs border border-ui-borderSubtle whitespace-nowrap transition cursor-pointer"
+              title="Click to Open Full Palette Library (50+ Palettes, Import, Export)"
+            >
+              <span>{{ selectedPaletteName }}</span>
+              <span class="text-[8px] opacity-70">▼</span>
+            </button>
+
+            <div class="flex items-center gap-0.5 flex-nowrap max-w-md overflow-x-auto py-0.5">
+              <button
+                v-for="(c, idx) in activePalette"
+                :key="idx"
+                @click="toolStore.primaryColor = c"
+                @contextmenu.prevent="toolStore.secondaryColor = c"
+                class="w-4 h-4 rounded-xxs border hover:scale-115 transition shrink-0 cursor-pointer relative"
+                :class="toolStore.primaryColor.toLowerCase() === c.toLowerCase() 
+                  ? 'ring-2 ring-amber-400 border-white z-1 scale-110 shadow-xs' 
+                  : (toolStore.secondaryColor.toLowerCase() === c.toLowerCase() ? 'ring-1 ring-sky-400 border-white' : 'border-black/50')"
+                :style="{ backgroundColor: c }"
+                :title="`Primary: ${c} · Right-Click for Secondary (#${idx + 1})`"
+              ></button>
+
+              <!-- Add Current Color to Palette Button -->
+              <button 
+                @click="addCurrentColorToActivePalette"
+                class="w-4 h-4 rounded-xxs border border-dashed border-ui-borderDefault hover:border-ui-accent hover:bg-ui-hover flex items-center justify-center text-ui-textMuted hover:text-white transition shrink-0 cursor-pointer"
+                title="Add current primary color to active palette"
+              >
+                <Plus class="w-2.5 h-2.5" />
+              </button>
+            </div>
+
+            <button 
+              @click="showPaletteLibraryModal = true" 
+              class="px-1.5 py-0.5 bg-ui-input hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary text-[9px] font-bold rounded-xs border border-ui-borderSubtle whitespace-nowrap transition cursor-pointer" 
+              title="Open Palette Library"
+            >
+              Library...
+            </button>
           </div>
-          <button @click="extractPaletteFromTexture" class="px-1.5 py-0.5 bg-ui-input hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary text-[9px] font-bold rounded-xs border border-ui-borderSubtle whitespace-nowrap transition cursor-pointer" title="Extract Palette from Texture">
-            Extract
-          </button>
+
+          <!-- Divider -->
+          <div class="h-4 w-px bg-ui-borderSubtle shrink-0"></div>
+
+          <!-- 5-Tone Color Shading Options Bar -->
+          <div class="flex items-center gap-1 shrink-0 bg-ui-input/60 px-1.5 py-0.5 rounded-xs border border-ui-borderSubtle">
+            <span class="text-[8.5px] font-bold text-amber-300 uppercase whitespace-nowrap">Shading:</span>
+            <div class="flex items-center gap-1">
+              <button 
+                @click="toolStore.primaryColor = activeShadingRamp.highlight"
+                @contextmenu.prevent="toolStore.secondaryColor = activeShadingRamp.highlight"
+                class="flex items-center justify-center px-1 h-4 rounded-xxs border border-black/40 hover:scale-105 transition shadow-2xs cursor-pointer text-[7.5px] font-mono text-black font-bold uppercase"
+                :style="{ backgroundColor: activeShadingRamp.highlight }"
+                :title="'Highlight (+45%): ' + activeShadingRamp.highlight + ' · Right-Click for Secondary'"
+              >
+                High
+              </button>
+              <button 
+                @click="toolStore.primaryColor = activeShadingRamp.light"
+                @contextmenu.prevent="toolStore.secondaryColor = activeShadingRamp.light"
+                class="flex items-center justify-center px-1 h-4 rounded-xxs border border-black/40 hover:scale-105 transition shadow-2xs cursor-pointer text-[7.5px] font-mono text-black font-bold uppercase"
+                :style="{ backgroundColor: activeShadingRamp.light }"
+                :title="'Light (+22%): ' + activeShadingRamp.light + ' · Right-Click for Secondary'"
+              >
+                Light
+              </button>
+              <button 
+                @click="toolStore.primaryColor = activeShadingRamp.base"
+                @contextmenu.prevent="toolStore.secondaryColor = activeShadingRamp.base"
+                class="flex items-center justify-center px-1 h-4 rounded-xxs border-2 border-amber-400 hover:scale-105 transition shadow-2xs cursor-pointer text-[7.5px] font-mono text-black font-bold uppercase"
+                :style="{ backgroundColor: activeShadingRamp.base }"
+                :title="'Base Midtone: ' + activeShadingRamp.base + ' · Right-Click for Secondary'"
+              >
+                Base
+              </button>
+              <button 
+                @click="toolStore.primaryColor = activeShadingRamp.shadow"
+                @contextmenu.prevent="toolStore.secondaryColor = activeShadingRamp.shadow"
+                class="flex items-center justify-center px-1 h-4 rounded-xxs border border-black/40 hover:scale-105 transition shadow-2xs cursor-pointer text-[7.5px] font-mono text-white font-bold uppercase"
+                :style="{ backgroundColor: activeShadingRamp.shadow }"
+                :title="'Shadow (-35%): ' + activeShadingRamp.shadow + ' · Right-Click for Secondary'"
+              >
+                Shad
+              </button>
+              <button 
+                @click="toolStore.primaryColor = activeShadingRamp.deepShadow"
+                @contextmenu.prevent="toolStore.secondaryColor = activeShadingRamp.deepShadow"
+                class="flex items-center justify-center px-1 h-4 rounded-xxs border border-black/40 hover:scale-105 transition shadow-2xs cursor-pointer text-[7.5px] font-mono text-white font-bold uppercase"
+                :style="{ backgroundColor: activeShadingRamp.deepShadow }"
+                :title="'Deep Shadow (-65%): ' + activeShadingRamp.deepShadow + ' · Right-Click for Secondary'"
+              >
+                Deep
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- Quick Info Status HUD at Bottom Left -->
@@ -1095,6 +1468,12 @@ defineExpose({
       @close="showImportModal = false; pendingImportFile = null" 
     />
   </div>
+  <!-- Palette Library & Manager Modal -->
+  <PaletteLibraryModal 
+    v-if="showPaletteLibraryModal" 
+    @close="showPaletteLibraryModal = false"
+    @selected="(pal) => { switchPalette(pal); showPaletteLibraryModal = false }"
+  />
 </template>
 
 <style scoped>
@@ -1106,6 +1485,54 @@ defineExpose({
 .pixel-header-row-2 {
   height: 32px;
   min-height: 32px;
+}
+
+.asset-pipeline,
+.editor-command-strip {
+  min-width: 0;
+}
+
+@container (max-width: 760px) {
+  .pixel-header-row-1 {
+    height: 64px;
+    min-height: 64px;
+    flex-wrap: wrap;
+    align-content: center;
+    padding-block: 4px;
+  }
+
+  .workspace-tabs {
+    order: 1;
+  }
+
+  .asset-pipeline {
+    order: 2;
+    width: 100%;
+    flex: 0 0 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .asset-pipeline::-webkit-scrollbar {
+    display: none;
+  }
+
+  .pixel-header-row-2 {
+    height: 64px;
+    min-height: 64px;
+    flex-wrap: wrap;
+    align-content: center;
+    padding-block: 4px;
+  }
+
+  .editor-command-strip {
+    width: 100%;
+    flex: 0 0 100%;
+  }
+
+  .editor-color-strip {
+    margin-left: auto;
+  }
 }
 
 .header-dropdown-menu {

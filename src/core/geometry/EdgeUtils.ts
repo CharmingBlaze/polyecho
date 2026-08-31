@@ -79,3 +79,134 @@ export function findClosestEdge(
 
   return closestEdge
 }
+
+/**
+ * Traverses a topological edge loop starting from an edge.
+ * Traverses through vertex junctions with valence 4 (continuing straight through).
+ */
+export function getEdgeLoop(mesh: MeshObject, startEdgeId: string): string[] {
+  const edges = getMeshEdges(mesh)
+  const edgeMap = new Map<string, Edge>()
+  const vertToEdges = new Map<string, string[]>()
+
+  for (const e of edges) {
+    edgeMap.set(e.id, e)
+    if (!vertToEdges.has(e.v1)) vertToEdges.set(e.v1, [])
+    if (!vertToEdges.has(e.v2)) vertToEdges.set(e.v2, [])
+    vertToEdges.get(e.v1)!.push(e.id)
+    vertToEdges.get(e.v2)!.push(e.id)
+  }
+
+  const startEdge = edgeMap.get(startEdgeId)
+  if (!startEdge) return []
+
+  const loop = new Set<string>([startEdgeId])
+
+  // Helper to walk in one direction from a vertex along the loop
+  const walk = (startV: string, fromEdgeId: string) => {
+    let currentV = startV
+    let prevEdge = edgeMap.get(fromEdgeId)
+
+    while (currentV && prevEdge) {
+      const connectedEdges = (vertToEdges.get(currentV) || []).filter(id => id !== prevEdge!.id)
+      // Standard quad valence at intersection is 4 (3 other edges remaining)
+      if (connectedEdges.length === 3) {
+        // Find opposite edge across faces
+        const otherV = prevEdge.v1 === currentV ? prevEdge.v2 : prevEdge.v1
+        let bestEdge: string | null = null
+
+        // Find edge that does not share a face with prevEdge
+        for (const eId of connectedEdges) {
+          const cand = edgeMap.get(eId)
+          if (!cand) continue
+          const candOtherV = cand.v1 === currentV ? cand.v2 : cand.v1
+          // Check face sharing
+          const sharesFace = mesh.faces.some(f => 
+            f.vertexIds.includes(currentV) && f.vertexIds.includes(otherV) && f.vertexIds.includes(candOtherV)
+          )
+          if (!sharesFace) {
+            bestEdge = eId
+            break
+          }
+        }
+
+        if (bestEdge && !loop.has(bestEdge)) {
+          loop.add(bestEdge)
+          const nextEdge = edgeMap.get(bestEdge)!
+          currentV = nextEdge.v1 === currentV ? nextEdge.v2 : nextEdge.v1
+          prevEdge = nextEdge
+        } else {
+          break
+        }
+      } else if (connectedEdges.length === 1 && !loop.has(connectedEdges[0])) {
+        // Boundary or line edge
+        const nextId = connectedEdges[0]
+        loop.add(nextId)
+        const nextEdge = edgeMap.get(nextId)!
+        currentV = nextEdge.v1 === currentV ? nextEdge.v2 : nextEdge.v1
+        prevEdge = nextEdge
+      } else {
+        break
+      }
+    }
+  }
+
+  walk(startEdge.v1, startEdgeId)
+  walk(startEdge.v2, startEdgeId)
+
+  return Array.from(loop)
+}
+
+/**
+ * Traverses a parallel topological edge ring starting from an edge across quad faces.
+ */
+export function getEdgeRing(mesh: MeshObject, startEdgeId: string): string[] {
+  const edges = getMeshEdges(mesh)
+  const edgeMap = new Map<string, Edge>()
+  for (const e of edges) {
+    edgeMap.set(e.id, e)
+  }
+
+  const startEdge = edgeMap.get(startEdgeId)
+  if (!startEdge) return []
+
+  const ring = new Set<string>([startEdgeId])
+
+  // Find faces sharing this edge
+  const getFacesForEdge = (e: Edge) => {
+    return mesh.faces.filter(f => f.vertexIds.includes(e.v1) && f.vertexIds.includes(e.v2))
+  }
+
+  // Helper to walk across faces
+  const walkFace = (face: any, fromEdge: Edge) => {
+    if (face.vertexIds.length !== 4) return // Quad only
+    const vIds = face.vertexIds
+    const idx1 = vIds.indexOf(fromEdge.v1)
+    const idx2 = vIds.indexOf(fromEdge.v2)
+    if (idx1 === -1 || idx2 === -1) return
+
+    // Opposite edge in a quad is the edge not sharing vertices with fromEdge
+    const oppositeVerts = vIds.filter((id: string) => id !== fromEdge.v1 && id !== fromEdge.v2)
+    if (oppositeVerts.length !== 2) return
+
+    const key1 = `${oppositeVerts[0]}_${oppositeVerts[1]}`
+    const key2 = `${oppositeVerts[1]}_${oppositeVerts[0]}`
+    const oppEdge = edgeMap.get(key1) || edgeMap.get(key2)
+
+    if (oppEdge && !ring.has(oppEdge.id)) {
+      ring.add(oppEdge.id)
+      const nextFaces = getFacesForEdge(oppEdge).filter(f => f.id !== face.id)
+      for (const nf of nextFaces) {
+        walkFace(nf, oppEdge)
+      }
+    }
+  }
+
+  const initialFaces = getFacesForEdge(startEdge)
+  for (const f of initialFaces) {
+    walkFace(f, startEdge)
+  }
+
+  return Array.from(ring)
+}
+

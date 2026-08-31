@@ -49,6 +49,7 @@ function selectMesh(id: string, e?: MouseEvent) {
 function toggleVisibility(id: string) {
   const mesh = projectStore.meshes.find(m => m.id === id)
   if (mesh) {
+    projectStore.recordState('Toggle Visibility')
     mesh.visible = !mesh.visible
   }
 }
@@ -56,6 +57,7 @@ function toggleVisibility(id: string) {
 function toggleLock(id: string) {
   const mesh = projectStore.meshes.find(m => m.id === id)
   if (mesh) {
+    projectStore.recordState('Toggle Lock')
     mesh.locked = !mesh.locked
   }
 }
@@ -63,13 +65,9 @@ function toggleLock(id: string) {
 function duplicateMesh(id: string) {
   const mesh = projectStore.meshes.find(m => m.id === id)
   if (!mesh) return
-  projectStore.recordState('Duplicate Mesh')
-  const cloned = JSON.parse(JSON.stringify(mesh))
-  cloned.id = `mesh_${Math.random().toString(36).substring(2, 8)}`
-  cloned.name = `${mesh.name}_Copy`
-  cloned.position.x += 0.5
-  projectStore.meshes.push(cloned)
-  projectStore.activeMeshId = cloned.id
+  projectStore.selectedMeshIds = [id]
+  projectStore.activeMeshId = id
+  projectStore.duplicateSelection('object')
 }
 
 function deleteMesh(id: string) {
@@ -85,6 +83,7 @@ function commitRenameMesh(id: string) {
   if (!editingName.value.trim()) return
   const mesh = projectStore.meshes.find(m => m.id === id)
   if (mesh) {
+    projectStore.recordState('Rename Mesh')
     mesh.name = editingName.value.trim()
   }
   editingItemId.value = null
@@ -153,6 +152,12 @@ function getParentMeshName(parentId?: string): string {
   const b = animationStore.armature.bones.find(x => x.id === parentId)
   if (b) return b.name
   return parentId
+}
+
+function getMeshTexture(mesh: any) {
+  const mat = projectStore.materials.find(m => m.id === mesh.materialId)
+  if (!mat || !mat.textureId) return null
+  return projectStore.textures.find(t => t.id === mat.textureId) || null
 }
 
 function handleAddBone() {
@@ -286,6 +291,13 @@ function handleAddBone() {
               <div class="flex items-center gap-1.5 truncate">
                 <span class="font-mono font-bold text-[11px] truncate select-none">
                   {{ mesh.name }}
+                </span>
+                <span 
+                  v-if="getMeshTexture(mesh)" 
+                  class="px-1 py-0.2 rounded-xs bg-sky-500/15 text-sky-300 border border-sky-500/30 text-[8px] font-mono truncate max-w-[70px] shrink-0" 
+                  :title="`Assigned Texture: ${getMeshTexture(mesh)?.name} (${getMeshTexture(mesh)?.width}x${getMeshTexture(mesh)?.height})`"
+                >
+                  {{ getMeshTexture(mesh)?.name }}
                 </span>
                 <span v-if="mesh.parentId" class="text-[9px] text-amber-400/80 font-mono flex items-center gap-0.5">
                   <span>↳</span>

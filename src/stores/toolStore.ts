@@ -86,7 +86,8 @@ export const useToolStore = defineStore('tool', () => {
 
   function setAppMode(mode: AppMode) {
     appMode.value = mode
-    if (mode === 'model' && selectMode.value === 'bone') {
+    isBoxSelectActive.value = false
+    if ((mode === 'model' || mode === 'uvpaint') && (selectMode.value === 'bone' || selectMode.value === 'origin')) {
       selectMode.value = 'object'
     } else if (mode === 'animate' || mode === 'rig') {
       selectMode.value = 'bone'

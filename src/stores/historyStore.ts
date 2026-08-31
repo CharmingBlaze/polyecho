@@ -117,6 +117,7 @@ export const useHistoryStore = defineStore('history', () => {
       }
     } finally {
       isApplyingHistory.value = false
+      projectStore.markGeometryUpdated()
     }
   }
 

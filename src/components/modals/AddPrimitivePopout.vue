@@ -4,6 +4,7 @@ import { PrimitiveType } from '../../core/primitives/PrimitiveTypes'
 import { PrimitivePlacementMode } from '../../core/operators/placement/PrimitivePlacementOperator'
 import { PlacementOrientation } from '../../core/placement/SurfacePlacementSolver'
 import BlenderIcon from '../icons/BlenderIcon.vue'
+import { EDITOR_EVENTS, requestPrimitivePlacement } from '../../core/commands/editorCommands'
 import { 
   X, 
   Search, 
@@ -115,15 +116,12 @@ function close() {
 }
 
 function selectPrimitive(type: PrimitiveType) {
-  window.dispatchEvent(
-    new CustomEvent('start-primitive-placement', {
-      detail: {
-        type,
-        mode: placementMode.value,
-        orientation: orientation.value
-      }
-    })
-  )
+  close()
+  requestPrimitivePlacement({
+    type,
+    mode: placementMode.value,
+    orientation: orientation.value
+  })
 }
 
 function handleGlobalKeyDown(e: KeyboardEvent) {
@@ -150,12 +148,12 @@ function handleOpenEvent(e: any) {
 
 onMounted(() => {
   window.addEventListener('keydown', handleGlobalKeyDown, true)
-  window.addEventListener('open-add-primitive-menu', handleOpenEvent)
+  window.addEventListener(EDITOR_EVENTS.openPrimitiveMenu, handleOpenEvent)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeyDown, true)
-  window.removeEventListener('open-add-primitive-menu', handleOpenEvent)
+  window.removeEventListener(EDITOR_EVENTS.openPrimitiveMenu, handleOpenEvent)
 })
 
 defineExpose({

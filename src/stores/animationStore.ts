@@ -1,9 +1,10 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, onScopeDispose } from 'vue'
 import { Armature, Bone, BoneSocket, Keyframe, AnimationClip, AnimationTrack, InterpolationType } from '../types/animation'
 import { Vector3D, MeshObject, Vertex } from '../types/mesh'
 import { sampleTrack } from '../core/animation/Armature'
 import { autoWeightMeshToArmature } from '../core/animation/AutoSkinning'
+import { SpringPhysicsSolver } from '../core/animation/SpringPhysics'
 import { useProjectStore } from './projectStore'
 
 function genId(prefix: string): string {
@@ -357,6 +358,8 @@ export const useAnimationStore = defineStore('animation', () => {
       return addRootBone(generateSmartBoneName())
     }
 
+    projectStore.recordState('Extrude Bone')
+
     const dirX = parent.tail.x - parent.head.x
     const dirY = parent.tail.y - parent.head.y
     const dirZ = parent.tail.z - parent.head.z
@@ -391,6 +394,8 @@ export const useAnimationStore = defineStore('animation', () => {
     const bone = armature.value.bones.find(b => b.id === boneId)
     if (!bone) return []
 
+    projectStore.recordState('Subdivide Bone')
+
     const midX = (bone.head.x + bone.tail.x) / 2
     const midY = (bone.head.y + bone.tail.y) / 2
     const midZ = (bone.head.z + bone.tail.z) / 2
@@ -422,6 +427,7 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function symmetrizeArmature() {
+    projectStore.recordState('Symmetrize Armature')
     const existingBones = [...armature.value.bones]
     const idMap = new Map<string, string>()
 
@@ -715,6 +721,7 @@ export const useAnimationStore = defineStore('animation', () => {
   function unbindGeometry(meshId: string, boneId?: string) {
     const mesh = projectStore.meshes.find(m => m.id === meshId)
     if (!mesh) return
+    projectStore.recordState('Unbind Geometry')
     if (boneId) {
       if (mesh.parentId === boneId) mesh.parentId = undefined
       for (const v of mesh.vertices) {
@@ -781,7 +788,6 @@ export const useAnimationStore = defineStore('animation', () => {
       xMirror?: boolean
     }
   ) {
-    projectStore.recordState('Paint Weight')
     const mesh = projectStore.meshes.find(m => m.id === meshId)
     if (!mesh) return
     mesh.armatureId = armature.value.id
@@ -933,6 +939,7 @@ export const useAnimationStore = defineStore('animation', () => {
   function floodFillBoneWeight(meshId: string, boneId: string, weight: number, selectedVertsOnly = false) {
     const mesh = projectStore.meshes.find(m => m.id === meshId)
     if (!mesh) return
+    projectStore.recordState('Flood Fill Weights')
     mesh.armatureId = armature.value.id
 
     const targetVerts = (selectedVertsOnly && projectStore.selectedVertexIds.length > 0)
@@ -955,6 +962,7 @@ export const useAnimationStore = defineStore('animation', () => {
   function normalizeAllMeshWeights(meshId: string) {
     const mesh = projectStore.meshes.find(m => m.id === meshId)
     if (!mesh) return
+    projectStore.recordState('Normalize Weights')
     for (const v of mesh.vertices) {
       normalizeSingleVertex(v)
     }
@@ -965,6 +973,8 @@ export const useAnimationStore = defineStore('animation', () => {
     if (!mesh) return
     const targetBoneId = boneId || selectedBoneId.value
     if (!targetBoneId) return
+
+    projectStore.recordState('Smooth Weights')
 
     const originalWeights = new Map<string, number>()
     for (const v of mesh.vertices) {
@@ -995,6 +1005,7 @@ export const useAnimationStore = defineStore('animation', () => {
   function clearBoneWeights(meshId: string, boneId: string) {
     const mesh = projectStore.meshes.find(m => m.id === meshId)
     if (!mesh) return
+    projectStore.recordState('Clear Bone Weights')
     for (const v of mesh.vertices) {
       if (v.boneWeights && v.boneWeights[boneId]) {
         delete v.boneWeights[boneId]
@@ -1005,6 +1016,7 @@ export const useAnimationStore = defineStore('animation', () => {
   function invertBoneWeights(meshId: string, boneId: string) {
     const mesh = projectStore.meshes.find(m => m.id === meshId)
     if (!mesh) return
+    projectStore.recordState('Invert Bone Weights')
     for (const v of mesh.vertices) {
       if (!v.boneWeights) v.boneWeights = {}
       const cur = v.boneWeights[boneId] ?? 0.0
@@ -1018,6 +1030,7 @@ export const useAnimationStore = defineStore('animation', () => {
   function addSocket(boneId: string, name = 'Socket'): BoneSocket | null {
     const bone = armature.value.bones.find(b => b.id === boneId)
     if (!bone) return null
+    projectStore.recordState('Add Socket')
     if (!bone.sockets) bone.sockets = []
     const socket: BoneSocket = {
       id: genId('socket'),
@@ -1034,6 +1047,7 @@ export const useAnimationStore = defineStore('animation', () => {
   function removeSocket(boneId: string, socketId: string) {
     const bone = armature.value.bones.find(b => b.id === boneId)
     if (!bone || !bone.sockets) return
+    projectStore.recordState('Remove Socket')
     bone.sockets = bone.sockets.filter(s => s.id !== socketId)
   }
 
@@ -1047,6 +1061,7 @@ export const useAnimationStore = defineStore('animation', () => {
       b.rotation = { x: 0, y: 0, z: 0 }
       b.scale = { x: 1, y: 1, z: 1 }
     }
+    SpringPhysicsSolver.reset()
   }
 
   function toggleTestPose(active?: boolean) {
@@ -1061,9 +1076,11 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function clearArmature() {
+    projectStore.recordState('Clear Armature')
     armature.value.bones = []
     armature.value.rootBoneIds = []
     selectedBoneId.value = null
+    SpringPhysicsSolver.reset()
     for (const mesh of projectStore.meshes) {
       if (mesh.armatureId === armature.value.id) {
         mesh.armatureId = undefined
@@ -1120,6 +1137,7 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function recordCurrentKeyframe() {
+    projectStore.recordState('Record Keyframe')
     if (selectedBoneId.value) {
       const bone = selectedBone.value
       if (bone) {
@@ -1138,6 +1156,7 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function recordAllBonesKeyframe(frame = currentFrame.value) {
+    projectStore.recordState('Record All Keyframes')
     let count = 0
     for (const bone of armature.value.bones) {
       addKeyframe(bone.id, 'bone', 'rotation', bone.rotation, frame)
@@ -1157,6 +1176,7 @@ export const useAnimationStore = defineStore('animation', () => {
 
   function clearKeyframeAtCurrentTime(frame = currentFrame.value) {
     if (!activeClip.value) return
+    projectStore.recordState('Clear Keyframes at Frame')
     for (const track of activeClip.value.tracks) {
       track.positionKeys = track.positionKeys.filter(k => k.frame !== frame)
       track.rotationKeys = track.rotationKeys.filter(k => k.frame !== frame)
@@ -1167,6 +1187,7 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function addChannelKeyframe(targetId: string, targetType: 'mesh' | 'bone', channel: 'position' | 'rotation' | 'scale', frame = currentFrame.value) {
+    projectStore.recordState('Add Channel Keyframe')
     if (targetType === 'bone') {
       const bone = armature.value.bones.find(b => b.id === targetId)
       if (bone) {
@@ -1181,6 +1202,7 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function addKeyframeForSelected(property: 'position' | 'rotation' | 'scale', value: Vector3D) {
+    projectStore.recordState('Add Keyframe')
     if (selectedBoneId.value) {
       addKeyframe(selectedBoneId.value, 'bone', property, value)
     } else if (projectStore.activeMesh) {
@@ -1192,6 +1214,8 @@ export const useAnimationStore = defineStore('animation', () => {
     if (!activeClip.value) return
     const track = activeClip.value.tracks.find(t => t.targetId === targetId)
     if (!track) return
+
+    projectStore.recordState('Delete Keyframe')
 
     if (!channel || channel === 'position') {
       track.positionKeys = track.positionKeys.filter(k => k.frame !== frame)
@@ -1230,6 +1254,8 @@ export const useAnimationStore = defineStore('animation', () => {
     const track = activeClip.value.tracks.find(t => t.targetId === targetId)
     if (!track) return
 
+    projectStore.recordState('Edit Keyframe Tangent')
+
     const keyList = channel === 'position' ? track.positionKeys : channel === 'rotation' ? track.rotationKeys : track.scaleKeys
     const key = keyList.find(k => k.frame === frame)
     if (key) {
@@ -1256,6 +1282,7 @@ export const useAnimationStore = defineStore('animation', () => {
   // BLOCKBENCH POSE CONTROLS (COPY / PASTE / RESET POSE)
   // ----------------------------------------------------
   function resetPose() {
+    projectStore.recordState('Reset Pose')
     if (selectedBoneId.value) {
       const bone = selectedBone.value
       if (bone) {
@@ -1290,6 +1317,8 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function pastePose() {
+    if (Object.keys(poseClipboard.value).length === 0) return
+    projectStore.recordState('Paste Pose')
     for (const mesh of projectStore.meshes) {
       const saved = poseClipboard.value[mesh.id]
       if (saved) {
@@ -1315,6 +1344,7 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function pasteFlippedPose() {
+    projectStore.recordState('Paste Flipped Pose')
     // 1. Mesh flipping
     for (const mesh of projectStore.meshes) {
       const name = mesh.name.toLowerCase()
@@ -1367,6 +1397,7 @@ export const useAnimationStore = defineStore('animation', () => {
   // ----------------------------------------------------
   function addMarker(name = 'Event', frame = currentFrame.value) {
     if (!activeClip.value) return
+    projectStore.recordState('Add Marker')
     if (!activeClip.value.markers) {
       activeClip.value.markers = []
     }
@@ -1381,6 +1412,7 @@ export const useAnimationStore = defineStore('animation', () => {
 
   function deleteMarker(markerId: string) {
     if (!activeClip.value || !activeClip.value.markers) return
+    projectStore.recordState('Delete Marker')
     activeClip.value.markers = activeClip.value.markers.filter(m => m.id !== markerId)
   }
 
@@ -1388,6 +1420,7 @@ export const useAnimationStore = defineStore('animation', () => {
   // PROCEDURAL GAME ANIMATION PRESETS (1-CLICK)
   // ----------------------------------------------------
   function generateIdleBreathe() {
+    projectStore.recordState('Generate Idle Breathe')
     const clip = addClip('Idle_Breathe', 24, 12)
     const meshes = projectStore.meshes
 
@@ -1407,6 +1440,7 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function generateWalkCycle() {
+    projectStore.recordState('Generate Walk Cycle')
     const clip = addClip('Walk_Cycle', 24, 12)
     const meshes = projectStore.meshes
 
@@ -1443,6 +1477,7 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function generateJumpArc() {
+    projectStore.recordState('Generate Jump Arc')
     const clip = addClip('Jump_Arc', 20, 12)
     const meshes = projectStore.meshes
 
@@ -1459,6 +1494,7 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function generateBirdDrink() {
+    projectStore.recordState('Generate Bird Drink')
     const clip = addClip('Bird_Drink', 24, 12)
     const bones = armature.value.bones
     const meshes = projectStore.meshes
@@ -1488,6 +1524,7 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function generateWingFlap() {
+    projectStore.recordState('Generate Wing Flap')
     const clip = addClip('Wing_Flap', 16, 12)
     const bones = armature.value.bones
     const meshes = projectStore.meshes
@@ -1516,6 +1553,7 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function generateQuadrupedWalk() {
+    projectStore.recordState('Generate Quadruped Walk')
     const clip = addClip('Quadruped_Walk', 24, 12)
     const bones = armature.value.bones
     const meshes = projectStore.meshes
@@ -1552,6 +1590,7 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function generateAttackSlash() {
+    projectStore.recordState('Generate Attack Slash')
     const clip = addClip('Attack_Slash', 16, 12)
     const bones = armature.value.bones
     const meshes = projectStore.meshes
@@ -1577,6 +1616,7 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function generateSpinLoop() {
+    projectStore.recordState('Generate Spin Loop')
     const clip = addClip('Spin_360', 24, 12)
     const targets = selectedBone.value ? [selectedBone.value] : projectStore.meshes
 
@@ -1592,6 +1632,7 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function generateFloatingBob() {
+    projectStore.recordState('Generate Floating Bob')
     const clip = addClip('Hover_Bob', 24, 12)
     const targets = selectedBone.value ? [selectedBone.value] : projectStore.meshes
 
@@ -1608,6 +1649,7 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function generateDoorOpenClose() {
+    projectStore.recordState('Generate Door Open/Close')
     const clip = addClip('Open_Close', 24, 12)
     const targets = selectedBone.value ? [selectedBone.value] : projectStore.meshes
 
@@ -1623,6 +1665,7 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function generateTailWiggle() {
+    projectStore.recordState('Generate Tail Wiggle')
     const clip = addClip('Tail_Wiggle', 24, 12)
     const bones = armature.value.bones.length > 0 ? armature.value.bones : projectStore.meshes
 
@@ -1638,6 +1681,7 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function generateImpactShake() {
+    projectStore.recordState('Generate Impact Shake')
     const clip = addClip('Impact_Shake', 12, 12)
     const targets = selectedBone.value ? [selectedBone.value] : projectStore.meshes
 
@@ -1710,6 +1754,10 @@ export const useAnimationStore = defineStore('animation', () => {
       playInterval = null
     }
   }
+
+  onScopeDispose(() => {
+    stopPlayback()
+  })
 
   function setFrame(frame: number) {
     const maxF = activeClip.value?.durationFrames || 24

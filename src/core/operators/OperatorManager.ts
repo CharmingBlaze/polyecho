@@ -66,14 +66,16 @@ export class OperatorManager {
 
   confirm() {
     if (!this.activeOperator) return
-    this.activeOperator.confirm()
+    const op = this.activeOperator
     this.finish()
+    op.confirm()
   }
 
   cancel() {
     if (!this.activeOperator) return
-    this.activeOperator.cancel()
+    const op = this.activeOperator
     this.finish()
+    op.cancel()
   }
 
   private finish() {

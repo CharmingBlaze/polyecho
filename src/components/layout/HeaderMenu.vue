@@ -42,6 +42,10 @@ import { PlacementOrientation } from '../../core/placement/SurfacePlacementSolve
 import { ProjectSerializer } from '../../core/project/ProjectSerializer'
 import { ObjImport } from '../../core/import/ObjImport'
 import { GltfImport } from '../../core/import/GltfImport'
+import { exportToBlockbench, importFromBlockbench } from '../../core/export/BlockbenchExport'
+import { exportToGLTF } from '../../core/export/GltfExport'
+import * as THREE from 'three'
+import { requestCameraView, requestModalTool, requestPrimitiveMenu, requestPrimitivePlacement } from '../../core/commands/editorCommands'
 
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
@@ -49,6 +53,17 @@ const historyStore = useHistoryStore()
 const animationStore = useAnimationStore()
 const layoutStore = useLayoutStore()
 const themeStore = useThemeStore()
+
+const isImporting = ref(false)
+const isExporting = ref(false)
+
+function safeUndo() {
+  historyStore.undo()
+}
+
+function safeRedo() {
+  historyStore.redo()
+}
 
 const currentPlacementMode = ref<PrimitivePlacementMode>(PrimitivePlacementMode.CAD_DRAW)
 const currentOrientation = ref<PlacementOrientation>('WORLD')
@@ -66,6 +81,7 @@ const activeDropdown = ref<string | null>(null)
 const loadProjectInput = ref<HTMLInputElement | null>(null)
 const importObjInput = ref<HTMLInputElement | null>(null)
 const importGltfInput = ref<HTMLInputElement | null>(null)
+const importBbmodelInput = ref<HTMLInputElement | null>(null)
 const importTextureInput = ref<HTMLInputElement | null>(null)
 const showImportModal = ref(false)
 const pendingImportFile = ref<File | null>(null)
@@ -79,33 +95,29 @@ function closeDropdowns() {
 }
 
 function setCameraView(view: 'persp' | 'top' | 'front' | 'right' | 'iso') {
-  window.dispatchEvent(new CustomEvent('set-camera-view', { detail: view }))
+  requestCameraView(view)
 }
 
 function handleStartPrimitivePlacement(type: PrimitiveType) {
-  window.dispatchEvent(
-    new CustomEvent('start-primitive-placement', {
-      detail: {
-        type,
-        mode: currentPlacementMode.value,
-        orientation: currentOrientation.value
-      }
-    })
-  )
+  requestPrimitivePlacement({
+    type,
+    mode: currentPlacementMode.value,
+    orientation: currentOrientation.value
+  })
   closeDropdowns()
 }
 
 function handleOpenAddDialog() {
-  window.dispatchEvent(new CustomEvent('open-add-primitive-menu', { detail: { x: 100, y: 150 } }))
+  requestPrimitiveMenu()
   closeDropdowns()
 }
 
 function handleStartLoopCut() {
-  window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'loopcut' }))
+  requestModalTool('loop_cut')
 }
 
 function handleStartKnife() {
-  window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'knife' }))
+  requestModalTool('knife')
 }
 
 function onDocumentClick(e: MouseEvent) {
@@ -142,6 +154,14 @@ function saveProject() {
   closeDropdowns()
 }
 
+async function handleRestoreLastSession() {
+  closeDropdowns()
+  const ok = await projectStore.restoreAutosaveSession()
+  if (!ok) {
+    alert('No previous autosaved session was found.')
+  }
+}
+
 function saveProjectAs() {
   const newName = prompt('Enter project name:', projectStore.projectName)
   if (newName) {
@@ -153,6 +173,8 @@ function saveProjectAs() {
 async function handleLoadProject(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
   if (!file) return
+  if (isImporting.value) return
+  isImporting.value = true
 
   try {
     const text = await file.text()
@@ -160,6 +182,12 @@ async function handleLoadProject(e: Event) {
 
     projectStore.projectName = data.projectName
     projectStore.meshes = data.meshes
+    if (data.meshes && data.meshes.length > 0) {
+      projectStore.activeMeshId = data.meshes[0].id
+      projectStore.selectedMeshIds = [data.meshes[0].id]
+    }
+    projectStore.clearSubSelections()
+
     if (data.materials) projectStore.materials = data.materials
     if (data.activePalette) projectStore.activePalette = data.activePalette
 
@@ -177,10 +205,24 @@ async function handleLoadProject(e: Event) {
     if (data.armature) {
       animationStore.armature = data.armature
     }
+    if (data.animations && data.animations.length > 0) {
+      animationStore.armature.clips = data.animations
+    }
+    if (data.activeAnimationId) {
+      animationStore.armature.activeClipId = data.activeAnimationId
+    }
+    if (typeof data.currentFrame === 'number') {
+      animationStore.currentFrame = data.currentFrame
+    }
+
+    projectStore.markGeometryUpdated()
+    projectStore.markTextureUpdated()
+    projectStore.recordState('Load Project')
   } catch (err) {
     console.error('Failed to load project:', err)
     alert('Failed to load project file')
   } finally {
+    isImporting.value = false
     if (loadProjectInput.value) loadProjectInput.value.value = ''
     closeDropdowns()
   }
@@ -189,16 +231,25 @@ async function handleLoadProject(e: Event) {
 async function handleImportObj(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
   if (!file) return
+  if (isImporting.value) return
+  isImporting.value = true
   try {
     const text = await file.text()
     const result = ObjImport.parse(text, file.name.replace('.obj', ''))
-    for (const m of result.meshes) {
-      projectStore.meshes.push(m)
+    if (result.meshes.length > 0) {
+      for (const m of result.meshes) {
+        projectStore.meshes.push(m)
+      }
+      projectStore.activeMeshId = result.meshes[0].id
+      projectStore.selectedMeshIds = [result.meshes[0].id]
+      projectStore.markGeometryUpdated()
+      projectStore.recordState(`Import OBJ (${file.name})`)
     }
   } catch (err) {
     console.error('Failed to import OBJ:', err)
     alert('Failed to import OBJ')
   } finally {
+    isImporting.value = false
     if (importObjInput.value) importObjInput.value.value = ''
     closeDropdowns()
   }
@@ -207,19 +258,28 @@ async function handleImportObj(e: Event) {
 async function handleImportGltf(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
   if (!file) return
+  if (isImporting.value) return
+  isImporting.value = true
   try {
     const buffer = await file.arrayBuffer()
     const result = await GltfImport.loadFromArrayBuffer(buffer, file.name)
-    for (const m of result.meshes) {
-      projectStore.meshes.push(m)
+    if (result.meshes.length > 0) {
+      for (const m of result.meshes) {
+        projectStore.meshes.push(m)
+      }
+      projectStore.activeMeshId = result.meshes[0].id
+      projectStore.selectedMeshIds = [result.meshes[0].id]
     }
     if (result.armature) {
       animationStore.armature = result.armature
     }
+    projectStore.markGeometryUpdated()
+    projectStore.recordState(`Import GLTF (${file.name})`)
   } catch (err) {
     console.error('Failed to import GLTF:', err)
     alert('Failed to import GLTF')
   } finally {
+    isImporting.value = false
     if (importGltfInput.value) importGltfInput.value.value = ''
     closeDropdowns()
   }
@@ -233,6 +293,86 @@ function handleImportTexture(e: Event) {
   showImportModal.value = true
   input.value = ''
   closeDropdowns()
+}
+
+async function exportBlockbench() {
+  if (isExporting.value) return
+  isExporting.value = true
+  try {
+    const jsonStr = exportToBlockbench(
+      projectStore.meshes,
+      projectStore.textures,
+      animationStore.armature,
+      { projectName: projectStore.projectName }
+    )
+    const blob = new Blob([jsonStr], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${projectStore.projectName || 'model'}.bbmodel`
+    a.click()
+    URL.revokeObjectURL(url)
+    closeDropdowns()
+  } finally {
+    isExporting.value = false
+  }
+}
+
+async function exportGltfDirect(binary = true) {
+  if (isExporting.value) return
+  isExporting.value = true
+  const texMap = new Map<string, any>()
+  try {
+    for (const t of projectStore.textures) {
+      if (t.pixelBuffer) {
+        const tex = new THREE.CanvasTexture(t.pixelBuffer.canvas)
+        texMap.set(t.id, tex)
+      }
+    }
+    const blob = await exportToGLTF(
+      projectStore.meshes,
+      texMap,
+      animationStore.armature.clips,
+      binary,
+      animationStore.armature
+    )
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${projectStore.projectName || 'model'}.${binary ? 'glb' : 'gltf'}`
+    a.click()
+    URL.revokeObjectURL(url)
+    closeDropdowns()
+  } finally {
+    for (const tex of texMap.values()) {
+      tex.dispose()
+    }
+    texMap.clear()
+    isExporting.value = false
+  }
+}
+
+async function handleImportBbmodel(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  if (isImporting.value) return
+  isImporting.value = true
+  try {
+    const text = await file.text()
+    const result = importFromBlockbench(text)
+    if (result.textures.length > 0) {
+      for (const t of result.textures) {
+        projectStore.addTexture(t.name, t.width, t.height, t.dataUrl)
+      }
+    }
+    projectStore.recordState(`Import Blockbench (${file.name})`)
+  } catch (err) {
+    console.error('Failed to parse .bbmodel file:', err)
+  } finally {
+    isImporting.value = false
+    if (importBbmodelInput.value) importBbmodelInput.value.value = ''
+    closeDropdowns()
+  }
 }
 
 function handleExitProject() {
@@ -249,6 +389,7 @@ function handleExitProject() {
     <input ref="loadProjectInput" type="file" accept=".psxproj" class="hidden" @change="handleLoadProject" />
     <input ref="importObjInput" type="file" accept=".obj" class="hidden" @change="handleImportObj" />
     <input ref="importGltfInput" type="file" accept=".gltf,.glb" class="hidden" @change="handleImportGltf" />
+    <input ref="importBbmodelInput" type="file" accept=".bbmodel" class="hidden" @change="handleImportBbmodel" />
     <input ref="importTextureInput" type="file" accept="image/*" class="hidden" @change="handleImportTexture" />
 
     <!-- 1. LEFT: Brand & Application Dropdown Menus -->
@@ -267,10 +408,14 @@ function handleExitProject() {
           File
         </button>
 
-        <div v-if="activeDropdown === 'file'" class="header-dropdown-menu absolute left-0 top-full mt-0.5 w-56 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+        <div v-if="activeDropdown === 'file'" class="header-dropdown-menu absolute left-0 top-full mt-0.5 w-60 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
           <button @click="$emit('new-project'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
             <span class="flex items-center gap-2"><Plus class="w-3.5 h-3.5 text-ui-accent" /> New Project...</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+N</span>
+          </button>
+          <button @click="handleRestoreLastSession" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-sky-300">
+            <span class="flex items-center gap-2"><RotateCcw class="w-3.5 h-3.5 text-sky-400" /> Reopen Last Session</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+Shift+T</span>
           </button>
           <button @click="loadProjectInput?.click()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2"><FolderOpen class="w-3.5 h-3.5 text-amber-400" /> Open (.psxproj)</span>
@@ -293,8 +438,25 @@ function handleExitProject() {
           <button @click="importGltfInput?.click()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
             <Upload class="w-3.5 h-3.5 text-ui-textMuted" /> GLTF / GLB (.glb)
           </button>
+          <button @click="importBbmodelInput?.click()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2 text-amber-400">
+            <Upload class="w-3.5 h-3.5 text-amber-400" /> Blockbench Model (.bbmodel)
+          </button>
           <button @click="importTextureInput?.click()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
             <ImageIcon class="w-3.5 h-3.5 text-ui-textMuted" /> Texture (PNG, JPG)
+          </button>
+
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+
+          <div class="px-3 py-1 text-[10px] font-bold text-ui-textMuted uppercase tracking-wider">Direct Export</div>
+          <button @click="exportGltfDirect(true)" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2 text-sky-300 font-medium">
+            <Download class="w-3.5 h-3.5 text-sky-400" /> Animated GLTF (.glb)
+          </button>
+          <button @click="exportBlockbench" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2 text-amber-300 font-medium">
+            <Download class="w-3.5 h-3.5 text-amber-400" /> Blockbench Model (.bbmodel)
+          </button>
+          <button @click="$emit('open-export'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-amber-400 font-medium">
+            <span class="flex items-center gap-2"><Sparkles class="w-3.5 h-3.5" /> All Export Formats...</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+E</span>
           </button>
 
           <div class="h-px bg-ui-borderSubtle my-1"></div>
@@ -302,13 +464,6 @@ function handleExitProject() {
           <button @click="$emit('open-preferences'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-ui-textPrimary font-medium">
             <span class="flex items-center gap-2"><Sliders class="w-3.5 h-3.5 text-amber-400" /> Preferences & Properties...</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+,</span>
-          </button>
-
-          <div class="h-px bg-ui-borderSubtle my-1"></div>
-
-          <button @click="$emit('open-export'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-amber-400 font-medium">
-            <span class="flex items-center gap-2"><Sparkles class="w-3.5 h-3.5" /> Export Game Assets...</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+E</span>
           </button>
 
           <div class="h-px bg-ui-borderSubtle my-1"></div>
@@ -329,11 +484,11 @@ function handleExitProject() {
           Edit
         </button>
         <div v-if="activeDropdown === 'edit'" class="header-dropdown-menu absolute left-0 top-full mt-0.5 w-52 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
-          <button @click="historyStore.undo(); closeDropdowns()" :disabled="historyStore.undoStack.length === 0" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between disabled:opacity-40">
+          <button @click="safeUndo(); closeDropdowns()" :disabled="historyStore.undoStack.length === 0" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between disabled:opacity-40">
             <span class="flex items-center gap-2"><Undo2 class="w-3.5 h-3.5 text-ui-textMuted" /> Undo</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+Z</span>
           </button>
-          <button @click="historyStore.redo(); closeDropdowns()" :disabled="historyStore.redoStack.length === 0" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between disabled:opacity-40">
+          <button @click="safeRedo(); closeDropdowns()" :disabled="historyStore.redoStack.length === 0" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between disabled:opacity-40">
             <span class="flex items-center gap-2"><Redo2 class="w-3.5 h-3.5 text-ui-textMuted" /> Redo</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+Y</span>
           </button>
@@ -568,6 +723,11 @@ function handleExitProject() {
             <span class="text-ui-textAccent font-medium text-[10px]">{{ toolStore.viewport.showBones ? 'VISIBLE' : 'HIDDEN' }}</span>
           </button>
 
+          <button @click="toolStore.viewport.crtFilter = !toolStore.viewport.crtFilter; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span class="flex items-center gap-2"><Tv class="w-3.5 h-3.5 text-amber-400" /> CRT / TV Scanline Filter</span>
+            <span class="text-ui-textAccent font-medium text-[10px]">{{ toolStore.viewport.crtFilter ? 'ON' : 'OFF' }}</span>
+          </button>
+
           <div class="h-px bg-ui-borderSubtle my-1"></div>
 
           <!-- Camera Viewpoints -->
@@ -665,6 +825,19 @@ function handleExitProject() {
         <span class="text-ui-borderStrong">|</span>
         <span>Tris: <strong class="text-ui-textPrimary">{{ projectStore.stats.tris }}</strong></span>
       </div>
+
+      <!-- CRT / Retro TV Filter Toggle Button -->
+      <button 
+        @click="toolStore.viewport.crtFilter = !toolStore.viewport.crtFilter"
+        :title="toolStore.viewport.crtFilter ? 'Disable CRT Scanlines (TV Filter)' : 'Enable CRT Scanlines (TV Filter)'"
+        class="flex items-center gap-1 px-1.5 h-6 rounded-xs text-[11px] font-mono transition border cursor-pointer select-none"
+        :class="toolStore.viewport.crtFilter 
+          ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-xs font-bold' 
+          : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover border-ui-borderSubtle bg-ui-input/40'"
+      >
+        <Tv class="w-3.5 h-3.5" :class="toolStore.viewport.crtFilter ? 'text-amber-400 animate-pulse' : 'text-ui-textMuted'" />
+        <span class="font-semibold text-[10px]">TV</span>
+      </button>
 
       <!-- Hotkeys Button -->
       <button 

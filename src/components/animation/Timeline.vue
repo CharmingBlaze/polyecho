@@ -410,8 +410,11 @@ const graphKeyNodes = computed(() => {
   return nodes
 })
 
+let graphEditRecorded = false
+
 function selectGraphNode(node: { axis: 'x' | 'y' | 'z'; frame: number; value: number; interpolation: InterpolationType }) {
   if (!activeGraphTarget.value) return
+  graphEditRecorded = false
   selectedGraphKey.value = {
     targetId: activeGraphTarget.value.id,
     targetType: activeGraphTarget.value.type,
@@ -426,6 +429,10 @@ function selectGraphNode(node: { axis: 'x' | 'y' | 'z'; frame: number; value: nu
 
 function updateGraphKeyVal(val: number) {
   if (!selectedGraphKey.value) return
+  if (!graphEditRecorded) {
+    projectStore.recordState('Edit Keyframe Value')
+    graphEditRecorded = true
+  }
   selectedGraphKey.value.value = val
   animationStore.updateKeyframeValue(
     selectedGraphKey.value.targetId,

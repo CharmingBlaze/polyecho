@@ -45,6 +45,7 @@ import {
   EyeOff
 } from 'lucide-vue-next'
 import BlenderIcon from '../icons/BlenderIcon.vue'
+import { EDITOR_EVENTS } from '../../core/commands/editorCommands'
 
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
@@ -285,7 +286,7 @@ function initThree() {
     if (event.value !== null) {
       orbitControls.enabled = false
     } else if (!toolStore.viewport.quadView || activeQuadrant.value === 'top_right') {
-      orbitControls.enabled = true
+      if (orbitControls) orbitControls.enabled = true
     }
   })
 
@@ -422,7 +423,8 @@ function initHoverVisuals() {
 
 const textureCache = new Map<string, THREE.CanvasTexture>()
 
-function getThreeTexture(textureId?: string | null): THREE.CanvasTexture {
+function getThreeTexture(textureId?: string | null): THREE.CanvasTexture | null {
+  if (textureId === null) return null
   const targetTex = (textureId ? projectStore.textures.find(t => t.id === textureId) : null) || projectStore.activeTexture || projectStore.textures[0]
   if (!targetTex || !targetTex.pixelBuffer) {
     if (!threeTexture) {
@@ -449,6 +451,15 @@ function getThreeTexture(textureId?: string | null): THREE.CanvasTexture {
 }
 
 function updateThreeTextures() {
+  // Dispose cached GPU textures whose source entries no longer exist
+  const liveIds = new Set(projectStore.textures.map(t => t.id))
+  for (const [id, tex] of textureCache) {
+    if (!liveIds.has(id)) {
+      tex.dispose()
+      textureCache.delete(id)
+    }
+  }
+
   for (const t of projectStore.textures) {
     if (t.pixelBuffer) {
       let tex = textureCache.get(t.id)
@@ -472,6 +483,63 @@ function updateThreeTextures() {
 
 function updateThreeTexture() {
   updateThreeTextures()
+}
+
+const isDraggingImageFile = ref(false)
+
+function onViewportDragOver(e: DragEvent) {
+  if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) {
+    isDraggingImageFile.value = true
+  }
+}
+
+function onViewportDragLeave() {
+  isDraggingImageFile.value = false
+}
+
+function onViewportDrop(e: DragEvent) {
+  isDraggingImageFile.value = false
+  const file = e.dataTransfer?.files?.[0]
+  if (!file || !file.type.startsWith('image/')) return
+
+  const rect = containerRef.value?.getBoundingClientRect()
+  if (!rect) return
+  const mouseX = ((e.clientX - rect.left) / rect.width) * 2 - 1
+  const mouseY = -((e.clientY - rect.top) / rect.height) * 2 + 1
+  
+  const cam = activeCamera || cameraPersp
+  if (!cam) return
+  raycaster.setFromCamera(new THREE.Vector2(mouseX, mouseY), cam)
+  const meshObjects = layers?.modelGroup?.children?.filter(c => !c.name.includes('_')) || []
+  const intersects = raycaster.intersectObjects(meshObjects, true)
+
+  let targetMeshId = projectStore.activeMeshId
+  if (intersects.length > 0) {
+    const hitObj = intersects[0].object
+    const found = projectStore.meshes.find(m => m.id === hitObj.name)
+    if (found) {
+      targetMeshId = found.id
+      projectStore.activeMeshId = found.id
+      projectStore.selectedMeshIds = [found.id]
+    }
+  }
+
+  const reader = new FileReader()
+  reader.onload = (event) => {
+    const dataUrl = event.target?.result as string
+    if (!dataUrl) return
+    const img = new Image()
+    img.onload = () => {
+      const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_')
+      const newTex = projectStore.addTexture(cleanName, img.width || 64, img.height || 64, dataUrl)
+      if (targetMeshId) {
+        projectStore.activeMeshId = targetMeshId
+        projectStore.assignTextureToActiveMesh(newTex.id)
+      }
+    }
+    img.src = dataUrl
+  }
+  reader.readAsDataURL(file)
 }
 
 function initTexture() {
@@ -524,8 +592,14 @@ function rebuildMeshes() {
     const child = layers.gizmoGroup.children[i]
     if (!preserve.includes(child)) {
       layers.gizmoGroup.remove(child)
-      if (child instanceof THREE.Mesh || child instanceof THREE.LineSegments) {
+      if (child instanceof THREE.Mesh || child instanceof THREE.LineSegments || child instanceof THREE.Points || child instanceof THREE.Line) {
         child.geometry.dispose()
+        const material = (child as THREE.Mesh).material
+        if (Array.isArray(material)) {
+          for (const m of material) m.dispose()
+        } else if (material) {
+          material.dispose()
+        }
       }
     }
   }
@@ -535,7 +609,7 @@ function rebuildMeshes() {
   for (const meshObj of projectStore.meshes) {
     if (!meshObj.visible) continue
 
-    const isSelectedMesh = projectStore.selectedMeshIds.includes(meshObj.id)
+    const isSelectedMesh = projectStore.selectedMeshIds.includes(meshObj.id) || projectStore.activeMeshId === meshObj.id
     const selectedFaces = (isSelectedMesh && toolStore.selectMode === 'face') ? projectStore.selectedFaceIds : []
     const selectedEdges = (isSelectedMesh && toolStore.selectMode === 'edge') ? projectStore.selectedEdgeIds : []
 
@@ -556,10 +630,27 @@ function rebuildMeshes() {
       vertexIndexMap 
     } = meshToThreeGeometry(meshObj, selectedFaces, selectedEdges, toolStore.viewport.shadeMode, skeletalContext, weightPaintContext)
 
+    // Track which helper geometries get attached to the scene; the rest must be disposed
+    let wireGeomUsed = false
+    let selFacesGeomUsed = false
+    let selEdgesGeomUsed = false
+    let edgeLinesGeomUsed = false
+    let ptsGeomUsed = false
+
     const isSmooth = (meshObj.shadeMode || toolStore.viewport.shadeMode) === 'smooth'
     const meshMatObj = projectStore.materials.find(m => m.id === meshObj.materialId) || projectStore.materials[0]
     const meshTex = getThreeTexture(meshMatObj?.textureId)
     const baseColor = new THREE.Color(meshMatObj?.color || '#ffffff')
+    const roughness = typeof meshMatObj?.roughness === 'number' ? meshMatObj.roughness : 0.75
+    const metalness = typeof meshMatObj?.metalness === 'number' ? meshMatObj.metalness : 0.05
+    const emissiveColor = meshMatObj?.emissive ? new THREE.Color(meshMatObj.emissive) : new THREE.Color(0x000000)
+    const emissiveIntensity = typeof meshMatObj?.emissiveIntensity === 'number' ? meshMatObj.emissiveIntensity : 0.0
+    const matOpacity = typeof meshMatObj?.opacity === 'number' ? meshMatObj.opacity : 1.0
+    const alphaTest = typeof meshMatObj?.alphaTest === 'number' ? meshMatObj.alphaTest : 0.0
+    const isDoubleSided = meshMatObj?.doubleSided !== false
+    const isTransparent = isXRay || matOpacity < 1.0 || (meshMatObj?.blendMode === 'blend' || meshMatObj?.blendMode === 'additive')
+    const sideSetting = isDoubleSided ? THREE.DoubleSide : THREE.FrontSide
+    const isWireframe = Boolean(meshMatObj?.wireframe)
 
     let mat: THREE.Material
     if (isWeightPaint) {
@@ -567,30 +658,109 @@ function rebuildMeshes() {
         vertexColors: true,
         roughness: 0.65,
         metalness: 0.05,
-        side: THREE.DoubleSide,
+        side: sideSetting,
         flatShading: !isSmooth,
         transparent: isXRay,
         opacity: isXRay ? 0.65 : 1.0,
         depthWrite: !isXRay
       })
-    } else if (toolStore.viewport.shading === 'psx' && psxMaterial) {
-      psxMaterial.uniforms.uJitterAmount.value = toolStore.viewport.psxJitter ? 1.0 : 0.0
-      psxMaterial.uniforms.uAffineEnabled.value = toolStore.viewport.psxAffine
-      psxMaterial.uniforms.uDitherEnabled.value = toolStore.viewport.dither
-      psxMaterial.uniforms.uTexture.value = meshTex
-      mat = psxMaterial
-    } else if (toolStore.viewport.shading === 'textured' || meshMatObj?.shading === 'textured') {
+    } else if (['psx', 'saturn', 'dreamcast', 'n64'].includes(meshMatObj?.shading || '') || toolStore.viewport.shading === 'psx' || (meshMatObj?.dither || toolStore.viewport.dither)) {
+      const psxMat = createPSXMaterial(meshTex)
+      psxMat.uniforms.uColor.value = baseColor
+
+      const shadingType = meshMatObj?.shading || 'psx'
+      let consoleMode = 0
+      if (shadingType === 'saturn') consoleMode = 1
+      else if (shadingType === 'dreamcast') consoleMode = 2
+      else if (shadingType === 'n64') consoleMode = 3
+      psxMat.uniforms.uConsoleMode.value = consoleMode
+
+      psxMat.uniforms.uJitterAmount.value = (consoleMode === 0 && (meshMatObj?.psxJitter || toolStore.viewport.psxJitter)) ? 1.0 : 0.0
+      psxMat.uniforms.uAffineEnabled.value = (consoleMode <= 1) && Boolean(meshMatObj?.psxAffine || toolStore.viewport.psxAffine)
+      psxMat.uniforms.uDitherEnabled.value = Boolean(meshMatObj?.dither || toolStore.viewport.dither || consoleMode === 0 || consoleMode === 1)
+      psxMat.uniforms.uDitherIntensity.value = typeof meshMatObj?.ditherLevel === 'number' ? (meshMatObj.ditherLevel / 32) : 1.0
+      
+      psxMat.uniforms.uSaturnMeshAlpha.value = Boolean(meshMatObj?.saturnMeshAlpha || shadingType === 'saturn')
+      psxMat.uniforms.uDreamcastVQ.value = Boolean(meshMatObj?.dreamcastVQ || shadingType === 'dreamcast')
+      psxMat.uniforms.uDreamcastSpecular.value = Boolean(meshMatObj?.dreamcastSpecular || shadingType === 'dreamcast')
+      psxMat.uniforms.uDreamcastCelOutline.value = Boolean(meshMatObj?.dreamcastCelOutline)
+
+      const patternName = meshMatObj?.ditherPattern || (shadingType === 'saturn' ? 'checker' : 'bayer4x4')
+      let patType = 0
+      if (patternName === 'bayer8x8') patType = 1
+      else if (patternName === 'bayer2x2') patType = 2
+      else if (patternName === 'bayer16x16') patType = 3
+      else if (patternName === 'bluenoise') patType = 4
+      else if (patternName === 'halftone') patType = 5
+      else if (patternName === 'crosshatch') patType = 6
+      else if (patternName === 'horizontal_lines') patType = 7
+      else if (patternName === 'vertical_lines') patType = 8
+      else if (patternName === 'checker') patType = 9
+      else if (patternName === 'noise') patType = 10
+      psxMat.uniforms.uDitherPatternType.value = patType
+
+      let spaceType = 0
+      if (meshMatObj?.ditherSpace === 'uv') spaceType = 1
+      else if (meshMatObj?.ditherSpace === 'world') spaceType = 2
+      psxMat.uniforms.uDitherSpace.value = spaceType
+
+      let chanType = 0
+      if (meshMatObj?.ditherChannel === 'luma') chanType = 1
+      else if (meshMatObj?.ditherChannel === 'alpha') chanType = 2
+      psxMat.uniforms.uDitherChannel.value = chanType
+
+      psxMat.uniforms.uBayerSize.value = patternName === 'bayer2x2' ? 2 : (patternName === 'bayer8x8' ? 8 : (patternName === 'bayer16x16' ? 16 : 4))
+      psxMat.uniforms.uDitherScale.value = typeof meshMatObj?.ditherScale === 'number' ? meshMatObj.ditherScale : 1.0
+      psxMat.uniforms.uColorDepth.value = typeof meshMatObj?.colorDepth === 'number' ? meshMatObj.colorDepth : (shadingType === 'dreamcast' ? 0.0 : 32.0)
+      psxMat.side = sideSetting
+      psxMat.transparent = isTransparent
+      psxMat.opacity = isXRay ? 0.55 : matOpacity
+      mat = psxMat
+    } else if (meshMatObj?.shading === 'unlit') {
+      mat = new THREE.MeshBasicMaterial({
+        map: meshTex,
+        color: baseColor,
+        vertexColors: true,
+        side: sideSetting,
+        wireframe: isWireframe,
+        alphaTest: alphaTest,
+        transparent: isTransparent,
+        opacity: isXRay ? 0.55 : matOpacity,
+        depthWrite: !isTransparent
+      })
+    } else if (meshMatObj?.shading === 'flat') {
       mat = new THREE.MeshStandardMaterial({
         map: meshTex,
         color: baseColor,
-        roughness: meshMatObj?.roughness !== undefined ? meshMatObj.roughness : 0.8,
-        metalness: meshMatObj?.metalness !== undefined ? meshMatObj.metalness : 0.05,
+        roughness: roughness,
+        metalness: metalness,
+        emissive: emissiveColor,
+        emissiveIntensity: emissiveIntensity,
         vertexColors: true,
-        side: THREE.DoubleSide,
-        flatShading: !isSmooth,
-        transparent: isXRay,
-        opacity: isXRay ? 0.55 : 1.0,
-        depthWrite: !isXRay
+        side: sideSetting,
+        flatShading: true,
+        wireframe: isWireframe,
+        alphaTest: alphaTest,
+        transparent: isTransparent,
+        opacity: isXRay ? 0.55 : matOpacity,
+        depthWrite: !isTransparent
+      })
+    } else if (meshMatObj?.shading === 'gouraud') {
+      mat = new THREE.MeshStandardMaterial({
+        map: meshTex,
+        color: baseColor,
+        roughness: roughness,
+        metalness: metalness,
+        emissive: emissiveColor,
+        emissiveIntensity: emissiveIntensity,
+        vertexColors: true,
+        side: sideSetting,
+        flatShading: false,
+        wireframe: isWireframe,
+        alphaTest: alphaTest,
+        transparent: isTransparent,
+        opacity: isXRay ? 0.55 : matOpacity,
+        depthWrite: !isTransparent
       })
     } else if (toolStore.viewport.shading === 'wireframe') {
       mat = new THREE.MeshBasicMaterial({
@@ -607,16 +777,22 @@ function rebuildMeshes() {
         depthWrite: !isXRay
       })
     } else {
+      // PBR / Textured Standard Material
       mat = new THREE.MeshStandardMaterial({
+        map: meshTex,
         color: baseColor,
-        roughness: meshMatObj?.roughness !== undefined ? meshMatObj.roughness : 0.75,
-        metalness: meshMatObj?.metalness !== undefined ? meshMatObj.metalness : 0.1,
+        roughness: roughness,
+        metalness: metalness,
+        emissive: emissiveColor,
+        emissiveIntensity: emissiveIntensity,
         vertexColors: true,
-        side: THREE.DoubleSide,
+        side: sideSetting,
         flatShading: !isSmooth,
-        transparent: isXRay,
-        opacity: isXRay ? 0.55 : 1.0,
-        depthWrite: !isXRay
+        wireframe: isWireframe,
+        alphaTest: alphaTest,
+        transparent: isTransparent,
+        opacity: isXRay ? 0.55 : matOpacity,
+        depthWrite: !isTransparent
       })
     }
 
@@ -684,7 +860,7 @@ function rebuildMeshes() {
     }
 
     // PASS 5: Wireframe overlay
-    if ((toolStore.appMode === 'model' || isXRay) && toolStore.viewport.shading !== 'wireframe') {
+    if ((toolStore.appMode === 'model' || isXRay || meshMatObj?.wireframe) && toolStore.viewport.shading !== 'wireframe') {
       const wireMat = new THREE.LineBasicMaterial({ 
         color: isSelectedMesh ? 0x6366f1 : 0x475569, 
         depthTest: !isXRay,
@@ -697,6 +873,7 @@ function rebuildMeshes() {
       wire.rotation.copy(threeMesh.rotation)
       wire.scale.copy(threeMesh.scale)
       layers.wireframeGroup.add(wire)
+      wireGeomUsed = true
     }
 
     // Seam Edges Overlay (Bright Red #ef4444)
@@ -751,6 +928,7 @@ function rebuildMeshes() {
       selFaceMesh.rotation.copy(threeMesh.rotation)
       selFaceMesh.scale.copy(threeMesh.scale)
       layers.selectionGroup.add(selFaceMesh)
+      selFacesGeomUsed = true
     }
 
     // PASS 5: Edge Mode Overlay
@@ -767,6 +945,7 @@ function rebuildMeshes() {
         selEdgeMesh.rotation.copy(threeMesh.rotation)
         selEdgeMesh.scale.copy(threeMesh.scale)
         layers.wireframeGroup.add(selEdgeMesh)
+        selEdgesGeomUsed = true
       }
 
       const edgeMat = new THREE.LineBasicMaterial({ color: 0x06b6d4, linewidth: 2, depthTest: false })
@@ -777,6 +956,7 @@ function rebuildMeshes() {
       edges.scale.copy(threeMesh.scale)
       edges.userData = { meshId: meshObj.id }
       layers.wireframeGroup.add(edges)
+      edgeLinesGeomUsed = true
     }
 
     // PASS 5: Vertex Mode Overlay
@@ -789,36 +969,65 @@ function rebuildMeshes() {
       pts.scale.copy(threeMesh.scale)
       pts.userData = { meshId: meshObj.id, vertexIndexMap }
       layers.wireframeGroup.add(pts)
+      ptsGeomUsed = true
     }
 
-    // PASS 6: Blockbench Origin / Pivot Point Marker
-    if (toolStore.appMode === 'model' && isSelectedMesh) {
-      const isOriginMode = toolStore.selectMode === 'origin'
+    // PASS 6: Blockbench Origin / Pivot Point Marker (Visible ONLY when Origin mode is selected)
+    if (toolStore.appMode === 'model' && toolStore.selectMode === 'origin' && isSelectedMesh) {
+      const isOriginMode = true
       const originMat = new THREE.MeshBasicMaterial({
-        color: isOriginMode ? 0xf59e0b : 0x38bdf8,
-        depthTest: false
+        color: 0xf59e0b,
+        depthTest: false,
+        depthWrite: false,
+        transparent: true
       })
-      const originGeom = new THREE.OctahedronGeometry(isOriginMode ? 0.12 : 0.08)
+      const originGeom = new THREE.OctahedronGeometry(0.22)
       const originMesh = new THREE.Mesh(originGeom, originMat)
       originMesh.name = `${meshObj.id}_origin`
       originMesh.position.set(meshObj.position.x, meshObj.position.y, meshObj.position.z)
-      originMesh.renderOrder = 998
+      originMesh.renderOrder = 99999
       layers.gizmoGroup.add(originMesh)
 
       const crosshairGeom = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([
-        -0.2, 0, 0, 0.2, 0, 0,
-        0, -0.2, 0, 0, 0.2, 0,
-        0, 0, -0.2, 0, 0, 0.2
+        -0.5, 0, 0, 0.5, 0, 0,
+        0, -0.5, 0, 0, 0.5, 0,
+        0, 0, -0.5, 0, 0, 0.5
       ], 3))
       const crosshairMat = new THREE.LineBasicMaterial({
-        color: isOriginMode ? 0xfef08a : 0x06b6d4,
-        depthTest: false
+        color: isOriginMode ? 0xfef08a : 0x38bdf8,
+        depthTest: false,
+        depthWrite: false,
+        transparent: true
       })
       const crosshair = new THREE.LineSegments(crosshairGeom, crosshairMat)
+      crosshair.name = `${meshObj.id}_crosshair`
       crosshair.position.copy(originMesh.position)
-      crosshair.renderOrder = 998
+      crosshair.renderOrder = 99999
       layers.gizmoGroup.add(crosshair)
+
+      if (isOriginMode) {
+        const ringGeom = new THREE.RingGeometry(0.3, 0.35, 32)
+        ringGeom.rotateX(Math.PI / 2)
+        const ringMat = new THREE.MeshBasicMaterial({
+          color: 0xf59e0b,
+          side: THREE.DoubleSide,
+          depthTest: false,
+          depthWrite: false,
+          transparent: true
+        })
+        const ringMesh = new THREE.Mesh(ringGeom, ringMat)
+        ringMesh.name = `${meshObj.id}_origin_ring`
+        ringMesh.position.copy(originMesh.position)
+        ringMesh.renderOrder = 99999
+        layers.gizmoGroup.add(ringMesh)
+      }
     }
+
+    if (!wireGeomUsed) wireframeGeometry.dispose()
+    if (!selFacesGeomUsed) selectedFacesGeometry.dispose()
+    if (!selEdgesGeomUsed) selectedEdgesGeometry.dispose()
+    if (!edgeLinesGeomUsed) edgeLinesGeometry.dispose()
+    if (!ptsGeomUsed) vertexPointsGeometry.dispose()
   }
 
   // Onion Skinning Ghost Frames Overlay
@@ -856,13 +1065,25 @@ function rebuildMeshes() {
 
       for (const meshObj of projectStore.meshes) {
         if (!meshObj.visible) continue
-        const { geometry } = meshToThreeGeometry(
+        const {
+          geometry,
+          wireframeGeometry: ghostWireGeom,
+          vertexPointsGeometry: ghostPtsGeom,
+          selectedFacesGeometry: ghostSelFacesGeom,
+          selectedEdgesGeometry: ghostSelEdgesGeom,
+          edgeLinesGeometry: ghostEdgeLinesGeom
+        } = meshToThreeGeometry(
           meshObj,
           [],
           [],
           'flat',
           { isPoseMode: true, bones: ghostBones }
         )
+        ghostWireGeom.dispose()
+        ghostPtsGeom.dispose()
+        ghostSelFacesGeom.dispose()
+        ghostSelEdgesGeom.dispose()
+        ghostEdgeLinesGeom.dispose()
 
         const ghostMat = new THREE.MeshBasicMaterial({
           color: ghost.color,
@@ -899,6 +1120,15 @@ function rebuildBones() {
   while (boneGroup.children.length > 0) {
     const obj = boneGroup.children[0]
     boneGroup.remove(obj)
+    if (obj instanceof THREE.Mesh || obj instanceof THREE.LineSegments || obj instanceof THREE.Points || obj instanceof THREE.Line) {
+      obj.geometry.dispose()
+      const material = (obj as THREE.Mesh).material
+      if (Array.isArray(material)) {
+        for (const m of material) m.dispose()
+      } else if (material) {
+        material.dispose()
+      }
+    }
   }
 
   if (!animationStore.showBones) {
@@ -1270,6 +1500,7 @@ function applyTheme(colors: ThemeColors) {
     if (gridHelper) {
       layers.gridGroup.remove(gridHelper)
       gridHelper.geometry.dispose()
+      ;(gridHelper.material as THREE.Material).dispose()
     }
     gridHelper = new THREE.GridHelper(
       20, 
@@ -1307,6 +1538,7 @@ function applyTheme(colors: ThemeColors) {
 const dragStartBonesMap = new Map<string, { head: Vector3D; tail: Vector3D; position: Vector3D; rotation: Vector3D; scale: Vector3D }>()
 
 function onGizmoDragStart() {
+  projectStore.recordState(toolStore.selectMode === 'origin' ? 'Move Origin' : 'Transform')
   transformProxy.updateMatrixWorld()
   dragStartProxyMatrix.copy(transformProxy.matrixWorld)
   dragStartProxyMatrixInverse.copy(dragStartProxyMatrix).invert()
@@ -1555,8 +1787,16 @@ function onGizmoObjectChange() {
 
     const { 
       geometry, 
-      wireframeGeometry
+      wireframeGeometry,
+      vertexPointsGeometry: ptsGeom,
+      selectedFacesGeometry: selFacesGeom,
+      selectedEdgesGeometry: selEdgesGeom,
+      edgeLinesGeometry: edgeLinesGeom
     } = meshToThreeGeometry(activeMesh)
+    ptsGeom.dispose()
+    selFacesGeom.dispose()
+    selEdgesGeom.dispose()
+    edgeLinesGeom.dispose()
 
     const threeMesh = layers.modelGroup.getObjectByName(activeMesh.id) as THREE.Mesh
     if (threeMesh) {
@@ -1575,6 +1815,16 @@ function onGizmoObjectChange() {
     const origMarker = layers.gizmoGroup.getObjectByName(`${activeMesh.id}_origin`) as THREE.Mesh
     if (origMarker) {
       origMarker.position.copy(transformProxy.position)
+    }
+
+    const crosshair = layers.gizmoGroup.getObjectByName(`${activeMesh.id}_crosshair`) as THREE.LineSegments
+    if (crosshair) {
+      crosshair.position.copy(transformProxy.position)
+    }
+
+    const ring = layers.gizmoGroup.getObjectByName(`${activeMesh.id}_origin_ring`) as THREE.Mesh
+    if (ring) {
+      ring.position.copy(transformProxy.position)
     }
     return
   }
@@ -1748,41 +1998,53 @@ function onGizmoObjectChange() {
       wireframeGeometry, 
       vertexPointsGeometry, 
       selectedFacesGeometry, 
-      selectedEdgesGeometry 
+      selectedEdgesGeometry,
+      edgeLinesGeometry
     } = meshToThreeGeometry(
       activeMesh,
       toolStore.selectMode === 'face' ? projectStore.selectedFaceIds : [],
       toolStore.selectMode === 'edge' ? projectStore.selectedEdgeIds : []
     )
+    edgeLinesGeometry.dispose()
 
     const threeMesh = layers.modelGroup.getObjectByName(activeMesh.id) as THREE.Mesh
     if (threeMesh) {
       threeMesh.geometry.dispose()
       threeMesh.geometry = geometry
+    } else {
+      geometry.dispose()
     }
 
     const wire = layers.wireframeGroup.getObjectByName(`${activeMesh.id}_wire`) as THREE.LineSegments
     if (wire) {
       wire.geometry.dispose()
       wire.geometry = wireframeGeometry
+    } else {
+      wireframeGeometry.dispose()
     }
 
     const pts = layers.wireframeGroup.getObjectByName(`${activeMesh.id}_pts`) as THREE.Points
     if (pts) {
       pts.geometry.dispose()
       pts.geometry = vertexPointsGeometry
+    } else {
+      vertexPointsGeometry.dispose()
     }
 
     const selFaces = layers.selectionGroup.getObjectByName(`${activeMesh.id}_selfaces`) as THREE.Mesh
     if (selFaces) {
       selFaces.geometry.dispose()
       selFaces.geometry = selectedFacesGeometry
+    } else {
+      selectedFacesGeometry.dispose()
     }
 
     const selEdges = layers.wireframeGroup.getObjectByName(`${activeMesh.id}_seledges`) as THREE.LineSegments
     if (selEdges) {
       selEdges.geometry.dispose()
       selEdges.geometry = selectedEdgesGeometry
+    } else {
+      selectedEdgesGeometry.dispose()
     }
   }
 }
@@ -1791,7 +2053,12 @@ function commitProxyTransform() {
   const activeMesh = projectStore.activeMesh
   if (!activeMesh) return
 
-  projectStore.recordState('Transform')
+  if (toolStore.snapping.autoMerge && (toolStore.selectMode === 'vertex' || toolStore.selectMode === 'edge')) {
+    const threshold = toolStore.snapping.autoMergeThreshold || 0.015
+    projectStore.performAutoMerge(activeMesh.id, threshold)
+  }
+
+  projectStore.markGeometryUpdated()
 
   if (toolStore.appMode === 'animate') {
     if (animationStore.autoKey) {
@@ -2108,7 +2375,12 @@ function onWheel(event: WheelEvent) {
 
 // Raycasting for Selection & Hover Highlighting
 function onPointerDown(event: PointerEvent) {
-  if (operatorManager.state.value.active) return
+  if (operatorManager.state.value.active) {
+    if (orbitControls) orbitControls.enabled = false
+    event.stopImmediatePropagation()
+    event.preventDefault()
+    return
+  }
 
   // Middle Mouse Button (button === 1) triggers the Specials Context Menu at cursor!
   if (event.button === 1) {
@@ -2162,6 +2434,8 @@ function onPointerDown(event: PointerEvent) {
       isPaintingOn3D = true
       event.stopImmediatePropagation()
       event.preventDefault()
+      projectStore.recordState('3D Paint')
+      lastPaintUV = null
       paintRaycastHit()
       return
     }
@@ -2184,6 +2458,7 @@ function onPointerDown(event: PointerEvent) {
 
     if (hitPoint) {
       pointerDownHitMesh = true
+      projectStore.recordState('Add Bone')
       const curBone = animationStore.selectedBone
       if (!curBone) {
         const rootBone = animationStore.addBoneFromPoints(
@@ -2238,6 +2513,7 @@ function onPointerDown(event: PointerEvent) {
         orbitControls.enabled = false
         event.stopImmediatePropagation()
         event.preventDefault()
+        projectStore.recordState('Weight Paint Stroke')
         const bId = animationStore.selectedBoneId || (animationStore.armature.bones[0]?.id ?? '')
         if (bId) {
           animationStore.paintVertexWeightAtPoint(activeMesh.id, intersects[0].point, bId, animationStore.weightPaintTool)
@@ -2247,25 +2523,7 @@ function onPointerDown(event: PointerEvent) {
       }
     }
   }
-
-  // Direct 3D Surface Paint Click / Drag Start
-  const isPaintActive = (toolStore.appMode === 'uvpaint' && (toolStore.uvWorkspaceTab === 'paint' || toolStore.uvWorkspaceTab === 'vertex')) ||
-    ['brush', 'eraser', 'picker', 'bucket', 'dither'].includes(toolStore.paintTool)
-  if (event.button === 0 && isPaintActive && !event.altKey) {
-    const intersects = raycaster.intersectObjects(layers.modelGroup.children, true)
-    if (intersects.length > 0 && intersects[0].uv) {
-      isPaintingOn3D = true
-      pointerDownHitMesh = true
-      orbitControls.enabled = false
-      event.stopImmediatePropagation()
-      event.preventDefault()
-      lastPaintUV = null
-      paintRaycastHit()
-      return
-    }
-  }
-
-  const isSelectionAllowed = toolStore.appMode === 'model' || (toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'uv')
+    const isSelectionAllowed = toolStore.appMode === 'model' || (toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'uv')
   const activeMesh = projectStore.activeMesh
 
   // 1. Edge Mode Selection
@@ -2273,7 +2531,11 @@ function onPointerDown(event: PointerEvent) {
     const edge = findClosestEdgeScreen(activeMesh)
     if (edge) {
       pointerDownHitMesh = true
-      if (event.shiftKey) {
+      if (event.altKey && (event.ctrlKey || event.metaKey)) {
+        projectStore.selectEdgeRing(edge.id, event.shiftKey)
+      } else if (event.altKey) {
+        projectStore.selectEdgeLoop(edge.id, event.shiftKey)
+      } else if (event.shiftKey) {
         if (projectStore.selectedEdgeIds.includes(edge.id)) {
           projectStore.selectedEdgeIds = projectStore.selectedEdgeIds.filter(id => id !== edge.id)
         } else {
@@ -2354,7 +2616,10 @@ function onPointerDown(event: PointerEvent) {
 }
 
 function onPointerMove(event: PointerEvent) {
-  if (operatorManager.state.value.active) return
+  if (operatorManager.state.value.active) {
+    if (orbitControls) orbitControls.enabled = false
+    return
+  }
   lastHoverClientPos = { x: event.clientX, y: event.clientY }
   if (isGizmoDragging || transformControls.dragging || (transformControls as any).axis !== null) {
     orbitControls.enabled = false
@@ -2607,7 +2872,6 @@ function onPointerUp(event?: PointerEvent) {
   if (isWeightPainting) {
     isWeightPainting = false
     orbitControls.enabled = true
-    projectStore.recordState('Weight Paint Stroke')
     if (event) {
       event.stopImmediatePropagation()
     }
@@ -2617,7 +2881,6 @@ function onPointerUp(event?: PointerEvent) {
     isPaintingOn3D = false
     lastPaintUV = null
     orbitControls.enabled = true
-    projectStore.recordState('3D Paint')
     if (event) {
       event.stopImmediatePropagation()
     }
@@ -2683,7 +2946,7 @@ function startModalOperator(tool: string, options?: any) {
     viewportKind: vpKind,
     quadrant: activeQuadrant.value,
     onUpdatePreview: () => {
-      if (activeMesh) {
+      if (activeMesh && tool !== 'primitive' && tool !== 'add_primitive') {
         const updatedMeshObj = MeshBridge.editableMeshToMeshObject(
           editableMesh,
           activeMesh,
@@ -2695,7 +2958,7 @@ function startModalOperator(tool: string, options?: any) {
       }
     },
     onCommit: (actionName: string) => {
-      if (activeMesh) {
+      if (activeMesh && tool !== 'primitive' && tool !== 'add_primitive') {
         const updatedMeshObj = MeshBridge.editableMeshToMeshObject(
           editableMesh,
           activeMesh,
@@ -2759,13 +3022,15 @@ function updateActiveMeshVisualsFast() {
     wireframeGeometry, 
     vertexPointsGeometry, 
     selectedFacesGeometry, 
-    selectedEdgesGeometry 
+    selectedEdgesGeometry,
+    edgeLinesGeometry
   } = meshToThreeGeometry(
     activeMesh,
     toolStore.selectMode === 'face' ? projectStore.selectedFaceIds : [],
     toolStore.selectMode === 'edge' ? projectStore.selectedEdgeIds : [],
     toolStore.viewport.shadeMode
   )
+  edgeLinesGeometry.dispose()
 
   const threeMesh = layers.modelGroup.getObjectByName(activeMesh.id) as THREE.Mesh
   if (threeMesh) {
@@ -2773,30 +3038,40 @@ function updateActiveMeshVisualsFast() {
     threeMesh.geometry = geometry
     threeMesh.castShadow = true
     threeMesh.receiveShadow = true
+  } else {
+    geometry.dispose()
   }
 
   const wire = layers.wireframeGroup.getObjectByName(`${activeMesh.id}_wire`) as THREE.LineSegments
   if (wire) {
     wire.geometry.dispose()
     wire.geometry = wireframeGeometry
+  } else {
+    wireframeGeometry.dispose()
   }
 
   const pts = layers.wireframeGroup.getObjectByName(`${activeMesh.id}_pts`) as THREE.Points
   if (pts) {
     pts.geometry.dispose()
     pts.geometry = vertexPointsGeometry
+  } else {
+    vertexPointsGeometry.dispose()
   }
 
   const selFaces = layers.selectionGroup.getObjectByName(`${activeMesh.id}_selfaces`) as THREE.Mesh
   if (selFaces) {
     selFaces.geometry.dispose()
     selFaces.geometry = selectedFacesGeometry
+  } else {
+    selectedFacesGeometry.dispose()
   }
 
   const selEdges = layers.wireframeGroup.getObjectByName(`${activeMesh.id}_seledges`) as THREE.LineSegments
   if (selEdges) {
     selEdges.geometry.dispose()
     selEdges.geometry = selectedEdgesGeometry
+  } else {
+    selectedEdgesGeometry.dispose()
   }
 }
 
@@ -2912,11 +3187,10 @@ function updateHoverState() {
     hoverBoneMesh.visible = false
   }
 
-  // 3D Paint & Weight Paint Projector Ring
-  const isPaintHoverActive = (toolStore.appMode === 'rig' && animationStore.isWeightPaintActive) ||
-    ((toolStore.appMode === 'uvpaint' || ['brush', 'eraser'].includes(toolStore.paintTool)) && (toolStore.uvWorkspaceTab === 'paint' || toolStore.uvWorkspaceTab === 'vertex' || toolStore.appMode !== 'uvpaint'))
+  // 3D Skeletal Weight Paint Projector Ring (Rigging mode only)
+  const isWeightPaintHoverActive = toolStore.appMode === 'rig' && animationStore.isWeightPaintActive
 
-  if (isPaintHoverActive && hoverWeightBrushRing) {
+  if (isWeightPaintHoverActive && hoverWeightBrushRing) {
     const intersects = raycaster.intersectObjects(layers.modelGroup.children, true)
     if (intersects.length > 0 && intersects[0].point) {
       const hit = intersects[0]
@@ -2924,9 +3198,7 @@ function updateHoverState() {
       if (hit.face) {
         hoverWeightBrushRing.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), hit.face.normal)
       }
-      const r = toolStore.appMode === 'rig' 
-        ? (animationStore.weightBrushRadius || 0.5) 
-        : Math.max(0.08, (toolStore.brushSize || 1) * 0.06)
+      const r = animationStore.weightBrushRadius || 0.5
       hoverWeightBrushRing.scale.set(r, r, r)
       hoverWeightBrushRing.visible = true
       hasHover = true
@@ -2938,11 +3210,16 @@ function updateHoverState() {
   }
 
   if (renderer && renderer.domElement) {
-    renderer.domElement.style.cursor = hasHover ? 'pointer' : 'crosshair'
+    if (toolStore.appMode === 'uvpaint') {
+      renderer.domElement.style.cursor = 'crosshair'
+    } else {
+      renderer.domElement.style.cursor = hasHover ? 'pointer' : 'default'
+    }
   }
 }
 
 function paintRaycastHit() {
+  if (toolStore.appMode !== 'uvpaint') return
   const intersects = raycaster.intersectObjects(layers.modelGroup.children, true)
   if (intersects.length === 0) return
   const hit = intersects[0]
@@ -2987,7 +3264,16 @@ function paintRaycastHit() {
   // 2. 2D Texture Pixel Painting
   if (hit.uv) {
     const uv = hit.uv
-    const pb = projectStore.pixelBuffer
+    const hitMesh = projectStore.meshes.find(m => m.id === hit.object.name)
+    const hitMat = hitMesh ? projectStore.materials.find(m => m.id === hitMesh.materialId) : null
+    const targetTex = (hitMat?.textureId ? projectStore.textures.find(t => t.id === hitMat.textureId) : null) || projectStore.activeTexture || projectStore.textures[0]
+    const pb = targetTex?.pixelBuffer || projectStore.pixelBuffer
+    if (!pb) return
+
+    if (targetTex && projectStore.activeTextureId !== targetTex.id) {
+      projectStore.activeTextureId = targetTex.id
+    }
+
     const px = Math.floor(uv.x * pb.width)
     const py = Math.floor((1 - uv.y) * pb.height)
 
@@ -3020,10 +3306,11 @@ function paintRaycastHit() {
       toolStore.primaryColor = pb.getPixelHex(px, py)
     }
 
-    if (threeTexture) {
-      threeTexture.needsUpdate = true
+    const hitTex = targetTex ? textureCache.get(targetTex.id) : threeTexture
+    if (hitTex) {
+      hitTex.needsUpdate = true
     }
-    projectStore.markTextureUpdated()
+    projectStore.markTextureUpdated(targetTex?.id)
   }
 }
 
@@ -3309,6 +3596,9 @@ watch(() => projectStore.textureRevision, () => {
   if (threeTexture) threeTexture.needsUpdate = true
 })
 watch(() => toolStore.appMode, async () => {
+  toolStore.isBoxSelectActive = false
+  isBoxSelectArmed.value = false
+  if (orbitControls) orbitControls.enabled = true
   rebuildMeshes()
   await nextTick()
   setTimeout(() => recoverViewportRenderer(), 50)
@@ -3318,7 +3608,13 @@ watch(() => toolStore.uvWorkspaceTab, async () => {
   await nextTick()
   setTimeout(() => recoverViewportRenderer(), 50)
 })
-watch(() => toolStore.selectMode, rebuildMeshes)
+watch(() => toolStore.selectMode, () => {
+  toolStore.isBoxSelectActive = false
+  isBoxSelectArmed.value = false
+  if (orbitControls) orbitControls.enabled = true
+  rebuildMeshes()
+  updateTransformGizmo()
+})
 watch(() => toolStore.modelTool, updateTransformGizmo)
 watch(() => animationStore.selectedBoneId, () => {
   rebuildBones()
@@ -3402,7 +3698,7 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
       toolStore.isBoxSelectActive = false
       isBoxSelectArmed.value = false
       isMarqueeSelecting.value = false
-      orbitControls.enabled = true
+      if (orbitControls) orbitControls.enabled = true
       return
     }
     if (operatorManager.state.value.active) {
@@ -3420,27 +3716,6 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
       return
     } else if (toolStore.appMode === 'rig') {
       animationStore.clickToPlaceMode = !animationStore.clickToPlaceMode
-      return
-    }
-  }
-
-  // Rigging Quick Extrude (E)
-  if ((e.key === 'e' || e.key === 'E') && !e.ctrlKey && !e.metaKey && !e.altKey && toolStore.appMode === 'rig') {
-    if (animationStore.selectedBoneId) {
-      projectStore.recordState('Extrude Bone')
-      animationStore.extrudeBone(animationStore.selectedBoneId)
-      rebuildBones()
-      return
-    }
-  }
-
-  // Quick Bind Shortcut (Ctrl+B)
-  if ((e.key === 'b' || e.key === 'B') && (e.ctrlKey || e.metaKey) && toolStore.appMode === 'rig') {
-    e.preventDefault()
-    if (animationStore.selectedBoneId) {
-      projectStore.recordState('Quick Bind Geometry')
-      animationStore.bindSelectedGeometry('rigid_vertex', animationStore.selectedBoneId)
-      rebuildMeshes()
       return
     }
   }
@@ -3481,7 +3756,7 @@ function handleGlobalWheel(e: WheelEvent) {
 function handleGlobalPointerDown(e: MouseEvent) {
   if (!operatorManager.state.value.active) return
 
-  // Prevent drawing in 3D scene when clicking on any UI button, floating panel, modal, inspector, etc.
+  // Prevent drawing in 3D scene when clicking on UI buttons, inputs, dropdowns, floating modals, or inspector panels
   const target = e.target as HTMLElement | null
   if (target) {
     if (
@@ -3493,12 +3768,14 @@ function handleGlobalPointerDown(e: MouseEvent) {
       target.closest('input') ||
       target.closest('select') ||
       target.closest('textarea') ||
-      target.closest('.pointer-events-auto') ||
-      (renderer && renderer.domElement && target !== renderer.domElement)
+      target.closest('.fixed:not(#canvas-mount)') ||
+      target.closest('.hud-panel')
     ) {
       return
     }
   }
+
+  if (orbitControls) orbitControls.enabled = false
 
   updateActiveCameraAndQuadrant(e)
   if (operatorManager.activeOperator) {
@@ -3654,6 +3931,12 @@ watch(() => [
   rebuildMeshes()
 })
 
+watch(() => operatorManager.state.value.active, (active) => {
+  if (orbitControls) {
+    orbitControls.enabled = !active
+  }
+})
+
 function toggleBoneVisibility() {
   toolStore.viewport.showBones = !toolStore.viewport.showBones
   animationStore.showBones = toolStore.viewport.showBones
@@ -3676,10 +3959,10 @@ watch(() => themeStore.currentThemeId, () => {
 
 onMounted(() => {
   void startViewportRenderer()
-  window.addEventListener('set-camera-view', handleCameraViewEvent)
-  window.addEventListener('blender-modal-op', handleBlenderModalEvent)
-  window.addEventListener('primitive-created', handlePrimitiveCreatedEvent)
-  window.addEventListener('start-primitive-placement', handleStartPrimitivePlacementEvent)
+  window.addEventListener(EDITOR_EVENTS.cameraView, handleCameraViewEvent)
+  window.addEventListener(EDITOR_EVENTS.modalTool, handleBlenderModalEvent)
+  window.addEventListener(EDITOR_EVENTS.primitiveCreated, handlePrimitiveCreatedEvent)
+  window.addEventListener(EDITOR_EVENTS.startPrimitivePlacement, handleStartPrimitivePlacementEvent)
   window.addEventListener('theme-changed', handleThemeChangedEvent)
   window.addEventListener('pointermove', handleGlobalPointerMove)
   window.addEventListener('keydown', handleGlobalKeyDown, true)
@@ -3690,10 +3973,10 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  window.removeEventListener('set-camera-view', handleCameraViewEvent)
-  window.removeEventListener('blender-modal-op', handleBlenderModalEvent)
-  window.removeEventListener('primitive-created', handlePrimitiveCreatedEvent)
-  window.removeEventListener('start-primitive-placement', handleStartPrimitivePlacementEvent)
+  window.removeEventListener(EDITOR_EVENTS.cameraView, handleCameraViewEvent)
+  window.removeEventListener(EDITOR_EVENTS.modalTool, handleBlenderModalEvent)
+  window.removeEventListener(EDITOR_EVENTS.primitiveCreated, handlePrimitiveCreatedEvent)
+  window.removeEventListener(EDITOR_EVENTS.startPrimitivePlacement, handleStartPrimitivePlacementEvent)
   window.removeEventListener('theme-changed', handleThemeChangedEvent)
   window.removeEventListener('pointermove', handleGlobalPointerMove)
   window.removeEventListener('keydown', handleGlobalKeyDown, true)
@@ -3706,22 +3989,47 @@ onUnmounted(() => {
     contextRecoveryTimer = null
   }
   cancelAnimationFrame(animationFrameId)
+  if (operatorManager.state.value.active) {
+    operatorManager.cancel()
+  }
   if (resizeObserver && containerRef.value) {
     resizeObserver.unobserve(containerRef.value)
     resizeObserver.disconnect()
   }
   if (renderer && renderer.domElement && containerRef.value) {
     renderer.domElement.removeEventListener('wheel', onWheel)
+    renderer.domElement.removeEventListener('pointerdown', onPointerDown, { capture: true } as EventListenerOptions)
+    renderer.domElement.removeEventListener('pointermove', onPointerMove, { capture: true } as EventListenerOptions)
+    renderer.domElement.removeEventListener('pointerup', onPointerUp, { capture: true } as EventListenerOptions)
+    renderer.domElement.removeEventListener('pointerleave', onPointerUp, { capture: true } as EventListenerOptions)
     renderer.domElement.removeEventListener('webglcontextlost', handleWebGLContextLost)
     renderer.domElement.removeEventListener('webglcontextrestored', handleWebGLContextRestored)
     renderer.domElement.parentElement?.removeChild(renderer.domElement)
     renderer.dispose()
+  }
+  if (orbitControls) {
+    orbitControls.dispose()
+  }
+  if (transformControls) {
+    transformControls.dispose()
   }
   if (layers) {
     layers.dispose(scene)
   }
   if (editorEnv) {
     editorEnv.dispose()
+  }
+  for (const tex of textureCache.values()) {
+    tex.dispose()
+  }
+  textureCache.clear()
+  if (threeTexture) {
+    threeTexture.dispose()
+    threeTexture = null
+  }
+  if (psxMaterial) {
+    psxMaterial.dispose()
+    psxMaterial = null
   }
   window.removeEventListener('resize', onWindowResize)
 })
@@ -3730,9 +4038,24 @@ onUnmounted(() => {
 <template>
   <div class="relative w-full h-full overflow-hidden bg-ui-root flex flex-col">
     <!-- 3D Canvas Container -->
-    <div ref="containerRef" class="w-full h-full cursor-crosshair flex-1 min-h-0 relative">
+    <div 
+      ref="containerRef" 
+      class="w-full h-full cursor-crosshair flex-1 min-h-0 relative"
+      @dragover.prevent="onViewportDragOver"
+      @dragleave.prevent="onViewportDragLeave"
+      @drop.prevent="onViewportDrop"
+    >
       <!-- Dedicated 3D Canvas Mount (Preserves Vue UI overlay and LightWave controls) -->
       <div ref="canvasMountRef" class="absolute inset-0 w-full h-full z-0 pointer-events-auto"></div>
+
+      <!-- Drop Image to Apply Texture Overlay -->
+      <div 
+        v-if="isDraggingImageFile"
+        class="absolute inset-3 bg-sky-950/70 backdrop-blur-xs border-2 border-dashed border-sky-400 rounded-lg z-50 flex flex-col items-center justify-center p-6 text-center pointer-events-none shadow-2xl animate-in fade-in"
+      >
+        <span class="text-sm font-bold text-white font-mono">Drop Image to Apply Texture</span>
+        <span class="text-[10px] text-sky-300 font-mono mt-1">Assigns image texture directly to 3D object</span>
+      </div>
       <div
         v-if="isWebGLContextLost || rendererInitError"
         class="absolute inset-0 z-40 flex items-center justify-center bg-ui-root/90 backdrop-blur-sm"
@@ -3812,6 +4135,23 @@ onUnmounted(() => {
             title="Split to Quad View (Ctrl+Alt+Q)"
           >
             <Maximize2 class="w-3.5 h-3.5 text-ui-textAccent" />
+          </button>
+        </div>
+
+        <!-- In-Viewport Origin Edit Mode Guidance Banner -->
+        <div 
+          v-if="toolStore.appMode === 'model' && toolStore.selectMode === 'origin'"
+          class="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1 bg-amber-950/90 backdrop-blur-xs border border-amber-500/50 rounded-full shadow-lg font-sans text-[11px] text-amber-300 select-none"
+        >
+          <div class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></div>
+          <span class="font-semibold">
+            Origin Edit Mode: Drag Gizmo or Use Presets to Move Pivot
+          </span>
+          <button 
+            @click="toolStore.selectMode = 'object'" 
+            class="ml-1 px-2 py-0.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xs text-[10px] transition cursor-pointer"
+          >
+            Done
           </button>
         </div>
 

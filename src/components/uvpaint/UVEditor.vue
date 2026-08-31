@@ -29,7 +29,7 @@ import {
   Upload, 
   Download, 
   Maximize,
-
+  Plus
 } from 'lucide-vue-next'
 import { SeamUnwrapper } from '../../core/uv/SeamUnwrapper'
 
@@ -107,6 +107,7 @@ const marqueeRect = computed(() => {
 // Interaction state: 'none' | 'move' | 'scale_corner' | 'scale_edge' | 'rotate' | 'drag_vert' | 'drag_edge'
 type DragType = 'none' | 'move' | 'scale_corner' | 'scale_edge' | 'rotate' | 'drag_vert' | 'drag_edge'
 let activeDrag: DragType = 'none'
+let uvDragRecorded = false
 let dragStartMouse = { u: 0, v: 0, screenX: 0, screenY: 0 }
 let dragStartBounds = { minU: 0, maxU: 1, minV: 0, maxV: 1, cU: 0.5, cV: 0.5, width: 1, height: 1 }
 let dragStartUvs: { faceIndex: number; vertIndex: number; origU: number; origV: number }[] = []
@@ -231,10 +232,12 @@ function screenToUV(screenX: number, screenY: number): { u: number; v: number } 
 // SMART RAF CANVAS RENDERING (Zero dropped frames, 60fps)
 // ----------------------------------------------------
 let renderPending = false
+let renderRafId: number | null = null
 function scheduleRender() {
   if (renderPending) return
   renderPending = true
-  requestAnimationFrame(() => {
+  renderRafId = requestAnimationFrame(() => {
+    renderRafId = null
     renderPending = false
     renderCanvas()
   })
@@ -370,7 +373,7 @@ function renderCanvas() {
     activeMesh.value.faces.forEach((face, fIdx) => {
       if (face.uvs.length < 3) return
 
-      const isFaceSelected = selectedFaceIndices.value.includes(fIdx) || uvSelectMode.value === 'island'
+      const isFaceSelected = selectedFaceIndices.value.includes(fIdx)
       const isHovered = hoveredFaceIndex === fIdx
 
       // Polygon Face
@@ -680,6 +683,7 @@ function onPointerDown(e: PointerEvent) {
   const uv = screenToUV(sx, sy)
 
   dragStartMouse = { u: uv.u, v: uv.v, screenX: sx, screenY: sy }
+  uvDragRecorded = false
 
   // 1. Vertex Mode Selection
   if (uvSelectMode.value === 'vertex') {
@@ -825,6 +829,11 @@ function onPointerMove(e: PointerEvent) {
     hoveredFaceIndex = findClickedFace(uv.u, uv.v)
     renderCanvas()
     return
+  }
+
+  if (!uvDragRecorded) {
+    projectStore.recordState('UV Transform Edit')
+    uvDragRecorded = true
   }
 
   // Move Selected Faces
@@ -1044,6 +1053,10 @@ function onPointerMove(e: PointerEvent) {
 }
 
 function onPointerUp(e: PointerEvent) {
+  const el = e.target as HTMLElement
+  if (el?.hasPointerCapture?.(e.pointerId)) {
+    el.releasePointerCapture(e.pointerId)
+  }
   activePointers.delete(e.pointerId)
   if (isPanning.value) {
     isPanning.value = false
@@ -1139,7 +1152,6 @@ function onPointerUp(e: PointerEvent) {
 
   if (activeDrag !== 'none') {
     activeDrag = 'none'
-    projectStore.recordState('UV Transform Edit')
     renderCanvas()
   }
 }
@@ -1232,14 +1244,6 @@ function resetPanZoom() {
   scheduleRender()
 }
 
-function onTextureChanged() {
-  projectStore.markTextureUpdated()
-  nextTick(() => {
-    resetPanZoom()
-    renderCanvas()
-  })
-}
-
 // ----------------------------------------------------
 // 3D VIEWPORT SELECTION SYNC
 // ----------------------------------------------------
@@ -1313,11 +1317,13 @@ function handleImageImport(e: Event) {
   const input = e.target as HTMLInputElement
   if (!input.files || input.files.length === 0) return
   const file = input.files[0]
+  const targetTextureId = projectStore.activeTexture?.id
   const reader = new FileReader()
   reader.onload = async (event) => {
+    if (projectStore.activeTexture?.id !== targetTextureId) return
     const url = event.target?.result as string
     await projectStore.pixelBuffer.loadFromDataURL(url, true)
-    if (projectStore.activeTexture) {
+    if (projectStore.activeTexture?.id === targetTextureId && projectStore.activeTexture) {
       projectStore.activeTexture.name = file.name.replace(/\.[^/.]+$/, '')
       projectStore.activeTexture.width = projectStore.pixelBuffer.width
       projectStore.activeTexture.height = projectStore.pixelBuffer.height
@@ -1329,7 +1335,11 @@ function handleImageImport(e: Event) {
       renderCanvas()
     })
   }
+  reader.onerror = () => {
+    console.warn('Failed to read imported image file.')
+  }
   reader.readAsDataURL(file)
+  input.value = ''
 }
 
 function exportTexturePng() {
@@ -1343,6 +1353,34 @@ function exportTexturePng() {
       URL.revokeObjectURL(url)
     }
   })
+}
+
+// ----------------------------------------------------
+// ACTIVE MESH, MATERIAL & TEXTURE BINDINGS
+// ----------------------------------------------------
+const showNewTextureModal = ref(false)
+const newTextureName = ref('')
+const newTextureSize = ref<number>(64)
+
+function handleTextureBindingChange(newTexId: string) {
+  if (projectStore.activeMesh) {
+    projectStore.assignTextureToActiveMesh(newTexId)
+  } else {
+    projectStore.activeTextureId = newTexId
+    projectStore.markTextureUpdated(newTexId)
+  }
+  scheduleRender()
+}
+
+function handleCreateNewTexture() {
+  const name = newTextureName.value.trim() || `Texture_${projectStore.textures.length + 1}`
+  const newTex = projectStore.addTexture(name, newTextureSize.value, newTextureSize.value)
+  if (projectStore.activeMesh) {
+    projectStore.assignTextureToActiveMesh(newTex.id)
+  }
+  showNewTextureModal.value = false
+  newTextureName.value = ''
+  scheduleRender()
 }
 
 // ----------------------------------------------------
@@ -1641,6 +1679,11 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('click', closeDropdowns)
+  if (renderRafId !== null) {
+    cancelAnimationFrame(renderRafId)
+    renderRafId = null
+    renderPending = false
+  }
   if (resizeObserver) {
     resizeObserver.disconnect()
     resizeObserver = null
@@ -1677,76 +1720,40 @@ defineExpose({
   <div class="uv-editor h-full w-full bg-ui-panel flex flex-col select-none overflow-hidden relative font-mono text-xs touch-none">
     <input ref="fileInputRef" type="file" accept="image/*" @change="handleImageImport" class="hidden" />
 
-    <!-- 1. ROW 1: WORKSPACE TABS & TEXTURE / DOCUMENT ACTIONS -->
-    <div class="uv-header-row-1 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between gap-2 shrink-0 z-30 select-none h-8 min-h-[32px]">
-      <!-- Main 2D Workspace Tabs: UV Editor vs Pixel Paint -->
-      <div class="flex items-center bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle shrink-0">
+    <!-- 1. ROW 1: WORKSPACE TABS & UNIFIED 3D ASSET BINDING HIERARCHY -->
+    <div class="uv-header-row-1 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between gap-2 shrink-0 z-30 select-none h-8.5 min-h-[34px]">
+      <!-- Left: Workspace Switcher Tabs -->
+      <div class="workspace-tabs flex items-center bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle shrink-0">
         <button 
           @click="toolStore.uvWorkspaceTab = 'uv'"
-          class="flex items-center space-x-1.5 px-3 py-0.5 rounded-xs text-[10px] font-bold transition cursor-pointer"
+          class="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-xs text-[10px] font-bold transition cursor-pointer"
           :class="toolStore.uvWorkspaceTab === 'uv' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="UV Unwrapping, Seams & Quadrant Atlas Mapping"
         >
           <BlenderIcon name="uv" :size="12" />
-          <span>UV Editor</span>
+          <span>UV</span>
         </button>
 
         <button 
           @click="toolStore.uvWorkspaceTab = 'paint'"
-          class="flex items-center space-x-1.5 px-3 py-0.5 rounded-xs text-[10px] font-bold transition cursor-pointer"
+          class="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-xs text-[10px] font-bold transition cursor-pointer"
           :class="toolStore.uvWorkspaceTab === 'paint' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Pixel & Texture Paint Studio"
         >
           <BlenderIcon name="brush" :size="11" />
-          <span>Pixel Paint</span>
+          <span>Paint</span>
         </button>
       </div>
 
-      <!-- Right: Active Texture Picker & Import/Export -->
-      <div class="flex items-center gap-1.5 shrink-0">
-        <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px]">
-          <span class="text-ui-textMuted font-bold text-[9px]">TEX:</span>
-          <select 
-            v-model="projectStore.activeTextureId" 
-            @change="onTextureChanged"
-            class="bg-transparent text-ui-textPrimary font-mono focus:outline-none cursor-pointer max-w-[140px] truncate"
-          >
-            <option v-for="t in projectStore.textures" :key="t.id" :value="t.id" class="bg-ui-panel">
-              {{ t.name }} ({{ t.width }}x{{ t.height }})
-            </option>
-          </select>
-        </div>
-
-        <button 
-          @click="fileInputRef?.click()" 
-          class="flex items-center gap-1 px-2 py-0.5 rounded-xs bg-ui-input hover:bg-ui-hover text-ui-textAccent text-[10px] font-bold border border-ui-borderSubtle transition cursor-pointer"
-          title="Import Texture / Sprite Sheet Image"
-        >
-          <Upload class="w-3 h-3 text-ui-accent" />
-          <span>Import</span>
-        </button>
-
-        <button 
-          @click="exportTexturePng" 
-          class="flex items-center gap-1 px-2 py-0.5 hover:bg-ui-hover rounded-xs text-emerald-400 border border-ui-borderSubtle bg-ui-input text-[10px] font-bold transition cursor-pointer"
-          title="Export UV Texture PNG"
-        >
-          <Download class="w-3 h-3 text-emerald-400" />
-          <span>Export</span>
-        </button>
-      </div>
-    </div>
-
-    <!-- 2. ROW 2: ACTIVE 3D OBJECT & DCC DROPDOWN MENUS + DIAGNOSTICS -->
-    <div class="uv-header-row-2 bg-ui-panel border-b border-ui-borderSubtle px-2 flex items-center justify-between gap-2 shrink-0 z-20 select-none h-8 min-h-[32px] overflow-visible">
-      <!-- Left: Active Object & DCC Dropdown Menus -->
-      <div class="flex items-center gap-1 min-w-0">
-        <!-- Active 3D Object Selector -->
-        <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px] text-ui-textSecondary shrink-0 mr-1">
-          <span class="text-ui-textMuted font-bold text-[9px]">OBJ:</span>
+      <!-- Center: Unified Asset Pipeline Hierarchy (OBJ -> MAT -> TEX) -->
+      <div class="asset-pipeline flex items-center gap-1.5 shrink-0 overflow-x-auto">
+        <!-- 1. Active 3D Object -->
+        <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px] text-ui-textSecondary shrink-0">
+          <span class="text-ui-textMuted font-bold text-[8.5px]">OBJ:</span>
           <select 
             v-model="projectStore.activeMeshId" 
-            class="bg-transparent text-ui-textPrimary font-bold focus:outline-none cursor-pointer max-w-[110px] truncate"
+            class="bg-transparent text-ui-textPrimary font-bold focus:outline-none cursor-pointer max-w-[100px] truncate"
+            title="Active 3D Object"
           >
             <option v-for="m in projectStore.meshes" :key="m.id" :value="m.id" class="bg-ui-panel text-ui-textPrimary">
               {{ m.name }} ({{ m.faces.length }}f)
@@ -1754,11 +1761,100 @@ defineExpose({
           </select>
         </div>
 
+        <span class="text-ui-textMuted text-[9px] font-bold shrink-0">→</span>
+
+        <!-- 2. Active Texture Map bound to this Object -->
+        <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px] text-ui-textSecondary shrink-0">
+          <span class="text-ui-textMuted font-bold text-[8.5px]">TEX:</span>
+          <select 
+            :value="projectStore.activeTextureId" 
+            @change="handleTextureBindingChange(($event.target as HTMLSelectElement).value)"
+            class="bg-transparent text-emerald-400 font-bold font-mono focus:outline-none cursor-pointer max-w-[125px] truncate"
+            title="Texture Map bound to Active Object"
+          >
+            <option v-for="t in projectStore.textures" :key="t.id" :value="t.id" class="bg-ui-panel text-ui-textPrimary">
+              {{ t.name }} ({{ t.width }}x{{ t.height }})
+            </option>
+          </select>
+          <button 
+            @click="showNewTextureModal = true"
+            class="p-0.5 hover:bg-ui-hover text-emerald-400 rounded-xs transition cursor-pointer"
+            title="Create New Texture Map for this Object"
+          >
+            <Plus class="w-3 h-3" />
+          </button>
+        </div>
+
+        <!-- Texture Import / Export Action Pill Group -->
+        <div class="flex items-center bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle shrink-0">
+          <button 
+            @click="fileInputRef?.click()" 
+            class="flex items-center gap-1 px-2 py-0.5 hover:bg-ui-hover text-ui-textAccent rounded-xs text-[10px] font-bold transition cursor-pointer whitespace-nowrap"
+            title="Import Texture / Sprite Sheet Image"
+          >
+            <Upload class="w-3 h-3 text-ui-accent" />
+            <span>Import</span>
+          </button>
+
+          <button 
+            @click="exportTexturePng" 
+            class="flex items-center gap-1 px-2 py-0.5 hover:bg-ui-hover text-emerald-400 rounded-xs text-[10px] font-bold transition cursor-pointer whitespace-nowrap"
+            title="Export UV Texture PNG"
+          >
+            <Download class="w-3 h-3 text-emerald-400" />
+            <span>Export</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Right: Active Resolution & Canvas Readout -->
+      <div class="asset-resolution flex items-center gap-1.5 shrink-0">
+        <div class="px-2 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px] font-mono text-ui-textMuted flex items-center gap-1">
+          <span class="text-[9px] text-ui-textMuted font-bold">RES:</span>
+          <span class="text-amber-300 font-bold">{{ projectStore.pixelBuffer.width }}×{{ projectStore.pixelBuffer.height }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. ROW 2: DCC MENUS & VIEW CONTROLS -->
+    <div class="uv-header-row-2 bg-ui-panel border-b border-ui-borderSubtle px-2 flex items-center justify-between gap-2 shrink-0 z-20 select-none h-8 min-h-[32px] overflow-visible">
+      <!-- Left: DCC Dropdown Menus -->
+      <div class="flex items-center gap-1 shrink-0">
+        <!-- Texture Menu Dropdown -->
+        <div class="relative" @click.stop>
+          <button 
+            @click="toggleDropdown('texture')"
+            class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0"
+            :class="activeDropdown === 'texture' ? 'bg-ui-hover text-emerald-400 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+          >
+            <span>Texture</span>
+            <span class="text-[8px] opacity-70">▼</span>
+          </button>
+
+          <div v-if="activeDropdown === 'texture'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-56 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+            <button @click="fileInputRef?.click(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-ui-textAccent font-bold">
+              <span>Import Image...</span>
+              <Upload class="w-3 h-3 text-ui-accent" />
+            </button>
+            <button @click="exportTexturePng(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-emerald-400 font-bold">
+              <span>Export Texture PNG</span>
+              <Download class="w-3 h-3 text-emerald-400" />
+            </button>
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="showNewTextureModal = true; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-amber-300 font-medium">
+              <span>+ New Texture Map...</span>
+            </button>
+            <button @click="projectStore.bakeSceneAtlas(2); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-amber-400 font-bold">
+              <span>Bake Scene Atlas</span>
+            </button>
+          </div>
+        </div>
+
         <!-- UV Menu Dropdown -->
         <div class="relative" @click.stop>
           <button 
             @click="toggleDropdown('uv')"
-            class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1"
+            class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0"
             :class="activeDropdown === 'uv' ? 'bg-ui-hover text-ui-textAccent shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
           >
             <span>UV</span>
@@ -1802,7 +1898,7 @@ defineExpose({
         <div class="relative" @click.stop>
           <button 
             @click="toggleDropdown('islands')"
-            class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1"
+            class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0"
             :class="activeDropdown === 'islands' ? 'bg-ui-hover text-emerald-400 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
           >
             <span>Islands</span>
@@ -1837,10 +1933,10 @@ defineExpose({
         <div class="relative" @click.stop>
           <button 
             @click="toggleDropdown('align')"
-            class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1"
+            class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0"
             :class="activeDropdown === 'align' ? 'bg-ui-hover text-ui-textAccent shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
           >
-            <span>Align & Snap</span>
+            <span class="whitespace-nowrap">Align & Snap</span>
             <span class="text-[8px] opacity-70">▼</span>
           </button>
 
@@ -1872,7 +1968,7 @@ defineExpose({
         <div class="relative" @click.stop>
           <button 
             @click="toggleDropdown('view')"
-            class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1"
+            class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0"
             :class="activeDropdown === 'view' ? 'bg-ui-hover text-ui-textPrimary shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
           >
             <span>View</span>
@@ -1910,7 +2006,7 @@ defineExpose({
       <div class="flex items-center gap-1 shrink-0">
         <button 
           @click="showCheckerboard = !showCheckerboard" 
-          class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs text-[10px] font-bold border transition cursor-pointer"
+          class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs text-[10px] font-bold border transition cursor-pointer whitespace-nowrap"
           :class="showCheckerboard ? 'bg-ui-active text-ui-textAccent border-ui-accent/40 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Toggle Calibration Checkerboard Test Grid"
         >
@@ -1919,12 +2015,61 @@ defineExpose({
 
         <button 
           @click="showHeatmap = !showHeatmap" 
-          class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs text-[10px] font-bold border transition cursor-pointer"
+          class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs text-[10px] font-bold border transition cursor-pointer whitespace-nowrap"
           :class="showHeatmap ? 'bg-ui-active text-ui-textAccent border-ui-accent/40 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Toggle UV Stretch & Distortion Heatmap"
         >
           <span>Heatmap</span>
         </button>
+      </div>
+    </div>
+
+    <!-- Mini-Modal: Create New Texture -->
+    <div v-if="showNewTextureModal" class="absolute inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+      <div class="bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-3 w-80 space-y-3" @click.stop>
+        <div class="flex items-center justify-between border-b border-ui-borderSubtle pb-1.5">
+          <span class="text-xs font-bold text-amber-300 uppercase">Create New Texture Map</span>
+          <button @click="showNewTextureModal = false" class="text-ui-textMuted hover:text-white transition">✕</button>
+        </div>
+
+        <div class="space-y-1">
+          <label class="text-[10px] text-ui-textMuted font-bold uppercase">Texture Name:</label>
+          <input 
+            v-model="newTextureName" 
+            placeholder="e.g. Character_Armor_64" 
+            class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-1 text-ui-textPrimary text-xs focus:outline-none focus:border-amber-400 font-mono"
+          />
+        </div>
+
+        <div class="space-y-1">
+          <label class="text-[10px] text-ui-textMuted font-bold uppercase">Resolution:</label>
+          <div class="grid grid-cols-3 gap-1">
+            <button 
+              v-for="s in [16, 32, 64, 128, 256, 512]" 
+              :key="s"
+              @click="newTextureSize = s"
+              class="py-1 text-center rounded-xs border text-[10px] font-mono transition cursor-pointer"
+              :class="newTextureSize === s ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-bold' : 'bg-ui-input text-ui-textSecondary border-ui-borderSubtle hover:bg-ui-hover'"
+            >
+              {{ s }} × {{ s }}
+            </button>
+          </div>
+        </div>
+
+        <div class="flex gap-1 pt-1">
+          <button 
+            @click="handleCreateNewTexture"
+            class="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xs text-xs font-bold transition cursor-pointer shadow-xs"
+          >
+            Create & Assign
+          </button>
+          <button 
+            @click="showNewTextureModal = false"
+            class="px-3 py-1.5 bg-ui-input hover:bg-ui-hover text-ui-textSecondary rounded-xs text-xs transition cursor-pointer"
+          >
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
 
@@ -2063,6 +2208,41 @@ defineExpose({
 .uv-header-row-2 {
   height: 32px;
   min-height: 32px;
+}
+
+.asset-pipeline {
+  min-width: 0;
+}
+
+@container (max-width: 760px) {
+  .uv-header-row-1 {
+    height: 64px;
+    min-height: 64px;
+    flex-wrap: wrap;
+    align-content: center;
+    padding-block: 4px;
+  }
+
+  .workspace-tabs {
+    order: 1;
+  }
+
+  .asset-resolution {
+    order: 2;
+    margin-left: auto;
+  }
+
+  .asset-pipeline {
+    order: 3;
+    width: 100%;
+    flex: 0 0 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .asset-pipeline::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 .header-dropdown-menu {

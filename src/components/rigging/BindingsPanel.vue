@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onBeforeUnmount } from 'vue'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
@@ -31,6 +31,23 @@ const customWeight = ref<number>(1.0)
 const weightMode = ref<'replace' | 'add'>('replace')
 const splitBoundary = ref<boolean>(false)
 const lastActionMessage = ref<string>('')
+let messageTimer: ReturnType<typeof setTimeout> | null = null
+
+function showActionMessage(msg: string) {
+  lastActionMessage.value = msg
+  if (messageTimer !== null) clearTimeout(messageTimer)
+  messageTimer = setTimeout(() => {
+    lastActionMessage.value = ''
+    messageTimer = null
+  }, 3500)
+}
+
+onBeforeUnmount(() => {
+  if (messageTimer !== null) {
+    clearTimeout(messageTimer)
+    messageTimer = null
+  }
+})
 
 const activeMesh = computed(() => projectStore.activeMesh)
 const selectedBone = computed(() => animationStore.selectedBone)
@@ -90,24 +107,21 @@ function handleBind() {
     mode: weightMode.value
   })
 
-  lastActionMessage.value = res.message
-  setTimeout(() => { lastActionMessage.value = '' }, 3500)
+  showActionMessage(res.message)
 }
 
 function handleUnbind() {
   if (!activeMesh.value) return
   projectStore.recordState('Unbind Geometry')
   animationStore.unbindGeometry(activeMesh.value.id, selectedBone.value?.id)
-  lastActionMessage.value = `Unbound ${activeMesh.value.name}`
-  setTimeout(() => { lastActionMessage.value = '' }, 3500)
+  showActionMessage(`Unbound ${activeMesh.value.name}`)
 }
 
 function handleAutoSmoothAll() {
   if (!activeMesh.value) return
   projectStore.recordState('Auto-Calculate Smooth Skinning')
   animationStore.autoWeightMeshToBones(activeMesh.value)
-  lastActionMessage.value = `Skinning computed for ${activeMesh.value.name}`
-  setTimeout(() => { lastActionMessage.value = '' }, 3500)
+  showActionMessage(`Skinning computed for ${activeMesh.value.name}`)
 }
 </script>
 

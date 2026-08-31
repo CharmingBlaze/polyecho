@@ -4,6 +4,12 @@ export interface Vector3D {
   z: number
 }
 
+export interface PrimitiveTransform {
+  position: Vector3D
+  rotation: Vector3D
+  scale: Vector3D
+}
+
 export interface UV {
   u: number
   v: number

@@ -24,7 +24,8 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowRight,
-  FolderTree
+  FolderTree,
+  Wand2
 } from 'lucide-vue-next'
 
 const animationStore = useAnimationStore()

@@ -9,6 +9,7 @@ import PixelCanvas from '../uvpaint/PixelCanvas.vue'
 import OutlinerTree from '../outliner/OutlinerTree.vue'
 import TransformProps from '../inspector/TransformProps.vue'
 import MaterialProps from '../inspector/MaterialProps.vue'
+import TextureProps from '../inspector/TextureProps.vue'
 import PalettePicker from '../uvpaint/PalettePicker.vue'
 import RiggingPanel from '../rigging/RiggingPanel.vue'
 import AnimationInspector from '../inspector/AnimationInspector.vue'
@@ -65,6 +66,16 @@ function setupLayout(api: any) {
     }
   })
 
+  api.addPanel({
+    id: 'textures_panel',
+    component: 'textures',
+    title: 'Textures',
+    position: {
+      referencePanel: outlinerPanel,
+      direction: 'within'
+    }
+  })
+
   // Focus Inspector by default
   const insp = api.getPanel('inspector_panel')
   if (insp) insp.api.setActive()
@@ -77,9 +88,11 @@ watch(() => toolStore.appMode, (mode) => {
   if (!dockviewApi.value) return
   const api = dockviewApi.value
 
+  const uvPanel = api.getPanel('uvcanvas_panel')
+  const timelinePanel = api.getPanel('timeline_panel')
+
   if (mode === 'uvpaint') {
-    const existing = api.getPanel('uvcanvas_panel')
-    if (!existing) {
+    if (!uvPanel) {
       const vp = api.getPanel('viewport_panel')
       if (vp) {
         api.addPanel({
@@ -93,9 +106,9 @@ watch(() => toolStore.appMode, (mode) => {
         })
       }
     }
+    if (timelinePanel) api.removePanel(timelinePanel)
   } else if (mode === 'animate') {
-    const existing = api.getPanel('timeline_panel')
-    if (!existing) {
+    if (!timelinePanel) {
       const vp = api.getPanel('viewport_panel')
       if (vp) {
         api.addPanel({
@@ -109,6 +122,10 @@ watch(() => toolStore.appMode, (mode) => {
         })
       }
     }
+    if (uvPanel) api.removePanel(uvPanel)
+  } else {
+    if (uvPanel) api.removePanel(uvPanel)
+    if (timelinePanel) api.removePanel(timelinePanel)
   }
 })
 
@@ -180,7 +197,14 @@ onUnmounted(() => {
         </div>
       </template>
 
-      <!-- 6. Animation Timeline Slot -->
+      <!-- 6. 2D Texture Assets Slot -->
+      <template #textures>
+        <div class="w-full h-full overflow-y-auto bg-ui-panel flex flex-col custom-scrollbar">
+          <TextureProps />
+        </div>
+      </template>
+
+      <!-- 7. Animation Timeline Slot -->
       <template #timeline>
         <div class="w-full h-full overflow-hidden bg-ui-panel flex flex-col">
           <Timeline />

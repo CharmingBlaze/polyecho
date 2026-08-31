@@ -27,6 +27,14 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown)
+  if (turntableInterval !== null) {
+    clearInterval(turntableInterval)
+    turntableInterval = null
+  }
+  if (activeRecorder && activeRecorder.state !== 'inactive') {
+    activeRecorder.stop()
+  }
+  activeRecorder = null
 })
 
 const activeTab = ref<'gltf' | 'obj' | 'spritesheet' | 'texture' | 'turntable'>('gltf')
@@ -36,6 +44,8 @@ const turntableDuration = ref<number>(3)
 const turntableFps = ref<number>(30)
 const isRecordingTurntable = ref<boolean>(false)
 const turntableProgress = ref<number>(0)
+let turntableInterval: ReturnType<typeof setInterval> | null = null
+let activeRecorder: MediaRecorder | null = null
 
 // Sprite sheet options
 const spriteSize = ref<number>(64)
@@ -53,29 +63,41 @@ function downloadFile(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
-async function handleExportGLTF(binary: boolean) {
-  const textureMap = new Map<string, THREE.Texture>()
-  for (const mat of projectStore.materials) {
-    const texObj = projectStore.getTextureForMaterial(mat.id)
-    if (texObj && texObj.pixelBuffer) {
-      const tex = new THREE.CanvasTexture(texObj.pixelBuffer.canvas)
-      textureMap.set(mat.id, tex)
-    }
-  }
-  if (textureMap.size === 0) {
-    const tex = new THREE.CanvasTexture(projectStore.pixelBuffer.canvas)
-    textureMap.set('default_material', tex)
-  }
+const isExportingGltf = ref(false)
 
-  const blob = await exportToGLTF(
-    projectStore.meshes, 
-    textureMap, 
-    animationStore.armature.clips, 
-    binary,
-    animationStore.armature
-  )
-  downloadFile(blob, `${projectStore.projectName}.${binary ? 'glb' : 'gltf'}`)
-  emit('close')
+async function handleExportGLTF(binary: boolean) {
+  if (isExportingGltf.value) return
+  isExportingGltf.value = true
+  const textureMap = new Map<string, THREE.Texture>()
+  try {
+    for (const mat of projectStore.materials) {
+      const texObj = projectStore.getTextureForMaterial(mat.id)
+      if (texObj && texObj.pixelBuffer) {
+        const tex = new THREE.CanvasTexture(texObj.pixelBuffer.canvas)
+        textureMap.set(mat.id, tex)
+      }
+    }
+    if (textureMap.size === 0) {
+      const tex = new THREE.CanvasTexture(projectStore.pixelBuffer.canvas)
+      textureMap.set('default_material', tex)
+    }
+
+    const blob = await exportToGLTF(
+      projectStore.meshes, 
+      textureMap, 
+      animationStore.armature.clips, 
+      binary,
+      animationStore.armature
+    )
+    downloadFile(blob, `${projectStore.projectName}.${binary ? 'glb' : 'gltf'}`)
+    emit('close')
+  } finally {
+    for (const tex of textureMap.values()) {
+      tex.dispose()
+    }
+    textureMap.clear()
+    isExportingGltf.value = false
+  }
 }
 
 function handleExportOBJ() {
@@ -121,6 +143,9 @@ function handleExportSpriteSheet() {
     frameStep: frameStep.value
   })
 
+  tex.dispose()
+  textureMap.clear()
+
   canvas.toBlob((blob) => {
     if (blob) {
       const clipSuffix = targetClip ? `_${targetClip.name}` : ''
@@ -143,6 +168,7 @@ async function handleExportTurntable() {
   const stream = canvas.captureStream(turntableFps.value)
   const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm'
   const recorder = new MediaRecorder(stream, { mimeType })
+  activeRecorder = recorder
   const chunks: Blob[] = []
 
   recorder.ondataavailable = (e) => {
@@ -153,6 +179,7 @@ async function handleExportTurntable() {
     const blob = new Blob(chunks, { type: 'video/webm' })
     downloadFile(blob, `${projectStore.projectName}_turntable_360.webm`)
     isRecordingTurntable.value = false
+    activeRecorder = null
     emit('close')
   }
 
@@ -162,11 +189,14 @@ async function handleExportTurntable() {
   const intervalTime = 100
   let elapsed = 0
 
-  const progressInterval = setInterval(() => {
+  turntableInterval = setInterval(() => {
     elapsed += intervalTime
     turntableProgress.value = Math.min(100, Math.round((elapsed / totalTime) * 100))
     if (elapsed >= totalTime) {
-      clearInterval(progressInterval)
+      if (turntableInterval !== null) {
+        clearInterval(turntableInterval)
+        turntableInterval = null
+      }
       recorder.stop()
     }
   }, intervalTime)

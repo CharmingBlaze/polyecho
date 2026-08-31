@@ -1,11 +1,13 @@
 import * as THREE from 'three'
 import { ModalOperator, OperatorContext } from '../ModalOperator'
+import { operatorManager } from '../OperatorManager'
 import { PrimitiveType, PrimitiveParameters } from '../../primitives/PrimitiveTypes'
 import { PrimitiveRegistry } from '../../primitives/PrimitiveRegistry'
 import { ConstructionFrame, ConstructionFrameResolver } from '../../placement/ConstructionFrame'
 import { PlacementHit, PlacementOrientation, SurfacePlacementSolver } from '../../placement/SurfacePlacementSolver'
 import { PrimitiveGhost } from '../../placement/PrimitiveGhost'
 import { ScreenGeometry } from '../../geometry/ScreenGeometry'
+import { notifyPrimitiveCreated } from '../../commands/editorCommands'
 
 export enum PrimitivePlacementMode {
   PLACE = 'PLACE',
@@ -98,7 +100,7 @@ export class PrimitivePlacementOperator extends ModalOperator {
     if (button === 0) {
       // LMB
       if (this.mode === PrimitivePlacementMode.PLACE) {
-        this.commitPrimitive()
+        operatorManager.confirm()
         return true
       }
 
@@ -132,18 +134,18 @@ export class PrimitivePlacementOperator extends ModalOperator {
           return true
         }
       } else if (this.state === PrimitivePlacementState.DRAWING_PRIMARY) {
-        if (kind === 'RECTANGULAR' || kind === 'RADIAL_HEIGHT' || kind === 'LINEAR_HEIGHT') {
+        if (kind === 'RECTANGULAR' || kind === 'RADIAL_HEIGHT' || kind === 'LINEAR_HEIGHT' || kind === 'TORUS') {
           this.state = PrimitivePlacementState.DRAWING_SECONDARY
           this.updateCadGhost()
           this.updateStatus()
           return true
         } else {
-          // Flat 2D shape (Plane / Circle)
-          this.commitPrimitive()
+          // Flat 2D shape (Plane / Circle) or 1-step shape (Sphere / Icosphere)
+          operatorManager.confirm()
           return true
         }
       } else if (this.state === PrimitivePlacementState.DRAWING_SECONDARY) {
-        this.commitPrimitive()
+        operatorManager.confirm()
         return true
       }
     } else if (button === 2) {
@@ -156,10 +158,11 @@ export class PrimitivePlacementOperator extends ModalOperator {
       } else if (this.state === PrimitivePlacementState.DRAWING_PRIMARY) {
         this.state = PrimitivePlacementState.WAITING_FOR_START
         this.ghost?.hide()
+        this.frame = null
         this.updateStatus()
         return true
       } else {
-        this.cancel()
+        operatorManager.cancel()
         return true
       }
     }
@@ -171,7 +174,13 @@ export class PrimitivePlacementOperator extends ModalOperator {
 
     if (key === 'escape') {
       event.preventDefault()
-      this.cancel()
+      operatorManager.cancel()
+      return true
+    }
+
+    if (key === 'enter' || key === ' ') {
+      event.preventDefault()
+      operatorManager.confirm()
       return true
     }
 
@@ -196,7 +205,14 @@ export class PrimitivePlacementOperator extends ModalOperator {
     // 1. In CAD Draw Primary Stage (2D footprint on surface): intersect the surface tangent plane
     if (this.state === PrimitivePlacementState.DRAWING_PRIMARY && this.frame) {
       const surfacePlane = new THREE.Plane().setFromNormalAndCoplanarPoint(this.frame.axisW, this.startPoint)
-      const hitPoint = ray.intersectPlane(surfacePlane, new THREE.Vector3())
+      let hitPoint = ray.intersectPlane(surfacePlane, new THREE.Vector3())
+      if (!hitPoint) {
+        // Fallback to camera plane through start point if tangent angle is degenerate
+        const camDir = new THREE.Vector3()
+        this.ctx.camera.getWorldDirection(camDir)
+        const fallbackPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(camDir, this.startPoint)
+        hitPoint = ray.intersectPlane(fallbackPlane, new THREE.Vector3())
+      }
       if (hitPoint) {
         this.placementHit = {
           type: 'FACE',
@@ -223,7 +239,11 @@ export class PrimitivePlacementOperator extends ModalOperator {
       }
 
       const extrusionPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeNormal, this.primaryPoint)
-      const hitPoint = ray.intersectPlane(extrusionPlane, new THREE.Vector3())
+      let hitPoint = ray.intersectPlane(extrusionPlane, new THREE.Vector3())
+      if (!hitPoint) {
+        const fallbackPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(cameraDir, this.primaryPoint)
+        hitPoint = ray.intersectPlane(fallbackPlane, new THREE.Vector3())
+      }
       if (hitPoint) {
         this.placementHit = {
           type: 'GRID',
@@ -240,16 +260,10 @@ export class PrimitivePlacementOperator extends ModalOperator {
     let hit: PlacementHit | null = null
 
     // 3. Raycast all scene meshes
-    const allMeshes = this.ctx.allMeshes || (this.ctx.mesh ? [{
-      id: 'active',
-      position: { x: 0, y: 0, z: 0 },
-      rotation: { x: 0, y: 0, z: 0 },
-      scale: { x: 1, y: 1, z: 1 },
-      vertices: Array.from(this.ctx.mesh.vertices.values()).map(v => ({ id: String(v.id), position: v.position })),
-      faces: Array.from(this.ctx.mesh.faces.values()).map(f => ({ id: String(f.id), vertexIds: f.vertexIds.map(String) }))
-    }] : [])
+    const allMeshes = this.ctx.allMeshes || []
 
     for (const meshObj of allMeshes) {
+      if (!meshObj.vertices || !meshObj.faces) continue
       const vertMap = new Map<string, THREE.Vector3>()
       for (const v of meshObj.vertices) {
         vertMap.set(v.id, new THREE.Vector3(
@@ -367,12 +381,19 @@ export class PrimitivePlacementOperator extends ModalOperator {
       const delta = currentWorld.clone().sub(this.startPoint)
       const { u, v } = ConstructionFrameResolver.projectToUVW(delta, this.frame)
 
-      const width = Math.max(0.02, Math.abs(u))
-      const depth = Math.max(0.02, Math.abs(v))
+      const width = Math.max(0.05, Math.abs(u))
+      const depth = Math.max(0.05, Math.abs(v))
 
-      if (kind === 'RECTANGULAR') {
+      if (kind === 'RECTANGULAR' || kind === 'LINEAR_HEIGHT') {
         const height = 0.05
-        this.currentParams = { width, depth, height }
+        this.currentParams = { 
+          ...this.currentParams, 
+          width, 
+          depth, 
+          length: width, 
+          totalRun: depth,
+          height 
+        }
         const center = this.startPoint.clone()
           .addScaledVector(this.frame.axisU, u / 2)
           .addScaledVector(this.frame.axisV, v / 2)
@@ -381,21 +402,32 @@ export class PrimitivePlacementOperator extends ModalOperator {
         this.ghost.update(this.primitiveType, this.currentParams, center, rotation)
         this.dimensionText = `Width: ${width.toFixed(2)}  |  Depth: ${depth.toFixed(2)}`
       } else if (kind === 'RADIAL' || kind === 'RADIAL_HEIGHT') {
-        const radius = Math.max(0.02, Math.hypot(u, v))
+        const radius = Math.max(0.05, Math.hypot(u, v))
         const height = 0.05
-        this.currentParams = { radius, height }
+        this.currentParams = { ...this.currentParams, radius, height }
         const center = this.startPoint.clone().addScaledVector(this.frame.axisW, height / 2)
 
         this.ghost.update(this.primitiveType, this.currentParams, center, rotation)
         this.dimensionText = `Radius: ${radius.toFixed(2)}`
+      } else if (kind === 'TORUS') {
+        const majorRadius = Math.max(0.1, Math.hypot(u, v))
+        const tubeRadius = Math.max(0.02, majorRadius * 0.25)
+        this.currentParams = { ...this.currentParams, majorRadius, tubeRadius }
+        const center = this.startPoint.clone().addScaledVector(this.frame.axisW, tubeRadius)
+        this.ghost.update(this.primitiveType, this.currentParams, center, rotation)
+        this.dimensionText = `Radius: ${majorRadius.toFixed(2)}`
       }
     } else if (this.state === PrimitivePlacementState.DRAWING_SECONDARY) {
       this.secondaryPoint.copy(currentWorld)
       const delta = currentWorld.clone().sub(this.primaryPoint)
       const w = delta.dot(this.frame.axisW)
 
-      const height = Math.max(0.02, Math.abs(w))
-      this.currentParams = { ...this.currentParams, height }
+      const height = Math.max(0.05, Math.abs(w))
+      this.currentParams = { 
+        ...this.currentParams, 
+        height, 
+        totalHeight: height 
+      }
 
       const halfW = (w >= 0 ? 1 : -1) * (height / 2)
 
@@ -408,11 +440,17 @@ export class PrimitivePlacementOperator extends ModalOperator {
         const center = baseCenter.clone().addScaledVector(this.frame.axisW, halfW)
 
         this.ghost.update(this.primitiveType, this.currentParams, center, rotation)
-        const u = (this.currentParams as any).width || 1
-        const v = (this.currentParams as any).depth || 1
+        const u = (this.currentParams as any).width || (this.currentParams as any).length || 1
+        const v = (this.currentParams as any).depth || (this.currentParams as any).totalRun || 1
         this.dimensionText = `Height: ${height.toFixed(2)}  |  Width: ${u.toFixed(2)}  |  Depth: ${v.toFixed(2)}`
+      } else if (kind === 'TORUS') {
+        const tubeRadius = Math.max(0.02, height)
+        this.currentParams = { ...this.currentParams, tubeRadius }
+        const center = this.startPoint.clone().addScaledVector(this.frame.axisW, tubeRadius)
+        this.ghost.update(this.primitiveType, this.currentParams, center, rotation)
+        this.dimensionText = `Tube Radius: ${tubeRadius.toFixed(2)}`
       } else {
-        // Radial with height (Cylinder, Cone, Capsule, Tube, Arch)
+        // Radial with height (Cylinder, Cone, Capsule, Tube, Arch, Prism)
         const center = this.startPoint.clone().addScaledVector(this.frame.axisW, halfW)
         this.ghost.update(this.primitiveType, this.currentParams, center, rotation)
         const rad = (this.currentParams as any).radius || 0.5
@@ -436,10 +474,7 @@ export class PrimitivePlacementOperator extends ModalOperator {
   }
 
   private commitPrimitive() {
-    if (!this.ghost) {
-      this.cancel()
-      return
-    }
+    if (!this.ghost) return
 
     const pos = this.ghost.group.position.clone()
     const rot = new THREE.Euler().setFromQuaternion(this.ghost.group.quaternion)
@@ -449,44 +484,29 @@ export class PrimitivePlacementOperator extends ModalOperator {
       z: THREE.MathUtils.radToDeg(rot.z)
     }
 
-    // Call store commit callback
-    this.ctx.onCommit(`Create ${this.primitiveType}`)
+    const type = this.primitiveType
+    const params = { ...this.currentParams }
+    const transform = {
+      position: { x: pos.x, y: pos.y, z: pos.z },
+      rotation: rotDeg,
+      scale: { x: 1, y: 1, z: 1 }
+    }
 
-    // Dispatch global event for projectStore to execute CreatePrimitiveCommand
-    window.dispatchEvent(
-      new CustomEvent('primitive-created', {
-        detail: {
-          type: this.primitiveType,
-          parameters: { ...this.currentParams },
-          transform: {
-            position: { x: pos.x, y: pos.y, z: pos.z },
-            rotation: rotDeg,
-            scale: { x: 1, y: 1, z: 1 }
-          }
-        }
-      })
-    )
+    // Clean up ghost before dispatching
+    this.ghost.dispose(this.ctx.previewGroup)
+    this.ghost = null
 
-    // Repeat creation workflow
-    this.state = this.mode === PrimitivePlacementMode.PLACE
-      ? PrimitivePlacementState.PLACE_PREVIEW
-      : PrimitivePlacementState.WAITING_FOR_START
-    this.frame = null
-    this.updateStatus()
+    notifyPrimitiveCreated({ type, parameters: params, transform })
   }
 
   cancel() {
     this.ghost?.dispose(this.ctx.previewGroup)
     this.ghost = null
-    this.ctx.onUpdatePreview?.()
-    super.cancel()
+    this.ctx.onCancel()
   }
 
   confirm() {
     this.commitPrimitive()
-    this.ghost?.dispose(this.ctx.previewGroup)
-    this.ghost = null
-    super.confirm()
   }
 
   updateStatus() {
@@ -497,11 +517,11 @@ export class PrimitivePlacementOperator extends ModalOperator {
       this.statusText = `${this.primitiveType} [${modeLabel}] (LMB: Place on Surface | O: Align [${orientLabel}] | Esc: Exit) | ${this.dimensionText}`
     } else {
       if (this.state === PrimitivePlacementState.WAITING_FOR_START) {
-        this.statusText = `${this.primitiveType} [${modeLabel}] (LMB: Click Any Surface to Start Base | Esc: Exit)`
+        this.statusText = `${this.primitiveType} [${modeLabel}] (LMB: Click Ground/Surface to Start Footprint | Esc: Exit)`
       } else if (this.state === PrimitivePlacementState.DRAWING_PRIMARY) {
-        this.statusText = `${this.primitiveType} [${modeLabel}] (LMB: Lock Surface Footprint | RMB: Back | Esc: Exit) | ${this.dimensionText}`
+        this.statusText = `${this.primitiveType} [${modeLabel}] (LMB: Lock Base Footprint | RMB: Back | Esc: Exit) | ${this.dimensionText}`
       } else {
-        this.statusText = `${this.primitiveType} [${modeLabel}] (LMB: Lock Surface Extrusion | RMB: Back | Esc: Exit) | ${this.dimensionText}`
+        this.statusText = `${this.primitiveType} [${modeLabel}] (LMB: Lock Extrusion Height & Finalize | RMB: Back | Esc: Exit) | ${this.dimensionText}`
       }
     }
   }

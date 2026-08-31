@@ -55,6 +55,10 @@ function getDB(): Promise<IDBDatabase> {
     }
   })
 
+  dbPromise.catch(() => {
+    dbPromise = null
+  })
+
   return dbPromise
 }
 

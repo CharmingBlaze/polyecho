@@ -6,7 +6,6 @@ import {
   createTreasureChestTemplate, 
   createDungeonRoomTemplate 
 } from '../../core/geometry/Templates'
-import { createCube } from '../../core/geometry/Primitives'
 import { X, Box, User, Shield, Castle } from 'lucide-vue-next'
 
 const projectStore = useProjectStore()
@@ -19,7 +18,9 @@ const emit = defineEmits<{
 function loadTemplate(type: 'blank' | 'character' | 'chest' | 'dungeon') {
   projectStore.recordState('Load Template')
 
-  if (type === 'character') {
+  if (type === 'blank') {
+    projectStore.resetToDefaultProject()
+  } else if (type === 'character') {
     const t = createCharacterTemplate()
     projectStore.projectName = t.name
     projectStore.meshes = t.meshes
@@ -36,12 +37,12 @@ function loadTemplate(type: 'blank' | 'character' | 'chest' | 'dungeon') {
     projectStore.projectName = t.name
     projectStore.meshes = t.meshes
   } else {
-    projectStore.projectName = 'New_Model'
-    projectStore.meshes = [createCube('Cube_1', 2)]
+    projectStore.resetToDefaultProject()
   }
 
   projectStore.activeMeshId = projectStore.meshes[0]?.id || ''
   projectStore.clearSubSelections()
+  projectStore.markGeometryUpdated()
   emit('close')
 }
 </script>

@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useToolStore } from '../../stores/toolStore'
+import { useLayoutStore } from '../../stores/layoutStore'
 import OutlinerTree from '../outliner/OutlinerTree.vue'
 import TransformProps from '../inspector/TransformProps.vue'
 import MaterialProps from '../inspector/MaterialProps.vue'
+import TextureProps from '../inspector/TextureProps.vue'
 import ModifiersProps from '../inspector/ModifiersProps.vue'
 import RiggingPanel from '../rigging/RiggingPanel.vue'
 import BindingsPanel from '../rigging/BindingsPanel.vue'
@@ -23,11 +25,14 @@ import {
   Pin, 
   PinOff, 
   Minus, 
-  Plus 
+  Plus,
+  X,
+  ChevronRight
 } from 'lucide-vue-next'
 
 const toolStore = useToolStore()
-const activeTab = ref<'outliner' | 'props' | 'modifiers' | 'material' | 'bindings' | 'weights' | 'skeleton'>('outliner')
+const layoutStore = useLayoutStore()
+const activeTab = ref<'outliner' | 'props' | 'modifiers' | 'material' | 'texture' | 'bindings' | 'weights' | 'skeleton'>('outliner')
 
 // Photoshop / DCC Floating & Resizable Panel States
 const isFloating = ref(false)
@@ -174,6 +179,16 @@ function startResizeCorner(e: MouseEvent) {
       title="Drag to resize inspector width"
     ></div>
 
+    <!-- Collapse / Hide Panel Edge Button (When docked) -->
+    <button 
+      v-if="!isFloating"
+      @click="layoutStore.showRightSidebar = false"
+      class="absolute -left-3 top-10 w-3 h-8 bg-ui-header/90 hover:bg-ui-panel border-l border-t border-b border-ui-borderStrong rounded-l-xs flex items-center justify-center text-ui-textMuted hover:text-white shadow-md transition z-50 cursor-pointer group"
+      title="Hide Properties Panel (Hotkey: N)"
+    >
+      <ChevronRight class="w-2.5 h-2.5 group-hover:translate-x-0.5 transition-transform" />
+    </button>
+
     <!-- Movable Header & Panel Controls -->
     <div 
       class="h-6 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between text-ui-textMuted select-none shrink-0"
@@ -207,6 +222,15 @@ function startResizeCorner(e: MouseEvent) {
         >
           <Plus v-if="isMinimized" class="w-3 h-3" />
           <Minus v-else class="w-3 h-3" />
+        </button>
+
+        <!-- Close / Hide Panel -->
+        <button 
+          @click="layoutStore.showRightSidebar = false"
+          class="p-0.5 text-ui-textMuted hover:text-rose-400 rounded-xs hover:bg-ui-hover transition"
+          title="Hide Properties Panel (Hotkey: N)"
+        >
+          <X class="w-3 h-3" />
         </button>
       </div>
     </div>
@@ -252,8 +276,8 @@ function startResizeCorner(e: MouseEvent) {
         </button>
       </div>
 
-      <!-- 2. Standard Tab Strip (Outliner, Object, Modifiers, Material) -->
-      <div v-else class="h-7 bg-ui-header border-b border-ui-borderSubtle grid grid-cols-4 text-xs shrink-0 font-sans">
+      <!-- 2. Standard Tab Strip (Outliner, Object, Modifiers, Material, Texture) -->
+      <div v-else class="h-7 bg-ui-header border-b border-ui-borderSubtle grid grid-cols-5 text-xs shrink-0 font-sans">
         <!-- Outliner Tab -->
         <button 
           @click="activeTab = 'outliner'"
@@ -289,9 +313,19 @@ function startResizeCorner(e: MouseEvent) {
           @click="activeTab = 'material'"
           class="flex items-center justify-center p-1 transition border-b-2"
           :class="activeTab === 'material' ? 'bg-ui-panel text-amber-400 font-semibold border-amber-500' : 'border-transparent text-ui-textMuted hover:text-amber-300 hover:bg-ui-hover'"
-          title="Material Properties"
+          title="Material Properties (PBR / PSX Shaders)"
         >
           <BlenderIcon name="material" :size="14" />
+        </button>
+
+        <!-- Texture Assets Tab -->
+        <button 
+          @click="activeTab = 'texture'"
+          class="flex items-center justify-center p-1 transition border-b-2"
+          :class="activeTab === 'texture' ? 'bg-ui-panel text-emerald-400 font-semibold border-emerald-500' : 'border-transparent text-ui-textMuted hover:text-emerald-300 hover:bg-ui-hover'"
+          title="Texture Asset Library (2D Maps)"
+        >
+          <BlenderIcon name="texture" :size="14" />
         </button>
       </div>
 
@@ -321,6 +355,11 @@ function startResizeCorner(e: MouseEvent) {
         <!-- Material Properties Tab -->
         <div v-else-if="activeTab === 'material'" class="h-full overflow-y-auto flex flex-col">
           <MaterialProps />
+        </div>
+
+        <!-- Texture Assets Tab -->
+        <div v-else-if="activeTab === 'texture'" class="h-full overflow-y-auto flex flex-col">
+          <TextureProps />
         </div>
       </div>
 

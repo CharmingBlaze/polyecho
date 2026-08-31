@@ -1,4 +1,4 @@
-import { hexToRgb, getBayerOffset, rgbToHex } from '../../utils/color'
+import { hexToRgb, getBayerOffset, rgbToHex, rgbToHsl, hslToRgb } from '../../utils/color'
 
 export interface PixelDrawParams {
   x: number
@@ -22,11 +22,23 @@ export interface SelectionRect {
   floatingBuffer?: ImageData
 }
 
+export interface BufferLayer {
+  id: string
+  name: string
+  visible: boolean
+  opacity: number
+  blendMode: 'normal' | 'multiply' | 'screen' | 'overlay' | 'additive'
+  canvas: HTMLCanvasElement
+  ctx: CanvasRenderingContext2D
+}
+
 export class PixelBuffer {
   width: number
   height: number
   canvas: HTMLCanvasElement
   ctx: CanvasRenderingContext2D
+  layers: BufferLayer[] = []
+  activeLayerId: string = ''
 
   constructor(width = 64, height = 64) {
     this.width = width
@@ -35,7 +47,109 @@ export class PixelBuffer {
     this.canvas.width = width
     this.canvas.height = height
     this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!
+    
+    // Create base layer
+    const baseCanvas = document.createElement('canvas')
+    baseCanvas.width = width
+    baseCanvas.height = height
+    const baseCtx = baseCanvas.getContext('2d', { willReadFrequently: true })!
+    const baseLayer: BufferLayer = {
+      id: 'layer_base',
+      name: 'Layer 1',
+      visible: true,
+      opacity: 1.0,
+      blendMode: 'normal',
+      canvas: baseCanvas,
+      ctx: baseCtx
+    }
+    this.layers.push(baseLayer)
+    this.activeLayerId = baseLayer.id
+
     this.clear('#333842')
+  }
+
+  get activeLayer(): BufferLayer | undefined {
+    return this.layers.find(l => l.id === this.activeLayerId) || this.layers[0]
+  }
+
+  addLayer(name?: string): BufferLayer {
+    const layerCanvas = document.createElement('canvas')
+    layerCanvas.width = this.width
+    layerCanvas.height = this.height
+    const layerCtx = layerCanvas.getContext('2d', { willReadFrequently: true })!
+    const newLayer: BufferLayer = {
+      id: `layer_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      name: name || `Layer ${this.layers.length + 1}`,
+      visible: true,
+      opacity: 1.0,
+      blendMode: 'normal',
+      canvas: layerCanvas,
+      ctx: layerCtx
+    }
+    this.layers.push(newLayer)
+    this.activeLayerId = newLayer.id
+    this.composite()
+    return newLayer
+  }
+
+  deleteLayer(id: string): boolean {
+    if (this.layers.length <= 1) return false // Keep at least one layer
+    const idx = this.layers.findIndex(l => l.id === id)
+    if (idx !== -1) {
+      this.layers.splice(idx, 1)
+      if (this.activeLayerId === id) {
+        this.activeLayerId = this.layers[Math.max(0, idx - 1)].id
+      }
+      this.composite()
+      return true
+    }
+    return false
+  }
+
+  duplicateLayer(id: string): BufferLayer | null {
+    const src = this.layers.find(l => l.id === id)
+    if (!src) return null
+    const layerCanvas = document.createElement('canvas')
+    layerCanvas.width = this.width
+    layerCanvas.height = this.height
+    const layerCtx = layerCanvas.getContext('2d', { willReadFrequently: true })!
+    layerCtx.drawImage(src.canvas, 0, 0)
+    const newLayer: BufferLayer = {
+      id: `layer_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      name: `${src.name} Copy`,
+      visible: true,
+      opacity: src.opacity,
+      blendMode: src.blendMode,
+      canvas: layerCanvas,
+      ctx: layerCtx
+    }
+    const idx = this.layers.findIndex(l => l.id === id)
+    this.layers.splice(idx + 1, 0, newLayer)
+    this.activeLayerId = newLayer.id
+    this.composite()
+    return newLayer
+  }
+
+  composite() {
+    this.ctx.clearRect(0, 0, this.width, this.height)
+    for (const layer of this.layers) {
+      if (!layer.visible || layer.opacity <= 0) continue
+      this.ctx.save()
+      this.ctx.globalAlpha = layer.opacity
+      if (layer.blendMode === 'multiply') {
+        this.ctx.globalCompositeOperation = 'multiply'
+      } else if (layer.blendMode === 'screen') {
+        this.ctx.globalCompositeOperation = 'screen'
+      } else if (layer.blendMode === 'overlay') {
+        this.ctx.globalCompositeOperation = 'overlay'
+      } else if (layer.blendMode === 'additive') {
+        this.ctx.globalCompositeOperation = 'lighter'
+      } else {
+        this.ctx.globalCompositeOperation = 'source-over'
+      }
+      this.ctx.drawImage(layer.canvas, 0, 0)
+      this.ctx.restore()
+    }
   }
 
   resize(newWidth: number, newHeight: number, mode: 'resample' | 'crop' = 'crop') {
@@ -119,9 +233,17 @@ export class PixelBuffer {
   }
 
   /**
-   * Aseprite-style Shading Brush (Lighten or Darken pixels by step)
+   * Aseprite-style Shading Brush (Lighten or Darken pixels with optional Hue Shifting or Palette Snapping)
    */
-  drawShade(x: number, y: number, mode: 'lighten' | 'darken', size = 1, step = 15) {
+  drawShade(
+    x: number, 
+    y: number, 
+    mode: 'lighten' | 'darken', 
+    size = 1, 
+    step = 15, 
+    hueShift = false, 
+    palette?: string[]
+  ) {
     const half = Math.floor(size / 2)
     for (let dy = -half; dy <= half; dy++) {
       for (let dx = -half; dx <= half; dx++) {
@@ -133,10 +255,51 @@ export class PixelBuffer {
         const d = imgData.data
         if (d[3] === 0) continue // Skip transparent
 
-        const delta = mode === 'lighten' ? step : -step
-        d[0] = Math.max(0, Math.min(255, d[0] + delta))
-        d[1] = Math.max(0, Math.min(255, d[1] + delta))
-        d[2] = Math.max(0, Math.min(255, d[2] + delta))
+        if (palette && palette.length > 0) {
+          const sorted = [...palette].sort((a, b) => {
+            const rgbA = hexToRgb(a)
+            const rgbB = hexToRgb(b)
+            return (rgbA.r * 0.299 + rgbA.g * 0.587 + rgbA.b * 0.114) - (rgbB.r * 0.299 + rgbB.g * 0.587 + rgbB.b * 0.114)
+          })
+          let bestIdx = 0
+          let bestDist = Infinity
+          const cr = d[0], cg = d[1], cb = d[2]
+          for (let i = 0; i < sorted.length; i++) {
+            const pr = hexToRgb(sorted[i])
+            const dist = (cr - pr.r) ** 2 + (cg - pr.g) ** 2 + (cb - pr.b) ** 2
+            if (dist < bestDist) {
+              bestDist = dist
+              bestIdx = i
+            }
+          }
+          const nextIdx = mode === 'lighten' ? Math.min(sorted.length - 1, bestIdx + 1) : Math.max(0, bestIdx - 1)
+          const targetRgb = hexToRgb(sorted[nextIdx])
+          d[0] = targetRgb.r
+          d[1] = targetRgb.g
+          d[2] = targetRgb.b
+        } else if (hueShift) {
+          const hsl = rgbToHsl(d[0], d[1], d[2])
+          const lDelta = (mode === 'lighten' ? step : -step) / 255
+          const newL = Math.max(0, Math.min(1, hsl.l + lDelta))
+          let newH = hsl.h
+          if (mode === 'lighten') {
+            const diff = 60 - newH
+            newH = (newH + diff * 0.05 + 360) % 360
+          } else {
+            const diff = 240 - newH
+            newH = (newH + diff * 0.05 + 360) % 360
+          }
+          const rgb = hslToRgb(newH, hsl.s, newL)
+          d[0] = rgb.r
+          d[1] = rgb.g
+          d[2] = rgb.b
+        } else {
+          const delta = mode === 'lighten' ? step : -step
+          d[0] = Math.max(0, Math.min(255, d[0] + delta))
+          d[1] = Math.max(0, Math.min(255, d[1] + delta))
+          d[2] = Math.max(0, Math.min(255, d[2] + delta))
+        }
+
         this.ctx.putImageData(imgData, px, py)
       }
     }

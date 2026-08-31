@@ -56,6 +56,8 @@ export interface SnappingSettings {
   face: boolean
   target: SnapTarget
   angle: number // e.g. 15, 45, 90 deg
+  autoMerge?: boolean
+  autoMergeThreshold?: number
 }
 
 export interface ViewportSettings {

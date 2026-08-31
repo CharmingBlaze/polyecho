@@ -80,6 +80,12 @@ export class ViewportLayerManager {
       group.remove(obj)
       if (obj instanceof THREE.Mesh || obj instanceof THREE.LineSegments || obj instanceof THREE.Points || obj instanceof THREE.Line) {
         obj.geometry.dispose()
+        const material = (obj as THREE.Mesh).material
+        if (Array.isArray(material)) {
+          for (const m of material) m.dispose()
+        } else if (material) {
+          material.dispose()
+        }
       }
     }
   }

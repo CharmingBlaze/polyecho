@@ -62,7 +62,20 @@ export function renderSpriteSheet(
 
   for (const meshObj of meshes) {
     if (!meshObj.visible) continue
-    const { geometry } = meshToThreeGeometry(meshObj)
+    const {
+      geometry,
+      wireframeGeometry,
+      vertexPointsGeometry,
+      selectedFacesGeometry,
+      selectedEdgesGeometry,
+      edgeLinesGeometry
+    } = meshToThreeGeometry(meshObj)
+    // Only the base geometry is used here; release the rest
+    wireframeGeometry.dispose()
+    vertexPointsGeometry.dispose()
+    selectedFacesGeometry.dispose()
+    selectedEdgesGeometry.dispose()
+    edgeLinesGeometry.dispose()
     const texture = textureMap.get(meshObj.materialId) || null
 
     const mat = new THREE.MeshLambertMaterial({
@@ -163,6 +176,17 @@ export function renderSpriteSheet(
   }
 
   // Clean up
+  scene.traverse(obj => {
+    if (obj instanceof THREE.Mesh || obj instanceof THREE.LineSegments || obj instanceof THREE.Points || obj instanceof THREE.Line) {
+      obj.geometry.dispose()
+      const material = (obj as THREE.Mesh).material
+      if (Array.isArray(material)) {
+        for (const m of material) m.dispose()
+      } else if (material) {
+        material.dispose()
+      }
+    }
+  })
   renderer.dispose()
   return sheetCanvas
 }

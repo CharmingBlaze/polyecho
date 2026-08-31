@@ -8,7 +8,8 @@ import {
   X, 
   Sparkles, 
   Lock, 
-  Unlock 
+  Unlock,
+  Grid
 } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -32,12 +33,20 @@ const filterMode = ref<'nearest' | 'bilinear'>('nearest')
 
 // Resolution presets: 'orig' | 32 | 64 | 128 | 256 | 512 | 'custom'
 type ResPreset = 'orig' | 32 | 64 | 128 | 256 | 512 | 'custom'
-const selectedRes = ref<ResPreset>(256)
+const selectedRes = ref<ResPreset>('orig')
 
 // Custom dimensions & aspect ratio lock
 const customWidth = ref<number>(256)
 const customHeight = ref<number>(256)
 const lockAspectRatio = ref<boolean>(true)
+
+// Atlas / Sprite Sheet Slicing Options
+const isAtlasMode = ref<boolean>(false)
+const atlasSliceMethod = ref<'grid' | 'tileSize'>('grid')
+const atlasCols = ref<number>(2)
+const atlasRows = ref<number>(2)
+const atlasTileW = ref<number>(32)
+const atlasTileH = ref<number>(32)
 
 // Palette extraction
 const extractPalette = ref<boolean>(true)
@@ -91,6 +100,34 @@ const targetDimensions = computed<{ width: number; height: number }>(() => {
   }
   const size = typeof selectedRes.value === 'number' ? selectedRes.value : 256
   return { width: size, height: size }
+})
+
+const computedTileDimensions = computed(() => {
+  const targetW = targetDimensions.value.width
+  const targetH = targetDimensions.value.height
+  if (atlasSliceMethod.value === 'grid') {
+    const cols = Math.max(1, atlasCols.value)
+    const rows = Math.max(1, atlasRows.value)
+    return {
+      cols,
+      rows,
+      tileW: Math.max(1, Math.floor(targetW / cols)),
+      tileH: Math.max(1, Math.floor(targetH / rows)),
+      count: cols * rows
+    }
+  } else {
+    const tw = Math.max(8, Math.min(targetW, atlasTileW.value))
+    const th = Math.max(8, Math.min(targetH, atlasTileH.value))
+    const cols = Math.max(1, Math.floor(targetW / tw))
+    const rows = Math.max(1, Math.floor(targetH / th))
+    return {
+      cols,
+      rows,
+      tileW: tw,
+      tileH: th,
+      count: cols * rows
+    }
+  }
 })
 
 const aspectRatioText = computed(() => {
@@ -201,8 +238,35 @@ function updateLivePreview() {
     ctx.imageSmoothingEnabled = false
     ctx.drawImage(buffer.canvas, ox, oy, drawW, drawH)
 
+    // Draw Atlas Grid Slice lines if Atlas Mode is enabled
+    if (isAtlasMode.value) {
+      const { cols, rows } = computedTileDimensions.value
+      ctx.strokeStyle = '#f59e0b'
+      ctx.lineWidth = 1
+      ctx.setLineDash([3, 3])
+
+      // Vertical lines
+      for (let c = 1; c < cols; c++) {
+        const x = ox + (drawW * (c / cols))
+        ctx.beginPath()
+        ctx.moveTo(x, oy)
+        ctx.lineTo(x, oy + drawH)
+        ctx.stroke()
+      }
+
+      // Horizontal lines
+      for (let r = 1; r < rows; r++) {
+        const y = oy + (drawH * (r / rows))
+        ctx.beginPath()
+        ctx.moveTo(ox, y)
+        ctx.lineTo(ox + drawW, y)
+        ctx.stroke()
+      }
+      ctx.setLineDash([])
+    }
+
     // Outline preview border
-    ctx.strokeStyle = 'rgba(99, 102, 241, 0.4)'
+    ctx.strokeStyle = isAtlasMode.value ? '#f59e0b' : 'rgba(99, 102, 241, 0.5)'
     ctx.lineWidth = 1
     ctx.strokeRect(ox, oy, drawW, drawH)
 
@@ -213,7 +277,7 @@ function updateLivePreview() {
   })
 }
 
-watch([fitMode, filterMode, selectedRes, extractPalette], () => {
+watch([fitMode, filterMode, selectedRes, extractPalette, isAtlasMode, atlasSliceMethod, atlasCols, atlasRows, atlasTileW, atlasTileH], () => {
   updateLivePreview()
 })
 
@@ -250,12 +314,13 @@ async function handleImport() {
 
   const targetW = targetDimensions.value.width
   const targetH = targetDimensions.value.height
+  const texName = props.file.name.replace(/\.[^/.]+$/, '')
 
   // Extract Retro Palette if requested
   if (extractPalette.value) {
     const colors = buffer.extractPalette(16)
     if (colors.length > 0) {
-      const palName = `Image_${props.file.name.replace(/\.[^/.]+$/, '').slice(0, 12)}`
+      const palName = `Image_${texName.slice(0, 12)}`
       projectStore.activePalette = {
         id: `pal_${Date.now()}`,
         name: palName,
@@ -268,15 +333,51 @@ async function handleImport() {
     }
   }
 
-  // Add texture to project
-  const texName = props.file.name.replace(/\.[^/.]+$/, '')
+  // If Atlas Slicing Mode is enabled:
+  if (isAtlasMode.value) {
+    const { cols, rows, tileW, tileH } = computedTileDimensions.value
+    projectStore.recordState(`Import & Slice Atlas (${texName}: ${cols}x${rows})`)
+
+    // Add Master Atlas texture
+    const masterTex = projectStore.addTexture(`${texName}_Atlas`, targetW, targetH)
+    masterTex.pixelBuffer = buffer
+    masterTex.dataUrl = buffer.toDataURL()
+
+    // Slice individual tiles
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const tileBuf = new PixelBuffer(tileW, tileH)
+        tileBuf.ctx.imageSmoothingEnabled = false
+        tileBuf.ctx.drawImage(
+          buffer.canvas,
+          c * tileW, r * tileH, tileW, tileH,
+          0, 0, tileW, tileH
+        )
+        const tileTex = projectStore.addTexture(`${texName}_${r}_${c}`, tileW, tileH)
+        tileTex.pixelBuffer = tileBuf
+        tileTex.dataUrl = tileBuf.toDataURL()
+        projectStore.markTextureUpdated(tileTex.id)
+      }
+    }
+
+    const targetMatId = props.targetMaterialId || projectStore.activeMesh?.materialId || projectStore.materials[0]?.id
+    if (targetMatId) {
+      projectStore.assignTextureToMaterial(targetMatId, masterTex.id)
+    }
+    projectStore.activeTextureId = masterTex.id
+    projectStore.markTextureUpdated(masterTex.id)
+    emit('imported', masterTex.id)
+    emit('close')
+    return
+  }
+
+  // Standard Single Texture Import
   const newTex = projectStore.addTexture(texName, targetW, targetH)
   newTex.pixelBuffer = buffer
   newTex.width = targetW
   newTex.height = targetH
   newTex.dataUrl = buffer.toDataURL()
 
-  // Assign to targeted material or active material
   const targetMatId = props.targetMaterialId || projectStore.activeMesh?.materialId || projectStore.materials[0]?.id
   if (targetMatId) {
     projectStore.assignTextureToMaterial(targetMatId, newTex.id)
@@ -296,7 +397,7 @@ async function handleImport() {
     class="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center z-50 select-none p-4 animate-in fade-in duration-150"
     @click.self="handleClose"
   >
-    <div class="bg-ui-surface border border-ui-borderDefault rounded-xs w-[640px] shadow-2xl overflow-hidden flex flex-col text-ui-textPrimary font-sans">
+    <div class="bg-ui-surface border border-ui-borderDefault rounded-xs w-[680px] shadow-2xl overflow-hidden flex flex-col text-ui-textPrimary font-sans">
       
       <!-- Modal Header -->
       <div class="h-10 bg-ui-panel border-b border-ui-borderSubtle px-3.5 flex items-center justify-between">
@@ -304,7 +405,7 @@ async function handleImport() {
           <div class="w-5 h-5 rounded-xs bg-ui-accent/15 text-ui-textAccent flex items-center justify-center">
             <ImageIcon class="w-3.5 h-3.5" />
           </div>
-          <span class="font-bold text-xs text-ui-textPrimary tracking-wide">Import Texture Map</span>
+          <span class="font-bold text-xs text-ui-textPrimary tracking-wide">Import Texture or Atlas Map</span>
         </div>
         <button 
           @click="handleClose" 
@@ -328,8 +429,8 @@ async function handleImport() {
           <div class="relative w-full aspect-square bg-[#12141a] rounded-xs border border-ui-borderSubtle overflow-hidden flex items-center justify-center shadow-inner">
             <canvas 
               ref="previewCanvasRef" 
-              width="210" 
-              height="210" 
+              width="230" 
+              height="230" 
               class="w-full h-full object-contain [image-rendering:pixelated]"
             />
           </div>
@@ -338,7 +439,7 @@ async function handleImport() {
           <div class="w-full bg-ui-input/70 p-2 rounded-xs border border-ui-borderSubtle text-[10px] space-y-1">
             <div class="flex items-center justify-between text-ui-textMuted">
               <span>Source:</span>
-              <span class="font-mono text-ui-textPrimary font-semibold truncate max-w-[110px]" :title="file?.name">{{ file?.name }}</span>
+              <span class="font-mono text-ui-textPrimary font-semibold truncate max-w-[120px]" :title="file?.name">{{ file?.name }}</span>
             </div>
             <div class="flex items-center justify-between text-ui-textMuted">
               <span>Original:</span>
@@ -348,15 +449,15 @@ async function handleImport() {
               <span>Aspect Ratio:</span>
               <span class="font-mono text-ui-textPrimary">{{ aspectRatioText }}</span>
             </div>
-            <div class="flex items-center justify-between text-ui-textMuted">
-              <span>File Size:</span>
-              <span class="font-mono text-ui-textPrimary">{{ fileSizeKb }} KB</span>
+            <div v-if="isAtlasMode" class="flex items-center justify-between text-amber-300 font-bold">
+              <span>Slicing:</span>
+              <span class="font-mono">{{ computedTileDimensions.cols }}×{{ computedTileDimensions.rows }} ({{ computedTileDimensions.count }} tiles)</span>
             </div>
           </div>
         </div>
 
-        <!-- Right: Professional Configuration Controls -->
-        <div class="col-span-7 p-3.5 space-y-3 flex flex-col justify-between">
+        <!-- Right: Configuration Controls -->
+        <div class="col-span-7 p-3.5 space-y-3 flex flex-col justify-between max-h-[460px] overflow-y-auto custom-scrollbar">
           
           <!-- 1. Resolution Presets & Custom Scaling -->
           <div class="space-y-1.5">
@@ -430,51 +531,108 @@ async function handleImport() {
             </div>
           </div>
 
-          <!-- 2. Fit & Placement Mode -->
-          <div class="space-y-1.5">
-            <span class="text-[10px] font-bold text-ui-textMuted uppercase tracking-wider">Fit & Placement Mode</span>
-            <div class="grid grid-cols-3 gap-1">
-              <button 
-                v-for="mode in [
-                  { id: 'stretch', label: 'Stretch (Scale)' },
-                  { id: 'contain', label: 'Contain (Pad)' },
-                  { id: 'tile', label: 'Tile (Repeat)' }
-                ]" 
-                :key="mode.id"
-                @click="fitMode = mode.id as any"
-                class="py-1 px-1.5 rounded-xs text-[10px] font-medium border transition text-center cursor-pointer"
-                :class="fitMode === mode.id 
-                  ? 'bg-ui-accent text-white font-bold border-ui-accent shadow-xs' 
-                  : 'bg-ui-input text-ui-textSecondary hover:text-ui-textPrimary border-ui-borderSubtle hover:bg-ui-hover'"
-              >
-                {{ mode.label }}
-              </button>
+          <!-- 2. Atlas / Sprite Sheet Slicing Card -->
+          <div class="bg-amber-950/20 p-2 rounded-xs border border-amber-500/30 space-y-2">
+            <label class="flex items-center justify-between cursor-pointer">
+              <span class="text-[10.5px] font-bold text-amber-300 flex items-center gap-1.5">
+                <Grid class="w-3.5 h-3.5 text-amber-400" />
+                <span>Atlas / Sprite Sheet Slicing</span>
+              </span>
+              <input 
+                type="checkbox" 
+                v-model="isAtlasMode" 
+                class="rounded-xs accent-amber-500 cursor-pointer"
+              />
+            </label>
+
+            <!-- Atlas Options (if enabled) -->
+            <div v-if="isAtlasMode" class="space-y-1.5 pt-1 border-t border-amber-500/20">
+              <div class="grid grid-cols-2 gap-1 text-[9.5px]">
+                <button 
+                  @click="atlasSliceMethod = 'grid'"
+                  class="py-1 rounded-xs border text-center transition cursor-pointer"
+                  :class="atlasSliceMethod === 'grid' ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-bold' : 'bg-ui-input text-ui-textSecondary border-ui-borderSubtle'"
+                >
+                  Grid (Cols × Rows)
+                </button>
+                <button 
+                  @click="atlasSliceMethod = 'tileSize'"
+                  class="py-1 rounded-xs border text-center transition cursor-pointer"
+                  :class="atlasSliceMethod === 'tileSize' ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-bold' : 'bg-ui-input text-ui-textSecondary border-ui-borderSubtle'"
+                >
+                  Tile Size (px)
+                </button>
+              </div>
+
+              <!-- Grid Mode Inputs -->
+              <div v-if="atlasSliceMethod === 'grid'" class="grid grid-cols-2 gap-2 text-[10px]">
+                <div>
+                  <span class="text-ui-textMuted text-[9px] block">Columns:</span>
+                  <input type="number" min="1" max="64" v-model.number="atlasCols" class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-ui-textPrimary font-mono" />
+                </div>
+                <div>
+                  <span class="text-ui-textMuted text-[9px] block">Rows:</span>
+                  <input type="number" min="1" max="64" v-model.number="atlasRows" class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-ui-textPrimary font-mono" />
+                </div>
+              </div>
+
+              <!-- Tile Size Inputs -->
+              <div v-else class="grid grid-cols-2 gap-2 text-[10px]">
+                <div>
+                  <span class="text-ui-textMuted text-[9px] block">Tile Width (px):</span>
+                  <input type="number" min="8" max="512" step="8" v-model.number="atlasTileW" class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-ui-textPrimary font-mono" />
+                </div>
+                <div>
+                  <span class="text-ui-textMuted text-[9px] block">Tile Height (px):</span>
+                  <input type="number" min="8" max="512" step="8" v-model.number="atlasTileH" class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-ui-textPrimary font-mono" />
+                </div>
+              </div>
+
+              <div class="text-[9px] text-amber-200/80 font-mono">
+                Will extract {{ computedTileDimensions.count }} sub-textures ({{ computedTileDimensions.tileW }}×{{ computedTileDimensions.tileH }}px each).
+              </div>
             </div>
           </div>
 
-          <!-- 3. Sampling Filter -->
-          <div class="space-y-1.5">
-            <span class="text-[10px] font-bold text-ui-textMuted uppercase tracking-wider">Sampling & Resample Filter</span>
-            <div class="grid grid-cols-2 gap-1">
-              <button 
-                @click="filterMode = 'nearest'"
-                class="py-1 px-1.5 rounded-xs text-[10px] font-medium border transition text-center cursor-pointer"
-                :class="filterMode === 'nearest' 
-                  ? 'bg-ui-accent text-white font-bold border-ui-accent shadow-xs' 
-                  : 'bg-ui-input text-ui-textSecondary hover:text-ui-textPrimary border-ui-borderSubtle hover:bg-ui-hover'"
-              >
-                Nearest (Pixel-Art)
-              </button>
+          <!-- 3. Sampling Filter & Placement -->
+          <div class="grid grid-cols-2 gap-2">
+            <div class="space-y-1">
+              <span class="text-[9.5px] font-bold text-ui-textMuted uppercase">Resample Filter</span>
+              <div class="grid grid-cols-2 gap-0.5">
+                <button 
+                  @click="filterMode = 'nearest'"
+                  class="py-1 rounded-xs text-[9.5px] font-medium border transition text-center cursor-pointer"
+                  :class="filterMode === 'nearest' ? 'bg-ui-accent text-white font-bold border-ui-accent' : 'bg-ui-input text-ui-textSecondary border-ui-borderSubtle'"
+                >
+                  Nearest
+                </button>
+                <button 
+                  @click="filterMode = 'bilinear'"
+                  class="py-1 rounded-xs text-[9.5px] font-medium border transition text-center cursor-pointer"
+                  :class="filterMode === 'bilinear' ? 'bg-ui-accent text-white font-bold border-ui-accent' : 'bg-ui-input text-ui-textSecondary border-ui-borderSubtle'"
+                >
+                  Bilinear
+                </button>
+              </div>
+            </div>
 
-              <button 
-                @click="filterMode = 'bilinear'"
-                class="py-1 px-1.5 rounded-xs text-[10px] font-medium border transition text-center cursor-pointer"
-                :class="filterMode === 'bilinear' 
-                  ? 'bg-ui-accent text-white font-bold border-ui-accent shadow-xs' 
-                  : 'bg-ui-input text-ui-textSecondary hover:text-ui-textPrimary border-ui-borderSubtle hover:bg-ui-hover'"
-              >
-                Bilinear (Smooth)
-              </button>
+            <div class="space-y-1">
+              <span class="text-[9.5px] font-bold text-ui-textMuted uppercase">Fit Mode</span>
+              <div class="grid grid-cols-3 gap-0.5">
+                <button 
+                  v-for="mode in [
+                    { id: 'stretch', label: 'Stretch' },
+                    { id: 'contain', label: 'Fit' },
+                    { id: 'tile', label: 'Tile' }
+                  ]" 
+                  :key="mode.id"
+                  @click="fitMode = mode.id as any"
+                  class="py-1 rounded-xs text-[9px] font-medium border transition text-center cursor-pointer"
+                  :class="fitMode === mode.id ? 'bg-ui-accent text-white font-bold border-ui-accent' : 'bg-ui-input text-ui-textSecondary border-ui-borderSubtle'"
+                >
+                  {{ mode.label }}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -508,20 +666,23 @@ async function handleImport() {
       </div>
 
       <!-- Modal Footer -->
-      <div class="h-11 bg-ui-panel px-3.5 flex items-center justify-end gap-2">
-        <button 
-          @click="handleClose" 
-          class="px-3.5 py-1 rounded-xs text-[11px] font-medium text-ui-textSecondary hover:text-ui-textPrimary bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle transition cursor-pointer"
-        >
-          Cancel
-        </button>
+      <div class="h-11 bg-ui-panel px-3.5 flex items-center justify-between">
+        <span class="text-[10px] text-ui-textMuted font-mono">Press Ctrl+Enter to Import</span>
+        <div class="flex items-center gap-2">
+          <button 
+            @click="handleClose" 
+            class="px-3.5 py-1 rounded-xs text-[11px] font-medium text-ui-textSecondary hover:text-ui-textPrimary bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle transition cursor-pointer"
+          >
+            Cancel
+          </button>
 
-        <button 
-          @click="handleImport" 
-          class="px-4 py-1 rounded-xs text-[11px] font-bold text-white bg-ui-accent hover:bg-ui-accentHover shadow-xs transition active:scale-95 cursor-pointer"
-        >
-          Import Texture
-        </button>
+          <button 
+            @click="handleImport" 
+            class="px-4 py-1 rounded-xs text-[11px] font-bold text-white bg-ui-accent hover:bg-ui-accentHover shadow-xs transition active:scale-95 cursor-pointer"
+          >
+            {{ isAtlasMode ? `Import Atlas (${computedTileDimensions.count} Tiles)` : 'Import Texture' }}
+          </button>
+        </div>
       </div>
 
     </div>

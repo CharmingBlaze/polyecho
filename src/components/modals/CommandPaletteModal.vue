@@ -4,6 +4,7 @@ import { useToolStore } from '../../stores/toolStore'
 import { useProjectStore } from '../../stores/projectStore'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import { Search, CornerDownLeft, Sparkles } from 'lucide-vue-next'
+import { requestExport, requestModalTool, requestPrimitivePlacement } from '../../core/commands/editorCommands'
 
 const toolStore = useToolStore()
 const projectStore = useProjectStore()
@@ -30,7 +31,7 @@ const allCommands = computed<CommandItem[]>(() => [
     category: 'Modeling',
     shortcut: 'E',
     icon: 'extrude',
-    action: () => window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'extrude' }))
+    action: () => requestModalTool('extrude')
   },
   {
     id: 'extrude-individual',
@@ -41,7 +42,7 @@ const allCommands = computed<CommandItem[]>(() => [
     action: () => {
       if (projectStore.activeMesh && projectStore.selectedFaceIds.length > 0) {
         projectStore.recordState('Extrude Individual Faces')
-        window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'extrude' }))
+        requestModalTool('extrude')
       }
     }
   },
@@ -51,15 +52,15 @@ const allCommands = computed<CommandItem[]>(() => [
     category: 'Modeling',
     shortcut: 'I',
     icon: 'inset',
-    action: () => window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'inset' }))
+    action: () => requestModalTool('inset')
   },
   {
     id: 'bevel',
-    title: 'Bevel Edges / Vertices',
+    title: 'Bevel Selected Faces',
     category: 'Modeling',
     shortcut: 'Ctrl+B',
     icon: 'bevel',
-    action: () => window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'bevel' }))
+    action: () => requestModalTool('bevel')
   },
   {
     id: 'loopcut',
@@ -67,7 +68,7 @@ const allCommands = computed<CommandItem[]>(() => [
     category: 'Modeling',
     shortcut: 'Ctrl+R',
     icon: 'loop-cut',
-    action: () => window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'loopcut' }))
+    action: () => requestModalTool('loop_cut')
   },
   {
     id: 'knife',
@@ -75,7 +76,7 @@ const allCommands = computed<CommandItem[]>(() => [
     category: 'Modeling',
     shortcut: 'K',
     icon: 'knife',
-    action: () => window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'knife' }))
+    action: () => requestModalTool('knife')
   },
   {
     id: 'move',
@@ -83,7 +84,7 @@ const allCommands = computed<CommandItem[]>(() => [
     category: 'Modeling',
     shortcut: 'G',
     icon: 'move',
-    action: () => window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'grab' }))
+    action: () => requestModalTool('grab')
   },
   {
     id: 'rotate',
@@ -91,7 +92,7 @@ const allCommands = computed<CommandItem[]>(() => [
     category: 'Modeling',
     shortcut: 'R',
     icon: 'rotate',
-    action: () => window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'rotate' }))
+    action: () => requestModalTool('rotate')
   },
   {
     id: 'scale',
@@ -99,7 +100,7 @@ const allCommands = computed<CommandItem[]>(() => [
     category: 'Modeling',
     shortcut: 'S',
     icon: 'scale',
-    action: () => window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'scale' }))
+    action: () => requestModalTool('scale')
   },
 
   // 2. TOPOLOGY
@@ -241,28 +242,28 @@ const allCommands = computed<CommandItem[]>(() => [
     category: 'Primitives',
     shortcut: 'Shift+A',
     icon: 'mesh-cube',
-    action: () => window.dispatchEvent(new CustomEvent('open-primitive-placement', { detail: { type: 'BOX' } }))
+    action: () => requestPrimitivePlacement({ type: 'BOX' })
   },
   {
     id: 'add-plane',
     title: 'Add Plane / Grid Surface',
     category: 'Primitives',
     icon: 'mesh-plane',
-    action: () => window.dispatchEvent(new CustomEvent('open-primitive-placement', { detail: { type: 'PLANE' } }))
+    action: () => requestPrimitivePlacement({ type: 'PLANE' })
   },
   {
     id: 'add-cylinder',
     title: 'Add Cylinder',
     category: 'Primitives',
     icon: 'mesh-cylinder',
-    action: () => window.dispatchEvent(new CustomEvent('open-primitive-placement', { detail: { type: 'CYLINDER' } }))
+    action: () => requestPrimitivePlacement({ type: 'CYLINDER' })
   },
   {
     id: 'add-sphere',
     title: 'Add UV Sphere',
     category: 'Primitives',
     icon: 'mesh-uvsphere',
-    action: () => window.dispatchEvent(new CustomEvent('open-primitive-placement', { detail: { type: 'SPHERE' } }))
+    action: () => requestPrimitivePlacement({ type: 'SPHERE' })
   },
 
   // 5. MODIFIERS
@@ -416,13 +417,13 @@ const allCommands = computed<CommandItem[]>(() => [
     title: 'Export GLTF / GLB Model (Blender Compatible)',
     category: 'Export',
     shortcut: 'Ctrl+E',
-    action: () => window.dispatchEvent(new CustomEvent('open-export-modal', { detail: 'glb' }))
+    action: () => requestExport('glb')
   },
   {
     id: 'export-obj',
     title: 'Export Wavefront OBJ',
     category: 'Export',
-    action: () => window.dispatchEvent(new CustomEvent('open-export-modal', { detail: 'obj' }))
+    action: () => requestExport('obj')
   }
 ])
 

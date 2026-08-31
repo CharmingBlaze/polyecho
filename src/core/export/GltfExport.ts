@@ -65,7 +65,19 @@ export async function exportToGLTF(
   for (const meshObj of meshes) {
     if (!meshObj.visible) continue
 
-    const { geometry } = meshToThreeGeometry(meshObj)
+    const {
+      geometry,
+      wireframeGeometry,
+      vertexPointsGeometry,
+      selectedFacesGeometry,
+      selectedEdgesGeometry,
+      edgeLinesGeometry
+    } = meshToThreeGeometry(meshObj)
+    wireframeGeometry.dispose()
+    vertexPointsGeometry.dispose()
+    selectedFacesGeometry.dispose()
+    selectedEdgesGeometry.dispose()
+    edgeLinesGeometry.dispose()
     const texture = textureMap.get(meshObj.materialId) || null
 
     let material: THREE.Material
@@ -250,10 +262,24 @@ export async function exportToGLTF(
   }
 
   const exporter = new GLTFExporter()
+  const disposeScene = () => {
+    scene.traverse(obj => {
+      if (obj instanceof THREE.Mesh || obj instanceof THREE.LineSegments || obj instanceof THREE.Points || obj instanceof THREE.Line) {
+        obj.geometry.dispose()
+        const material = (obj as THREE.Mesh).material
+        if (Array.isArray(material)) {
+          for (const m of material) m.dispose()
+        } else if (material) {
+          material.dispose()
+        }
+      }
+    })
+  }
   return new Promise((resolve, reject) => {
     exporter.parse(
       scene,
       (gltf) => {
+        disposeScene()
         if (binary) {
           const blob = new Blob([gltf as ArrayBuffer], { type: 'model/gltf-binary' })
           resolve(blob)
@@ -263,7 +289,10 @@ export async function exportToGLTF(
           resolve(blob)
         }
       },
-      (error) => reject(error),
+      (error) => {
+        disposeScene()
+        reject(error)
+      },
       { binary, animations: threeClips }
     )
   })

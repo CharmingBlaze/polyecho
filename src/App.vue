@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import HeaderMenu from './components/layout/HeaderMenu.vue'
 import LeftToolbar from './components/layout/LeftToolbar.vue'
 import RightSidebar from './components/layout/RightSidebar.vue'
@@ -15,6 +15,7 @@ import BlenderPieMenu from './components/viewport/BlenderPieMenu.vue'
 import CommandPaletteModal from './components/modals/CommandPaletteModal.vue'
 import PreferencesModal from './components/modals/PreferencesModal.vue'
 import BoneHierarchyPopout from './components/rigging/BoneHierarchyPopout.vue'
+import { ChevronLeft } from 'lucide-vue-next'
 
 import { useToolStore } from './stores/toolStore'
 import { useProjectStore } from './stores/projectStore'
@@ -24,6 +25,8 @@ import { useLayoutStore } from './stores/layoutStore'
 import { useThemeStore } from './stores/themeStore'
 import { useKeymapStore } from './stores/keymapStore'
 import { ProjectSerializer } from './core/project/ProjectSerializer'
+import { EDITOR_EVENTS, requestCameraView, requestModalTool } from './core/commands/editorCommands'
+import { operatorManager } from './core/operators/OperatorManager'
 
 const toolStore = useToolStore()
 const projectStore = useProjectStore()
@@ -43,9 +46,10 @@ const uvSplitRatio = ref<number>(50) // percentage
 const isUvSplitting = ref<boolean>(false)
 
 function startUvSplit(e: MouseEvent) {
-  isUvSplitting.value = true
   const container = (e.target as HTMLElement).closest('main')
   if (!container) return
+
+  isUvSplitting.value = true
   const rect = container.getBoundingClientRect()
 
   const onMouseMove = (moveEvent: MouseEvent) => {
@@ -84,6 +88,7 @@ function handleKeyDown(e: KeyboardEvent) {
   if (e.ctrlKey || e.metaKey) {
     if (e.key === 'z' || e.key === 'Z') {
       e.preventDefault()
+      if (operatorManager.state.value.active) return
       if (e.shiftKey) {
         historyStore.redo()
       } else {
@@ -93,6 +98,7 @@ function handleKeyDown(e: KeyboardEvent) {
     }
     if (e.key === 'y' || e.key === 'Y') {
       e.preventDefault()
+      if (operatorManager.state.value.active) return
       historyStore.redo()
       return
     }
@@ -123,7 +129,8 @@ function handleKeyDown(e: KeyboardEvent) {
         animationStore.armature.clips,
         animationStore.armature.activeClipId,
         animationStore.currentFrame,
-        toolStore.viewport
+        toolStore.viewport,
+        projectStore.textures
       )
       ProjectSerializer.downloadProject(jsonStr, projectStore.projectName || 'PSX_Model')
       return
@@ -136,6 +143,11 @@ function handleKeyDown(e: KeyboardEvent) {
     if (e.key === 'n' || e.key === 'N') {
       e.preventDefault()
       showNewProjectModal.value = true
+      return
+    }
+    if ((e.key === 't' || e.key === 'T') && e.shiftKey) {
+      e.preventDefault()
+      projectStore.restoreAutosaveSession()
       return
     }
     if (e.key === ',' || e.key === '<') {
@@ -161,7 +173,7 @@ function handleKeyDown(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && (e.key === 'r' || e.key === 'R')) {
     e.preventDefault()
     if (toolStore.appMode === 'model') {
-      window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'loop_cut' }))
+      requestModalTool('loop_cut')
     }
     return
   }
@@ -170,7 +182,7 @@ function handleKeyDown(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'B')) {
     e.preventDefault()
     if (toolStore.appMode === 'model') {
-      window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'bevel' }))
+      requestModalTool('bevel')
     } else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
       const mode = toolStore.selectMode === 'object' ? 'object' : (toolStore.selectMode === 'edge' ? 'edges' : (toolStore.selectMode === 'vertex' ? 'vertices' : 'faces'))
       animationStore.bindSelectedGeometry(mode)
@@ -181,13 +193,15 @@ function handleKeyDown(e: KeyboardEvent) {
   // Parent to Bone (Ctrl+P) / Unbind (Alt+P) (Blender)
   if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
     e.preventDefault()
-    const mode = toolStore.selectMode === 'object' ? 'object' : (toolStore.selectMode === 'edge' ? 'edges' : (toolStore.selectMode === 'vertex' ? 'vertices' : 'faces'))
-    animationStore.bindSelectedGeometry(mode)
+    if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
+      const mode = toolStore.selectMode === 'object' ? 'object' : (toolStore.selectMode === 'edge' ? 'edges' : (toolStore.selectMode === 'vertex' ? 'vertices' : 'faces'))
+      animationStore.bindSelectedGeometry(mode)
+    }
     return
   }
   if (e.altKey && (e.key === 'p' || e.key === 'P') && !e.ctrlKey && !e.metaKey) {
     e.preventDefault()
-    if (projectStore.activeMesh) {
+    if ((toolStore.appMode === 'rig' || toolStore.appMode === 'animate') && projectStore.activeMesh) {
       animationStore.unbindGeometry(projectStore.activeMesh.id)
     }
     return
@@ -211,27 +225,31 @@ function handleKeyDown(e: KeyboardEvent) {
     return
   }
 
+  // Modifier shortcuts that were not handled above belong to the focused
+  // workspace component. Do not also run a plain-key action in this handler.
+  if (e.ctrlKey || e.metaKey || e.altKey) return
+
   // Desktop Numpad View Hotkeys
   if (e.code === 'Numpad7') {
     e.preventDefault()
     toolStore.viewport.quadView = false
     // Emit top view via custom event or global viewport event
-    window.dispatchEvent(new CustomEvent('set-camera-view', { detail: 'top' }))
+    requestCameraView('top')
     return
   } else if (e.code === 'Numpad1') {
     e.preventDefault()
     toolStore.viewport.quadView = false
-    window.dispatchEvent(new CustomEvent('set-camera-view', { detail: 'front' }))
+    requestCameraView('front')
     return
   } else if (e.code === 'Numpad3') {
     e.preventDefault()
     toolStore.viewport.quadView = false
-    window.dispatchEvent(new CustomEvent('set-camera-view', { detail: 'right' }))
+    requestCameraView('right')
     return
   } else if (e.code === 'Numpad0') {
     e.preventDefault()
     toolStore.viewport.quadView = false
-    window.dispatchEvent(new CustomEvent('set-camera-view', { detail: 'iso' }))
+    requestCameraView('iso')
     return
   } else if (e.code === 'Numpad5') {
     e.preventDefault()
@@ -243,38 +261,71 @@ function handleKeyDown(e: KeyboardEvent) {
   switch (e.key.toLowerCase()) {
     case 'tab':
       e.preventDefault()
+      toolStore.setAppMode('model')
+      if (!projectStore.activeMesh && projectStore.meshes.length > 0) {
+        projectStore.activeMeshId = projectStore.meshes[0].id
+        projectStore.selectedMeshIds = [projectStore.meshes[0].id]
+      }
       toolStore.selectMode = toolStore.selectMode === 'object' ? 'face' : 'object'
-      projectStore.clearSubSelections()
       break
     case '1':
+      toolStore.setAppMode('model')
+      if (!projectStore.activeMesh && projectStore.meshes.length > 0) {
+        projectStore.activeMeshId = projectStore.meshes[0].id
+        projectStore.selectedMeshIds = [projectStore.meshes[0].id]
+      }
       toolStore.selectMode = 'vertex'
-      projectStore.clearSubSelections()
       break
     case '2':
+      toolStore.setAppMode('model')
+      if (!projectStore.activeMesh && projectStore.meshes.length > 0) {
+        projectStore.activeMeshId = projectStore.meshes[0].id
+        projectStore.selectedMeshIds = [projectStore.meshes[0].id]
+      }
       toolStore.selectMode = 'edge'
-      projectStore.clearSubSelections()
       break
     case '3':
+      toolStore.setAppMode('model')
+      if (!projectStore.activeMesh && projectStore.meshes.length > 0) {
+        projectStore.activeMeshId = projectStore.meshes[0].id
+        projectStore.selectedMeshIds = [projectStore.meshes[0].id]
+      }
       toolStore.selectMode = 'face'
-      projectStore.clearSubSelections()
       break
     case '4':
+      toolStore.setAppMode('model')
+      if (!projectStore.activeMesh && projectStore.meshes.length > 0) {
+        projectStore.activeMeshId = projectStore.meshes[0].id
+        projectStore.selectedMeshIds = [projectStore.meshes[0].id]
+      }
       toolStore.selectMode = 'object'
-      projectStore.clearSubSelections()
       break
     case '5':
-    case 'p':
+      toolStore.setAppMode('model')
+      if (!projectStore.activeMesh && projectStore.meshes.length > 0) {
+        projectStore.activeMeshId = projectStore.meshes[0].id
+        projectStore.selectedMeshIds = [projectStore.meshes[0].id]
+      }
       toolStore.selectMode = 'origin'
-      projectStore.clearSubSelections()
+      break
+    case 'p':
+      if (toolStore.appMode === 'model') {
+        if (toolStore.selectMode === 'face' || toolStore.selectMode === 'edge' || toolStore.selectMode === 'vertex') {
+          projectStore.performSeparateMesh()
+        } else {
+          toolStore.selectMode = 'origin'
+        }
+      }
       break
     case '6':
+      if (toolStore.appMode !== 'animate') {
+        toolStore.setAppMode('rig')
+      }
       toolStore.selectMode = 'bone'
-      toolStore.setAppMode('rig')
-      projectStore.clearSubSelections()
       break
     case 'g':
       if (toolStore.appMode === 'model') {
-        window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'grab' }))
+        requestModalTool('grab')
       } else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
         toolStore.setModelTool('move')
       } else if (toolStore.appMode === 'uvpaint') {
@@ -282,7 +333,7 @@ function handleKeyDown(e: KeyboardEvent) {
       }
       break
     case 'w':
-      if (toolStore.appMode === 'model' || toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
+      if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
         toolStore.setModelTool('move')
       } else if (toolStore.appMode === 'uvpaint') {
         toolStore.setPaintTool('bucket')
@@ -290,21 +341,21 @@ function handleKeyDown(e: KeyboardEvent) {
       break
     case 'r':
       if (toolStore.appMode === 'model') {
-        window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'rotate' }))
+        requestModalTool('rotate')
       } else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
         toolStore.setModelTool('rotate')
       }
       break
     case 's':
       if (toolStore.appMode === 'model') {
-        window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'scale' }))
+        requestModalTool('scale')
       } else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
         toolStore.setModelTool('scale')
       }
       break
     case 'e':
       if (toolStore.appMode === 'model') {
-        window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'extrude' }))
+        requestModalTool('extrude')
       } else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
         animationStore.extrudeBone(animationStore.selectedBoneId)
       } else if (toolStore.appMode === 'uvpaint') {
@@ -313,21 +364,19 @@ function handleKeyDown(e: KeyboardEvent) {
       break
     case 'i':
       if (toolStore.appMode === 'model') {
-        window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'inset' }))
+        requestModalTool('inset')
       } else if (toolStore.appMode === 'uvpaint') {
         toolStore.setPaintTool('picker')
       }
       break
     case 'b':
-      if (toolStore.appMode === 'model') {
-        toolStore.setModelTool('select')
-      } else if (toolStore.appMode === 'uvpaint') {
+      if (toolStore.appMode === 'uvpaint') {
         toolStore.setPaintTool('brush')
       }
       break
     case 'k':
       if (toolStore.appMode === 'model') {
-        window.dispatchEvent(new CustomEvent('blender-modal-op', { detail: 'knife' }))
+        requestModalTool('knife')
       }
       break
     case 'f':
@@ -340,7 +389,6 @@ function handleKeyDown(e: KeyboardEvent) {
       if (toolStore.appMode === 'uvpaint') toolStore.setPaintTool('dither')
       break
     case 'h':
-    case 'H':
       if (e.shiftKey || toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
         e.preventDefault()
         animationStore.toggleBoneHierarchyPopout()
@@ -364,34 +412,30 @@ function handleKeyDown(e: KeyboardEvent) {
       }
       break
     case 'n':
-    case 'N':
       e.preventDefault()
       layoutStore.toggleRightSidebar()
       break
   }
 }
 
-// In the UV/Paint workspace, do not display the right panel by default to maximize canvas drawing area
-watch(() => toolStore.appMode, (newMode, oldMode) => {
-  if (newMode === 'uvpaint') {
-    layoutStore.showRightSidebar = false
-  } else if (oldMode === 'uvpaint') {
-    layoutStore.showRightSidebar = true
-  }
-})
+function handleOpenExportCommand() {
+  showExportModal.value = true
+}
 
 onMounted(async () => {
   themeStore.initTheme()
   keymapStore.initKeymaps()
   window.addEventListener('keydown', handleKeyDown)
+  window.addEventListener(EDITOR_EVENTS.openExport, handleOpenExportCommand)
 
-  if (toolStore.appMode === 'uvpaint') {
-    layoutStore.showRightSidebar = false
+  if (await projectStore.checkAutosaveSession()) {
+    await projectStore.restoreAutosaveSession()
   }
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown)
+  window.removeEventListener(EDITOR_EVENTS.openExport, handleOpenExportCommand)
 })
 </script>
 
@@ -454,6 +498,17 @@ onUnmounted(() => {
 
       <!-- Right Sidebar (Outliner + Inspector + Material & Palette) -->
       <RightSidebar v-if="layoutStore.showRightSidebar" />
+
+      <!-- Expand Right Sidebar Tab (When hidden) -->
+      <button 
+        v-else
+        @click="layoutStore.showRightSidebar = true"
+        class="absolute right-0 top-1/2 -translate-y-1/2 z-40 bg-ui-header/90 hover:bg-ui-panel text-ui-textMuted hover:text-ui-textPrimary border-l border-t border-b border-ui-borderStrong rounded-l-xs py-2 px-1 shadow-xl transition flex flex-col items-center gap-1 group cursor-pointer"
+        title="Show Properties Panel (Hotkey: N)"
+      >
+        <ChevronLeft class="w-3 h-3 text-amber-400 group-hover:-translate-x-0.5 transition-transform" />
+        <span class="text-[8.5px] font-mono [writing-mode:vertical-lr] tracking-widest uppercase opacity-75 group-hover:opacity-100">Properties</span>
+      </button>
     </div>
 
     <!-- Desktop Bottom Status Bar Footer -->
