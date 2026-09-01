@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
+import { useFloatingDrag } from '../../composables/useFloatingDrag'
 import { useToolStore } from '../../stores/toolStore'
 import { useLayoutStore } from '../../stores/layoutStore'
 import OutlinerTree from '../outliner/OutlinerTree.vue'
 import TransformProps from '../inspector/TransformProps.vue'
 import MaterialProps from '../inspector/MaterialProps.vue'
 import TextureProps from '../inspector/TextureProps.vue'
+import ReferenceProps from '../inspector/ReferenceProps.vue'
 import ModifiersProps from '../inspector/ModifiersProps.vue'
 import RiggingPanel from '../rigging/RiggingPanel.vue'
 import BindingsPanel from '../rigging/BindingsPanel.vue'
@@ -21,18 +23,69 @@ import {
   Link,
   Paintbrush,
   FolderTree,
+  Box,
+  Scan,
+  Film,
   GripHorizontal, 
   Pin, 
   PinOff, 
   Minus, 
   Plus,
   X,
-  ChevronRight
+  ChevronRight,
+  Image
 } from 'lucide-vue-next'
 
 const toolStore = useToolStore()
 const layoutStore = useLayoutStore()
-const activeTab = ref<'outliner' | 'props' | 'modifiers' | 'material' | 'texture' | 'bindings' | 'weights' | 'skeleton'>('outliner')
+const activeTab = computed({
+  get: () => layoutStore.inspectorTab,
+  set: (tab) => layoutStore.setInspectorTab(tab, toolStore.appMode)
+})
+
+type SidebarTab = {
+  id: 'outliner' | 'props' | 'modifiers' | 'material' | 'texture' | 'refs' | 'skeleton' | 'bindings' | 'weights'
+  label: string
+  title: string
+  icon: any
+  accent?: string
+}
+
+const standardTabs = computed<SidebarTab[]>(() => {
+  const mode = toolStore.appMode
+  const propsTab: SidebarTab =
+    mode === 'animate'
+      ? { id: 'props', label: 'Anim', title: 'Animation — bones, keys, clips', icon: Film }
+      : mode === 'uvpaint'
+        ? { id: 'props', label: 'UV', title: 'UV / Paint — unwrap, seams, paint target', icon: Scan }
+        : { id: 'props', label: 'Object', title: 'Object — location, rotation, scale, origin', icon: Box }
+
+  const list: SidebarTab = { id: 'outliner', label: 'List', title: 'Outliner — hierarchy, visibility, parenting', icon: Layers }
+  const mod: SidebarTab = { id: 'modifiers', label: 'Mod', title: 'Modifiers', icon: Wrench, accent: 'sky' }
+  const mat: SidebarTab = { id: 'material', label: 'Mat', title: 'Material — shading and assign', icon: 'material', accent: 'amber' }
+  const tex: SidebarTab = { id: 'texture', label: 'Tex', title: 'Texture — select, create, apply', icon: 'texture', accent: 'emerald' }
+
+  const refs: SidebarTab = { id: 'refs', label: 'Refs', title: 'Reference images for blockout', icon: Image, accent: 'sky' }
+  if (mode === 'uvpaint') return [list, propsTab, tex, mat, mod]
+  if (mode === 'blockout') return [list, propsTab, refs, mod]
+  return [list, propsTab, mod, mat, tex]
+})
+
+const rigTabs = computed<SidebarTab[]>(() => [
+  { id: 'skeleton', label: 'Skel', title: 'Skeleton hierarchy', icon: FolderTree },
+  { id: 'props', label: 'Bone', title: 'Bone properties', icon: Sliders },
+  { id: 'bindings', label: 'Bind', title: 'Geometry bindings (Ctrl+B)', icon: Link, accent: 'amber' },
+  { id: 'weights', label: 'Wts', title: 'Weight paint', icon: Paintbrush, accent: 'sky' }
+])
+
+function tabClass(id: string, accent?: string) {
+  const on = activeTab.value === id
+  if (!on) return 'border-transparent text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'
+  if (accent === 'sky') return 'bg-ui-panel text-sky-400 font-semibold border-sky-500'
+  if (accent === 'amber') return 'bg-ui-panel text-amber-400 font-semibold border-amber-500'
+  if (accent === 'emerald') return 'bg-ui-panel text-emerald-400 font-semibold border-emerald-500'
+  return 'bg-ui-panel text-ui-textPrimary font-semibold border-ui-accent'
+}
 
 // Photoshop / DCC Floating & Resizable Panel States
 const isFloating = ref(false)
@@ -44,8 +97,11 @@ const pos = ref({
   y: 90 
 })
 
-const isDragging = ref(false)
-let dragOffset = { x: 0, y: 0 }
+const { isDragging, startDrag } = useFloatingDrag(pos, {
+  enabled: () => isFloating.value,
+  maxPadX: 100,
+  maxPadY: 50
+})
 
 const isResizingWidth = ref(false)
 const isResizingHeight = ref(false)
@@ -54,23 +110,13 @@ let resizeStartY = 0
 let startW = 320
 let startH = 560
 
-function updateWorkspaceDefaultTab() {
-  if (toolStore.appMode === 'rig') {
-    activeTab.value = 'skeleton'
-  } else if (toolStore.appMode === 'uvpaint') {
-    activeTab.value = 'material'
-  } else if (toolStore.appMode === 'model') {
-    if (toolStore.selectMode === 'object') {
-      activeTab.value = 'outliner'
-    } else {
-      activeTab.value = 'props'
-    }
-  } else {
-    activeTab.value = 'props'
-  }
-}
-
-watch(() => [toolStore.appMode, toolStore.selectMode], updateWorkspaceDefaultTab, { immediate: true })
+watch(
+  () => toolStore.appMode,
+  (mode) => {
+    layoutStore.restoreInspectorTab(mode)
+  },
+  { immediate: true }
+)
 
 function toggleFloating() {
   isFloating.value = !isFloating.value
@@ -80,34 +126,6 @@ function toggleFloating() {
       y: 90
     }
   }
-}
-
-function startDrag(e: MouseEvent) {
-  if (!isFloating.value) return
-  if (e.button !== 0) return
-
-  isDragging.value = true
-  dragOffset = {
-    x: e.clientX - pos.value.x,
-    y: e.clientY - pos.value.y
-  }
-
-  const onMouseMove = (moveEvent: MouseEvent) => {
-    if (!isDragging.value) return
-    const maxX = window.innerWidth - 100
-    const maxY = window.innerHeight - 50
-    pos.value.x = Math.max(0, Math.min(maxX, moveEvent.clientX - dragOffset.x))
-    pos.value.y = Math.max(34, Math.min(maxY, moveEvent.clientY - dragOffset.y))
-  }
-
-  const onMouseUp = () => {
-    isDragging.value = false
-    window.removeEventListener('mousemove', onMouseMove)
-    window.removeEventListener('mouseup', onMouseUp)
-  }
-
-  window.addEventListener('mousemove', onMouseMove)
-  window.addEventListener('mouseup', onMouseUp)
 }
 
 function startResizeLeft(e: MouseEvent) {
@@ -157,9 +175,11 @@ function startResizeCorner(e: MouseEvent) {
 
 <template>
   <aside 
-    class="bg-ui-panel border border-ui-borderSubtle flex flex-col select-none z-30 font-mono text-xs overflow-hidden transition-all duration-75"
+    data-floating-panel
+    class="bg-ui-panel border border-ui-borderSubtle flex flex-col select-none z-30 font-mono text-xs overflow-hidden"
     :class="[
       isFloating ? 'fixed rounded-xs shadow-2xl border-ui-borderStrong' : 'relative border-l border-t-0 border-b-0 border-r-0 h-full',
+      isDragging ? 'transition-none cursor-grabbing' : '',
       isMinimized ? 'h-auto' : ''
     ]"
     :style="isFloating ? { 
@@ -193,7 +213,7 @@ function startResizeCorner(e: MouseEvent) {
     <div 
       class="h-6 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between text-ui-textMuted select-none shrink-0"
       :class="{ 'cursor-move': isFloating, 'cursor-pointer': !isFloating }"
-      @mousedown="startDrag"
+      @pointerdown="startDrag"
       @dblclick="isMinimized = !isMinimized"
       :title="isFloating ? 'Drag header to move inspector. Double-click to fold.' : 'Double-click to fold.'"
     >
@@ -202,7 +222,7 @@ function startResizeCorner(e: MouseEvent) {
         <span>Properties</span>
       </div>
 
-      <div class="flex items-center space-x-1" @mousedown.stop>
+      <div class="flex items-center space-x-1" @mousedown.stop @pointerdown.stop>
         <!-- Toggle Dock / Float -->
         <button 
           @click="toggleFloating"
@@ -237,95 +257,42 @@ function startResizeCorner(e: MouseEvent) {
 
     <!-- Body Content (Hidden when minimized) -->
     <div v-show="!isMinimized" class="flex-1 flex flex-col min-h-0 overflow-hidden">
-      <!-- 1. Rigging Tab Strip (Skeleton, Bone Properties, Bindings, Weights) -->
-      <div v-if="toolStore.appMode === 'rig'" class="h-7 bg-ui-header border-b border-ui-borderSubtle grid grid-cols-4 text-xs shrink-0 font-sans">
-        <button 
-          @click="activeTab = 'skeleton'"
-          class="flex items-center justify-center p-1 transition border-b-2"
-          :class="activeTab === 'skeleton' ? 'bg-ui-panel text-ui-textPrimary font-semibold border-ui-accent' : 'border-transparent text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
-          title="Skeleton Hierarchy Tree"
+      <div
+        v-if="toolStore.appMode === 'rig'"
+        class="h-7 bg-ui-header border-b border-ui-borderSubtle grid shrink-0 font-sans"
+        :style="{ gridTemplateColumns: `repeat(${rigTabs.length}, minmax(0, 1fr))` }"
+      >
+        <button
+          v-for="tab in rigTabs"
+          :key="tab.id"
+          type="button"
+          @click="activeTab = tab.id"
+          class="flex flex-col items-center justify-center gap-0 leading-none transition border-b-2 px-0.5 text-[9px]"
+          :class="tabClass(tab.id, tab.accent)"
+          :title="tab.title"
         >
-          <FolderTree class="w-3.5 h-3.5" />
-        </button>
-
-        <button 
-          @click="activeTab = 'props'"
-          class="flex items-center justify-center p-1 transition border-b-2"
-          :class="activeTab === 'props' ? 'bg-ui-panel text-ui-textPrimary font-semibold border-ui-accent' : 'border-transparent text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
-          title="Bone Properties"
-        >
-          <Sliders class="w-3.5 h-3.5" />
-        </button>
-
-        <button 
-          @click="activeTab = 'bindings'"
-          class="flex items-center justify-center p-1 transition border-b-2"
-          :class="activeTab === 'bindings' ? 'bg-ui-panel text-amber-400 font-semibold border-amber-500' : 'border-transparent text-ui-textMuted hover:text-amber-300 hover:bg-ui-hover'"
-          title="Geometry Bindings (Ctrl+B)"
-        >
-          <Link class="w-3.5 h-3.5" />
-        </button>
-
-        <button 
-          @click="activeTab = 'weights'"
-          class="flex items-center justify-center p-1 transition border-b-2"
-          :class="activeTab === 'weights' ? 'bg-ui-panel text-sky-400 font-semibold border-sky-500' : 'border-transparent text-ui-textMuted hover:text-sky-300 hover:bg-ui-hover'"
-          title="Weight Paint & Vertex Weights"
-        >
-          <Paintbrush class="w-3.5 h-3.5" />
+          <component :is="tab.icon" class="w-3.5 h-3.5" />
+          <span>{{ tab.label }}</span>
         </button>
       </div>
 
-      <!-- 2. Standard Tab Strip (Outliner, Object, Modifiers, Material, Texture) -->
-      <div v-else class="h-7 bg-ui-header border-b border-ui-borderSubtle grid grid-cols-5 text-xs shrink-0 font-sans">
-        <!-- Outliner Tab -->
-        <button 
-          @click="activeTab = 'outliner'"
-          class="flex items-center justify-center p-1 transition border-b-2"
-          :class="activeTab === 'outliner' ? 'bg-ui-panel text-ui-textPrimary font-semibold border-ui-accent' : 'border-transparent text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
-          title="Outliner / Collections"
+      <div
+        v-else
+        class="h-7 bg-ui-header border-b border-ui-borderSubtle grid shrink-0 font-sans"
+        :style="{ gridTemplateColumns: `repeat(${standardTabs.length}, minmax(0, 1fr))` }"
+      >
+        <button
+          v-for="tab in standardTabs"
+          :key="tab.id"
+          type="button"
+          @click="activeTab = tab.id"
+          class="flex flex-col items-center justify-center gap-0 leading-none transition border-b-2 px-0.5 text-[9px]"
+          :class="tabClass(tab.id, tab.accent)"
+          :title="tab.title"
         >
-          <Layers class="w-3.5 h-3.5" />
-        </button>
-
-        <!-- Properties Tab -->
-        <button 
-          @click="activeTab = 'props'"
-          class="flex items-center justify-center p-1 transition border-b-2"
-          :class="activeTab === 'props' ? 'bg-ui-panel text-ui-textPrimary font-semibold border-ui-accent' : 'border-transparent text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
-          :title="toolStore.appMode === 'animate' ? 'Animation Properties' : 'Object Properties'"
-        >
-          <Sliders class="w-3.5 h-3.5" />
-        </button>
-
-        <!-- Modifiers Tab -->
-        <button 
-          @click="activeTab = 'modifiers'"
-          class="flex items-center justify-center p-1 transition border-b-2"
-          :class="activeTab === 'modifiers' ? 'bg-ui-panel text-sky-400 font-semibold border-sky-500' : 'border-transparent text-ui-textMuted hover:text-sky-300 hover:bg-ui-hover'"
-          title="Modifiers (Wrench)"
-        >
-          <Wrench class="w-3.5 h-3.5" />
-        </button>
-
-        <!-- Material Properties Tab -->
-        <button 
-          @click="activeTab = 'material'"
-          class="flex items-center justify-center p-1 transition border-b-2"
-          :class="activeTab === 'material' ? 'bg-ui-panel text-amber-400 font-semibold border-amber-500' : 'border-transparent text-ui-textMuted hover:text-amber-300 hover:bg-ui-hover'"
-          title="Material Properties (PBR / PSX Shaders)"
-        >
-          <BlenderIcon name="material" :size="14" />
-        </button>
-
-        <!-- Texture Assets Tab -->
-        <button 
-          @click="activeTab = 'texture'"
-          class="flex items-center justify-center p-1 transition border-b-2"
-          :class="activeTab === 'texture' ? 'bg-ui-panel text-emerald-400 font-semibold border-emerald-500' : 'border-transparent text-ui-textMuted hover:text-emerald-300 hover:bg-ui-hover'"
-          title="Texture Asset Library (2D Maps)"
-        >
-          <BlenderIcon name="texture" :size="14" />
+          <BlenderIcon v-if="tab.icon === 'material' || tab.icon === 'texture'" :name="tab.icon" :size="12" />
+          <component v-else :is="tab.icon" class="w-3.5 h-3.5" />
+          <span>{{ tab.label }}</span>
         </button>
       </div>
 
@@ -360,6 +327,10 @@ function startResizeCorner(e: MouseEvent) {
         <!-- Texture Assets Tab -->
         <div v-else-if="activeTab === 'texture'" class="h-full overflow-y-auto flex flex-col">
           <TextureProps />
+        </div>
+
+        <div v-else-if="activeTab === 'refs'" class="h-full overflow-y-auto flex flex-col">
+          <ReferenceProps />
         </div>
       </div>
 

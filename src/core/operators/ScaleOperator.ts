@@ -25,17 +25,9 @@ export class ScaleOperator extends ModalOperator {
 
     const basis = PivotManager.getBasis(this.orientation, this.ctx.camera)
 
-    const targetVertIds = new Set<number>()
-    if (this.ctx.selectedFaceIds.length > 0) {
-      for (const fId of this.ctx.selectedFaceIds) {
-        const face = this.ctx.mesh.faces.get(fId)
-        if (face) face.vertexIds.forEach(vid => targetVertIds.add(vid))
-      }
-    } else {
-      this.ctx.selectedVertIds.forEach((vid: number) => targetVertIds.add(vid))
-    }
+    const targetVertIds = this.collectTargetVertIds()
 
-    for (const [vId, v] of this.ctx.mesh.vertices) {
+    for (const [vId] of this.ctx.mesh.vertices) {
       if (targetVertIds.has(vId)) {
         const initPos = this.initialVertices.get(vId)
         if (initPos) {
@@ -67,13 +59,12 @@ export class ScaleOperator extends ModalOperator {
             local.multiplyScalar(factor)
           }
 
-          // Transform back to world coordinates
           const world = this.pivot.clone()
             .add(basis.x.clone().multiplyScalar(local.x))
             .add(basis.y.clone().multiplyScalar(local.y))
             .add(basis.z.clone().multiplyScalar(local.z))
 
-          v.position.copy(world)
+          this.writeWorldPos(vId, world)
         }
       }
     }

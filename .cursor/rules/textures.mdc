@@ -1,0 +1,17 @@
+---
+description: Texture library, materials, and paint target
+globs: src/stores/projectStore.ts,src/types/texture.ts,src/composables/useTextureApply.ts,src/components/inspector/TextureProps.vue,src/components/inspector/MaterialProps.vue,src/components/uvpaint/**/*.vue,src/core/painting/**/*.ts,src/components/modals/ImportTextureModal.vue
+alwaysApply: false
+---
+
+# Textures
+
+Read `docs/TEXTURES.md`. Three verbs only:
+
+- `selectTexture(id)` — paint/UV target. No mesh bind.
+- `createTexture(...)` — add a library image. No mesh bind.
+- `applyTextureToMesh` / `applyTextureToMaterial` — show the image on an object or material.
+
+Shared material: `useTextureApply()` + `TextureSharePrompt` for Texture-panel **Use on**. UV/Paint TEX, New, and Import bind the active object with `applyTextureToMesh(..., 'this_object')` (silent fork if the material is shared). File → Import Texture stays create + select only.
+
+Do not auto-set `activeTextureId` when selecting objects in Model mode. UV/Paint workspace and 3D paint may sync via `syncPaintTargetFromMesh`.

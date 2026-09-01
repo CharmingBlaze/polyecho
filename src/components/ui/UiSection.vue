@@ -8,11 +8,15 @@ const props = withDefaults(defineProps<{
   isOpen?: boolean
   collapsible?: boolean
   badge?: string | number
+  hint?: string
+  icon?: any
 }>(), {
   defaultOpen: true,
   isOpen: undefined,
   collapsible: true,
-  badge: undefined
+  badge: undefined,
+  hint: undefined,
+  icon: undefined
 })
 
 const emit = defineEmits<{
@@ -56,9 +60,11 @@ function toggle() {
           :is="localIsOpen ? ChevronDown : ChevronRight" 
           class="w-3 h-3 text-ui-textMuted shrink-0 transition-transform" 
         />
+        <component v-if="icon" :is="icon" class="w-3 h-3 text-ui-textMuted shrink-0" />
         <span class="font-sans font-semibold text-[11px] text-ui-textSecondary truncate">
           {{ title }}
         </span>
+        <span v-if="hint" class="font-mono text-[9px] text-ui-textMuted/80 truncate">{{ hint }}</span>
       </div>
 
       <div class="flex items-center space-x-1.5 shrink-0" @click.stop>

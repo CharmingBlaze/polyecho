@@ -8,6 +8,7 @@ export interface TextureStorageData {
   width: number
   height: number
   dataUrl: string
+  atlas?: { cols: number; rows: number }
 }
 
 export interface ProjectStorageData {

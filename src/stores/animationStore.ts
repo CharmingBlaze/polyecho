@@ -2,10 +2,12 @@ import { defineStore } from 'pinia'
 import { ref, computed, onScopeDispose } from 'vue'
 import { Armature, Bone, BoneSocket, Keyframe, AnimationClip, AnimationTrack, InterpolationType } from '../types/animation'
 import { Vector3D, MeshObject, Vertex } from '../types/mesh'
-import { sampleTrack } from '../core/animation/Armature'
+import { sampleTrack, setMeshBoneParent } from '../core/animation/Armature'
 import { autoWeightMeshToArmature } from '../core/animation/AutoSkinning'
+import { applyIKConstraints } from '../core/animation/IKSolver'
 import { SpringPhysicsSolver } from '../core/animation/SpringPhysics'
 import { useProjectStore } from './projectStore'
+import { useToolStore } from './toolStore'
 
 function genId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).substring(2, 9)}`
@@ -49,6 +51,15 @@ export const useAnimationStore = defineStore('animation', () => {
   const loopMode = ref<'loop' | 'once' | 'pingpong'>('loop')
   const showBones = ref<boolean>(true)
   const xrayBones = ref<boolean>(true)
+
+  function setShowBones(visible: boolean) {
+    showBones.value = visible
+    useToolStore().viewport.showBones = visible
+  }
+
+  function toggleShowBones() {
+    setShowBones(!showBones.value)
+  }
   const isTestPoseActive = ref<boolean>(false)
   const clickToPlaceMode = ref<boolean>(false)
   const showBoneHierarchyPopout = ref<boolean>(false)
@@ -145,22 +156,38 @@ export const useAnimationStore = defineStore('animation', () => {
   })
 
   // ----------------------------------------------------
-  // CLIP MANAGEMENT (Multiple Animations For Games)
+  // CLIP MANAGEMENT (Three Verbs — see docs/ANIMATION.md)
+  //   selectClip         timeline target only (no track changes, no undo)
+  //   createClip         add an animation clip to the library
+  //   evaluatePose       sample pose on armature & meshes at current/given frame
   // ----------------------------------------------------
-  function addClip(name = 'New_Action', durationFrames = 24, fps = 12): AnimationClip {
-    projectStore.recordState('Add Animation Clip')
+  function createClip(
+    name = 'New_Action',
+    durationFrames = 24,
+    fps = 12,
+    options?: { record?: boolean; select?: boolean; loop?: boolean }
+  ): AnimationClip {
+    const record = options?.record !== false
+    const shouldSelect = options?.select !== false
+    if (record) projectStore.recordState(`Add Animation Clip (${name})`)
     const newClip: AnimationClip = {
       id: genId('clip'),
       name,
       durationFrames,
       fps,
-      loop: true,
+      loop: options?.loop ?? true,
       tracks: []
     }
     armature.value.clips.push(newClip)
-    armature.value.activeClipId = newClip.id
-    currentFrame.value = 0
+    if (shouldSelect) {
+      selectClip(newClip.id)
+    }
     return newClip
+  }
+
+  /** @deprecated Use createClip — same behavior, kept for compatibility */
+  function addClip(name = 'New_Action', durationFrames = 24, fps = 12): AnimationClip {
+    return createClip(name, durationFrames, fps)
   }
 
   function duplicateClip(clipId: string): AnimationClip | null {
@@ -171,7 +198,7 @@ export const useAnimationStore = defineStore('animation', () => {
     cloned.id = genId('clip')
     cloned.name = `${src.name}_Copy`
     armature.value.clips.push(cloned)
-    armature.value.activeClipId = cloned.id
+    selectClip(cloned.id)
     return cloned
   }
 
@@ -180,8 +207,7 @@ export const useAnimationStore = defineStore('animation', () => {
     projectStore.recordState('Delete Animation Clip')
     armature.value.clips = armature.value.clips.filter(c => c.id !== clipId)
     if (armature.value.activeClipId === clipId) {
-      armature.value.activeClipId = armature.value.clips[0].id
-      currentFrame.value = 0
+      selectClip(armature.value.clips[0].id)
     }
   }
 
@@ -270,6 +296,24 @@ export const useAnimationStore = defineStore('animation', () => {
     }
 
     armature.value.bones.splice(boneIndex, 1)
+
+    const fallbackBoneId = bone.parentId
+    for (const mesh of projectStore.meshes) {
+      if (mesh.parentBoneId === boneId) {
+        setMeshBoneParent(mesh, fallbackBoneId, fallbackBoneId ? armature.value.id : undefined)
+      }
+      if (mesh.parentId === boneId) {
+        mesh.parentId = undefined
+      }
+      for (const v of mesh.vertices) {
+        if (v.boneWeights && v.boneWeights[boneId] != null) {
+          delete v.boneWeights[boneId]
+          normalizeSingleVertex(v)
+        }
+      }
+    }
+    projectStore.markGeometryUpdated()
+
     if (selectedBoneId.value === boneId) {
       selectedBoneId.value = armature.value.bones[0]?.id || null
     }
@@ -481,8 +525,11 @@ export const useAnimationStore = defineStore('animation', () => {
   function parentMeshToBone(meshId: string, boneId: string | null) {
     const mesh = projectStore.meshes.find(m => m.id === meshId)
     if (!mesh) return
-    mesh.parentId = boneId || undefined
-    mesh.armatureId = boneId ? armature.value.id : undefined
+    setMeshBoneParent(mesh, boneId, boneId ? armature.value.id : undefined)
+    if (!boneId && mesh.armatureId === armature.value.id) {
+      const stillSkinned = mesh.vertices.some(v => v.boneWeights && Object.keys(v.boneWeights).length > 0)
+      if (!stillSkinned) mesh.armatureId = undefined
+    }
   }
 
   function autoWeightMeshToBones(mesh: MeshObject) {
@@ -539,8 +586,7 @@ export const useAnimationStore = defineStore('animation', () => {
 
     // 1. Direct Object Node Parenting
     if (targetType === 'object') {
-      activeMesh.parentId = boneId
-      activeMesh.armatureId = armature.value.id
+      setMeshBoneParent(activeMesh, boneId, armature.value.id)
       return { success: true, message: `Parented ${activeMesh.name} to ${bone.name} (Object Node)` }
     }
 
@@ -723,14 +769,18 @@ export const useAnimationStore = defineStore('animation', () => {
     if (!mesh) return
     projectStore.recordState('Unbind Geometry')
     if (boneId) {
-      if (mesh.parentId === boneId) mesh.parentId = undefined
+      if (mesh.parentBoneId === boneId || mesh.parentId === boneId) {
+        setMeshBoneParent(mesh, null)
+      }
       for (const v of mesh.vertices) {
         if (v.boneWeights && v.boneWeights[boneId]) {
           delete v.boneWeights[boneId]
+          normalizeSingleVertex(v)
         }
       }
     } else {
-      mesh.parentId = undefined
+      setMeshBoneParent(mesh, null)
+      mesh.armatureId = undefined
       for (const v of mesh.vertices) {
         v.boneWeights = {}
       }
@@ -1084,7 +1134,8 @@ export const useAnimationStore = defineStore('animation', () => {
     for (const mesh of projectStore.meshes) {
       if (mesh.armatureId === armature.value.id) {
         mesh.armatureId = undefined
-        mesh.parentId = undefined
+        setMeshBoneParent(mesh, null)
+        for (const v of mesh.vertices) v.boneWeights = {}
       }
     }
   }
@@ -1136,8 +1187,8 @@ export const useAnimationStore = defineStore('animation', () => {
     }
   }
 
-  function recordCurrentKeyframe() {
-    projectStore.recordState('Record Keyframe')
+  function recordCurrentKeyframe(options?: { record?: boolean }) {
+    if (options?.record !== false) projectStore.recordState('Record Keyframe')
     if (selectedBoneId.value) {
       const bone = selectedBone.value
       if (bone) {
@@ -1289,12 +1340,12 @@ export const useAnimationStore = defineStore('animation', () => {
         bone.rotation = { x: 0, y: 0, z: 0 }
         bone.position = { x: 0, y: 0, z: 0 }
         bone.scale = { x: 1, y: 1, z: 1 }
-        if (autoKey.value) recordCurrentKeyframe()
+        if (autoKey.value) recordCurrentKeyframe({ record: false })
       }
     } else if (projectStore.activeMesh) {
       const mesh = projectStore.activeMesh
       mesh.rotation = { x: 0, y: 0, z: 0 }
-      if (autoKey.value) recordCurrentKeyframe()
+      if (autoKey.value) recordCurrentKeyframe({ record: false })
     }
   }
 
@@ -1787,6 +1838,8 @@ export const useAnimationStore = defineStore('animation', () => {
         }
       }
     }
+
+    applyIKConstraints(armature.value.bones)
   }
 
   return {
@@ -1798,6 +1851,8 @@ export const useAnimationStore = defineStore('animation', () => {
     playbackSpeed,
     loopMode,
     showBones,
+    setShowBones,
+    toggleShowBones,
     xrayBones,
     autoKey,
     interpolationMode,
@@ -1806,6 +1861,7 @@ export const useAnimationStore = defineStore('animation', () => {
     onionOpacity,
     showMotionTrail,
     activeClip,
+    createClip,
     addClip,
     duplicateClip,
     deleteClip,

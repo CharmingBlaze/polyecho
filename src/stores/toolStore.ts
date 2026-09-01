@@ -23,6 +23,7 @@ export const useToolStore = defineStore('tool', () => {
   const rigTool = ref<RigToolType>('select_bone')
   const animateTool = ref<AnimateToolType>('select_bone')
   const isBoxSelectActive = ref<boolean>(false)
+  const activeProfileId = ref<string>('psx_retro')
 
   // Painting settings
   const primaryColor = ref<string>('#ffffff')
@@ -41,11 +42,9 @@ export const useToolStore = defineStore('tool', () => {
 
   // Vertex Painting settings
   const vertexPaintColor = ref<string>('#ffffff')
-  const vertexBrushRadius = ref<number>(0.8)
-  const vertexBrushFalloff = ref<number>(0.5) // 0 = hard, 1 = smooth falloff
-  const vertexBrushBlend = ref<'mix' | 'add' | 'multiply'>('mix')
-  const paintTarget = ref<'texture' | 'vertex'>('texture')
-  const uvWorkspaceTab = ref<'uv' | 'paint' | 'vertex'>('uv')
+  const uvWorkspaceTab = ref<'uv' | 'paint'>('uv')
+  /** Face ids of the UV island under the cursor — 3D viewport highlights these. */
+  const uvHoverFaceIds = ref<string[]>([])
 
   // Snapping & Precision
   const snapping = ref<SnappingSettings>({
@@ -69,7 +68,7 @@ export const useToolStore = defineStore('tool', () => {
     showNormals: false,
     showBones: true,
     faceOrientation: false,
-    wireframeOpacity: 0.6,
+    wireframeOpacity: 0.88,
     psxJitter: false,
     psxAffine: false,
     dither: false,
@@ -84,13 +83,21 @@ export const useToolStore = defineStore('tool', () => {
     invertZoom: false,
   })
 
+  function isMeshWorkspace() {
+    return appMode.value === 'model' || appMode.value === 'blockout'
+  }
+
   function setAppMode(mode: AppMode) {
     appMode.value = mode
     isBoxSelectActive.value = false
-    if ((mode === 'model' || mode === 'uvpaint') && (selectMode.value === 'bone' || selectMode.value === 'origin')) {
+    if ((mode === 'model' || mode === 'blockout' || mode === 'uvpaint') && (selectMode.value === 'bone' || selectMode.value === 'origin')) {
       selectMode.value = 'object'
     } else if (mode === 'animate' || mode === 'rig') {
       selectMode.value = 'bone'
+    }
+    if (mode === 'blockout') {
+      selectMode.value = 'object'
+      modelTool.value = 'move'
     }
   }
 
@@ -110,6 +117,13 @@ export const useToolStore = defineStore('tool', () => {
     rigTool.value = tool
   }
 
+  function setUvHoverFaceIds(ids: string[]) {
+    const next = ids.slice()
+    const prev = uvHoverFaceIds.value
+    if (prev.length === next.length && prev.every((id, i) => id === next[i])) return
+    uvHoverFaceIds.value = next
+  }
+
   return {
     appMode,
     selectMode,
@@ -117,6 +131,7 @@ export const useToolStore = defineStore('tool', () => {
     transformOrientation,
     pivotPoint,
     isBoxSelectActive,
+    activeProfileId,
     paintTool,
     rigTool,
     animateTool,
@@ -132,14 +147,13 @@ export const useToolStore = defineStore('tool', () => {
     currentPressure,
     currentPointerType,
     vertexPaintColor,
-    vertexBrushRadius,
-    vertexBrushFalloff,
-    vertexBrushBlend,
-    paintTarget,
     uvWorkspaceTab,
+    uvHoverFaceIds,
+    setUvHoverFaceIds,
     snapping,
     cursor3D,
     viewport,
+    isMeshWorkspace,
     setAppMode,
     setSelectMode,
     setModelTool,

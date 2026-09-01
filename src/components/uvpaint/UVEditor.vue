@@ -12,6 +12,7 @@ import {
   packUVIslands,
   gridifyQuadIslands,
   equalizeTexelDensity,
+  sampleFaceTexelDensity,
   calculateUVDistortion,
   generateUVCheckerboardDataURL,
   ensureMeshUVs
@@ -32,13 +33,27 @@ import {
   Plus
 } from 'lucide-vue-next'
 import { SeamUnwrapper } from '../../core/uv/SeamUnwrapper'
+import { expandFacesToIslands, expandWeldedUvEdges, findUvIslands, stitchUvEdge } from '../../core/uv/UVIslands'
+import type { MeshObject } from '../../types/mesh'
+import TextureSharePrompt from '../modals/TextureSharePrompt.vue'
+import ImportTextureModal from '../modals/ImportTextureModal.vue'
+import { useTextureApply } from '../../composables/useTextureApply'
 
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
+const {
+  isOpen: sharePromptOpen,
+  sharedCount: sharePromptCount,
+  applyToActiveMesh,
+  confirm: confirmShareApply,
+  cancel: cancelShareApply
+} = useTextureApply()
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const containerRef = ref<HTMLDivElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
+const showImportModal = ref(false)
+const pendingImportFile = ref<File | null>(null)
 
 // UV Selection mode: 'vertex' | 'edge' | 'face' | 'island'
 const activeDropdown = ref<string | null>(null)
@@ -69,6 +84,17 @@ const uvSelectMode = computed<'vertex' | 'edge' | 'face' | 'island'>({
 const selectedUvVerts = ref<{ faceIndex: number; vertIndex: number }[]>([])
 const selectedUvEdges = ref<{ faceIndex: number; edgeIndex: number }[]>([])
 const selectedFaceIndices = ref<number[]>([])
+const paintAtlas = computed(() => projectStore.activeTexture?.atlas || null)
+const atlasMenuCells = computed(() => {
+  const a = paintAtlas.value || { cols: 2, rows: 2 }
+  const cells: { col: number; row: number }[] = []
+  for (let row = 0; row < a.rows; row++) {
+    for (let col = 0; col < a.cols; col++) cells.push({ col, row })
+  }
+  return cells
+})
+const pinnedUvKeys = ref<Set<string>>(new Set())
+const hoveredIslandFaceIndices = ref<number[]>([])
 
 const zoom = ref<number>(5)
 const panOffset = ref<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -77,6 +103,29 @@ const snapToPixels = ref<boolean>(true)
 const showCheckerboard = ref<boolean>(false)
 const showHeatmap = ref<boolean>(false)
 const checkerboardImage = ref<HTMLImageElement | null>(null)
+
+const targetTexelDensity = ref<number>(16)
+const sampledDensity = ref<number | null>(null)
+
+function handleSampleTexelDensity() {
+  if (!activeMesh.value) return
+  const faceIdx = selectedFaceIndices.value.length > 0 ? selectedFaceIndices.value[0] : 0
+  const texSize = projectStore.activeTexture?.width || 64
+  const density = sampleFaceTexelDensity(activeMesh.value, faceIdx, texSize)
+  targetTexelDensity.value = density
+  sampledDensity.value = density
+}
+
+function handleApplyTexelDensity() {
+  if (!activeMesh.value) return
+  projectStore.performApplyTexelDensity(targetTexelDensity.value, selectedFaceIndices.value.length > 0 ? selectedFaceIndices.value : undefined)
+  renderCanvas()
+}
+
+function handleEqualizeTexelDensity() {
+  projectStore.performEqualizeTexelDensity()
+  renderCanvas()
+}
 
 const distortionMap = computed(() => {
   if (!showHeatmap.value || !activeMesh.value) return null
@@ -90,6 +139,8 @@ let initialPinchZoom = 5
 let initialPinchPan = { x: 0, y: 0 }
 
 const isPanning = ref<boolean>(false)
+let spaceHeld = false
+let lastCanvasClickAt = 0
 let panStart = { x: 0, y: 0 }
 
 // Marquee Box Selection State (Blender Box Select / Ctrl+LMB Drag)
@@ -156,10 +207,82 @@ watch(() => projectStore.selectedVertexIds, (newVal) => {
 
 function getTargetFaces(): number[] {
   if (!activeMesh.value) return []
-  if (uvSelectMode.value === 'island' || selectedFaceIndices.value.length === 0) {
-    return activeMesh.value.faces.map((_, i) => i)
+
+  if (uvSelectMode.value === 'vertex' && selectedUvVerts.value.length > 0) {
+    return Array.from(new Set(selectedUvVerts.value.map(v => v.faceIndex)))
   }
-  return selectedFaceIndices.value
+  if (uvSelectMode.value === 'edge' && selectedUvEdges.value.length > 0) {
+    return Array.from(new Set(selectedUvEdges.value.map(e => e.faceIndex)))
+  }
+
+  if (selectedFaceIndices.value.length > 0) {
+    if (uvSelectMode.value === 'island') {
+      return expandFacesToIslands(activeMesh.value, selectedFaceIndices.value)
+    }
+    return [...selectedFaceIndices.value]
+  }
+
+  return []
+}
+
+const uvIslandCount = computed(() => {
+  if (!activeMesh.value) return 0
+  return findUvIslands(activeMesh.value).length
+})
+
+const selectedFaceCount = computed(() => getTargetFaces().length)
+
+function pinKey(faceIndex: number, vertIndex: number): string {
+  const face = activeMesh.value?.faces[faceIndex]
+  if (!face) return ''
+  return `${face.id}:${face.vertexIds[vertIndex]}`
+}
+
+function isPinned(faceIndex: number, vertIndex: number): boolean {
+  return pinnedUvKeys.value.has(pinKey(faceIndex, vertIndex))
+}
+
+function commitUvEdgeSelection(edges: { faceIndex: number; edgeIndex: number }[], additive: boolean) {
+  if (!activeMesh.value) return
+  const expanded = expandWeldedUvEdges(activeMesh.value, edges)
+  if (additive) {
+    const merged = [...selectedUvEdges.value]
+    const seen = new Set(merged.map(e => `${e.faceIndex}:${e.edgeIndex}`))
+    for (const e of expanded) {
+      const key = `${e.faceIndex}:${e.edgeIndex}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      merged.push(e)
+    }
+    selectedUvEdges.value = merged
+  } else {
+    selectedUvEdges.value = expanded
+  }
+  syncEdgesTo3D()
+}
+
+function publishUvHover(faceIndex: number | null) {
+  if (faceIndex === null || !activeMesh.value) {
+    hoveredIslandFaceIndices.value = []
+    toolStore.setUvHoverFaceIds([])
+    return
+  }
+  const faces = uvSelectMode.value === 'island'
+    ? expandFacesToIslands(activeMesh.value, [faceIndex])
+    : [faceIndex]
+  hoveredIslandFaceIndices.value = faces
+  toolStore.setUvHoverFaceIds(faces.map(i => activeMesh.value!.faces[i]?.id).filter(Boolean))
+}
+
+function selectIslandFromFace(faceIndex: number, additive: boolean) {
+  if (!activeMesh.value) return
+  const island = expandFacesToIslands(activeMesh.value, [faceIndex])
+  if (additive) {
+    selectedFaceIndices.value = Array.from(new Set([...selectedFaceIndices.value, ...island]))
+  } else {
+    selectedFaceIndices.value = island
+  }
+  syncFacesTo3D()
 }
 
 // Compute Bounding Box of Active Selection (Supports unconstrained / negative UV space)
@@ -296,10 +419,10 @@ function renderCanvas() {
   }
 
   // 2. Draw Active Central 0..1 Texture (or Checkerboard Test Grid)
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.9)'
-  ctx.shadowBlur = 32
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.45)'
+  ctx.shadowBlur = 8
   ctx.shadowOffsetX = 0
-  ctx.shadowOffsetY = 4
+  ctx.shadowOffsetY = 2
   if (showCheckerboard.value && checkerboardImage.value) {
     ctx.drawImage(checkerboardImage.value, ox, oy, texW, texH)
   } else {
@@ -313,18 +436,28 @@ function renderCanvas() {
   ctx.lineWidth = 1.5
   ctx.strokeRect(ox, oy, texW, texH)
 
-  // Quadrant 50% Subdivisions (Dashed Crosshairs)
-  ctx.save()
-  ctx.setLineDash([4, 4])
-  ctx.strokeStyle = 'rgba(99, 102, 241, 0.35)'
-  ctx.lineWidth = 1
-  ctx.beginPath()
-  ctx.moveTo(ox + texW / 2, oy)
-  ctx.lineTo(ox + texW / 2, oy + texH)
-  ctx.moveTo(ox, oy + texH / 2)
-  ctx.lineTo(ox + texW, oy + texH / 2)
-  ctx.stroke()
-  ctx.restore()
+  const atlasGrid = projectStore.activeTexture?.atlas
+  if (atlasGrid && (atlasGrid.cols > 1 || atlasGrid.rows > 1)) {
+    ctx.save()
+    ctx.setLineDash([4, 4])
+    ctx.strokeStyle = 'rgba(245, 158, 11, 0.45)'
+    ctx.lineWidth = 1
+    for (let c = 1; c < atlasGrid.cols; c++) {
+      const x = ox + (texW * c) / atlasGrid.cols
+      ctx.beginPath()
+      ctx.moveTo(x, oy)
+      ctx.lineTo(x, oy + texH)
+      ctx.stroke()
+    }
+    for (let r = 1; r < atlasGrid.rows; r++) {
+      const y = oy + (texH * r) / atlasGrid.rows
+      ctx.beginPath()
+      ctx.moveTo(ox, y)
+      ctx.lineTo(ox + texW, y)
+      ctx.stroke()
+    }
+    ctx.restore()
+  }
 
   // 3. Pixel Grid inside Texture
   if (showPixelGrid.value && zoom.value >= 4) {
@@ -374,7 +507,7 @@ function renderCanvas() {
       if (face.uvs.length < 3) return
 
       const isFaceSelected = selectedFaceIndices.value.includes(fIdx)
-      const isHovered = hoveredFaceIndex === fIdx
+      const isHovered = hoveredIslandFaceIndices.value.includes(fIdx)
 
       // Polygon Face
       ctx.beginPath()
@@ -391,23 +524,20 @@ function renderCanvas() {
         ctx.strokeStyle = isFaceSelected ? '#f59e0b' : '#38bdf8'
         ctx.lineWidth = isFaceSelected ? 2 : 1
       } else if (isFaceSelected) {
-        ctx.fillStyle = 'rgba(245, 158, 11, 0.38)'
+        ctx.fillStyle = 'rgba(245, 158, 11, 0.12)'
         ctx.strokeStyle = '#f59e0b'
-        ctx.lineWidth = 2
-      } else if (isHovered && (uvSelectMode.value === 'face' || uvSelectMode.value === 'island')) {
-        ctx.fillStyle = 'rgba(254, 240, 138, 0.32)'
-        ctx.strokeStyle = '#fef08a'
-        ctx.lineWidth = 2
-        ctx.shadowColor = '#fef08a'
-        ctx.shadowBlur = 8
+        ctx.lineWidth = 1.5
+      } else if (isHovered) {
+        ctx.fillStyle = 'rgba(254, 240, 138, 0.08)'
+        ctx.strokeStyle = '#fbbf24'
+        ctx.lineWidth = 1.5
       } else {
-        ctx.fillStyle = 'rgba(56, 189, 248, 0.12)'
-        ctx.strokeStyle = '#0284c7'
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.04)'
+        ctx.strokeStyle = 'rgba(14, 165, 233, 0.7)'
         ctx.lineWidth = 1
       }
       ctx.fill()
       ctx.stroke()
-      ctx.shadowBlur = 0
 
       // Edge Mode Highlighting
       if (uvSelectMode.value === 'edge') {
@@ -458,6 +588,22 @@ function renderCanvas() {
           ctx.shadowBlur = 0
         })
       }
+
+      face.uvs.forEach((uv, vIdx) => {
+        if (!isPinned(fIdx, vIdx)) return
+        const pt = uvToScreen(uv.u, uv.v)
+        ctx.beginPath()
+        ctx.moveTo(pt.x, pt.y - 6)
+        ctx.lineTo(pt.x + 5, pt.y)
+        ctx.lineTo(pt.x, pt.y + 6)
+        ctx.lineTo(pt.x - 5, pt.y)
+        ctx.closePath()
+        ctx.fillStyle = '#f472b6'
+        ctx.strokeStyle = '#831843'
+        ctx.lineWidth = 1.2
+        ctx.fill()
+        ctx.stroke()
+      })
     })
 
     // 5. Draw 8-Point Bounding Box Transform Gizmo (Face / Island Mode)
@@ -669,13 +815,21 @@ function onPointerDown(e: PointerEvent) {
   }
 
   // Middle-Click, Right-Click, Space/Alt+Click -> Pan
-  if (e.button === 1 || e.button === 2 || e.altKey) {
+  if (e.button === 1 || e.button === 2 || e.altKey || spaceHeld) {
     isPanning.value = true
     panStart = { x: e.clientX - panOffset.value.x, y: e.clientY - panOffset.value.y }
     return
   }
 
   if (e.button !== 0) return
+
+  const now = Date.now()
+  if (now - lastCanvasClickAt < 280) {
+    lastCanvasClickAt = 0
+    frameSelection()
+    return
+  }
+  lastCanvasClickAt = now
 
   const rect = canvasRef.value!.getBoundingClientRect()
   const sx = e.clientX - rect.left
@@ -711,14 +865,19 @@ function onPointerDown(e: PointerEvent) {
     if (edge) {
       if (e.shiftKey) {
         const existIdx = selectedUvEdges.value.findIndex(se => se.faceIndex === edge.faceIndex && se.edgeIndex === edge.edgeIndex)
-        if (existIdx >= 0) selectedUvEdges.value.splice(existIdx, 1)
-        else selectedUvEdges.value.push(edge)
+        if (existIdx >= 0) {
+          selectedUvEdges.value.splice(existIdx, 1)
+          syncEdgesTo3D()
+        } else {
+          commitUvEdgeSelection([edge], true)
+        }
       } else {
-        selectedUvEdges.value = [edge]
+        commitUvEdgeSelection([edge], false)
       }
-      syncEdgesTo3D()
-      activeDrag = 'drag_edge'
-      recordDragStartUVs()
+      if (!e.shiftKey || selectedUvEdges.value.length > 0) {
+        activeDrag = 'drag_edge'
+        recordDragStartUVs()
+      }
       renderCanvas()
       return
     }
@@ -749,18 +908,21 @@ function onPointerDown(e: PointerEvent) {
     }
   }
 
-  // 4. Face Click Check
+  // 4. Face / island click
   const clickedFace = findClickedFace(uv.u, uv.v)
   if (clickedFace !== null && !e.ctrlKey) {
-    if (e.shiftKey) {
+    if (uvSelectMode.value === 'island') {
+      selectIslandFromFace(clickedFace, e.shiftKey)
+    } else if (e.shiftKey) {
       const idx = selectedFaceIndices.value.indexOf(clickedFace)
       if (idx >= 0) selectedFaceIndices.value.splice(idx, 1)
       else selectedFaceIndices.value.push(clickedFace)
+      syncFacesTo3D()
     } else {
       selectedFaceIndices.value = [clickedFace]
+      syncFacesTo3D()
     }
 
-    syncFacesTo3D()
     recordDragStartUVs()
     const b = selectionBounds.value
     if (b) dragStartBounds = { ...b }
@@ -827,6 +989,17 @@ function onPointerMove(e: PointerEvent) {
     hoveredVert = uvSelectMode.value === 'vertex' ? findClickedVertex(sx, sy) : null
     hoveredEdge = uvSelectMode.value === 'edge' ? findClickedEdge(sx, sy) : null
     hoveredFaceIndex = findClickedFace(uv.u, uv.v)
+    if (uvSelectMode.value === 'edge') {
+      if (hoveredEdge && activeMesh.value) {
+        const faces = [...new Set(expandWeldedUvEdges(activeMesh.value, [hoveredEdge]).map(e => e.faceIndex))]
+        hoveredIslandFaceIndices.value = faces
+        toolStore.setUvHoverFaceIds(faces.map(i => activeMesh.value!.faces[i]?.id).filter(Boolean))
+      } else {
+        publishUvHover(null)
+      }
+    } else {
+      publishUvHover(hoveredFaceIndex)
+    }
     renderCanvas()
     return
   }
@@ -852,6 +1025,7 @@ function onPointerMove(e: PointerEvent) {
     const deltaV = uv.v - dragStartMouse.v
     if (!activeMesh.value) return
     selectedUvVerts.value.forEach(sv => {
+      if (isPinned(sv.faceIndex, sv.vertIndex)) return
       const face = activeMesh.value!.faces[sv.faceIndex]
       const orig = dragStartUvs.find(d => d.faceIndex === sv.faceIndex && d.vertIndex === sv.vertIndex)
       if (face && orig && face.uvs[sv.vertIndex]) {
@@ -875,11 +1049,11 @@ function onPointerMove(e: PointerEvent) {
         const v2Idx = (se.edgeIndex + 1) % face.uvs.length
         const orig1 = dragStartUvs.find(d => d.faceIndex === se.faceIndex && d.vertIndex === v1Idx)
         const orig2 = dragStartUvs.find(d => d.faceIndex === se.faceIndex && d.vertIndex === v2Idx)
-        if (orig1 && face.uvs[v1Idx]) {
+        if (orig1 && face.uvs[v1Idx] && !isPinned(se.faceIndex, v1Idx)) {
           face.uvs[v1Idx].u = orig1.origU + deltaU
           face.uvs[v1Idx].v = orig1.origV + deltaV
         }
-        if (orig2 && face.uvs[v2Idx]) {
+        if (orig2 && face.uvs[v2Idx] && !isPinned(se.faceIndex, v2Idx)) {
           face.uvs[v2Idx].u = orig2.origU + deltaU
           face.uvs[v2Idx].v = orig2.origV + deltaV
         }
@@ -1052,6 +1226,11 @@ function onPointerMove(e: PointerEvent) {
   }
 }
 
+function onPointerLeave(e: PointerEvent) {
+  publishUvHover(null)
+  onPointerUp(e)
+}
+
 function onPointerUp(e: PointerEvent) {
   const el = e.target as HTMLElement
   if (el?.hasPointerCapture?.(e.pointerId)) {
@@ -1105,12 +1284,7 @@ function onPointerUp(e: PointerEvent) {
             }
           }
         })
-        if (e.shiftKey) {
-          selectedUvEdges.value = [...selectedUvEdges.value, ...newEdges]
-        } else {
-          selectedUvEdges.value = newEdges
-        }
-        syncEdgesTo3D()
+        commitUvEdgeSelection(newEdges, e.shiftKey)
       }
 
       // UV FACE / ISLAND MODE
@@ -1129,10 +1303,14 @@ function onPointerUp(e: PointerEvent) {
             newFaces.push(fIdx)
           }
         })
+        let faces = newFaces
+        if (uvSelectMode.value === 'island' && activeMesh.value) {
+          faces = expandFacesToIslands(activeMesh.value, newFaces)
+        }
         if (e.shiftKey) {
-          selectedFaceIndices.value = Array.from(new Set([...selectedFaceIndices.value, ...newFaces]))
+          selectedFaceIndices.value = Array.from(new Set([...selectedFaceIndices.value, ...faces]))
         } else {
-          selectedFaceIndices.value = newFaces
+          selectedFaceIndices.value = faces
         }
         syncFacesTo3D()
       }
@@ -1266,16 +1444,19 @@ function syncVerticesTo3D() {
 
 function syncEdgesTo3D() {
   if (!activeMesh.value) return
-  // Highlight face vertices of edge
   const vertIds: string[] = []
+  const edgeIds: string[] = []
   selectedUvEdges.value.forEach(se => {
     const face = activeMesh.value!.faces[se.faceIndex]
-    if (face) {
-      vertIds.push(face.vertexIds[se.edgeIndex])
-      vertIds.push(face.vertexIds[(se.edgeIndex + 1) % face.vertexIds.length])
-    }
+    if (!face) return
+    const a = face.vertexIds[se.edgeIndex]
+    const b = face.vertexIds[(se.edgeIndex + 1) % face.vertexIds.length]
+    if (!a || !b) return
+    vertIds.push(a, b)
+    edgeIds.push(a < b ? `${a}_${b}` : `${b}_${a}`)
   })
   projectStore.selectedVertexIds = Array.from(new Set(vertIds))
+  projectStore.selectedEdgeIds = Array.from(new Set(edgeIds))
 }
 
 function recordDragStartUVs() {
@@ -1299,6 +1480,7 @@ function recordDragStartUVs() {
 function applyUVTransform(transformFn: (origU: number, origV: number) => { u: number; v: number }) {
   if (!activeMesh.value) return
   dragStartUvs.forEach(d => {
+    if (isPinned(d.faceIndex, d.vertIndex)) return
     const face = activeMesh.value!.faces[d.faceIndex]
     if (face && face.uvs[d.vertIndex]) {
       const res = transformFn(d.origU, d.origV)
@@ -1316,30 +1498,22 @@ function applyUVTransform(transformFn: (origU: number, origV: number) => { u: nu
 function handleImageImport(e: Event) {
   const input = e.target as HTMLInputElement
   if (!input.files || input.files.length === 0) return
-  const file = input.files[0]
-  const targetTextureId = projectStore.activeTexture?.id
-  const reader = new FileReader()
-  reader.onload = async (event) => {
-    if (projectStore.activeTexture?.id !== targetTextureId) return
-    const url = event.target?.result as string
-    await projectStore.pixelBuffer.loadFromDataURL(url, true)
-    if (projectStore.activeTexture?.id === targetTextureId && projectStore.activeTexture) {
-      projectStore.activeTexture.name = file.name.replace(/\.[^/.]+$/, '')
-      projectStore.activeTexture.width = projectStore.pixelBuffer.width
-      projectStore.activeTexture.height = projectStore.pixelBuffer.height
-      projectStore.activeTexture.dataUrl = projectStore.pixelBuffer.toDataURL()
-    }
-    projectStore.markTextureUpdated()
-    nextTick(() => {
-      resetPanZoom()
-      renderCanvas()
-    })
-  }
-  reader.onerror = () => {
-    console.warn('Failed to read imported image file.')
-  }
-  reader.readAsDataURL(file)
+  pendingImportFile.value = input.files[0]
+  showImportModal.value = true
   input.value = ''
+}
+
+function handleTextureImported(texId?: string) {
+  const id = texId || projectStore.activeTextureId
+  if (id && projectStore.activeMesh) {
+    projectStore.applyTextureToMesh(projectStore.activeMesh.id, id, 'this_object')
+  }
+  showImportModal.value = false
+  pendingImportFile.value = null
+  nextTick(() => {
+    resetPanZoom()
+    renderCanvas()
+  })
 }
 
 function exportTexturePng() {
@@ -1362,25 +1536,34 @@ const showNewTextureModal = ref(false)
 const newTextureName = ref('')
 const newTextureSize = ref<number>(64)
 
-function handleTextureBindingChange(newTexId: string) {
-  if (projectStore.activeMesh) {
-    projectStore.assignTextureToActiveMesh(newTexId)
-  } else {
-    projectStore.activeTextureId = newTexId
-    projectStore.markTextureUpdated(newTexId)
+function bindTextureToActiveObject(textureId: string) {
+  const mesh = projectStore.activeMesh
+  if (!mesh) {
+    projectStore.selectTexture(textureId)
+    return
   }
+  projectStore.applyTextureToMesh(mesh.id, textureId, 'this_object')
+}
+
+function handleTextureBindingChange(newTexId: string) {
+  bindTextureToActiveObject(newTexId)
   scheduleRender()
 }
 
 function handleCreateNewTexture() {
   const name = newTextureName.value.trim() || `Texture_${projectStore.textures.length + 1}`
-  const newTex = projectStore.addTexture(name, newTextureSize.value, newTextureSize.value)
+  const tex = projectStore.createTexture(name, newTextureSize.value, newTextureSize.value)
   if (projectStore.activeMesh) {
-    projectStore.assignTextureToActiveMesh(newTex.id)
+    projectStore.applyTextureToMesh(projectStore.activeMesh.id, tex.id, 'this_object')
   }
   showNewTextureModal.value = false
   newTextureName.value = ''
   scheduleRender()
+}
+
+function handleApplyPaintTargetToMesh() {
+  if (!projectStore.activeTexture || !projectStore.activeMesh) return
+  applyToActiveMesh(projectStore.activeTexture.id)
 }
 
 // ----------------------------------------------------
@@ -1438,7 +1621,14 @@ function snapToQuadrant(quad: 1 | 2 | 3 | 4) {
 }
 
 function snapToFull() {
+  if (!activeMesh.value) return
   projectStore.recordState('Fit UV to Full 0..1 Space')
+  if (getTargetFaces().length === 0) {
+    selectedFaceIndices.value = activeMesh.value.faces.map((_, i) => i)
+    fitSelectionToRange(0, 1, 0, 1)
+    selectedFaceIndices.value = []
+    return
+  }
   fitSelectionToRange(0, 1, 0, 1)
 }
 
@@ -1470,7 +1660,8 @@ function applyBulkTransform(fn: (u: number, v: number) => { u: number; v: number
   targetFaces.forEach(fIdx => {
     const face = activeMesh.value!.faces[fIdx]
     if (!face) return
-    face.uvs.forEach(uv => {
+    face.uvs.forEach((uv, vIdx) => {
+      if (isPinned(fIdx, vIdx)) return
       const res = fn(uv.u, uv.v)
       uv.u = res.u
       uv.v = res.v
@@ -1483,6 +1674,21 @@ function applyBulkTransform(fn: (u: number, v: number) => { u: number; v: number
 // ----------------------------------------------------
 // UNIVERSAL UNWRAPPING ACTIONS
 // ----------------------------------------------------
+function commitUnwrappedFaces(result: MeshObject, onlySelected: boolean) {
+  if (!activeMesh.value) return
+  const targets = getTargetFaces()
+  if (onlySelected && targets.length > 0) {
+    const targetSet = new Set(targets)
+    for (const i of targetSet) {
+      if (result.faces[i]) activeMesh.value.faces[i].uvs = result.faces[i].uvs
+    }
+  } else {
+    activeMesh.value.faces = result.faces
+  }
+  projectStore.markGeometryUpdated()
+  scheduleRender()
+}
+
 function handleSeamUnwrap() {
   if (!activeMesh.value) return
   projectStore.recordState('Unwrap Along Seams')
@@ -1494,63 +1700,192 @@ function handleSeamUnwrap() {
 function handleBoxUnwrap() {
   if (!activeMesh.value) return
   projectStore.recordState('Box Unwrap')
-  const unwrapped = boxUnwrap(activeMesh.value)
-  activeMesh.value.faces = unwrapped.faces
-  projectStore.markGeometryUpdated()
-  scheduleRender()
+  commitUnwrappedFaces(boxUnwrap(activeMesh.value), true)
 }
 
 function handlePlanarUnwrap(axis: 'x' | 'y' | 'z') {
   if (!activeMesh.value) return
   projectStore.recordState(`Planar Unwrap (${axis.toUpperCase()})`)
-  const unwrapped = planarUnwrap(activeMesh.value, axis)
-  activeMesh.value.faces = unwrapped.faces
-  projectStore.markGeometryUpdated()
-  scheduleRender()
+  commitUnwrappedFaces(planarUnwrap(activeMesh.value, axis), true)
 }
 
 function handleCylinderUnwrap() {
   if (!activeMesh.value) return
   projectStore.recordState('Cylindrical Unwrap')
-  const unwrapped = cylinderUnwrap(activeMesh.value)
-  activeMesh.value.faces = unwrapped.faces
-  projectStore.markGeometryUpdated()
-  scheduleRender()
+  commitUnwrappedFaces(cylinderUnwrap(activeMesh.value), true)
 }
 
 function handleSphereUnwrap() {
   if (!activeMesh.value) return
   projectStore.recordState('Spherical Unwrap')
-  const unwrapped = sphereUnwrap(activeMesh.value)
-  activeMesh.value.faces = unwrapped.faces
-  projectStore.markGeometryUpdated()
-  scheduleRender()
+  commitUnwrappedFaces(sphereUnwrap(activeMesh.value), true)
 }
 
 function handleConeUnwrap() {
   if (!activeMesh.value) return
   projectStore.recordState('Conical Fan Unwrap')
-  const unwrapped = coneUnwrap(activeMesh.value)
-  activeMesh.value.faces = unwrapped.faces
-  projectStore.markGeometryUpdated()
-  scheduleRender()
+  commitUnwrappedFaces(coneUnwrap(activeMesh.value), true)
 }
 
 function handleCubemapCross() {
   if (!activeMesh.value) return
   projectStore.recordState('Cubemap Cross Unwrap')
-  const unwrapped = cubemapCrossUnwrap(activeMesh.value)
+  commitUnwrappedFaces(cubemapCrossUnwrap(activeMesh.value), true)
+}
+
+function handlePackIslands(marginPx = 2) {
+  if (!activeMesh.value) return
+  const selected = getTargetFaces()
+  projectStore.recordState(
+    selected.length > 0
+      ? `Pack Selected UV Islands (${marginPx}px)`
+      : `Auto-Pack UV Islands (${marginPx}px)`
+  )
+  const unwrapped = packUVIslands(
+    activeMesh.value,
+    marginPx,
+    projectStore.pixelBuffer.width,
+    selected.length > 0 ? selected : undefined
+  )
   activeMesh.value.faces = unwrapped.faces
   projectStore.markGeometryUpdated()
   scheduleRender()
 }
 
-function handlePackIslands(marginPx = 2) {
+function stitchSelectedEdges() {
   if (!activeMesh.value) return
-  projectStore.recordState(`Auto-Pack UV Islands (${marginPx}px)`)
-  const unwrapped = packUVIslands(activeMesh.value, marginPx, projectStore.pixelBuffer.width)
-  activeMesh.value.faces = unwrapped.faces
+  const edges = [...selectedUvEdges.value]
+  if (edges.length === 0 && hoveredEdge) {
+    edges.push(hoveredEdge)
+  }
+  if (edges.length === 0) return
+  projectStore.recordState('Stitch UV Edge')
+  let any = false
+  for (const edge of edges) {
+    if (stitchUvEdge(activeMesh.value, edge.faceIndex, edge.edgeIndex)) any = true
+  }
+  if (!any) return
   projectStore.markGeometryUpdated()
+  scheduleRender()
+}
+
+function togglePinSelected() {
+  const next = new Set(pinnedUvKeys.value)
+  const corners: { faceIndex: number; vertIndex: number }[] = []
+  if (selectedUvVerts.value.length > 0) {
+    corners.push(...selectedUvVerts.value)
+  } else if (selectedUvEdges.value.length > 0) {
+    for (const se of selectedUvEdges.value) {
+      const face = activeMesh.value?.faces[se.faceIndex]
+      if (!face) continue
+      corners.push({ faceIndex: se.faceIndex, vertIndex: se.edgeIndex })
+      corners.push({ faceIndex: se.faceIndex, vertIndex: (se.edgeIndex + 1) % face.uvs.length })
+    }
+  } else {
+    for (const fIdx of getTargetFaces()) {
+      const face = activeMesh.value?.faces[fIdx]
+      face?.uvs.forEach((_, vIdx) => corners.push({ faceIndex: fIdx, vertIndex: vIdx }))
+    }
+  }
+  if (corners.length === 0) return
+  const allPinned = corners.every(c => next.has(pinKey(c.faceIndex, c.vertIndex)))
+  for (const c of corners) {
+    const key = pinKey(c.faceIndex, c.vertIndex)
+    if (!key) continue
+    if (allPinned) next.delete(key)
+    else next.add(key)
+  }
+  pinnedUvKeys.value = next
+  scheduleRender()
+}
+
+function clearUvPins() {
+  pinnedUvKeys.value = new Set()
+  scheduleRender()
+}
+
+function weldSelectedUVs() {
+  if (!activeMesh.value) return
+  const groups = new Map<string, { faceIndex: number; vertIndex: number }[]>()
+
+  const pushCorner = (faceIndex: number, vertIndex: number) => {
+    const face = activeMesh.value!.faces[faceIndex]
+    const vid = face?.vertexIds[vertIndex]
+    if (!vid) return
+    const list = groups.get(vid) || []
+    list.push({ faceIndex, vertIndex })
+    groups.set(vid, list)
+  }
+
+  if (selectedUvVerts.value.length > 0) {
+    selectedUvVerts.value.forEach(v => pushCorner(v.faceIndex, v.vertIndex))
+  } else {
+    for (const fIdx of getTargetFaces()) {
+      const face = activeMesh.value.faces[fIdx]
+      face?.vertexIds.forEach((_, vIdx) => pushCorner(fIdx, vIdx))
+    }
+  }
+
+  let welded = 0
+  projectStore.recordState('Weld Selected UVs')
+  for (const corners of groups.values()) {
+    if (corners.length < 2) continue
+    let u = 0, v = 0
+    for (const c of corners) {
+      const uv = activeMesh.value.faces[c.faceIndex].uvs[c.vertIndex]
+      u += uv.u
+      v += uv.v
+    }
+    u /= corners.length
+    v /= corners.length
+    for (const c of corners) {
+      activeMesh.value.faces[c.faceIndex].uvs[c.vertIndex].u = u
+      activeMesh.value.faces[c.faceIndex].uvs[c.vertIndex].v = v
+    }
+    welded++
+  }
+  if (welded === 0) return
+  projectStore.markGeometryUpdated()
+  scheduleRender()
+}
+
+function frameSelection() {
+  const mesh = activeMesh.value
+  const canvas = canvasRef.value
+  const container = containerRef.value
+  if (!mesh || !canvas || !container) return
+
+  const faces = getTargetFaces()
+  const indices = faces.length > 0 ? faces : mesh.faces.map((_, i) => i)
+  let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity
+  for (const fIdx of indices) {
+    for (const uv of mesh.faces[fIdx]?.uvs || []) {
+      if (uv.u < minU) minU = uv.u
+      if (uv.u > maxU) maxU = uv.u
+      if (uv.v < minV) minV = uv.v
+      if (uv.v > maxV) maxV = uv.v
+    }
+  }
+  if (!isFinite(minU)) {
+    resetPanZoom()
+    return
+  }
+
+  const pad = 0.08
+  const spanU = Math.max(0.05, maxU - minU) + pad
+  const spanV = Math.max(0.05, maxV - minV) + pad
+  const w = container.clientWidth || canvas.clientWidth
+  const h = container.clientHeight || canvas.clientHeight
+  const texW = projectStore.pixelBuffer.width
+  const texH = projectStore.pixelBuffer.height
+  const fitZoom = Math.max(0.2, Math.min(24, Math.min(w / (spanU * texW), h / (spanV * texH)) * 0.9))
+  zoom.value = fitZoom
+  const midU = (minU + maxU) / 2
+  const midV = (minV + maxV) / 2
+  panOffset.value = {
+    x: w / 2 - midU * texW * fitZoom,
+    y: h / 2 - (1 - midV) * texH * fitZoom
+  }
   scheduleRender()
 }
 
@@ -1582,7 +1917,9 @@ function alignSelection(alignment: 'left' | 'right' | 'top' | 'bottom' | 'center
   for (const fIdx of targetFaces) {
     const face = activeMesh.value.faces[fIdx]
     if (!face) continue
-    for (const uv of face.uvs) {
+    for (let vIdx = 0; vIdx < face.uvs.length; vIdx++) {
+      if (isPinned(fIdx, vIdx)) continue
+      const uv = face.uvs[vIdx]
       if (alignment === 'left') uv.u = b.minU
       else if (alignment === 'right') uv.u = b.maxU
       else if (alignment === 'top') uv.v = b.maxV
@@ -1609,7 +1946,9 @@ function snapToTrimCell(col: number, row: number, totalCols: number, totalRows: 
   for (const fIdx of targetFaces) {
     const face = activeMesh.value.faces[fIdx]
     if (!face) continue
-    for (const uv of face.uvs) {
+    for (let vIdx = 0; vIdx < face.uvs.length; vIdx++) {
+      if (isPinned(fIdx, vIdx)) continue
+      const uv = face.uvs[vIdx]
       const normU = (uv.u - b.minU) / b.width
       const normV = (uv.v - b.minV) / b.height
       uv.u = Math.max(0, Math.min(1, targetU0 + normU * cellW))
@@ -1629,6 +1968,8 @@ watch(() => projectStore.activeMeshId, () => {
   selectedFaceIndices.value = []
   selectedUvVerts.value = []
   selectedUvEdges.value = []
+  pinnedUvKeys.value = new Set()
+  publishUvHover(null)
   nextTick(() => {
     scheduleRender()
   })
@@ -1650,8 +1991,41 @@ watch(() => toolStore.uvWorkspaceTab, (tab) => {
 
 let resizeObserver: ResizeObserver | null = null
 
+function onUvKeyDown(e: KeyboardEvent) {
+  if (toolStore.appMode !== 'uvpaint' || toolStore.uvWorkspaceTab !== 'uv') return
+  const tag = (e.target as HTMLElement)?.tagName
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return
+  if (e.code === 'Space') {
+    spaceHeld = true
+    e.preventDefault()
+  }
+  if (e.key === 'f' || e.key === 'F') {
+    e.preventDefault()
+    frameSelection()
+  }
+  if ((e.key === 'p' || e.key === 'P') && e.altKey) {
+    e.preventDefault()
+    clearUvPins()
+    return
+  }
+  if (e.key === 'p' || e.key === 'P') {
+    e.preventDefault()
+    togglePinSelected()
+  }
+  if (e.key === 'v' || e.key === 'V') {
+    e.preventDefault()
+    stitchSelectedEdges()
+  }
+}
+
+function onUvKeyUp(e: KeyboardEvent) {
+  if (e.code === 'Space') spaceHeld = false
+}
+
 onMounted(() => {
   window.addEventListener('click', closeDropdowns)
+  window.addEventListener('keydown', onUvKeyDown)
+  window.addEventListener('keyup', onUvKeyUp)
   // Generate high-contrast numbered calibration test grid
   const img = new Image()
   img.src = generateUVCheckerboardDataURL(512)
@@ -1679,6 +2053,9 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('click', closeDropdowns)
+  window.removeEventListener('keydown', onUvKeyDown)
+  window.removeEventListener('keyup', onUvKeyUp)
+  toolStore.setUvHoverFaceIds([])
   if (renderRafId !== null) {
     cancelAnimationFrame(renderRafId)
     renderRafId = null
@@ -1763,23 +2140,31 @@ defineExpose({
 
         <span class="text-ui-textMuted text-[9px] font-bold shrink-0">→</span>
 
-        <!-- 2. Active Texture Map bound to this Object -->
+        <!-- Paint target (not a mesh bind) -->
         <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px] text-ui-textSecondary shrink-0">
           <span class="text-ui-textMuted font-bold text-[8.5px]">TEX:</span>
           <select 
             :value="projectStore.activeTextureId" 
             @change="handleTextureBindingChange(($event.target as HTMLSelectElement).value)"
             class="bg-transparent text-emerald-400 font-bold font-mono focus:outline-none cursor-pointer max-w-[125px] truncate"
-            title="Texture Map bound to Active Object"
+            title="Paint target — the image this UV editor shows"
           >
             <option v-for="t in projectStore.textures" :key="t.id" :value="t.id" class="bg-ui-panel text-ui-textPrimary">
               {{ t.name }} ({{ t.width }}x{{ t.height }})
             </option>
           </select>
+          <button
+            type="button"
+            class="px-1 py-0.5 text-[8.5px] font-bold text-sky-300 hover:bg-ui-hover rounded-xs"
+            title="Apply this paint target to the active object"
+            @click="handleApplyPaintTargetToMesh"
+          >
+            Apply
+          </button>
           <button 
             @click="showNewTextureModal = true"
             class="p-0.5 hover:bg-ui-hover text-emerald-400 rounded-xs transition cursor-pointer"
-            title="Create New Texture Map for this Object"
+            title="Create a new texture (paint target only)"
           >
             <Plus class="w-3 h-3" />
           </button>
@@ -1790,7 +2175,7 @@ defineExpose({
           <button 
             @click="fileInputRef?.click()" 
             class="flex items-center gap-1 px-2 py-0.5 hover:bg-ui-hover text-ui-textAccent rounded-xs text-[10px] font-bold transition cursor-pointer whitespace-nowrap"
-            title="Import Texture / Sprite Sheet Image"
+            title="Add an image to the library (does not replace the current map)"
           >
             <Upload class="w-3 h-3 text-ui-accent" />
             <span>Import</span>
@@ -1868,6 +2253,7 @@ defineExpose({
             </button>
             <button @click="handleBoxUnwrap(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Smart Box Unwrap</span>
+              <span class="text-[9px] text-ui-textMuted">sel or all</span>
             </button>
             <button @click="handleCubemapCross(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-ui-textAccent">
               <span>Cubemap Cross (Blockbench)</span>
@@ -1926,6 +2312,26 @@ defineExpose({
             <button @click="handleEqualizeTexels(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover text-sky-400">
               <span>Equalize Texel Density</span>
             </button>
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="stitchSelectedEdges(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+              <span>Stitch Selected Edge</span>
+              <span class="text-[10px] text-ui-textMuted font-mono">V</span>
+            </button>
+            <button @click="weldSelectedUVs(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+              <span>Weld UVs (same 3D verts)</span>
+            </button>
+            <button @click="togglePinSelected(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+              <span>Pin / Unpin Selected</span>
+              <span class="text-[10px] text-ui-textMuted font-mono">P</span>
+            </button>
+            <button @click="clearUvPins(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+              <span>Clear Pins</span>
+              <span class="text-[10px] text-ui-textMuted font-mono">Alt+P</span>
+            </button>
+            <button @click="frameSelection(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+              <span>Frame Selection</span>
+              <span class="text-[10px] text-ui-textMuted font-mono">F</span>
+            </button>
           </div>
         </div>
 
@@ -1951,16 +2357,71 @@ defineExpose({
               <button @click="alignSelection('center_v'); closeDropdowns()" class="px-2 py-1 bg-ui-input hover:bg-ui-hover text-center rounded-xs text-[11px]">Center V</button>
             </div>
             <div class="h-px bg-ui-borderSubtle my-1"></div>
-            <div class="px-3 py-0.5 text-[9px] font-bold text-ui-textMuted uppercase">Quadrant / Trim Snapping</div>
+            <div class="px-3 py-0.5 text-[9px] font-bold text-ui-textMuted uppercase">Atlas cells</div>
             <button @click="snapToFull(); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover text-amber-400 font-bold">Fit to Full (0..1)</button>
-            <button @click="snapToQuadrant(1); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover">Top-Left (Q1)</button>
-            <button @click="snapToQuadrant(2); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover">Top-Right (Q2)</button>
-            <button @click="snapToQuadrant(3); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover">Bottom-Left (Q3)</button>
-            <button @click="snapToQuadrant(4); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover">Bottom-Right (Q4)</button>
-            <div class="h-px bg-ui-borderSubtle my-1"></div>
-            <button @click="snapToTrimCell(0,0,2,2); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover text-ui-textMuted">2x2 Grid (1,1)</button>
-            <button @click="snapToTrimCell(1,1,2,2); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover text-ui-textMuted">2x2 Grid (2,2)</button>
-            <button @click="snapToTrimCell(0,0,4,4); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover text-ui-textMuted">4x4 Grid (1,1)</button>
+            <div class="grid gap-0.5 px-2 py-1" :style="{ gridTemplateColumns: `repeat(${paintAtlas?.cols || 2}, minmax(0, 1fr))` }">
+              <button
+                v-for="cell in atlasMenuCells"
+                :key="`${cell.col}-${cell.row}`"
+                type="button"
+                class="px-1 py-1 bg-ui-input hover:bg-ui-hover text-center rounded-xs text-[10px] font-mono"
+                @click="snapToTrimCell(cell.col, cell.row, paintAtlas?.cols || 2, paintAtlas?.rows || 2); closeDropdowns()"
+              >
+                {{ cell.col + 1 }},{{ cell.row + 1 }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Texel Density Menu Dropdown -->
+        <div class="relative" @click.stop>
+          <button 
+            @click="toggleDropdown('texel')"
+            class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0"
+            :class="activeDropdown === 'texel' ? 'bg-ui-hover text-ui-textAccent shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+          >
+            <span class="whitespace-nowrap">Texel</span>
+            <span class="text-[8px] opacity-70">▼</span>
+          </button>
+
+          <div v-if="activeDropdown === 'texel'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-60 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl p-2 z-50 text-xs space-y-2">
+            <div class="flex items-center justify-between border-b border-ui-borderSubtle pb-1">
+              <span class="text-[10px] font-bold text-amber-300 uppercase">Texel Density (px/unit)</span>
+              <span v-if="sampledDensity !== null" class="text-[10px] font-mono text-emerald-400 font-bold">{{ sampledDensity }} px/u</span>
+            </div>
+
+            <div class="flex items-center gap-1.5">
+              <label class="text-[10px] text-ui-textMuted font-mono">Target:</label>
+              <input 
+                type="number" 
+                min="1" 
+                max="256" 
+                v-model.number="targetTexelDensity" 
+                class="flex-1 bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-0.5 text-xs font-mono text-ui-textPrimary focus:outline-none focus:border-amber-400"
+              />
+              <button 
+                @click="handleSampleTexelDensity"
+                class="px-2 py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[10px] font-mono text-ui-textSecondary hover:text-white"
+                title="Sample density from active face"
+              >
+                Sample
+              </button>
+            </div>
+
+            <div class="grid grid-cols-2 gap-1 pt-1 border-t border-ui-borderSubtle/60">
+              <button 
+                @click="handleApplyTexelDensity(); closeDropdowns()" 
+                class="px-2 py-1 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded-xs text-[10px] transition text-center shadow-xs"
+              >
+                Apply Density
+              </button>
+              <button 
+                @click="handleEqualizeTexelDensity(); closeDropdowns()" 
+                class="px-2 py-1 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textPrimary rounded-xs text-[10px] transition text-center"
+              >
+                Equalize All
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1997,6 +2458,10 @@ defineExpose({
             <button @click="resetPanZoom(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-ui-textAccent">
               <span>Frame UV Canvas</span>
               <span class="text-[10px] text-ui-textMuted font-mono">Home</span>
+            </button>
+            <button @click="frameSelection(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+              <span>Frame Selection / Islands</span>
+              <span class="text-[10px] text-ui-textMuted font-mono">F</span>
             </button>
           </div>
         </div>
@@ -2061,7 +2526,7 @@ defineExpose({
             @click="handleCreateNewTexture"
             class="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xs text-xs font-bold transition cursor-pointer shadow-xs"
           >
-            Create & Assign
+            Create
           </button>
           <button 
             @click="showNewTextureModal = false"
@@ -2148,7 +2613,7 @@ defineExpose({
           @click="showHeatmap = !showHeatmap"
           class="uv-view-icon"
           :class="{ 'is-active': showHeatmap }"
-          title="Toggle Distortion Heatmap (Alt+Z)"
+          title="Toggle distortion heatmap"
         ><BlenderIcon name="xray" :size="14" /></button>
         <button
           @click="snapToPixels = !snapToPixels"
@@ -2177,7 +2642,7 @@ defineExpose({
         @pointerdown="onPointerDown" 
         @pointermove="onPointerMove" 
         @pointerup="onPointerUp" 
-        @pointerleave="onPointerUp"
+        @pointerleave="onPointerLeave"
         @pointercancel="onPointerUp"
         class="w-full h-full block touch-none"
       ></canvas>
@@ -2185,13 +2650,28 @@ defineExpose({
       <!-- Quick Info HUD at Bottom Left -->
       <div class="uv-status-hud">
         <span class="flex items-center gap-1">Mode: <strong class="text-ui-textAccent uppercase font-bold">{{ uvSelectMode }}</strong></span>
-        <span>Res: <strong class="text-ui-textPrimary font-bold">{{ projectStore.pixelBuffer.width }}x{{ projectStore.pixelBuffer.height }}</strong></span>
+        <span>Islands: <strong class="text-ui-textPrimary font-bold">{{ uvIslandCount }}</strong></span>
+        <span v-if="selectedFaceCount">Sel: <strong class="text-amber-300 font-bold">{{ selectedFaceCount }}f</strong></span>
+        <span v-if="pinnedUvKeys.size">Pins: <strong class="text-pink-400 font-bold">{{ pinnedUvKeys.size }}</strong></span>
+        <span v-else class="text-ui-textMuted">No selection</span>
         <span v-if="selectionBounds" class="text-ui-textAccent font-bold">
-          Bounds: {{ Math.round(selectionBounds.width * 100) }}% x {{ Math.round(selectionBounds.height * 100) }}%
+          Bounds: {{ Math.round(selectionBounds.width * 100) }}% × {{ Math.round(selectionBounds.height * 100) }}%
         </span>
-        <span class="text-ui-textMuted hidden md:inline">Space+Drag / MMB to Pan | Double-Click Zoom to Frame</span>
+        <span class="text-ui-textMuted hidden md:inline">Space-drag pan · F frame · V stitch · P pin</span>
       </div>
     </div>
+    <ImportTextureModal
+      v-if="showImportModal && pendingImportFile"
+      :file="pendingImportFile"
+      @imported="handleTextureImported"
+      @close="() => { showImportModal = false; pendingImportFile = null }"
+    />
+    <TextureSharePrompt
+      v-if="sharePromptOpen"
+      :object-count="sharePromptCount"
+      @confirm="confirmShareApply"
+      @cancel="cancelShareApply"
+    />
   </div>
 </template>
 

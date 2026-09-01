@@ -2,13 +2,16 @@
 import { computed } from 'vue'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useProjectStore } from '../../stores/projectStore'
+import UiSection from '../ui/UiSection.vue'
+import UiButton from '../ui/UiButton.vue'
 import { 
   Trash2, 
   RotateCcw, 
   Wrench, 
   Plus, 
   Sliders,
-  GitCommitVertical
+  GitCommitVertical,
+  Sparkles
 } from 'lucide-vue-next'
 
 const animationStore = useAnimationStore()
@@ -30,7 +33,7 @@ const boneLength = computed({
   }
 })
 
-function setBoneLength(bone: any, newLen: number) {
+function setBoneLength(bone: { head: { x: number; y: number; z: number }; tail: { x: number; y: number; z: number } }, newLen: number) {
   if (newLen <= 0.05) newLen = 0.05
   const dx = bone.tail.x - bone.head.x
   const dy = bone.tail.y - bone.head.y
@@ -46,12 +49,6 @@ function adjustBoneLength(delta: number) {
   if (!selectedBone.value) return
   projectStore.recordState('Change Bone Length')
   boneLength.value = Math.max(0.1, Number((boneLength.value + delta).toFixed(2)))
-}
-
-function setPresetBoneLength(len: number) {
-  if (!selectedBone.value) return
-  projectStore.recordState('Set Bone Length to ' + len)
-  boneLength.value = len
 }
 
 function handleReparent(parentBoneId: string) {
@@ -100,8 +97,7 @@ function startScrubVector(e: MouseEvent, targetObj: { x: number; y: number; z: n
   const onMouseMove = (moveEvent: MouseEvent) => {
     const deltaX = moveEvent.clientX - startX
     const mult = moveEvent.shiftKey ? 0.1 : 1.0
-    const newVal = Number((startVal + deltaX * step * mult).toFixed(precision))
-    targetObj[axis] = newVal
+    targetObj[axis] = Number((startVal + deltaX * step * mult).toFixed(precision))
   }
 
   const onMouseUp = () => {
@@ -113,297 +109,194 @@ function startScrubVector(e: MouseEvent, targetObj: { x: number; y: number; z: n
   window.addEventListener('mousemove', onMouseMove)
   window.addEventListener('mouseup', onMouseUp)
 }
+
+function toggleIk(on: boolean) {
+  if (!selectedBone.value) return
+  if (!selectedBone.value.ikConstraint) {
+    selectedBone.value.ikConstraint = { enabled: on, chainLength: 2, iterations: 10, weight: 1 }
+  } else {
+    selectedBone.value.ikConstraint.enabled = on
+  }
+}
+
+function toggleSpring(on: boolean) {
+  if (!selectedBone.value) return
+  if (!selectedBone.value.springConstraint) {
+    selectedBone.value.springConstraint = { enabled: on, stiffness: 0.3, damping: 0.25, gravity: 0 }
+  } else {
+    selectedBone.value.springConstraint.enabled = on
+  }
+}
 </script>
 
 <template>
-  <div class="h-full w-full bg-ui-panel p-3 text-ui-textPrimary flex flex-col space-y-3 font-sans text-xs select-none overflow-y-auto">
-    <!-- Top Mode Switcher: EDIT RIG vs POSE -->
-    <div class="bg-ui-surface/60 p-1.5 rounded-xs border border-ui-borderSubtle space-y-1.5">
-      <div class="grid grid-cols-2 gap-1 bg-ui-input/70 p-0.5 rounded-xs border border-ui-borderSubtle">
-        <button 
-          @click="animationStore.toggleTestPose(false)"
-          class="py-1.5 px-2 rounded-xs font-semibold text-[11px] flex items-center justify-center gap-1.5 transition cursor-pointer"
-          :class="!animationStore.isTestPoseActive ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
-        >
-          <Sliders class="w-3.5 h-3.5" />
-          <span>Edit Rig</span>
-        </button>
-
-        <button 
-          @click="animationStore.toggleTestPose(true)"
-          class="py-1.5 px-2 rounded-xs font-semibold text-[11px] flex items-center justify-center gap-1.5 transition cursor-pointer"
-          :class="animationStore.isTestPoseActive ? 'bg-amber-500 text-slate-950 shadow-xs font-bold' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
-        >
-          <RotateCcw class="w-3.5 h-3.5" />
-          <span>Pose Mode</span>
-        </button>
+  <div class="flex flex-col select-none text-xs font-sans">
+    <div class="h-7 bg-ui-header border-b border-ui-borderSubtle px-2.5 flex items-center justify-between">
+      <div class="flex items-center space-x-1.5">
+        <Sliders class="w-3 h-3 text-amber-400" />
+        <span class="text-[11px] font-medium text-ui-textMuted">Bone</span>
       </div>
-
-      <button 
-        v-if="animationStore.isTestPoseActive"
-        @click="animationStore.resetAllBonesToRest"
-        class="w-full py-1 text-[11px] text-amber-400 hover:bg-amber-500/10 border border-amber-500/30 rounded-xs font-medium flex items-center justify-center gap-1.5 transition cursor-pointer"
-      >
-        <RotateCcw class="w-3 h-3" />
-        <span>Reset Rest Pose (Alt+R)</span>
-      </button>
+      <span class="font-semibold text-ui-textPrimary truncate max-w-[150px] text-[11px]">
+        {{ selectedBone?.name || 'None selected' }}
+      </span>
     </div>
 
-    <!-- Active Bone Inspector -->
-    <div v-if="selectedBone" class="bg-ui-surface/60 p-2.5 rounded-xs border border-ui-borderSubtle space-y-3">
-      <!-- Bone Header -->
-      <div class="flex items-center justify-between border-b border-ui-borderSubtle pb-1.5">
-        <span class="text-[11px] font-bold text-ui-textMuted uppercase tracking-wider">
-          Bone Properties
-        </span>
-        <button 
-          @click="animationStore.deleteBone(selectedBone.id)"
-          class="text-ui-textMuted hover:text-rose-400 p-0.5 transition cursor-pointer"
-          title="Delete bone (Del)"
-        >
-          <Trash2 class="w-3.5 h-3.5" />
-        </button>
+    <UiSection title="Mode" :icon="Sliders" :default-open="true">
+      <div class="grid grid-cols-2 gap-1">
+        <UiButton size="xs" :variant="!animationStore.isTestPoseActive ? 'accent' : 'default'" @click="animationStore.toggleTestPose(false)">Edit rest</UiButton>
+        <UiButton size="xs" :variant="animationStore.isTestPoseActive ? 'accent' : 'default'" @click="animationStore.toggleTestPose(true)">Pose</UiButton>
       </div>
+      <UiButton v-if="animationStore.isTestPoseActive" size="xs" class="w-full" @click="animationStore.resetAllBonesToRest">
+        <RotateCcw class="w-3 h-3" /> Reset pose
+      </UiButton>
+    </UiSection>
 
-      <!-- Rename -->
-      <div class="space-y-1">
-        <div class="text-[10px] text-ui-textMuted font-semibold uppercase">Bone Name</div>
-        <input 
+    <template v-if="selectedBone">
+      <UiSection title="Identity" :icon="GitCommitVertical" :default-open="true">
+        <input
           v-model="selectedBone.name"
-          class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-ui-textPrimary text-xs focus:outline-none focus:border-ui-accent font-medium"
+          class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-xs"
         />
-      </div>
-
-      <!-- Parent Bone Selector -->
-      <div class="space-y-1">
-        <div class="text-[10px] text-ui-textMuted font-semibold uppercase">Parent Bone</div>
-        <select 
+        <select
           :value="selectedBone.parentId || 'root'"
+          class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-xs cursor-pointer"
           @change="handleReparent(($event.target as HTMLSelectElement).value)"
-          class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-ui-textPrimary text-xs focus:outline-none focus:border-ui-accent cursor-pointer"
         >
-          <option value="root" class="bg-ui-panel text-ui-textMuted">-- None (Root Bone) --</option>
-          <option 
-            v-for="b in animationStore.armature.bones.filter(b => b.id !== selectedBone?.id)" 
-            :key="b.id" 
-            :value="b.id"
-            class="bg-ui-panel text-ui-textPrimary"
-          >
-            {{ b.name }}
-          </option>
-        </select>
-      </div>
-
-      <!-- Head Position -->
-      <div class="space-y-1">
-        <div class="flex items-center justify-between text-[10px]">
-          <span class="text-ui-textMuted font-semibold uppercase">Head Pivot</span>
-          <span class="text-ui-textMuted/70 text-[9px]">Drag label</span>
-        </div>
-        <div class="grid grid-cols-3 gap-1">
-          <div class="flex items-center bg-ui-input border border-ui-borderSubtle hover:border-ui-borderDefault rounded-xs px-1.5 py-0.5 transition">
-            <span @mousedown="startScrubVector($event, selectedBone.head, 'x', 0.05, 2)" class="text-[10px] text-rose-400 font-bold mr-1 cursor-ew-resize select-none hover:text-rose-300" title="Click and drag to scrub X">X</span>
-            <input type="number" step="0.1" v-model.number="selectedBone.head.x" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none font-mono" />
-          </div>
-          <div class="flex items-center bg-ui-input border border-ui-borderSubtle hover:border-ui-borderDefault rounded-xs px-1.5 py-0.5 transition">
-            <span @mousedown="startScrubVector($event, selectedBone.head, 'y', 0.05, 2)" class="text-[10px] text-emerald-400 font-bold mr-1 cursor-ew-resize select-none hover:text-emerald-300" title="Click and drag to scrub Y">Y</span>
-            <input type="number" step="0.1" v-model.number="selectedBone.head.y" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none font-mono" />
-          </div>
-          <div class="flex items-center bg-ui-input border border-ui-borderSubtle hover:border-ui-borderDefault rounded-xs px-1.5 py-0.5 transition">
-            <span @mousedown="startScrubVector($event, selectedBone.head, 'z', 0.05, 2)" class="text-[10px] text-sky-400 font-bold mr-1 cursor-ew-resize select-none hover:text-sky-300" title="Click and drag to scrub Z">Z</span>
-            <input type="number" step="0.1" v-model.number="selectedBone.head.z" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none font-mono" />
-          </div>
-        </div>
-      </div>
-
-      <!-- Tail Position -->
-      <div class="space-y-1">
-        <div class="flex items-center justify-between text-[10px]">
-          <span class="text-ui-textMuted font-semibold uppercase">Tail Pivot</span>
-          <span class="text-ui-textMuted/70 text-[9px]">Drag label</span>
-        </div>
-        <div class="grid grid-cols-3 gap-1">
-          <div class="flex items-center bg-ui-input border border-ui-borderSubtle hover:border-ui-borderDefault rounded-xs px-1.5 py-0.5 transition">
-            <span @mousedown="startScrubVector($event, selectedBone.tail, 'x', 0.05, 2)" class="text-[10px] text-rose-400 font-bold mr-1 cursor-ew-resize select-none hover:text-rose-300" title="Click and drag to scrub X">X</span>
-            <input type="number" step="0.1" v-model.number="selectedBone.tail.x" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none font-mono" />
-          </div>
-          <div class="flex items-center bg-ui-input border border-ui-borderSubtle hover:border-ui-borderDefault rounded-xs px-1.5 py-0.5 transition">
-            <span @mousedown="startScrubVector($event, selectedBone.tail, 'y', 0.05, 2)" class="text-[10px] text-emerald-400 font-bold mr-1 cursor-ew-resize select-none hover:text-emerald-300" title="Click and drag to scrub Y">Y</span>
-            <input type="number" step="0.1" v-model.number="selectedBone.tail.y" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none font-mono" />
-          </div>
-          <div class="flex items-center bg-ui-input border border-ui-borderSubtle hover:border-ui-borderDefault rounded-xs px-1.5 py-0.5 transition">
-            <span @mousedown="startScrubVector($event, selectedBone.tail, 'z', 0.05, 2)" class="text-[10px] text-sky-400 font-bold mr-1 cursor-ew-resize select-none hover:text-sky-300" title="Click and drag to scrub Z">Z</span>
-            <input type="number" step="0.1" v-model.number="selectedBone.tail.z" class="w-full bg-transparent text-ui-textPrimary text-right text-xs focus:outline-none font-mono" />
-          </div>
-        </div>
-      </div>
-
-      <!-- Bone Length Slider -->
-      <div class="space-y-1.5 pt-1.5 border-t border-ui-borderSubtle/60">
-        <div class="flex items-center justify-between text-[10px]">
-          <span class="text-ui-textMuted font-semibold uppercase">Bone Length</span>
-          <div class="flex items-center gap-1">
-            <button @click="adjustBoneLength(-0.1)" class="px-1.5 py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[9px] text-ui-textSecondary cursor-pointer">-0.1</button>
-            <span class="text-ui-textAccent font-semibold font-mono">{{ boneLength }}m</span>
-            <button @click="adjustBoneLength(0.1)" class="px-1.5 py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[9px] text-ui-textSecondary cursor-pointer">+0.1</button>
-          </div>
-        </div>
-        <input 
-          type="range" 
-          min="0.1" 
-          max="5.0" 
-          step="0.05" 
-          v-model.number="boneLength"
-          class="w-full accent-ui-accent h-1 bg-ui-input rounded-xs cursor-pointer"
-        />
-        <div class="grid grid-cols-4 gap-1">
-          <button @click="setPresetBoneLength(0.5)" class="py-0.5 bg-ui-input/70 hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[9px] text-ui-textMuted cursor-pointer">0.5m</button>
-          <button @click="setPresetBoneLength(1.0)" class="py-0.5 bg-ui-input/70 hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[9px] text-ui-textMuted cursor-pointer">1.0m</button>
-          <button @click="setPresetBoneLength(1.5)" class="py-0.5 bg-ui-input/70 hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[9px] text-ui-textMuted cursor-pointer">1.5m</button>
-          <button @click="setPresetBoneLength(2.0)" class="py-0.5 bg-ui-input/70 hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[9px] text-ui-textMuted cursor-pointer">2.0m</button>
-        </div>
-      </div>
-
-      <!-- Sockets on this bone -->
-      <div class="space-y-1.5 pt-1.5 border-t border-ui-borderSubtle/60">
-        <div class="flex items-center justify-between text-[10px]">
-          <span class="text-ui-textMuted font-semibold uppercase flex items-center gap-1">
-            <Wrench class="w-3 h-3 text-sky-400" />
-            <span>Sockets ({{ selectedBone.sockets?.length || 0 }})</span>
-          </span>
-          <button @click="handleAddSocket" class="px-1.5 py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textPrimary rounded-xs text-[9px] font-medium flex items-center gap-0.5 cursor-pointer">
-            <Plus class="w-2.5 h-2.5" />
-            <span>Add</span>
-          </button>
-        </div>
-
-        <div class="space-y-1">
-          <div 
-            v-for="s in selectedBone.sockets || []" 
-            :key="s.id"
-            class="flex items-center justify-between px-2 py-1 bg-ui-input/70 rounded-xs border border-ui-borderSubtle text-[11px]"
-          >
-            <input 
-              v-model="s.name"
-              class="bg-transparent text-sky-300 font-medium focus:outline-none border-b border-transparent focus:border-ui-accent truncate"
-            />
-            <button @click="handleRemoveSocket(s.id)" class="text-ui-textMuted hover:text-rose-400 p-0.5 transition cursor-pointer">
-              <Trash2 class="w-3 h-3" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Spring / Jiggle Physics Section -->
-      <div class="space-y-1.5 pt-1.5 border-t border-ui-borderSubtle/60">
-        <div class="flex items-center justify-between">
-          <span class="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">Spring Physics (Jiggle)</span>
-          <input 
-            type="checkbox"
-            :checked="selectedBone?.springConstraint?.enabled || false"
-            @change="(e) => {
-              if (!selectedBone) return
-              if (!selectedBone.springConstraint) {
-                selectedBone.springConstraint = { enabled: true, stiffness: 0.3, damping: 0.25, gravity: 0.0 }
-              } else {
-                selectedBone.springConstraint.enabled = (e.target as HTMLInputElement).checked
-              }
-            }"
-            class="rounded-xs accent-emerald-500 cursor-pointer"
-          />
-        </div>
-
-        <template v-if="selectedBone && selectedBone.springConstraint?.enabled">
-          <div class="space-y-1 text-[10px]">
-            <div class="flex items-center justify-between text-ui-textMuted">
-              <span>Stiffness:</span>
-              <span class="font-mono text-ui-textPrimary">{{ selectedBone.springConstraint.stiffness }}</span>
-            </div>
-            <input 
-              type="range" 
-              min="0.05" 
-              max="1.0" 
-              step="0.05" 
-              v-model.number="selectedBone.springConstraint.stiffness"
-              class="w-full accent-emerald-500 h-1 bg-ui-input rounded-xs cursor-pointer"
-            />
-
-            <div class="flex items-center justify-between text-ui-textMuted">
-              <span>Damping:</span>
-              <span class="font-mono text-ui-textPrimary">{{ selectedBone.springConstraint.damping }}</span>
-            </div>
-            <input 
-              type="range" 
-              min="0.05" 
-              max="1.0" 
-              step="0.05" 
-              v-model.number="selectedBone.springConstraint.damping"
-              class="w-full accent-emerald-500 h-1 bg-ui-input rounded-xs cursor-pointer"
-            />
-
-            <div class="flex items-center justify-between text-ui-textMuted">
-              <span>Gravity Sag:</span>
-              <span class="font-mono text-ui-textPrimary">{{ selectedBone.springConstraint.gravity }}</span>
-            </div>
-            <input 
-              type="range" 
-              min="0.0" 
-              max="1.0" 
-              step="0.05" 
-              v-model.number="selectedBone.springConstraint.gravity"
-              class="w-full accent-emerald-500 h-1 bg-ui-input rounded-xs cursor-pointer"
-            />
-          </div>
-        </template>
-      </div>
-    </div>
-
-    <!-- Empty State / Quick Selector -->
-    <div v-else class="flex-1 flex flex-col p-4 space-y-3 bg-ui-surface/60 rounded-xs border border-ui-borderSubtle text-center my-auto">
-      <div class="w-9 h-9 mx-auto rounded-full bg-ui-input/80 border border-ui-borderSubtle flex items-center justify-center text-ui-accent">
-        <GitCommitVertical class="w-5 h-5" />
-      </div>
-      <div class="space-y-1">
-        <h4 class="font-semibold text-xs text-ui-textPrimary">No Bone Selected</h4>
-        <p class="text-[11px] text-ui-textMuted leading-relaxed">
-          Select a bone to edit its properties or create a new joint.
-        </p>
-      </div>
-
-      <!-- Quick Actions -->
-      <div class="grid grid-cols-2 gap-1.5 pt-1">
-        <button 
-          @click="animationStore.addRootBone(`Bone_Root_${animationStore.armature.bones.length + 1}`)"
-          class="py-1.5 px-2 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold text-[11px] flex items-center justify-center gap-1 shadow-sm transition cursor-pointer"
-        >
-          <Plus class="w-3.5 h-3.5" />
-          <span>Add Bone</span>
-        </button>
-
-        <button 
-          @click="animationStore.clickToPlaceMode = !animationStore.clickToPlaceMode"
-          class="py-1.5 px-2 rounded-xs font-semibold text-[11px] flex items-center justify-center gap-1 transition border cursor-pointer"
-          :class="animationStore.clickToPlaceMode ? 'bg-amber-500/20 text-amber-300 border-amber-500/60' : 'bg-ui-input/70 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
-        >
-          <span>Draw (B)</span>
-        </button>
-      </div>
-
-      <!-- Quick Bones List -->
-      <div v-if="animationStore.armature.bones.length > 0" class="space-y-1 flex-1 overflow-y-auto text-left pt-2 border-t border-ui-borderSubtle/60">
-        <span class="text-[10px] text-ui-textMuted font-semibold uppercase tracking-wider">Armature Bones</span>
-        <div class="space-y-0.5">
-          <button 
-            v-for="b in animationStore.armature.bones" 
+          <option value="root" class="bg-ui-panel">None (root)</option>
+          <option
+            v-for="b in animationStore.armature.bones.filter(b => b.id !== selectedBone?.id)"
             :key="b.id"
-            @click="animationStore.selectBone(b.id)"
-            class="w-full px-2 py-1 bg-ui-input/70 hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-left text-[11px] text-ui-textPrimary font-medium flex items-center gap-1.5 transition cursor-pointer"
-          >
-            <GitCommitVertical class="w-3.5 h-3.5 text-ui-accent" />
-            <span class="truncate">{{ b.name }}</span>
-          </button>
+            :value="b.id"
+            class="bg-ui-panel"
+          >{{ b.name }}</option>
+        </select>
+        <UiButton size="xs" variant="danger" class="w-full" @click="animationStore.deleteBone(selectedBone.id)">
+          <Trash2 class="w-3 h-3" /> Delete
+        </UiButton>
+      </UiSection>
+
+      <UiSection title="Rest" :icon="Sliders" :default-open="true">
+        <div class="text-[9px] text-ui-textMuted">Head</div>
+        <div class="grid grid-cols-3 gap-1">
+          <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
+            <span class="text-[9px] text-rose-400 cursor-ew-resize" @mousedown="startScrubVector($event, selectedBone.head, 'x')">X</span>
+            <input type="number" step="0.1" v-model.number="selectedBone.head.x" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
+          </div>
+          <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
+            <span class="text-[9px] text-emerald-400 cursor-ew-resize" @mousedown="startScrubVector($event, selectedBone.head, 'y')">Y</span>
+            <input type="number" step="0.1" v-model.number="selectedBone.head.y" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
+          </div>
+          <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
+            <span class="text-[9px] text-sky-400 cursor-ew-resize" @mousedown="startScrubVector($event, selectedBone.head, 'z')">Z</span>
+            <input type="number" step="0.1" v-model.number="selectedBone.head.z" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
+          </div>
         </div>
+        <div class="text-[9px] text-ui-textMuted">Tail</div>
+        <div class="grid grid-cols-3 gap-1">
+          <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
+            <span class="text-[9px] text-rose-400 cursor-ew-resize" @mousedown="startScrubVector($event, selectedBone.tail, 'x')">X</span>
+            <input type="number" step="0.1" v-model.number="selectedBone.tail.x" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
+          </div>
+          <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
+            <span class="text-[9px] text-emerald-400 cursor-ew-resize" @mousedown="startScrubVector($event, selectedBone.tail, 'y')">Y</span>
+            <input type="number" step="0.1" v-model.number="selectedBone.tail.y" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
+          </div>
+          <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
+            <span class="text-[9px] text-sky-400 cursor-ew-resize" @mousedown="startScrubVector($event, selectedBone.tail, 'z')">Z</span>
+            <input type="number" step="0.1" v-model.number="selectedBone.tail.z" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
+          </div>
+        </div>
+        <div class="flex items-center justify-between text-[10px] text-ui-textMuted">
+          <span>Length</span>
+          <span class="font-mono text-ui-textPrimary">{{ boneLength }}</span>
+        </div>
+        <input type="range" min="0.1" max="5" step="0.05" v-model.number="boneLength" class="w-full accent-ui-accent h-1" />
+        <div class="grid grid-cols-4 gap-1">
+          <UiButton size="xs" @click="adjustBoneLength(-0.1)">−</UiButton>
+          <UiButton size="xs" @click="adjustBoneLength(0.1)">+</UiButton>
+          <UiButton size="xs" @click="boneLength = 1">1</UiButton>
+          <UiButton size="xs" @click="boneLength = 2">2</UiButton>
+        </div>
+      </UiSection>
+
+      <UiSection title="IK" :icon="Sparkles" hint="Pose drag" :default-open="true">
+        <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
+          <span>Enabled</span>
+          <input
+            type="checkbox"
+            :checked="selectedBone.ikConstraint?.enabled || false"
+            class="accent-amber-500"
+            @change="toggleIk(($event.target as HTMLInputElement).checked)"
+          />
+        </label>
+        <p class="text-[9px] text-ui-textMuted leading-snug">Solved after keys. Drag in Pose to set the target.</p>
+        <template v-if="selectedBone.ikConstraint?.enabled">
+          <div class="flex justify-between text-[10px] text-ui-textMuted">
+            <span>Chain</span>
+            <span class="font-mono text-ui-textPrimary">{{ selectedBone.ikConstraint.chainLength }}</span>
+          </div>
+          <input type="range" min="2" max="6" step="1" v-model.number="selectedBone.ikConstraint.chainLength" class="w-full accent-amber-500 h-1" />
+          <select
+            :value="selectedBone.ikConstraint.targetBoneId || ''"
+            class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-xs cursor-pointer"
+            @change="selectedBone.ikConstraint!.targetBoneId = ($event.target as HTMLSelectElement).value || undefined"
+          >
+            <option value="" class="bg-ui-panel">Gizmo / last pos</option>
+            <option v-for="b in animationStore.armature.bones.filter(b => b.id !== selectedBone?.id)" :key="b.id" :value="b.id" class="bg-ui-panel">{{ b.name }}</option>
+          </select>
+          <select
+            :value="selectedBone.ikConstraint.poleTargetBoneId || ''"
+            class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-xs cursor-pointer"
+            @change="selectedBone.ikConstraint!.poleTargetBoneId = ($event.target as HTMLSelectElement).value || undefined"
+          >
+            <option value="" class="bg-ui-panel">No pole</option>
+            <option v-for="b in animationStore.armature.bones.filter(b => b.id !== selectedBone?.id)" :key="b.id" :value="b.id" class="bg-ui-panel">{{ b.name }}</option>
+          </select>
+        </template>
+      </UiSection>
+
+      <UiSection title="Sockets" :icon="Wrench" :badge="selectedBone.sockets?.length || 0" :default-open="false">
+        <UiButton size="xs" class="w-full" @click="handleAddSocket"><Plus class="w-3 h-3" /> Add</UiButton>
+        <div v-for="s in selectedBone.sockets || []" :key="s.id" class="flex items-center gap-1">
+          <input v-model="s.name" class="flex-1 bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-[10px] text-sky-300" />
+          <button type="button" class="text-ui-textMuted hover:text-rose-400" @click="handleRemoveSocket(s.id)"><Trash2 class="w-3 h-3" /></button>
+        </div>
+      </UiSection>
+
+      <UiSection title="Spring" :icon="Sparkles" :default-open="false">
+        <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
+          <span>Jiggle</span>
+          <input
+            type="checkbox"
+            :checked="selectedBone.springConstraint?.enabled || false"
+            class="accent-emerald-500"
+            @change="toggleSpring(($event.target as HTMLInputElement).checked)"
+          />
+        </label>
+        <template v-if="selectedBone.springConstraint?.enabled">
+          <div class="flex justify-between text-[10px] text-ui-textMuted"><span>Stiff</span><span class="font-mono">{{ selectedBone.springConstraint.stiffness }}</span></div>
+          <input type="range" min="0.05" max="1" step="0.05" v-model.number="selectedBone.springConstraint.stiffness" class="w-full accent-emerald-500 h-1" />
+          <div class="flex justify-between text-[10px] text-ui-textMuted"><span>Damp</span><span class="font-mono">{{ selectedBone.springConstraint.damping }}</span></div>
+          <input type="range" min="0.05" max="1" step="0.05" v-model.number="selectedBone.springConstraint.damping" class="w-full accent-emerald-500 h-1" />
+          <div class="flex justify-between text-[10px] text-ui-textMuted"><span>Gravity</span><span class="font-mono">{{ selectedBone.springConstraint.gravity }}</span></div>
+          <input type="range" min="0" max="1" step="0.05" v-model.number="selectedBone.springConstraint.gravity" class="w-full accent-emerald-500 h-1" />
+        </template>
+      </UiSection>
+    </template>
+
+    <UiSection v-else title="Select" :icon="GitCommitVertical" :default-open="true">
+      <p class="text-[9px] text-ui-textMuted">Pick a bone in the viewport or Skel tab.</p>
+      <div class="grid grid-cols-2 gap-1">
+        <UiButton size="xs" variant="primary" @click="animationStore.addRootBone(`Bone_Root_${animationStore.armature.bones.length + 1}`)">Add</UiButton>
+        <UiButton size="xs" :variant="animationStore.clickToPlaceMode ? 'accent' : 'default'" @click="animationStore.clickToPlaceMode = !animationStore.clickToPlaceMode">Draw</UiButton>
       </div>
-    </div>
+      <button
+        v-for="b in animationStore.armature.bones"
+        :key="b.id"
+        type="button"
+        class="w-full text-left px-2 py-1 rounded-xs text-[10px] hover:bg-ui-hover text-ui-textSecondary"
+        @click="animationStore.selectBone(b.id)"
+      >{{ b.name }}</button>
+    </UiSection>
   </div>
 </template>

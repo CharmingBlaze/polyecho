@@ -8,7 +8,8 @@ export const EDITOR_EVENTS = {
   openPrimitiveMenu: 'editor:open-primitive-menu',
   startPrimitivePlacement: 'editor:start-primitive-placement',
   primitiveCreated: 'editor:primitive-created',
-  openExport: 'editor:open-export'
+  openExport: 'editor:open-export',
+  fillFace: 'editor:fill-face'
 } as const
 
 export type ModalToolCommand =
@@ -20,6 +21,7 @@ export type ModalToolCommand =
   | 'bevel'
   | 'knife'
   | 'loop_cut'
+  | 'polydraw'
 
 export type CameraViewCommand = 'persp' | 'top' | 'front' | 'right' | 'iso'
 export type ExportFormatCommand = 'glb' | 'obj'
@@ -53,4 +55,8 @@ export function notifyPrimitiveCreated(detail: unknown) {
 
 export function requestExport(format?: ExportFormatCommand) {
   window.dispatchEvent(new CustomEvent(EDITOR_EVENTS.openExport, { detail: format }))
+}
+
+export function requestFillFace() {
+  window.dispatchEvent(new CustomEvent(EDITOR_EVENTS.fillFace))
 }

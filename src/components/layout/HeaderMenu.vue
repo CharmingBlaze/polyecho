@@ -43,9 +43,8 @@ import { ProjectSerializer } from '../../core/project/ProjectSerializer'
 import { ObjImport } from '../../core/import/ObjImport'
 import { GltfImport } from '../../core/import/GltfImport'
 import { exportToBlockbench, importFromBlockbench } from '../../core/export/BlockbenchExport'
-import { exportToGLTF } from '../../core/export/GltfExport'
-import * as THREE from 'three'
-import { requestCameraView, requestModalTool, requestPrimitiveMenu, requestPrimitivePlacement } from '../../core/commands/editorCommands'
+import { exportToGLTF, buildExportTextureMap } from '../../core/export/GltfExport'
+import { requestCameraView, requestModalTool, requestPrimitiveMenu, requestPrimitivePlacement, requestFillFace } from '../../core/commands/editorCommands'
 
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
@@ -120,6 +119,27 @@ function handleStartKnife() {
   requestModalTool('knife')
 }
 
+function handleStartExtrude() {
+  if (toolStore.selectMode === 'object' || toolStore.selectMode === 'origin') {
+    toolStore.setSelectMode('face')
+  }
+  requestModalTool('extrude')
+}
+
+function handleStartInset() {
+  if (toolStore.selectMode === 'object' || toolStore.selectMode === 'origin') {
+    toolStore.setSelectMode('face')
+  }
+  requestModalTool('inset')
+}
+
+function handleStartBevel() {
+  if (toolStore.selectMode === 'object' || toolStore.selectMode === 'origin') {
+    toolStore.setSelectMode('face')
+  }
+  requestModalTool('bevel')
+}
+
 function onDocumentClick(e: MouseEvent) {
   const target = e.target as HTMLElement
   if (!target.closest('.header-menu-container')) {
@@ -148,7 +168,8 @@ function saveProject() {
     animationStore.armature.activeClipId,
     animationStore.currentFrame,
     toolStore.viewport,
-    projectStore.textures
+    projectStore.textures,
+    projectStore.referenceImages
   )
   ProjectSerializer.downloadProject(json, projectStore.projectName)
   closeDropdowns()
@@ -194,9 +215,9 @@ async function handleLoadProject(e: Event) {
     if (data.textures && data.textures.length > 0) {
       projectStore.textures = []
       for (const t of data.textures) {
-        projectStore.addTexture(t.name, t.width, t.height, t.dataUrl)
+        projectStore.createTexture(t.name, t.width, t.height, t.dataUrl, undefined, { record: false, select: false })
       }
-      projectStore.activeTextureId = projectStore.textures[0]?.id || 'tex_default'
+      projectStore.selectTexture(projectStore.textures[0]?.id || 'tex_default')
     } else if (data.textureDataUrl) {
       await projectStore.pixelBuffer.loadFromDataURL(data.textureDataUrl, true)
       projectStore.markTextureUpdated()
@@ -214,6 +235,8 @@ async function handleLoadProject(e: Event) {
     if (typeof data.currentFrame === 'number') {
       animationStore.currentFrame = data.currentFrame
     }
+    projectStore.referenceImages = data.referenceImages ? JSON.parse(JSON.stringify(data.referenceImages)) : []
+    projectStore.referenceRevision++
 
     projectStore.markGeometryUpdated()
     projectStore.markTextureUpdated()
@@ -321,20 +344,15 @@ async function exportBlockbench() {
 async function exportGltfDirect(binary = true) {
   if (isExporting.value) return
   isExporting.value = true
-  const texMap = new Map<string, any>()
+  const texMap = buildExportTextureMap(projectStore.textures)
   try {
-    for (const t of projectStore.textures) {
-      if (t.pixelBuffer) {
-        const tex = new THREE.CanvasTexture(t.pixelBuffer.canvas)
-        texMap.set(t.id, tex)
-      }
-    }
     const blob = await exportToGLTF(
       projectStore.meshes,
       texMap,
       animationStore.armature.clips,
       binary,
-      animationStore.armature
+      animationStore.armature,
+      projectStore.materials
     )
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -362,7 +380,7 @@ async function handleImportBbmodel(e: Event) {
     const result = importFromBlockbench(text)
     if (result.textures.length > 0) {
       for (const t of result.textures) {
-        projectStore.addTexture(t.name, t.width, t.height, t.dataUrl)
+        projectStore.createTexture(t.name, t.width, t.height, t.dataUrl, undefined, { record: false, select: false })
       }
     }
     projectStore.recordState(`Import Blockbench (${file.name})`)
@@ -409,12 +427,15 @@ function handleExitProject() {
         </button>
 
         <div v-if="activeDropdown === 'file'" class="header-dropdown-menu absolute left-0 top-full mt-0.5 w-60 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
-          <button @click="$emit('new-project'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
-            <span class="flex items-center gap-2"><Plus class="w-3.5 h-3.5 text-ui-accent" /> New Project...</span>
+          <button @click="projectStore.resetToDefaultProject(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between font-medium">
+            <span class="flex items-center gap-2"><Plus class="w-3.5 h-3.5 text-ui-accent" /> New Project (Blank)</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+N</span>
           </button>
+          <button @click="$emit('new-project'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-ui-textSecondary">
+            <span class="flex items-center gap-2"><LayoutGrid class="w-3.5 h-3.5 text-indigo-400" /> New from Template...</span>
+          </button>
           <button @click="handleRestoreLastSession" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-sky-300">
-            <span class="flex items-center gap-2"><RotateCcw class="w-3.5 h-3.5 text-sky-400" /> Reopen Last Session</span>
+            <span class="flex items-center gap-2"><RotateCcw class="w-3.5 h-3.5 text-sky-400" /> Recover Autosaved Session</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+Shift+T</span>
           </button>
           <button @click="loadProjectInput?.click()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
@@ -443,6 +464,10 @@ function handleExitProject() {
           </button>
           <button @click="importTextureInput?.click()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
             <ImageIcon class="w-3.5 h-3.5 text-ui-textMuted" /> Texture (PNG, JPG)
+          </button>
+          <button @click="projectStore.restoreDefaultTexture(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-amber-400 font-medium">
+            <span class="flex items-center gap-2"><Sparkles class="w-3.5 h-3.5 text-amber-400" /> Restore Default Texture</span>
+            <span class="text-ui-textMuted font-mono text-[9px]">64x64 Atlas</span>
           </button>
 
           <div class="h-px bg-ui-borderSubtle my-1"></div>
@@ -621,15 +646,15 @@ function handleExitProject() {
         </button>
         <div v-if="activeDropdown === 'mesh'" class="header-dropdown-menu absolute left-0 top-full mt-0.5 w-60 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
           <div class="px-3 py-1 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">Transform & Extrude</div>
-          <button @click="projectStore.performExtrude(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
+          <button @click="handleStartExtrude(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
             <span>Extrude Region</span>
             <span class="text-ui-textMuted font-mono text-[10px]">E</span>
           </button>
-          <button @click="projectStore.performInset(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
+          <button @click="handleStartInset(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
             <span>Inset Faces</span>
             <span class="text-ui-textMuted font-mono text-[10px]">I</span>
           </button>
-          <button @click="projectStore.performBevel(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
+          <button @click="handleStartBevel(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
             <span>Bevel / Chamfer</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+B</span>
           </button>
@@ -646,13 +671,35 @@ function handleExitProject() {
             <span class="text-ui-textMuted font-mono text-[10px]">K</span>
           </button>
           <button @click="projectStore.performSubdivide(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
-            <span>Subdivide</span>
+            <span>Subdivide / Divide</span>
           </button>
           <button @click="projectStore.performBridgeEdges(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
             <span>Bridge Edge Loops</span>
           </button>
           <button @click="projectStore.performGridFill(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
             <span>Grid Fill</span>
+          </button>
+
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+
+          <div class="px-3 py-1 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">Vertices</div>
+          <button @click="projectStore.performMerge('center'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
+            <span>Merge at Center</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">M</span>
+          </button>
+          <button @click="projectStore.performConnectVertices(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
+            <span>Connect Vertices</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">J</span>
+          </button>
+          <button @click="requestFillFace(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
+            <span>Fill Face</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">F</span>
+          </button>
+          <button @click="projectStore.performDissolve('vertex'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
+            <span>Dissolve Vertices</span>
+          </button>
+          <button @click="projectStore.performDissolve('edge'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
+            <span>Dissolve Edges</span>
           </button>
 
           <div class="h-px bg-ui-borderSubtle my-1"></div>
@@ -718,7 +765,7 @@ function handleExitProject() {
             <span class="text-ui-textMuted font-mono text-[10px]">Alt+Z</span>
           </button>
 
-          <button @click="toolStore.viewport.showBones = !toolStore.viewport.showBones; animationStore.showBones = toolStore.viewport.showBones; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+          <button @click="animationStore.toggleShowBones(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2"><GitCommitVertical class="w-3.5 h-3.5 text-amber-400" /> Skeleton Bones</span>
             <span class="text-ui-textAccent font-medium text-[10px]">{{ toolStore.viewport.showBones ? 'VISIBLE' : 'HIDDEN' }}</span>
           </button>
@@ -771,22 +818,23 @@ function handleExitProject() {
       </div>
     </div>
 
-    <!-- 2. CENTER: Blender Workspace Tabs (Layout, Modeling, UV/Paint, Rigging, Animation) -->
+    <!-- 2. CENTER: Workspace tabs (Modeling, UV/Paint, Rigging, Animation) -->
     <div class="flex items-center space-x-0.5 bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle shrink-0 font-sans">
       <button 
-        @click="toolStore.setAppMode('model'); toolStore.selectMode = 'object'"
+        @click="toolStore.setAppMode('model')"
         class="flex items-center gap-1.5 px-2.5 h-6 rounded-xs text-xs font-semibold transition"
-        :class="toolStore.appMode === 'model' && toolStore.selectMode === 'object' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
-      >
-        <span>Layout</span>
-      </button>
-
-      <button 
-        @click="toolStore.setAppMode('model'); if (toolStore.selectMode === 'object') toolStore.selectMode = 'face'"
-        class="flex items-center gap-1.5 px-2.5 h-6 rounded-xs text-xs font-semibold transition"
-        :class="toolStore.appMode === 'model' && toolStore.selectMode !== 'object' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
+        :class="toolStore.appMode === 'model' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
       >
         <span>Modeling</span>
+      </button>
+
+      <button
+        @click="toolStore.setAppMode('blockout')"
+        class="flex items-center gap-1.5 px-2.5 h-6 rounded-xs text-xs font-semibold transition"
+        :class="toolStore.appMode === 'blockout' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
+        title="Blockout — Front / Side / Persp, Poly Draw, references"
+      >
+        <span>Blockout</span>
       </button>
 
       <button 

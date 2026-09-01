@@ -3,6 +3,8 @@ import { EditableMesh, MeshSnapshot } from '../mesh/MeshKernel'
 import { NumericInput } from '../transform/NumericInput'
 import { SnapManager } from '../transform/SnapManager'
 import { AxisConstraint, TransformOrientation, PivotMode } from '../transform/TransformTypes'
+import type { ViewQuadrant } from '../geometry/ScreenGeometry'
+import { ScreenGeometry } from '../geometry/ScreenGeometry'
 
 export interface OperatorContext {
   mesh: EditableMesh
@@ -18,7 +20,14 @@ export interface OperatorContext {
   sceneGroup?: THREE.Group
   allMeshes?: any[]
   viewportKind?: 'persp' | 'top' | 'front' | 'right'
-  quadrant?: 'top_left' | 'top_right' | 'bottom_left' | 'bottom_right' | 'main'
+  quadrant?: ViewQuadrant
+  /** World units for incremental snap (from toolStore.snapping). */
+  gridSize?: number
+  snapGrid?: boolean
+  snapVertex?: boolean
+  snapEdge?: boolean
+  /** Object TRS so G/R/S run in world space then write local verts. */
+  objectMatrix?: THREE.Matrix4
   onUpdatePreview: () => void
   onCommit: (actionName: string) => void
   onCancel: () => void
@@ -40,6 +49,7 @@ export abstract class ModalOperator {
 
   protected numericInput = new NumericInput()
   protected snapManager = new SnapManager()
+  protected worldToLocal = new THREE.Matrix4()
 
   protected isShiftHeld = false
   protected isCtrlHeld = false
@@ -54,6 +64,12 @@ export abstract class ModalOperator {
       this.initialVertices.set(id, v.position.clone())
     }
 
+    const worldMat = ctx.objectMatrix?.clone() ?? new THREE.Matrix4()
+    this.worldToLocal.copy(worldMat).invert()
+    for (const pos of this.initialVertices.values()) {
+      pos.applyMatrix4(worldMat)
+    }
+
     this.startMouse = { x: startPointer.x, y: startPointer.y }
     this.currentMouse = { x: startPointer.x, y: startPointer.y }
 
@@ -62,23 +78,34 @@ export abstract class ModalOperator {
     this.updateStatus()
   }
 
+  protected collectTargetVertIds(): Set<number> {
+    const ids = new Set<number>()
+    for (const vid of this.ctx.selectedVertIds) ids.add(vid)
+    for (const fId of this.ctx.selectedFaceIds) {
+      const f = this.ctx.mesh.faces.get(fId)
+      if (f) f.vertexIds.forEach(vid => ids.add(vid))
+    }
+    for (const eId of this.ctx.selectedEdgeIds) {
+      const e = this.ctx.mesh.edges.get(eId)
+      if (e) {
+        ids.add(e.v1)
+        ids.add(e.v2)
+      }
+    }
+    return ids
+  }
+
+  protected writeWorldPos(vId: number, world: THREE.Vector3) {
+    const v = this.ctx.mesh.vertices.get(vId)
+    if (!v) return
+    v.position.copy(world).applyMatrix4(this.worldToLocal)
+  }
+
   protected initPivot() {
     const positions: THREE.Vector3[] = []
-    if (this.ctx.selectedFaceIds.length > 0) {
-      for (const fId of this.ctx.selectedFaceIds) {
-        const f = this.ctx.mesh.faces.get(fId)
-        if (f) {
-          f.vertexIds.forEach(vid => {
-            const v = this.ctx.mesh.vertices.get(vid)
-            if (v) positions.push(v.position)
-          })
-        }
-      }
-    } else if (this.ctx.selectedVertIds.length > 0) {
-      for (const vid of this.ctx.selectedVertIds) {
-        const v = this.ctx.mesh.vertices.get(vid)
-        if (v) positions.push(v.position)
-      }
+    for (const vid of this.collectTargetVertIds()) {
+      const p = this.initialVertices.get(vid)
+      if (p) positions.push(p)
     }
 
     this.pivot.set(0, 0, 0)
@@ -87,13 +114,9 @@ export abstract class ModalOperator {
       this.pivot.divideScalar(positions.length)
     }
 
-    // Project pivot to screen
     const rect = this.ctx.viewportElement.getBoundingClientRect()
-    const proj = this.pivot.clone().project(this.ctx.camera)
-    this.pivotScreen = {
-      x: (proj.x * 0.5 + 0.5) * (rect.width || window.innerWidth) + (rect.left || 0),
-      y: (-(proj.y * 0.5) + 0.5) * (rect.height || window.innerHeight) + (rect.top || 0)
-    }
+    const screen = ScreenGeometry.worldToScreen(this.pivot, this.ctx.camera, rect, this.ctx.quadrant)
+    this.pivotScreen = { x: screen.x, y: screen.y }
   }
 
   protected restoreSnapshot() {

@@ -12,9 +12,13 @@ dist
 dist-ssr
 *.local
 
+# Local Blockbench reference scrapes (do not commit)
+.tmp_bb/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
+!.vscode/settings.json
 .idea
 .DS_Store
 *.suo

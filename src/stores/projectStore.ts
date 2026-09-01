@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
-import { ref, computed, watch } from 'vue'
-import { MeshObject, Vertex, Face } from '../types/mesh'
-import { Material, Palette, TextureMap } from '../types/texture'
+import { ref, computed, markRaw } from 'vue'
+import { MeshObject, Vertex, Face, MeshShadeMode } from '../types/mesh'
+import { Material, Palette, TextureMap, TextureApplyPolicy } from '../types/texture'
 import { SelectMode } from '../types/tools'
 import { createCube } from '../core/geometry/Primitives'
 import { 
@@ -21,20 +21,30 @@ import {
   deleteElements 
 } from '../core/geometry/Operations'
 import { getMeshEdges, getEdgeLoop, getEdgeRing } from '../core/geometry/EdgeUtils'
-import { DEFAULT_PALETTES } from '../utils/color'
+import { DEFAULT_PALETTES, loadCustomPalettes, saveCustomPalettes } from '../utils/color'
 import { PixelBuffer } from '../core/painting/PixelCanvas'
 import { generateRetroAtlas } from '../core/painting/DefaultTextures'
 import { PrimitiveType, PrimitiveParameters } from '../core/primitives/PrimitiveTypes'
 import { PrimitiveBuilder } from '../core/primitives/PrimitiveBuilder'
 import { MeshBridge } from '../core/mesh/MeshBridge'
+import { EditableMesh } from '../core/mesh/MeshKernel'
 import { SeamUnwrapper } from '../core/uv/SeamUnwrapper'
 import { UVIslandPacker } from '../core/uv/UVIslandPacker'
 import { AtlasBaker } from '../core/uv/AtlasBaker'
+import { clampAtlasGrid, mapFacesToAtlasCell, sliceBufferIntoTiles } from '../core/uv/AtlasCells'
+import { applyTargetTexelDensity, equalizeTexelDensity } from '../core/geometry/UVUnwrap'
+import {
+  applyModifier,
+  defaultMirrorModifier,
+  defaultSolidifyModifier,
+  defaultSubdivisionModifier
+} from '../core/geometry/Modifiers'
 import { computeFaceNormal, computeCentroid } from '../utils/math'
 import { Vector3D, PrimitiveTransform } from '../types/mesh'
+import { ReferenceImage, ReferencePlane } from '../types/reference'
 import { useHistoryStore } from './historyStore'
 import { useAnimationStore } from './animationStore'
-import { ProjectStorage } from '../core/storage/ProjectStorage'
+import { ProjectStorage, type ProjectStorageData } from '../core/storage/ProjectStorage'
 
 export const useProjectStore = defineStore('project', () => {
   const historyStore = useHistoryStore()
@@ -50,11 +60,25 @@ export const useProjectStore = defineStore('project', () => {
   const selectedEdgeIds = ref<string[]>([])
   const selectedFaceIds = ref<string[]>([])
 
-  // Textures & Materials & Geometry
-  const activePalette = ref<Palette>(DEFAULT_PALETTES[0])
+  // Textures & Materials & Geometry & Palettes
+  const customSavedPalettes = loadCustomPalettes()
+  const palettes = ref<Palette[]>([...DEFAULT_PALETTES, ...customSavedPalettes])
+  const activePaletteId = ref<string>(DEFAULT_PALETTES[0].id)
+  const activePalette = computed<Palette>({
+    get: () => palettes.value.find(p => p.id === activePaletteId.value) || palettes.value[0] || DEFAULT_PALETTES[0],
+    set: (p: Palette) => {
+      if (!palettes.value.some(existing => existing.id === p.id)) {
+        palettes.value.push(p)
+      }
+      activePaletteId.value = p.id
+    }
+  })
   const textureRevision = ref<number>(0)
   const geometryRevision = ref<number>(0)
   const activeTextureId = ref<string>('tex_default')
+  const referenceImages = ref<ReferenceImage[]>([])
+  const referenceRevision = ref<number>(0)
+  const selectedReferenceId = ref<string>('')
 
   // Create default 64x64 pixel buffer atlas
   const defaultBuffer = new PixelBuffer(64, 64)
@@ -67,7 +91,8 @@ export const useProjectStore = defineStore('project', () => {
       width: 64,
       height: 64,
       dataUrl: defaultBuffer.toDataURL(),
-      pixelBuffer: defaultBuffer
+      pixelBuffer: markRaw(defaultBuffer),
+      atlas: { cols: 2, rows: 2 }
     }
   ])
 
@@ -76,12 +101,37 @@ export const useProjectStore = defineStore('project', () => {
   })
 
   // Backward compatibility: projectStore.pixelBuffer transparently accesses active texture's pixel buffer
+  function attachPixelBuffer(tex: TextureMap, buf: PixelBuffer) {
+    tex.pixelBuffer = markRaw(buf)
+    tex.width = buf.width
+    tex.height = buf.height
+    return buf
+  }
+
+  function ensureTextureBuffer(tex?: TextureMap | null): PixelBuffer {
+    const target = tex || activeTexture.value
+    const existing = target.pixelBuffer
+    if (existing && typeof existing.drawBrush === 'function') {
+      existing.ensureDrawable()
+      return existing
+    }
+    const buf = markRaw(new PixelBuffer(target.width || 64, target.height || 64))
+    if (target.dataUrl) {
+      const img = new Image()
+      img.onload = () => {
+        buf.ctx.drawImage(img, 0, 0, buf.width, buf.height)
+        buf.syncToActiveLayer()
+        markTextureUpdated(target.id)
+      }
+      img.src = target.dataUrl
+    }
+    return attachPixelBuffer(target, buf)
+  }
+
   const pixelBuffer = computed<PixelBuffer>({
-    get: () => activeTexture.value.pixelBuffer || defaultBuffer,
+    get: () => ensureTextureBuffer(activeTexture.value),
     set: (buf: PixelBuffer) => {
-      activeTexture.value.pixelBuffer = buf
-      activeTexture.value.width = buf.width
-      activeTexture.value.height = buf.height
+      attachPixelBuffer(activeTexture.value, buf)
     }
   })
 
@@ -101,19 +151,40 @@ export const useProjectStore = defineStore('project', () => {
     }
   ])
 
+  const activeMaterialId = ref<string>('default_material')
+
+  const activeMaterial = computed<Material>(() => {
+    return materials.value.find(m => m.id === activeMaterialId.value) || materials.value[0]
+  })
+
   // Computed
   const activeMesh = computed<MeshObject | undefined>(() => meshes.value.find((m: MeshObject) => m.id === activeMeshId.value) || meshes.value[0])
 
-  watch(activeMeshId, (newMeshId) => {
-    if (!newMeshId) return
-    const mesh = meshes.value.find(m => m.id === newMeshId)
-    if (mesh && mesh.materialId) {
-      const mat = materials.value.find(m => m.id === mesh.materialId)
-      if (mat && mat.textureId) {
-        activeTextureId.value = mat.textureId
-      }
-    }
-  })
+  function selectTexture(textureId: string) {
+    if (!textures.value.some(t => t.id === textureId)) return
+    activeTextureId.value = textureId
+  }
+
+  function selectMaterial(materialId: string) {
+    if (!materials.value.some(m => m.id === materialId)) return
+    activeMaterialId.value = materialId
+  }
+
+  function countMeshesUsingMaterial(matId: string): number {
+    return meshes.value.filter(m => (m.materialId || 'default_material') === matId).length
+  }
+
+  function isMaterialShared(matId?: string | null): boolean {
+    if (!matId) return false
+    return countMeshesUsingMaterial(matId) > 1
+  }
+
+  function syncPaintTargetFromMesh(meshId?: string) {
+    const mesh = meshes.value.find(m => m.id === (meshId || activeMeshId.value))
+    if (!mesh) return
+    const mat = materials.value.find(m => m.id === (mesh.materialId || 'default_material'))
+    if (mat?.textureId) selectTexture(mat.textureId)
+  }
 
   const stats = computed(() => {
     let verts = 0
@@ -140,14 +211,92 @@ export const useProjectStore = defineStore('project', () => {
     historyStore.recordState(desc)
   }
 
-  // Primitive adding
-  function addPrimitive(
+  // ----------------------------------------------------
+  // OBJECTS & HIERARCHY (Three Verbs — see docs/HIERARCHY.md)
+  //   selectMesh         active object & inspector target
+  //   createMesh         add a 3D object to the scene
+  //   parentMesh         set transform hierarchy between objects
+  // ----------------------------------------------------
+  function selectMesh(meshId: string, options?: { multi?: boolean }) {
+    if (!meshes.value.some(m => m.id === meshId)) return
+    activeMeshId.value = meshId
+    if (options?.multi) {
+      if (!selectedMeshIds.value.includes(meshId)) {
+        selectedMeshIds.value.push(meshId)
+      }
+    } else {
+      selectedMeshIds.value = [meshId]
+    }
+    selectedReferenceId.value = ''
+    syncPaintTargetFromMesh(meshId)
+    const mesh = meshes.value.find(m => m.id === meshId)
+    if (mesh?.materialId) {
+      selectMaterial(mesh.materialId)
+    }
+  }
+
+  function selectMeshes(meshIds: string[]) {
+    const valid = meshIds.filter(id => meshes.value.some(m => m.id === id))
+    selectedMeshIds.value = valid
+    if (valid.length > 0) {
+      activeMeshId.value = valid[0]
+      syncPaintTargetFromMesh(valid[0])
+      const mesh = meshes.value.find(m => m.id === valid[0])
+      if (mesh?.materialId) selectMaterial(mesh.materialId)
+    }
+  }
+
+  function isDescendantOf(childId: string, potentialAncestorId: string): boolean {
+    let cur = meshes.value.find(m => m.id === potentialAncestorId)
+    while (cur && cur.parentId) {
+      if (cur.parentId === childId) return true
+      cur = meshes.value.find(m => m.id === cur!.parentId)
+    }
+    return false
+  }
+
+  function parentMesh(childId: string, parentId: string | null) {
+    const child = meshes.value.find(m => m.id === childId)
+    if (!child) return
+    if (!parentId) {
+      unparentMesh(childId)
+      return
+    }
+    if (childId === parentId || isDescendantOf(childId, parentId)) {
+      console.warn(`Cannot parent ${child.name} to ${parentId}: would create a circular dependency.`)
+      return
+    }
+    const parent = meshes.value.find(m => m.id === parentId)
+    const parentName = parent ? parent.name : parentId
+    recordState(`Parent ${child.name} to ${parentName}`)
+    child.parentId = parentId
+    markGeometryUpdated()
+  }
+
+  function unparentMesh(childId: string) {
+    const child = meshes.value.find(m => m.id === childId)
+    if (child && child.parentId) {
+      recordState(`Unparent ${child.name}`)
+      child.parentId = undefined
+      markGeometryUpdated()
+    }
+  }
+
+  function getMeshChildren(meshId: string): MeshObject[] {
+    return meshes.value.filter(m => m.parentId === meshId)
+  }
+
+  // Primitive adding & mesh creation
+  function createMesh(
     type: PrimitiveType | 'cube' | 'plane' | 'cylinder' | 'cone' | 'sphere' = 'BOX',
     params?: PrimitiveParameters,
-    transform?: PrimitiveTransform
-  ) {
+    transform?: PrimitiveTransform,
+    options?: { record?: boolean; select?: boolean; materialId?: string }
+  ): MeshObject {
     const normType = (type.toUpperCase() === 'CUBE' ? 'BOX' : type.toUpperCase()) as PrimitiveType
-    recordState(`Add ${normType}`)
+    const shouldRecord = options?.record !== false
+    const shouldSelect = options?.select !== false
+    if (shouldRecord) recordState(`Add ${normType}`)
     const count = meshes.value.length + 1
 
     const editableMesh = PrimitiveBuilder.create(normType, params || {})
@@ -159,13 +308,85 @@ export const useProjectStore = defineStore('project', () => {
       newMesh.rotation = { ...transform.rotation }
       newMesh.scale = { ...transform.scale }
     }
+    if (options?.materialId) {
+      newMesh.materialId = options.materialId
+    }
 
     meshes.value.push(newMesh)
-    activeMeshId.value = newMesh.id
-    selectedMeshIds.value = [newMesh.id]
+    if (shouldSelect) {
+      selectMesh(newMesh.id)
+    }
     clearSubSelections()
     markGeometryUpdated()
     return newMesh
+  }
+
+  /** @deprecated Use createMesh — same behavior, kept for compatibility */
+  function addPrimitive(
+    type: PrimitiveType | 'cube' | 'plane' | 'cylinder' | 'cone' | 'sphere' = 'BOX',
+    params?: PrimitiveParameters,
+    transform?: PrimitiveTransform
+  ): MeshObject {
+    return createMesh(type, params, transform)
+  }
+
+  function addEditableMesh(mesh: EditableMesh, name: string): MeshObject {
+    recordState(name)
+    const obj = MeshBridge.editableMeshToMeshObject(mesh, name)
+    meshes.value.push(obj)
+    selectMesh(obj.id)
+    clearSubSelections()
+    markGeometryUpdated()
+    return obj
+  }
+
+  function addReferenceImage(plane: ReferencePlane, dataUrl: string, name?: string): ReferenceImage {
+    recordState('Add Reference Image')
+    const img: ReferenceImage = {
+      id: `ref_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      name: name || `${plane[0].toUpperCase() + plane.slice(1)} Ref`,
+      plane,
+      dataUrl,
+      opacity: 0.65,
+      scale: 4,
+      offsetX: 0,
+      offsetY: 0,
+      flipX: false,
+      visible: true,
+      locked: false
+    }
+    referenceImages.value = [...referenceImages.value, img]
+    referenceRevision.value++
+    return img
+  }
+
+  /** One lightbox image per plane — replace if that plane already has a ref. */
+  function setReferenceOnPlane(plane: ReferencePlane, dataUrl: string, name?: string): ReferenceImage {
+    const existing = referenceImages.value.find(img => img.plane === plane)
+    if (existing) {
+      recordState(`Replace ${plane} Reference`)
+      updateReferenceImage(existing.id, { dataUrl, name: name || existing.name, visible: true })
+      return referenceImages.value.find(img => img.id === existing.id) || existing
+    }
+    return addReferenceImage(plane, dataUrl, name)
+  }
+
+  function selectReference(id: string) {
+    selectedReferenceId.value = id
+    selectedMeshIds.value = []
+  }
+
+  function updateReferenceImage(id: string, patch: Partial<ReferenceImage>, opts?: { rebuild?: boolean }) {
+    referenceImages.value = referenceImages.value.map(img => img.id === id ? { ...img, ...patch, id: img.id } : img)
+    const rebuild = opts?.rebuild ?? ('dataUrl' in patch || 'plane' in patch || 'visible' in patch)
+    if (rebuild) referenceRevision.value++
+  }
+
+  function removeReferenceImage(id: string) {
+    recordState('Remove Reference Image')
+    if (selectedReferenceId.value === id) selectedReferenceId.value = ''
+    referenceImages.value = referenceImages.value.filter(img => img.id !== id)
+    referenceRevision.value++
   }
 
   function clearSubSelections() {
@@ -188,10 +409,10 @@ export const useProjectStore = defineStore('project', () => {
     replaceMesh(result.mesh)
   }
 
-  function performInset(scale = 0.7) {
+  function performInset(thickness = 0.1) {
     if (!activeMesh.value || selectedFaceIds.value.length === 0) return
-    recordState('Inset Face(s)')
-    const result = insetFaces(activeMesh.value, selectedFaceIds.value, scale)
+    recordState('Inset Faces')
+    const result = insetFaces(activeMesh.value, selectedFaceIds.value, thickness)
     selectedFaceIds.value = result.selectedFaceIds
     selectedVertexIds.value = result.selectedVertexIds
     replaceMesh(result.mesh)
@@ -252,16 +473,23 @@ export const useProjectStore = defineStore('project', () => {
     replaceMesh(result.mesh)
   }
 
-  function performFillFace() {
+  function performFillFace(viewDirection?: { x: number; y: number; z: number }) {
     if (!activeMesh.value) return
     let boundaryVertexIds = [...selectedVertexIds.value]
     if (boundaryVertexIds.length < 3 && selectedEdgeIds.value.length > 0) {
       const selectedEdges = getMeshEdges(activeMesh.value).filter(e => selectedEdgeIds.value.includes(e.id))
       boundaryVertexIds = Array.from(new Set(selectedEdges.flatMap(edge => [edge.v1, edge.v2])))
     }
+    if (boundaryVertexIds.length === 2) {
+      recordState('Split Face')
+      const result = connectTwoVertices(activeMesh.value, boundaryVertexIds[0], boundaryVertexIds[1])
+      selectedFaceIds.value = result.selectedFaceIds
+      replaceMesh(result.mesh)
+      return
+    }
     if (boundaryVertexIds.length < 3) return
     recordState('Fill Face (F)')
-    const result = fillFaceFromVertices(activeMesh.value, boundaryVertexIds)
+    const result = fillFaceFromVertices(activeMesh.value, boundaryVertexIds, viewDirection)
     selectedFaceIds.value = result.selectedFaceIds
     replaceMesh(result.mesh)
   }
@@ -314,6 +542,7 @@ export const useProjectStore = defineStore('project', () => {
       scale: { ...sourceMesh.scale },
       materialId: sourceMesh.materialId,
       shadeMode: sourceMesh.shadeMode,
+      autoSmoothAngle: sourceMesh.autoSmoothAngle,
       vertices: JSON.parse(JSON.stringify(vertsToMove)),
       faces: JSON.parse(JSON.stringify(facesToMove))
     }
@@ -463,6 +692,41 @@ export const useProjectStore = defineStore('project', () => {
     replaceMesh(result.mesh)
   }
 
+  type GenerateModifier = 'mirror' | 'subdivision' | 'solidify'
+
+  function addModifier(type: GenerateModifier) {
+    if (!activeMesh.value) return
+    recordState(`Add ${type} Modifier`)
+    if (type === 'mirror') {
+      activeMesh.value.mirror = { ...defaultMirrorModifier(), ...activeMesh.value.mirror, enabled: true }
+    } else if (type === 'subdivision') {
+      activeMesh.value.subdivision = {
+        ...defaultSubdivisionModifier(),
+        ...activeMesh.value.subdivision,
+        enabled: true
+      }
+    } else {
+      activeMesh.value.solidify = { ...defaultSolidifyModifier(), ...activeMesh.value.solidify, enabled: true }
+    }
+    markGeometryUpdated()
+  }
+
+  function applyMeshModifier(type: GenerateModifier | 'all') {
+    if (!activeMesh.value) return
+    recordState(type === 'all' ? 'Apply All Modifiers' : `Apply ${type} Modifier`)
+    applyModifier(activeMesh.value, type)
+    markGeometryUpdated()
+  }
+
+  function removeMeshModifier(type: GenerateModifier) {
+    if (!activeMesh.value) return
+    recordState(`Remove ${type} Modifier`)
+    if (type === 'mirror') delete activeMesh.value.mirror
+    else if (type === 'subdivision') delete activeMesh.value.subdivision
+    else delete activeMesh.value.solidify
+    markGeometryUpdated()
+  }
+
   function replaceMesh(newMesh: MeshObject) {
     const idx = meshes.value.findIndex(m => m.id === newMesh.id)
     if (idx !== -1) {
@@ -494,6 +758,7 @@ export const useProjectStore = defineStore('project', () => {
     selectedVertexIds.value = []
     selectedEdgeIds.value = []
     selectedFaceIds.value = []
+    selectedReferenceId.value = ''
     if (activeMesh.value) {
       activeMesh.value.vertices.forEach(v => (v.selected = false))
       activeMesh.value.faces.forEach(f => (f.selected = false))
@@ -783,6 +1048,8 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   const hasAutosaveSession = ref<boolean>(false)
+  const autosaveRecord = ref<ProjectStorageData | null>(null)
+  const showRecoveryBanner = ref<boolean>(false)
   const isRestoringSession = ref<boolean>(false)
   let autosaveTimer: any = null
 
@@ -798,7 +1065,8 @@ export const useProjectStore = defineStore('project', () => {
           name: t.name,
           width: t.width,
           height: t.height,
-          dataUrl: t.pixelBuffer ? t.pixelBuffer.canvas.toDataURL() : ''
+          dataUrl: t.pixelBuffer ? t.pixelBuffer.canvas.toDataURL() : '',
+          atlas: t.atlas
         }))
 
         await ProjectStorage.saveProject({
@@ -816,10 +1084,29 @@ export const useProjectStore = defineStore('project', () => {
     }, 1200)
   }
 
-  async function checkAutosaveSession() {
-    const hasData = await ProjectStorage.hasAutosave()
-    hasAutosaveSession.value = hasData
-    return hasData
+  async function checkAutosaveSession(): Promise<boolean> {
+    const data = await ProjectStorage.loadProject()
+    if (data && Array.isArray(data.meshes) && data.meshes.length > 0) {
+      hasAutosaveSession.value = true
+      autosaveRecord.value = data
+      showRecoveryBanner.value = true
+      return true
+    }
+    hasAutosaveSession.value = false
+    autosaveRecord.value = null
+    showRecoveryBanner.value = false
+    return false
+  }
+
+  function dismissRecoverySession() {
+    showRecoveryBanner.value = false
+  }
+
+  async function discardRecoverySession() {
+    await ProjectStorage.clearAutosave()
+    hasAutosaveSession.value = false
+    autosaveRecord.value = null
+    showRecoveryBanner.value = false
   }
 
   async function restoreAutosaveSession(): Promise<boolean> {
@@ -845,16 +1132,30 @@ export const useProjectStore = defineStore('project', () => {
       if (Array.isArray(data.textures) && data.textures.length > 0) {
         textures.value = data.textures.map(t => {
           const buf = new PixelBuffer(t.width || 64, t.height || 64)
-          if (t.dataUrl) {
+          // If this is default texture and dataUrl is missing or too short, generate retro atlas
+          if (t.id === 'tex_default' && (!t.dataUrl || t.dataUrl.length < 100)) {
+            generateRetroAtlas(buf)
+            t.dataUrl = buf.toDataURL()
+          } else if (t.dataUrl) {
             textureLoads.push(new Promise<void>(resolve => {
               const img = new Image()
               img.onload = () => {
+                buf.ctx.clearRect(0, 0, buf.width, buf.height)
                 buf.ctx.drawImage(img, 0, 0)
+                buf.syncToActiveLayer()
                 resolve()
               }
-              img.onerror = () => resolve()
+              img.onerror = () => {
+                if (t.id === 'tex_default') {
+                  generateRetroAtlas(buf)
+                }
+                resolve()
+              }
               img.src = t.dataUrl
             }))
+          } else if (t.id === 'tex_default') {
+            generateRetroAtlas(buf)
+            t.dataUrl = buf.toDataURL()
           }
           return {
             id: t.id,
@@ -862,7 +1163,8 @@ export const useProjectStore = defineStore('project', () => {
             width: t.width,
             height: t.height,
             dataUrl: t.dataUrl,
-            pixelBuffer: buf
+            pixelBuffer: markRaw(buf),
+            atlas: t.atlas || (t.id === 'tex_default' ? { cols: 2, rows: 2 } : undefined)
           }
         })
         activeTextureId.value = textures.value[0]?.id || 'tex_default'
@@ -870,16 +1172,29 @@ export const useProjectStore = defineStore('project', () => {
       }
 
       // Ensure default retro atlas texture is always available
-      if (!textures.value.some(t => t.id === 'tex_default')) {
+      let defTex = textures.value.find(t => t.id === 'tex_default')
+      if (!defTex) {
         const defBuf = new PixelBuffer(64, 64)
         generateRetroAtlas(defBuf)
-        textures.value.unshift({
+        defTex = {
           id: 'tex_default',
           name: 'Texture_Atlas_64x64',
           width: 64,
           height: 64,
           dataUrl: defBuf.toDataURL(),
-          pixelBuffer: defBuf
+          pixelBuffer: markRaw(defBuf),
+          atlas: { cols: 2, rows: 2 }
+        }
+        textures.value.unshift(defTex)
+      }
+
+      // Ensure materials are well-formed and linked to valid textures
+      if (Array.isArray(data.materials) && data.materials.length > 0) {
+        materials.value = data.materials.map(m => {
+          if (m.id === 'default_material' && !m.textureId) {
+            return { ...m, textureId: 'tex_default', color: '#ffffff', shading: m.shading || 'textured' }
+          }
+          return m
         })
       }
 
@@ -902,20 +1217,49 @@ export const useProjectStore = defineStore('project', () => {
     triggerAutosave()
   }
 
-  function markTextureUpdated(_textureId?: string) {
+  /** Live stroke preview: bump revision so CanvasTextures refresh. No toDataURL / autosave. */
+  function markTexturePreview() {
     textureRevision.value++
+  }
+
+  function markTextureUpdated(textureId?: string) {
+    textureRevision.value++
+    const targetId = textureId || activeTextureId.value
+    const targetTex = textures.value.find(t => t.id === targetId) || activeTexture.value
+    if (targetTex && targetTex.pixelBuffer) {
+      targetTex.dataUrl = targetTex.pixelBuffer.toDataURL()
+    }
     triggerAutosave()
   }
 
   // Multi-Texture Store Management
-  function addTexture(name: string, width = 64, height = 64, initialDataUrl?: string): TextureMap {
+  //
+  // Three verbs — see docs/TEXTURES.md
+  //   selectTexture          paint/UV target only
+  //   createTexture          add an image to the library (does not bind a mesh)
+  //   applyTextureToMesh     bind an image onto an object (optional material fork)
+  //   applyTextureToMaterial bind an image onto a material (all sharers update)
+
+  function createTexture(
+    name: string,
+    width = 64,
+    height = 64,
+    initialDataUrl?: string,
+    customBuffer?: PixelBuffer,
+    options?: { record?: boolean; select?: boolean; atlas?: { cols: number; rows: number } }
+  ): TextureMap {
+    const record = options?.record !== false
+    const shouldSelect = options?.select !== false
+    if (record) recordState(`Add Texture (${name || 'untitled'})`)
+
     const id = `tex_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
-    const buf = new PixelBuffer(width, height)
-    if (initialDataUrl) {
+    const buf = markRaw(customBuffer || new PixelBuffer(width, height))
+    if (!customBuffer && initialDataUrl) {
       const img = new Image()
       img.onload = () => {
         buf.ctx.drawImage(img, 0, 0)
-        markTextureUpdated()
+        buf.syncToActiveLayer()
+        markTextureUpdated(id)
       }
       img.src = initialDataUrl
     }
@@ -925,32 +1269,44 @@ export const useProjectStore = defineStore('project', () => {
       width,
       height,
       dataUrl: initialDataUrl || buf.toDataURL(),
-      pixelBuffer: buf
+      pixelBuffer: buf,
+      atlas: options?.atlas ? clampAtlasGrid(options.atlas.cols, options.atlas.rows) : undefined
     }
     textures.value.push(newTex)
-    activeTextureId.value = id
-    markTextureUpdated()
+    if (shouldSelect) activeTextureId.value = id
+    markTextureUpdated(id)
     return newTex
+  }
+
+  /** @deprecated Use createTexture — same behavior, kept for existing call sites. */
+  function addTexture(
+    name: string,
+    width = 64,
+    height = 64,
+    initialDataUrl?: string,
+    customBuffer?: PixelBuffer
+  ): TextureMap {
+    return createTexture(name, width, height, initialDataUrl, customBuffer)
   }
 
   function duplicateTexture(id: string): TextureMap | null {
     const src = textures.value.find(t => t.id === id)
     if (!src) return null
     recordState(`Duplicate Texture (${src.name})`)
-    const clonedBuf = new PixelBuffer(src.width, src.height)
-    if (src.pixelBuffer) {
-      clonedBuf.ctx.drawImage(src.pixelBuffer.canvas, 0, 0)
-    }
+    const clonedBuf = src.pixelBuffer
+      ? src.pixelBuffer.clone()
+      : new PixelBuffer(src.width, src.height)
     const newTex: TextureMap = {
       id: `tex_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       name: `${src.name}_Copy`,
       width: src.width,
       height: src.height,
       dataUrl: clonedBuf.toDataURL(),
-      pixelBuffer: clonedBuf
+      pixelBuffer: markRaw(clonedBuf),
+      atlas: src.atlas ? { ...src.atlas } : undefined
     }
     textures.value.push(newTex)
-    activeTextureId.value = newTex.id
+    selectTexture(newTex.id)
     markTextureUpdated()
     return newTex
   }
@@ -967,15 +1323,64 @@ export const useProjectStore = defineStore('project', () => {
     if (textures.value.length <= 1) return
     recordState('Delete Texture')
     textures.value = textures.value.filter(t => t.id !== id)
-    if (activeTextureId.value === id) {
-      activeTextureId.value = textures.value[0]?.id || 'tex_default'
-    }
     for (const mat of materials.value) {
       if (mat.textureId === id) {
-        mat.textureId = activeTextureId.value
+        mat.textureId = null
       }
     }
+    if (activeTextureId.value === id) {
+      selectTexture(textures.value[0]?.id || 'tex_default')
+    }
     markTextureUpdated()
+    markGeometryUpdated()
+  }
+
+  function setTextureAtlasGrid(id: string, cols: number, rows: number) {
+    const tex = textures.value.find(t => t.id === id)
+    if (!tex) return
+    recordState(`Atlas Grid ${cols}×${rows}`)
+    const grid = clampAtlasGrid(cols, rows)
+    tex.atlas = grid.cols === 1 && grid.rows === 1 ? undefined : grid
+    markTextureUpdated(id)
+  }
+
+  function clearTextureAtlasGrid(id: string) {
+    const tex = textures.value.find(t => t.id === id)
+    if (!tex || !tex.atlas) return
+    recordState('Clear Atlas Grid')
+    tex.atlas = undefined
+    markTextureUpdated(id)
+  }
+
+  function sliceTextureIntoTiles(id: string, cols?: number, rows?: number) {
+    const tex = textures.value.find(t => t.id === id)
+    if (!tex?.pixelBuffer) return
+    const grid = clampAtlasGrid(cols ?? tex.atlas?.cols ?? 2, rows ?? tex.atlas?.rows ?? 2)
+    if (grid.cols * grid.rows < 2) return
+    recordState(`Slice Atlas ${tex.name} (${grid.cols}×${grid.rows})`)
+    tex.atlas = grid
+    const tiles = sliceBufferIntoTiles(tex.pixelBuffer, grid.cols, grid.rows)
+    for (const tile of tiles) {
+      createTexture(
+        `${tex.name}_${tile.row}_${tile.col}`,
+        tile.width,
+        tile.height,
+        tile.buffer.toDataURL(),
+        tile.buffer,
+        { record: false, select: false }
+      )
+    }
+    selectTexture(tex.id)
+  }
+
+  function performMapUVsToAtlasCell(col: number, row: number) {
+    const mesh = activeMesh.value
+    const tex = activeTexture.value
+    if (!mesh) return
+    const grid = tex.atlas || { cols: 2, rows: 2 }
+    recordState(`Map UVs to atlas cell ${col + 1},${row + 1}`)
+    mapFacesToAtlasCell(mesh.faces, selectedFaceIds.value, grid, col, row)
+    markGeometryUpdated()
   }
 
   function getTextureForMaterial(matId?: string | null): TextureMap | undefined {
@@ -991,26 +1396,70 @@ export const useProjectStore = defineStore('project', () => {
     return textures.value.find(t => t.id === id)
   }
 
-  function assignTextureToMaterial(matId: string, textureId: string) {
+  function applyTextureToMaterial(
+    matId: string,
+    textureId: string | null,
+    options?: { record?: boolean }
+  ) {
     const mat = materials.value.find(m => m.id === matId)
-    if (mat) {
-      mat.textureId = textureId
-      markTextureUpdated()
+    if (!mat) return
+    if (options?.record !== false) recordState(`Apply Texture to Material (${mat.name})`)
+    mat.textureId = textureId
+    if (textureId) {
+      selectTexture(textureId)
+      markTextureUpdated(textureId)
     }
+    markGeometryUpdated()
+  }
+
+  function assignTextureToMaterial(matId: string, textureId: string | null) {
+    applyTextureToMaterial(matId, textureId)
+  }
+
+  function applyTextureToAllMaterials(textureId: string) {
+    recordState('Apply Texture to All Materials')
+    for (const mat of materials.value) {
+      mat.textureId = textureId
+    }
+    selectTexture(textureId)
+    markTextureUpdated(textureId)
+    markGeometryUpdated()
+  }
+
+  function unbindTextureFromMaterial(matId: string) {
+    const mat = materials.value.find(m => m.id === matId)
+    if (!mat) return
+    recordState(`Unbind Texture from Material (${mat.name})`)
+    mat.textureId = null
+    markGeometryUpdated()
   }
 
   // Multi-Material Store Management
-  function addMaterial(name?: string, colorOrTextureId?: string | null, textureId?: string | null): Material {
-    recordState('Add Material')
+  //
+  // Three verbs — see docs/MATERIALS.md
+  //   selectMaterial         inspector target only (no mesh change, no undo)
+  //   createMaterial         add a material to the library (does not bind a mesh)
+  //   applyMaterialToMesh    bind a material onto an object
+  //   forkMaterialForMesh    duplicate material exclusively for a mesh
+
+  function createMaterial(
+    name?: string,
+    colorOrTextureId?: string | null,
+    textureId?: string | null,
+    options?: { record?: boolean; select?: boolean }
+  ): Material {
+    const record = options?.record !== false
+    const shouldSelect = options?.select !== false
+    if (record) recordState(`Add Material (${name || 'untitled'})`)
     const id = `mat_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
     let color = '#ffffff'
-    let texId: string | undefined = activeTextureId.value
+    let texId: string | null = null
 
     if (textureId !== undefined) {
       if (colorOrTextureId && colorOrTextureId.startsWith('#')) {
         color = colorOrTextureId
       }
-      texId = textureId || activeTextureId.value
+      texId = textureId
     } else if (colorOrTextureId) {
       if (colorOrTextureId.startsWith('#') || colorOrTextureId.startsWith('rgb')) {
         color = colorOrTextureId
@@ -1023,7 +1472,7 @@ export const useProjectStore = defineStore('project', () => {
       id,
       name: name || `Material_${materials.value.length + 1}`,
       color,
-      textureId: texId || activeTextureId.value,
+      textureId: texId ?? null,
       shading: 'textured',
       psxJitter: false,
       psxJitterResolution: 240,
@@ -1033,7 +1482,13 @@ export const useProjectStore = defineStore('project', () => {
       wireframe: false
     }
     materials.value.push(newMat)
+    if (shouldSelect) selectMaterial(newMat.id)
     return newMat
+  }
+
+  /** @deprecated Use createMaterial — same behavior, kept for compatibility */
+  function addMaterial(name?: string, colorOrTextureId?: string | null, textureId?: string | null): Material {
+    return createMaterial(name, colorOrTextureId, textureId)
   }
 
   function deleteMaterial(id: string) {
@@ -1046,14 +1501,26 @@ export const useProjectStore = defineStore('project', () => {
         mesh.materialId = fallbackMatId
       }
     }
+    if (activeMaterialId.value === id) {
+      selectMaterial(fallbackMatId)
+    }
     markGeometryUpdated()
+  }
+
+  function applyMaterialToMesh(meshId: string, materialId: string) {
+    const mesh = meshes.value.find(m => m.id === meshId)
+    const mat = materials.value.find(m => m.id === materialId)
+    if (mesh && mat) {
+      recordState(`Assign Material (${mat.name}) to ${mesh.name}`)
+      mesh.materialId = materialId
+      selectMaterial(materialId)
+      markGeometryUpdated()
+    }
   }
 
   function assignMaterialToActiveMesh(matId: string) {
     if (activeMesh.value) {
-      recordState('Assign Material')
-      activeMesh.value.materialId = matId
-      markGeometryUpdated()
+      applyMaterialToMesh(activeMesh.value.id, matId)
     }
   }
 
@@ -1065,59 +1532,260 @@ export const useProjectStore = defineStore('project', () => {
     }
     if (activeMesh.value) {
       activeMesh.value.materialId = matId
+      selectMaterial(matId)
+    }
+    markGeometryUpdated()
+  }
+
+  function forkMaterialForMesh(meshId: string, options?: { record?: boolean }): Material | null {
+    const mesh = meshes.value.find(m => m.id === meshId)
+    if (!mesh) return null
+    const currentMatId = mesh.materialId || 'default_material'
+    const currentMat = materials.value.find(m => m.id === currentMatId)
+    if (!currentMat) return null
+
+    if (options?.record !== false) recordState(`Fork Material for ${mesh.name}`)
+    const newMat: Material = {
+      ...JSON.parse(JSON.stringify(currentMat)),
+      id: `mat_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      name: `${mesh.name}_Mat`
+    }
+    materials.value.push(newMat)
+    mesh.materialId = newMat.id
+    selectMaterial(newMat.id)
+    markGeometryUpdated()
+    return newMat
+  }
+
+  function duplicateMaterial(id: string): Material | null {
+    const src = materials.value.find(m => m.id === id)
+    if (!src) return null
+    recordState(`Duplicate Material (${src.name})`)
+    const newMat: Material = {
+      ...JSON.parse(JSON.stringify(src)),
+      id: `mat_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      name: `${src.name}_Copy`
+    }
+    materials.value.push(newMat)
+    selectMaterial(newMat.id)
+    return newMat
+  }
+
+  function renameMaterial(id: string, newName: string) {
+    const mat = materials.value.find(m => m.id === id)
+    if (mat && newName.trim()) {
+      recordState('Rename Material')
+      mat.name = newName.trim()
     }
   }
 
-  function assignTextureToActiveMesh(textureId: string) {
-    if (!activeMesh.value) {
-      activeTextureId.value = textureId
-      markTextureUpdated(textureId)
-      return
+  function purgeUnusedMaterials() {
+    const used = new Set(meshes.value.map(m => m.materialId).filter(Boolean) as string[])
+    const keep = materials.value.filter(m => used.has(m.id))
+    if (keep.length === materials.value.length) return
+    if (keep.length === 0 && materials.value.length > 0) {
+      keep.push(materials.value[0])
     }
-
-    recordState(`Assign Texture to ${activeMesh.value.name}`)
-    const currentMatId = activeMesh.value.materialId || 'default_material'
-    const isShared = meshes.value.filter(m => m.materialId === currentMatId).length > 1
-    const currentMat = materials.value.find(m => m.id === currentMatId)
-
-    if (isShared && currentMat) {
-      // Fork / duplicate material so this mesh has its own dedicated material slot
-      const newMat: Material = {
-        ...JSON.parse(JSON.stringify(currentMat)),
-        id: `mat_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        name: `${activeMesh.value.name}_Mat`,
-        textureId
-      }
-      materials.value.push(newMat)
-      activeMesh.value.materialId = newMat.id
-    } else if (currentMat) {
-      currentMat.textureId = textureId
-    } else {
-      const newMat = addMaterial(`${activeMesh.value.name}_Mat`, '#ffffff', textureId)
-      activeMesh.value.materialId = newMat.id
+    recordState('Purge Unused Materials')
+    materials.value = keep
+    if (!keep.some(m => m.id === activeMaterialId.value)) {
+      selectMaterial(keep[0]?.id || 'default_material')
     }
-
-    activeTextureId.value = textureId
-    markTextureUpdated(textureId)
     markGeometryUpdated()
+  }
+
+  /** Clone the mesh material's texture; fork the material if it is shared. */
+  function forkTextureForMesh(meshId: string): TextureMap | null {
+    const mesh = meshes.value.find(m => m.id === meshId)
+    if (!mesh) return null
+    const mat = materials.value.find(m => m.id === (mesh.materialId || 'default_material'))
+    const src = textures.value.find(t => t.id === mat?.textureId) || activeTexture.value
+    if (!src?.pixelBuffer) return null
+
+    recordState(`Fork Texture for ${mesh.name}`)
+    const clonedBuf = src.pixelBuffer.clone()
+    const newTex = createTexture(
+      `${mesh.name}_Texture`,
+      src.width,
+      src.height,
+      clonedBuf.toDataURL(),
+      clonedBuf,
+      { record: false, select: true }
+    )
+    let targetMat = mat
+    if (mat && isMaterialShared(mat.id)) {
+      targetMat = forkMaterialForMesh(meshId, { record: false }) || mat
+    }
+    if (targetMat) {
+      applyTextureToMaterial(targetMat.id, newTex.id, { record: false })
+    }
+    return newTex
   }
 
   function makeActiveMeshMaterialUnique(): Material | null {
     if (!activeMesh.value) return null
-    const currentMatId = activeMesh.value.materialId || 'default_material'
-    const currentMat = materials.value.find(m => m.id === currentMatId)
-    if (!currentMat) return null
+    return forkMaterialForMesh(activeMesh.value.id)
+  }
 
-    recordState(`Make Material Unique (${activeMesh.value.name})`)
-    const newMat: Material = {
-      ...JSON.parse(JSON.stringify(currentMat)),
-      id: `mat_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      name: `${activeMesh.value.name}_Mat`
+  function applyTextureToMesh(meshId: string, textureId: string, policy: TextureApplyPolicy = 'this_object') {
+    const mesh = meshes.value.find(m => m.id === meshId)
+    if (!mesh) {
+      selectTexture(textureId)
+      markTextureUpdated(textureId)
+      return
     }
-    materials.value.push(newMat)
-    activeMesh.value.materialId = newMat.id
+
+    const currentMatId = mesh.materialId || 'default_material'
+    const currentMat = materials.value.find(m => m.id === currentMatId)
+    const shared = isMaterialShared(currentMatId)
+
+    recordState(`Apply Texture to ${mesh.name}`)
+
+    if (policy === 'this_object' && shared && currentMat) {
+      const newMat: Material = {
+        ...JSON.parse(JSON.stringify(currentMat)),
+        id: `mat_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        name: `${mesh.name}_Mat`,
+        color: '#ffffff',
+        textureId
+      }
+      materials.value.push(newMat)
+      mesh.materialId = newMat.id
+    } else if (currentMat) {
+      currentMat.textureId = textureId
+      currentMat.color = '#ffffff'
+    } else {
+      const newMat = addMaterial(`${mesh.name}_Mat`, '#ffffff', textureId)
+      mesh.materialId = newMat.id
+    }
+
+    selectTexture(textureId)
+    markTextureUpdated(textureId)
     markGeometryUpdated()
-    return newMat
+  }
+
+  function assignTextureToActiveMesh(textureId: string, policy: TextureApplyPolicy = 'this_object') {
+    if (!activeMesh.value) {
+      selectTexture(textureId)
+      markTextureUpdated(textureId)
+      return
+    }
+    applyTextureToMesh(activeMesh.value.id, textureId, policy)
+  }
+
+  function restoreDefaultTexture(): TextureMap {
+    recordState('Restore Default Texture')
+    const defBuf = new PixelBuffer(64, 64)
+    generateRetroAtlas(defBuf)
+
+    const target = activeTexture.value || textures.value.find(t => t.id === 'tex_default')
+    if (target) {
+      target.width = 64
+      target.height = 64
+      target.pixelBuffer = defBuf
+      target.dataUrl = defBuf.toDataURL()
+      target.atlas = { cols: 2, rows: 2 }
+      if (activeTextureId.value !== target.id) {
+        activeTextureId.value = target.id
+      }
+      markTextureUpdated(target.id)
+      return target
+    }
+
+    const created: TextureMap = {
+      id: 'tex_default',
+      name: 'Texture_Atlas_64x64',
+      width: 64,
+      height: 64,
+      dataUrl: defBuf.toDataURL(),
+      pixelBuffer: markRaw(defBuf),
+      atlas: { cols: 2, rows: 2 }
+    }
+    textures.value.unshift(created)
+    activeTextureId.value = created.id
+    markTextureUpdated(created.id)
+    return created
+  }
+
+  // --- Palettes Subsystem (Three Verbs — see docs/PALETTES.md) ---
+  function selectPalette(id: string) {
+    const pal = palettes.value.find(p => p.id === id)
+    if (!pal) return
+    activePaletteId.value = id
+  }
+
+  function createPalette(
+    name: string,
+    colors: string[],
+    options?: { category?: string; record?: boolean; select?: boolean; isCustom?: boolean }
+  ): Palette {
+    const record = options?.record !== false
+    const shouldSelect = options?.select !== false
+    if (record) recordState(`Add Palette (${name || 'untitled'})`)
+    const id = `pal_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
+    const newPal: Palette = {
+      id,
+      name: name || `Palette_${palettes.value.length + 1}`,
+      category: options?.category || 'Custom',
+      isCustom: options?.isCustom ?? true,
+      colors: colors.length > 0 ? [...colors] : ['#ffffff', '#000000']
+    }
+    palettes.value.push(newPal)
+    saveCustomPalettes(palettes.value.filter(p => p.isCustom))
+    if (shouldSelect) selectPalette(newPal.id)
+    return newPal
+  }
+
+  function applyPaletteToTexture(
+    textureId: string,
+    paletteId: string,
+    ditherMode: 'nearest' | 'floyd-steinberg' | 'atkinson' = 'nearest'
+  ) {
+    const tex = textures.value.find(t => t.id === textureId)
+    const pal = palettes.value.find(p => p.id === paletteId)
+    if (!tex || !tex.pixelBuffer || !pal || pal.colors.length === 0) return
+
+    recordState(`Apply Palette (${pal.name}) to ${tex.name}`)
+    tex.pixelBuffer.remapToPalette(pal.colors, ditherMode)
+    selectPalette(paletteId)
+    markTextureUpdated(textureId)
+    markGeometryUpdated()
+  }
+
+  function applyPaletteToAllTextures(
+    paletteId: string,
+    ditherMode: 'nearest' | 'floyd-steinberg' | 'atkinson' = 'nearest'
+  ) {
+    const pal = palettes.value.find(p => p.id === paletteId)
+    if (!pal || pal.colors.length === 0) return
+
+    recordState(`Apply Palette (${pal.name}) to All Textures`)
+    for (const tex of textures.value) {
+      if (tex.pixelBuffer) {
+        tex.pixelBuffer.remapToPalette(pal.colors, ditherMode)
+        markTextureUpdated(tex.id)
+      }
+    }
+    selectPalette(paletteId)
+    markGeometryUpdated()
+  }
+
+  function extractPaletteFromActiveTexture(name?: string, colorCount = 16): Palette {
+    const tex = activeTexture.value
+    const colors = tex?.pixelBuffer ? tex.pixelBuffer.extractPalette(colorCount) : ['#ffffff', '#000000']
+    const palName = name || `Extracted_${tex?.name || 'Texture'}`
+    return createPalette(palName, colors, { category: 'Custom', isCustom: true })
+  }
+
+  function deletePalette(id: string) {
+    const pal = palettes.value.find(p => p.id === id)
+    if (!pal || !pal.isCustom) return
+    recordState(`Delete Palette (${pal.name})`)
+    palettes.value = palettes.value.filter(p => p.id !== id)
+    saveCustomPalettes(palettes.value.filter(p => p.isCustom))
+    if (activePaletteId.value === id) {
+      selectPalette(DEFAULT_PALETTES[0].id)
+    }
   }
 
   function resetToDefaultProject() {
@@ -1139,10 +1807,13 @@ export const useProjectStore = defineStore('project', () => {
         width: 64,
         height: 64,
         dataUrl: defBuf.toDataURL(),
-        pixelBuffer: defBuf
+        pixelBuffer: markRaw(defBuf),
+        atlas: { cols: 2, rows: 2 }
       }
     ]
     activeTextureId.value = 'tex_default'
+    referenceImages.value = []
+    referenceRevision.value++
 
     materials.value = [
       {
@@ -1173,15 +1844,32 @@ export const useProjectStore = defineStore('project', () => {
     clearSubSelections()
     markGeometryUpdated()
     markTextureUpdated('tex_default')
+    ProjectStorage.clearAutosave()
   }
 
-  function setShadeMode(mode: 'flat' | 'smooth') {
+  function setShadeMode(mode: MeshShadeMode) {
+    const label = mode === 'flat' ? 'Shade Flat' : mode === 'smooth' ? 'Shade Smooth' : 'Shade Auto Smooth'
+    recordState(label)
     for (const mesh of meshes.value) {
       if (selectedMeshIds.value.includes(mesh.id) || mesh.id === activeMeshId.value) {
         mesh.shadeMode = mode
+        if (mode === 'auto' && mesh.autoSmoothAngle === undefined) {
+          mesh.autoSmoothAngle = 30
+        }
       }
     }
-    recordState(`Set Shade ${mode === 'flat' ? 'Flat' : 'Smooth'}`)
+    markGeometryUpdated()
+  }
+
+  function setAutoSmoothAngle(angle: number) {
+    recordState('Set Auto Smooth Angle')
+    const clamped = Math.max(0, Math.min(180, angle))
+    for (const mesh of meshes.value) {
+      if (selectedMeshIds.value.includes(mesh.id) || mesh.id === activeMeshId.value) {
+        mesh.autoSmoothAngle = clamped
+      }
+    }
+    markGeometryUpdated()
   }
 
   function toggleShadeMode() {
@@ -1224,6 +1912,26 @@ export const useProjectStore = defineStore('project', () => {
     if (!activeMesh.value) return
     recordState('Pack UV Islands')
     UVIslandPacker.packIslands(activeMesh.value, padding)
+  }
+
+  function performApplyTexelDensity(targetDensity: number, faceIndices?: number[]) {
+    if (!activeMesh.value || targetDensity <= 0) return
+    recordState(`Set Texel Density (${targetDensity} px/unit)`)
+    const texSize = activeTexture.value?.width || 64
+    const indices = faceIndices !== undefined ? faceIndices : (
+      selectedFaceIds.value.length > 0
+        ? selectedFaceIds.value.map(id => activeMesh.value!.faces.findIndex(f => f.id === id)).filter(idx => idx >= 0)
+        : undefined
+    )
+    const updated = applyTargetTexelDensity(activeMesh.value, targetDensity, texSize, indices)
+    replaceMesh(updated)
+  }
+
+  function performEqualizeTexelDensity() {
+    if (!activeMesh.value) return
+    recordState('Equalize Texel Density')
+    const updated = equalizeTexelDensity(activeMesh.value)
+    replaceMesh(updated)
   }
 
   function generateBoxUVs() {
@@ -1415,15 +2123,41 @@ export const useProjectStore = defineStore('project', () => {
     selectedEdgeIds,
     selectedFaceIds,
     activePalette,
+    palettes,
+    activePaletteId,
+    selectPalette,
+    createPalette,
+    applyPaletteToTexture,
+    applyPaletteToAllTextures,
+    extractPaletteFromActiveTexture,
+    deletePalette,
     pixelBuffer,
     activeTextureId,
     activeTexture,
+    activeMaterialId,
+    activeMaterial,
     textureRevision,
     textures,
     materials,
     stats,
     clipboard,
+    selectMesh,
+    selectMeshes,
+    createMesh,
     addPrimitive,
+    addEditableMesh,
+    referenceImages,
+    referenceRevision,
+    selectedReferenceId,
+    addReferenceImage,
+    setReferenceOnPlane,
+    selectReference,
+    updateReferenceImage,
+    removeReferenceImage,
+    parentMesh,
+    unparentMesh,
+    getMeshChildren,
+    isDescendantOf,
     clearSubSelections,
     selectAll,
     deselectAll,
@@ -1448,34 +2182,64 @@ export const useProjectStore = defineStore('project', () => {
     performDissolve,
     performConnectVertices,
     performCleanupMesh,
+    addModifier,
+    applyMeshModifier,
+    removeMeshModifier,
     growSelection,
     shrinkSelection,
     selectConnected,
     replaceMesh,
     setShadeMode,
+    setAutoSmoothAngle,
     toggleShadeMode,
     geometryRevision,
     markGeometryUpdated,
+    markTexturePreview,
     markTextureUpdated,
+    selectTexture,
+    ensureTextureBuffer,
+    selectMaterial,
+    syncPaintTargetFromMesh,
+    countMeshesUsingMaterial,
+    isMaterialShared,
+    createTexture,
     addTexture,
     duplicateTexture,
     renameTexture,
     deleteTexture,
+    setTextureAtlasGrid,
+    clearTextureAtlasGrid,
+    sliceTextureIntoTiles,
+    performMapUVsToAtlasCell,
     getTextureForMaterial,
     getTextureById,
+    applyTextureToMaterial,
     assignTextureToMaterial,
+    applyTextureToAllMaterials,
+    unbindTextureFromMaterial,
+    applyTextureToMesh,
+    createMaterial,
     addMaterial,
+    duplicateMaterial,
+    renameMaterial,
+    purgeUnusedMaterials,
+    forkTextureForMesh,
     deleteMaterial,
+    applyMaterialToMesh,
+    forkMaterialForMesh,
     assignMaterialToActiveMesh,
     assignMaterialToSelectedMeshes,
     assignTextureToActiveMesh,
     makeActiveMeshMaterialUnique,
+    restoreDefaultTexture,
     resetToDefaultProject,
     markSelectedEdgesAsSeam,
     clearSelectedEdgesSeam,
     clearAllSeams,
     performSeamUnwrap,
     performPackUVIslands,
+    performApplyTexelDensity,
+    performEqualizeTexelDensity,
     generateBoxUVs,
     bakeSceneAtlas,
     offsetMeshOrigin,
@@ -1486,8 +2250,12 @@ export const useProjectStore = defineStore('project', () => {
     performAutoMerge,
     recordState,
     hasAutosaveSession,
+    autosaveRecord,
+    showRecoveryBanner,
     checkAutosaveSession,
     restoreAutosaveSession,
+    dismissRecoverySession,
+    discardRecoverySession,
     triggerAutosave,
   }
 })

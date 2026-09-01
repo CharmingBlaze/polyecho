@@ -1,0 +1,16 @@
+---
+description: Pinia store conventions
+globs: src/stores/**/*.ts
+alwaysApply: false
+---
+
+# Stores
+
+- Setup-store style only: `defineStore('name', () => { ... })`.
+- `projectStore`: meshes, selection, materials, textures. Modeling menu actions live here as `perform*` / `addPrimitive`.
+- `animationStore`: armature, clips, keys, weight paint. Do not duplicate bone arrays on the project store.
+- `toolStore`: modes and viewport flags, not mesh data.
+- `historyStore.recordState` before destructive edits. Texture snapshots must `pixelBuffer.clone()`.
+- Cross-store calls are allowed (project → history, animation → project) but avoid cycles in `setup` besides the existing ones.
+- After editing geometry or pixels, call `markGeometryUpdated` / `markTextureUpdated` (or equivalent revision bumps).
+- `keymapStore` is display/persistence for the Hotkeys modal. Changing `currentKey` does not rebind `App.vue` unless you wire that.

@@ -1,5 +1,7 @@
-import { MeshObject, Vertex, Face } from '../../types/mesh'
-import { addVec3, scaleVec3, computeCentroid, computeFaceNormal, subVec3 } from '../../utils/math'
+import { MeshObject, Vertex, Face, Vector3D } from '../../types/mesh'
+import { addVec3, scaleVec3, computeCentroid, computeFaceNormal, subVec3, lengthVec3, crossVec3, normalizeVec3, dotVec3 } from '../../utils/math'
+import { MeshBridge } from '../mesh/MeshBridge'
+import { InsetKernel } from '../mesh/operations/InsetKernel'
 
 function genId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).substring(2, 9)}`
@@ -90,82 +92,43 @@ export function extrudeFaces(mesh: MeshObject, faceIds: string[], distance = 0.5
 }
 
 /**
- * Insets selected faces inward towards their center,
- * creating surrounding quad frames.
+ * Insets selected faces (Blender region inset). Connected faces share one inner loop.
+ * `thickness` is even edge offset in object space (not a scale-to-centroid factor).
  */
-export function insetFaces(mesh: MeshObject, faceIds: string[], scaleFactor = 0.7): OperationResult {
-  const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
-  const targetFaceIndices = newMesh.faces
-    .map((f, i) => (faceIds.includes(f.id) ? i : -1))
-    .filter(i => i !== -1)
-
-  if (targetFaceIndices.length === 0) {
-    return { mesh: newMesh, selectedFaceIds: faceIds, selectedVertexIds: [] }
+export function insetFaces(
+  mesh: MeshObject,
+  faceIds: string[],
+  thickness = 0.1,
+  options?: { individual?: boolean; depth?: number; outset?: boolean; boundary?: boolean }
+): OperationResult {
+  if (faceIds.length === 0) {
+    return { mesh, selectedFaceIds: faceIds, selectedVertexIds: [] }
   }
 
-  const newSelectedFaces: string[] = []
-  const newSelectedVerts: string[] = []
+  const bridge = MeshBridge.meshObjectToEditableMesh(mesh)
+  const numFaces = faceIds
+    .map(id => bridge.strToNumFaceId.get(id))
+    .filter((id): id is number => id !== undefined)
 
-  for (const fIdx of targetFaceIndices) {
-    const face = newMesh.faces[fIdx]
-    const vertMap = new Map<string, Vertex>()
-    for (const v of newMesh.vertices) {
-      vertMap.set(v.id, v)
-    }
+  const result = InsetKernel.insetFaces(bridge.mesh, numFaces, {
+    thickness: Math.max(0, thickness),
+    depth: options?.depth ?? 0,
+    outset: options?.outset,
+    individual: options?.individual,
+    boundary: options?.boundary
+  })
 
-    const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
-    const centroid = computeCentroid(faceVerts.map(v => v.position))
+  const out = MeshBridge.editableMeshToMeshObject(
+    bridge.mesh,
+    mesh,
+    bridge.numToStrVertId,
+    bridge.numToStrFaceId
+  )
 
-    const newVertIds: string[] = []
-    for (const v of faceVerts) {
-      const newVId = genId('v_ins')
-      const toCenter = subVec3(centroid, v.position)
-      const insetPos = addVec3(v.position, scaleVec3(toCenter, 1 - scaleFactor))
+  const selectedFaceIds = result.insetFaceIds.map(id => bridge.numToStrFaceId.get(id) || `f_${id}`)
+  const selectedVertexIds = result.insetVertexIds.map(id => bridge.numToStrVertId.get(id) || `v_${id}`)
 
-      newMesh.vertices.push({
-        id: newVId,
-        position: insetPos,
-        color: v.color || '#ffffff',
-        selected: true
-      })
-      newVertIds.push(newVId)
-      newSelectedVerts.push(newVId)
-    }
-
-    // Create perimeter quad faces
-    const count = face.vertexIds.length
-    for (let i = 0; i < count; i++) {
-      const next = (i + 1) % count
-      const vOld1 = face.vertexIds[i]
-      const vOld2 = face.vertexIds[next]
-      const vNew1 = newVertIds[i]
-      const vNew2 = newVertIds[next]
-
-      newMesh.faces.push({
-        id: genId('f_inset_border'),
-        vertexIds: [vOld1, vOld2, vNew2, vNew1],
-        uvs: [
-          { u: 0, v: 0 },
-          { u: 1, v: 0 },
-          { u: 1, v: 1 },
-          { u: 0, v: 1 }
-        ],
-        materialIndex: face.materialIndex,
-        selected: false
-      })
-    }
-
-    // Update center face
-    face.vertexIds = newVertIds
-    face.selected = true
-    newSelectedFaces.push(face.id)
-  }
-
-  return {
-    mesh: newMesh,
-    selectedFaceIds: newSelectedFaces,
-    selectedVertexIds: newSelectedVerts
-  }
+  return { mesh: out, selectedFaceIds, selectedVertexIds }
 }
 
 /**
@@ -510,44 +473,182 @@ export function mergeVerticesAdvanced(
 }
 
 /**
+ * Walk selected vertices along existing mesh edges into a closed loop.
+ * Falls back to a planar angular sort if the verts are not a connected chain.
+ */
+function orderFillLoop(mesh: MeshObject, vertexIds: string[]): string[] {
+  const want = new Set(vertexIds)
+  const adj = new Map<string, Set<string>>()
+  const link = (a: string, b: string) => {
+    if (!want.has(a) || !want.has(b) || a === b) return
+    if (!adj.has(a)) adj.set(a, new Set())
+    if (!adj.has(b)) adj.set(b, new Set())
+    adj.get(a)!.add(b)
+    adj.get(b)!.add(a)
+  }
+  for (const face of mesh.faces) {
+    const ids = face.vertexIds
+    for (let i = 0; i < ids.length; i++) {
+      link(ids[i], ids[(i + 1) % ids.length])
+    }
+  }
+
+  const start =
+    vertexIds.find(id => (adj.get(id)?.size ?? 0) === 1) ||
+    vertexIds.find(id => (adj.get(id)?.size ?? 0) > 0) ||
+    vertexIds[0]
+  const loop: string[] = [start]
+  const used = new Set([start])
+  let prev = ''
+  let cur = start
+  while (loop.length < vertexIds.length) {
+    const nbrs = [...(adj.get(cur) || [])].filter(n => n !== prev)
+    const next = nbrs.find(n => !used.has(n))
+    if (!next) break
+    loop.push(next)
+    used.add(next)
+    prev = cur
+    cur = next
+  }
+
+  if (loop.length >= 3 && loop.length === vertexIds.length) return loop
+
+  const vertMap = new Map(mesh.vertices.map(v => [v.id, v]))
+  const pts = vertexIds.map(id => vertMap.get(id)?.position).filter(Boolean) as Vector3D[]
+  if (pts.length < 3) return vertexIds
+  const nrm = computeFaceNormal(pts)
+  const c = computeCentroid(pts)
+  const ref = subVec3(pts[0], c)
+  let u = ref
+  if (lengthVec3(u) < 1e-8) u = { x: 1, y: 0, z: 0 }
+  u = normalizeVec3(u)
+  let v = crossVec3(nrm, u)
+  if (lengthVec3(v) < 1e-8) {
+    u = { x: 0, y: 1, z: 0 }
+    v = crossVec3(nrm, u)
+  }
+  v = normalizeVec3(v)
+  const ranked = vertexIds
+    .map(id => {
+      const p = vertMap.get(id)?.position
+      if (!p) return { id, ang: 0 }
+      const d = subVec3(p, c)
+      return { id, ang: Math.atan2(dotVec3(d, v), dotVec3(d, u)) }
+    })
+    .sort((a, b) => a.ang - b.ang)
+  return ranked.map(r => r.id)
+}
+
+function faceHasDirectedEdge(face: Face, a: string, b: string): boolean {
+  const ids = face.vertexIds
+  const n = ids.length
+  for (let i = 0; i < n; i++) {
+    if (ids[i] === a && ids[(i + 1) % n] === b) return true
+  }
+  return false
+}
+
+/**
+ * CCW winding matches outward neighbors: shared edges must run opposite
+ * the existing face. If there are no neighbors, point away from the mesh center.
+ */
+function orientFillLoop(mesh: MeshObject, loop: string[], viewDirection?: Vector3D): string[] {
+  const ordered = [...loop]
+  let sameDir = 0
+  let oppositeDir = 0
+  const n = ordered.length
+  for (let i = 0; i < n; i++) {
+    const a = ordered[i]
+    const b = ordered[(i + 1) % n]
+    for (const face of mesh.faces) {
+      if (faceHasDirectedEdge(face, a, b)) sameDir++
+      if (faceHasDirectedEdge(face, b, a)) oppositeDir++
+    }
+  }
+  if (sameDir + oppositeDir > 0) {
+    if (sameDir > oppositeDir) ordered.reverse()
+    return ordered
+  }
+
+  const vertMap = new Map(mesh.vertices.map(v => [v.id, v]))
+  const pts = ordered.map(id => vertMap.get(id)?.position).filter(Boolean) as Vector3D[]
+  if (pts.length < 3) return ordered
+  const faceN = computeFaceNormal(pts)
+
+  // Blockbench: if the new face looks away from the camera, invert it.
+  if (viewDirection && lengthVec3(viewDirection) > 1e-8) {
+    if (dotVec3(faceN, viewDirection) > 0) ordered.reverse()
+    return ordered
+  }
+
+  const faceC = computeCentroid(pts)
+  const meshC = computeCentroid(mesh.vertices.map(v => v.position))
+  const outward = subVec3(faceC, meshC)
+  if (lengthVec3(outward) > 1e-8 && dotVec3(faceN, outward) < 0) {
+    ordered.reverse()
+  }
+  return ordered
+}
+
+/**
  * Creates a new polygon face from selected vertices (Blender 'F' key).
  */
-export function fillFaceFromVertices(mesh: MeshObject, vertexIds: string[]): OperationResult {
+export function fillFaceFromVertices(
+  mesh: MeshObject,
+  vertexIds: string[],
+  viewDirection?: Vector3D
+): OperationResult {
   if (vertexIds.length < 3) {
     return { mesh, selectedFaceIds: [], selectedVertexIds: vertexIds }
   }
 
+  const unique = [...new Set(vertexIds)]
+  if (unique.length < 3) {
+    return { mesh, selectedFaceIds: [], selectedVertexIds: vertexIds }
+  }
+
   const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
-  const selectedVerts = newMesh.vertices.filter(v => vertexIds.includes(v.id))
-  if (selectedVerts.length < 3) {
+  const loop = orientFillLoop(newMesh, orderFillLoop(newMesh, unique), viewDirection)
+  const vertMap = new Map(newMesh.vertices.map(v => [v.id, v]))
+  const pts = loop.map(id => vertMap.get(id)?.position).filter(Boolean) as Vector3D[]
+  if (pts.length < 3) {
     return { mesh: newMesh, selectedFaceIds: [], selectedVertexIds: vertexIds }
   }
 
-  const normal = computeFaceNormal(selectedVerts.map(v => v.position))
+  const normal = computeFaceNormal(pts)
   const newFaceId = genId('f_fill')
-
-  // Generate planar UVs
-  const uvs = selectedVerts.map((_, i) => {
-    const angle = (i / selectedVerts.length) * Math.PI * 2
-    return {
-      u: 0.5 + Math.cos(angle) * 0.4,
-      v: 0.5 + Math.sin(angle) * 0.4
+  let materialIndex = 0
+  for (let i = 0; i < loop.length; i++) {
+    const a = loop[i]
+    const b = loop[(i + 1) % loop.length]
+    const neighbor = newMesh.faces.find(f => faceHasDirectedEdge(f, b, a) || faceHasDirectedEdge(f, a, b))
+    if (neighbor) {
+      materialIndex = neighbor.materialIndex
+      break
     }
+  }
+
+  const uAxis = normalizeVec3(subVec3(pts[1], pts[0]))
+  const vAxis = normalizeVec3(crossVec3(normal, uAxis))
+  const origin = pts[0]
+  const uvs = pts.map(p => {
+    const d = subVec3(p, origin)
+    return { u: dotVec3(d, uAxis), v: dotVec3(d, vAxis) }
   })
 
   newMesh.faces.push({
     id: newFaceId,
-    vertexIds: [...vertexIds],
+    vertexIds: loop,
     uvs,
     normal,
-    materialIndex: 0,
+    materialIndex,
     selected: true
   })
 
   return {
     mesh: newMesh,
     selectedFaceIds: [newFaceId],
-    selectedVertexIds: vertexIds
+    selectedVertexIds: loop
   }
 }
 

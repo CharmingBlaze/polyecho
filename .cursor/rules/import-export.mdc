@@ -1,0 +1,13 @@
+---
+description: Import, export, and project files
+globs: src/core/export/**/*.ts,src/core/import/**/*.ts,src/core/project/**/*.ts,src/core/storage/**/*.ts
+alwaysApply: false
+---
+
+# Import and export
+
+- GLB: `GltfExport.ts` / `GltfImport.ts` via Three.js GLTF helpers. Preserve bones, skins, materials, and clip extras (timeline markers).
+- OBJ: `ObjExport.ts` / `ObjImport.ts` — geometry + MTL, no skeleton.
+- `.psxproj`: `ProjectSerializer` version `1.0`, `appName` `'PSXModeller'`. Additive optional fields only unless you bump the format on purpose.
+- New format: new file under `export/` or `import/`, then `ExportModal.vue` or the import modal. Do not embed exporters in Vue SFCs.
+- Round-trip at least one mesh (and armature if the format supports it) after changing I/O.

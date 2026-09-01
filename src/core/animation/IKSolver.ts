@@ -126,3 +126,95 @@ export function solveCCDIK(
 
   return true
 }
+
+function eulerDegFromThree(e: THREE.Euler): { x: number; y: number; z: number } {
+  return {
+    x: Number(THREE.MathUtils.radToDeg(e.x).toFixed(2)),
+    y: Number(THREE.MathUtils.radToDeg(e.y).toFixed(2)),
+    z: Number(THREE.MathUtils.radToDeg(e.z).toFixed(2))
+  }
+}
+
+function boneDepth(bone: Bone, allBones: Bone[]): number {
+  let d = 0
+  let cur: Bone | undefined = bone
+  const seen = new Set<string>()
+  while (cur?.parentId && !seen.has(cur.id)) {
+    seen.add(cur.id)
+    d++
+    cur = allBones.find(b => b.id === cur!.parentId)
+  }
+  return d
+}
+
+function worldHead(bone: Bone, allBones: Bone[]): THREE.Vector3 {
+  const mat = computeBoneWorldMatrix(bone, allBones)
+  return new THREE.Vector3(bone.head.x, bone.head.y, bone.head.z).applyMatrix4(mat)
+}
+
+/**
+ * Apply every enabled IK constraint after FK / clip evaluation.
+ * Leaves first so child effectors win on overlapping chains.
+ */
+export function applyIKConstraints(allBones: Bone[]): void {
+  const constrained = allBones
+    .filter(b => b.ikConstraint?.enabled)
+    .sort((a, b) => boneDepth(b, allBones) - boneDepth(a, allBones))
+
+  for (const endBone of constrained) {
+    const ik = endBone.ikConstraint!
+    const chainLength = Math.max(2, Math.round(ik.chainLength || 2))
+    const iterations = ik.iterations ?? 10
+
+    let targetPos: THREE.Vector3 | null = null
+    if (ik.targetBoneId) {
+      const target = allBones.find(b => b.id === ik.targetBoneId)
+      if (target) targetPos = worldHead(target, allBones)
+    }
+    if (!targetPos && ik.targetPosition) {
+      targetPos = new THREE.Vector3(ik.targetPosition.x, ik.targetPosition.y, ik.targetPosition.z)
+    }
+    if (!targetPos) continue
+
+    let pole: THREE.Vector3 | undefined
+    if (ik.poleTargetBoneId) {
+      const poleBone = allBones.find(b => b.id === ik.poleTargetBoneId)
+      if (poleBone) pole = worldHead(poleBone, allBones)
+    }
+
+    const mid = endBone.parentId ? allBones.find(b => b.id === endBone.parentId) : undefined
+    const root = mid?.parentId ? allBones.find(b => b.id === mid.parentId) : undefined
+
+    if (chainLength === 2 && root && mid) {
+      const solved = solveTwoBoneIK(root, mid, endBone, targetPos, allBones, pole)
+      if (solved) {
+        const rootDeg = eulerDegFromThree(solved.rootRot)
+        const midDeg = eulerDegFromThree(solved.midRot)
+        root.rotation = rootDeg
+        mid.rotation = midDeg
+      } else {
+        solveCCDIK(endBone.id, targetPos, allBones, chainLength, iterations)
+      }
+    } else {
+      solveCCDIK(endBone.id, targetPos, allBones, chainLength, iterations)
+    }
+  }
+}
+
+/** Persist a world-space IK target on the end bone and solve once. */
+export function setIKTargetAndSolve(
+  endBone: Bone,
+  targetPos: THREE.Vector3,
+  allBones: Bone[],
+  chainLength = 2
+): void {
+  if (!endBone.ikConstraint) {
+    endBone.ikConstraint = { enabled: true, chainLength, iterations: 10, weight: 1 }
+  }
+  endBone.ikConstraint.targetPosition = {
+    x: Number(targetPos.x.toFixed(3)),
+    y: Number(targetPos.y.toFixed(3)),
+    z: Number(targetPos.z.toFixed(3))
+  }
+  applyIKConstraints(allBones)
+}

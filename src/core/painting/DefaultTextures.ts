@@ -8,6 +8,7 @@ import { PixelBuffer } from './PixelCanvas'
  * 4. Bottom-Right (32..63, 32..63): Gold / Cyber Glow Tech Circuit with neon core
  */
 export function generateRetroAtlas(pb: PixelBuffer) {
+  pb.suspendComposite()
   pb.clear('#181a20')
 
   // --- 1. Top-Left: Dungeon Stone Bricks (0, 0 to 32, 32) ---
@@ -150,4 +151,6 @@ export function generateRetroAtlas(pb: PixelBuffer) {
   pb.drawLine(34, 61, 34, 55, cyanGlow, 1)
   pb.drawLine(61, 61, 55, 61, cyanGlow, 1)
   pb.drawLine(61, 61, 61, 55, cyanGlow, 1)
+
+  pb.resumeComposite()
 }

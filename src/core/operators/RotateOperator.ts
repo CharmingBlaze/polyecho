@@ -46,22 +46,14 @@ export class RotateOperator extends ModalOperator {
 
     const q = new THREE.Quaternion().setFromAxisAngle(rotAxis, angleRad)
 
-    const targetVertIds = new Set<number>()
-    if (this.ctx.selectedFaceIds.length > 0) {
-      for (const fId of this.ctx.selectedFaceIds) {
-        const face = this.ctx.mesh.faces.get(fId)
-        if (face) face.vertexIds.forEach(vid => targetVertIds.add(vid))
-      }
-    } else {
-      this.ctx.selectedVertIds.forEach((vid: number) => targetVertIds.add(vid))
-    }
+    const targetVertIds = this.collectTargetVertIds()
 
-    for (const [vId, v] of this.ctx.mesh.vertices) {
+    for (const [vId] of this.ctx.mesh.vertices) {
       if (targetVertIds.has(vId)) {
         const initPos = this.initialVertices.get(vId)
         if (initPos) {
           const rel = initPos.clone().sub(this.pivot).applyQuaternion(q)
-          v.position.copy(this.pivot).add(rel)
+          this.writeWorldPos(vId, this.pivot.clone().add(rel))
         }
       }
     }

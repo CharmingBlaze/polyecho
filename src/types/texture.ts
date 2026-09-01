@@ -17,6 +17,17 @@ export interface TextureLayer {
   data?: Uint8ClampedArray
 }
 
+/** How to bind a texture onto a mesh that may share its material. */
+export type TextureApplyPolicy =
+  | 'this_object'      // fork the material if other meshes share it
+  | 'shared_material'  // write Material.textureId; every mesh on that material updates
+
+/** Regular sprite-sheet grid on a library image. Row 0 is the top of the image. */
+export interface AtlasGrid {
+  cols: number
+  rows: number
+}
+
 export interface TextureMap {
   id: string
   name: string
@@ -26,6 +37,8 @@ export interface TextureMap {
   pixelBuffer?: any
   layers?: TextureLayer[]
   activeLayerId?: string
+  /** When set, UV/Paint treat this image as a cell atlas. */
+  atlas?: AtlasGrid
 }
 
 export type ShadingModel = 'pbr' | 'unlit' | 'gouraud' | 'flat' | 'textured' | 'psx' | 'saturn' | 'dreamcast' | 'n64' | 'solid' | 'wireframe'

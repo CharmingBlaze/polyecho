@@ -1,4 +1,5 @@
 import { hexToRgb, getBayerOffset, rgbToHex, rgbToHsl, hslToRgb } from '../../utils/color'
+import { applyFloydSteinbergDither, applyAtkinsonDither } from '../../utils/dithering'
 
 export interface PixelDrawParams {
   x: number
@@ -30,6 +31,29 @@ export interface BufferLayer {
   blendMode: 'normal' | 'multiply' | 'screen' | 'overlay' | 'additive'
   canvas: HTMLCanvasElement
   ctx: CanvasRenderingContext2D
+}
+
+/**
+ * Pixel paint buffer. `canvas` is the composited preview (Three.js / 2D view).
+ * All draw mutations write the active layer, then `composite()`.
+ * `PixelCanvas.vue` is the UV/Paint tab router — not this class.
+ */
+function canvasLooksEmpty(ctx: CanvasRenderingContext2D) {
+  const w = ctx.canvas.width
+  const h = ctx.canvas.height
+  if (w < 1 || h < 1) return true
+  const pts = [
+    [0, 0],
+    [w - 1, 0],
+    [0, h - 1],
+    [w - 1, h - 1],
+    [Math.floor(w / 2), Math.floor(h / 2)]
+  ]
+  for (const [x, y] of pts) {
+    const d = ctx.getImageData(x, y, 1, 1).data
+    if (d[3] > 0) return false
+  }
+  return true
 }
 
 export class PixelBuffer {
@@ -65,11 +89,84 @@ export class PixelBuffer {
     this.layers.push(baseLayer)
     this.activeLayerId = baseLayer.id
 
-    this.clear('#333842')
+    this.clear()
   }
 
   get activeLayer(): BufferLayer | undefined {
     return this.layers.find(l => l.id === this.activeLayerId) || this.layers[0]
+  }
+
+  layerCtx(): CanvasRenderingContext2D {
+    this.ensureDrawable()
+    return this.activeLayer?.ctx ?? this.ctx
+  }
+
+  /** Keep layer canvases sized and back the photo onto the layer if it was only on the composite. */
+  ensureDrawable() {
+    if (this.layers.length === 0) {
+      const baseCanvas = document.createElement('canvas')
+      baseCanvas.width = this.width
+      baseCanvas.height = this.height
+      const baseCtx = baseCanvas.getContext('2d', { willReadFrequently: true })!
+      this.layers.push({
+        id: 'layer_base',
+        name: 'Layer 1',
+        visible: true,
+        opacity: 1.0,
+        blendMode: 'normal',
+        canvas: baseCanvas,
+        ctx: baseCtx
+      })
+      this.activeLayerId = 'layer_base'
+    }
+
+    if (this.canvas.width !== this.width || this.canvas.height !== this.height) {
+      this.canvas.width = this.width
+      this.canvas.height = this.height
+      this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!
+    }
+
+    const layer = this.activeLayer
+    if (!layer) return
+    if (layer.canvas.width !== this.width || layer.canvas.height !== this.height) {
+      layer.canvas.width = this.width
+      layer.canvas.height = this.height
+      layer.ctx = layer.canvas.getContext('2d', { willReadFrequently: true })!
+    }
+
+    if (canvasLooksEmpty(layer.ctx) && !canvasLooksEmpty(this.ctx)) {
+      this.syncToActiveLayer()
+    }
+  }
+
+  compositeDeferred = false
+
+  commitLayers() {
+    if (!this.compositeDeferred) this.composite()
+  }
+
+  suspendComposite() {
+    this.compositeDeferred = true
+  }
+
+  resumeComposite() {
+    this.compositeDeferred = false
+    this.composite()
+  }
+
+  resizeCanvasContents(
+    source: HTMLCanvasElement,
+    dest: HTMLCanvasElement,
+    destCtx: CanvasRenderingContext2D,
+    mode: 'resample' | 'crop'
+  ) {
+    destCtx.imageSmoothingEnabled = mode === 'resample'
+    destCtx.clearRect(0, 0, dest.width, dest.height)
+    if (mode === 'resample') {
+      destCtx.drawImage(source, 0, 0, dest.width, dest.height)
+    } else {
+      destCtx.drawImage(source, 0, 0)
+    }
   }
 
   addLayer(name?: string): BufferLayer {
@@ -154,24 +251,39 @@ export class PixelBuffer {
 
   resize(newWidth: number, newHeight: number, mode: 'resample' | 'crop' = 'crop') {
     if (newWidth <= 0 || newHeight <= 0) return
-    const tempCanvas = document.createElement('canvas')
-    tempCanvas.width = this.width
-    tempCanvas.height = this.height
-    const tempCtx = tempCanvas.getContext('2d')!
-    tempCtx.drawImage(this.canvas, 0, 0)
+    const nextW = Math.round(newWidth)
+    const nextH = Math.round(newHeight)
+    if (nextW === this.width && nextH === this.height && mode === 'crop') return
 
-    this.width = Math.round(newWidth)
-    this.height = Math.round(newHeight)
-    this.canvas.width = this.width
-    this.canvas.height = this.height
+    for (const layer of this.layers) {
+      const snapshot = document.createElement('canvas')
+      snapshot.width = layer.canvas.width
+      snapshot.height = layer.canvas.height
+      snapshot.getContext('2d')!.drawImage(layer.canvas, 0, 0)
+      layer.canvas.width = nextW
+      layer.canvas.height = nextH
+      layer.ctx = layer.canvas.getContext('2d', { willReadFrequently: true })!
+      this.resizeCanvasContents(snapshot, layer.canvas, layer.ctx, mode)
+    }
+
+    this.width = nextW
+    this.height = nextH
+    this.canvas.width = nextW
+    this.canvas.height = nextH
     this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!
-    this.ctx.imageSmoothingEnabled = mode === 'resample'
+    this.composite()
+  }
 
-    if (mode === 'resample') {
-      this.ctx.drawImage(tempCanvas, 0, 0, this.width, this.height)
-    } else {
-      this.clear('#1e2025')
-      this.ctx.drawImage(tempCanvas, 0, 0)
+  syncToActiveLayer() {
+    const layer = this.activeLayer
+    if (layer) {
+      if (layer.canvas.width !== this.width || layer.canvas.height !== this.height) {
+        layer.canvas.width = this.width
+        layer.canvas.height = this.height
+        layer.ctx = layer.canvas.getContext('2d', { willReadFrequently: true })!
+      }
+      layer.ctx.clearRect(0, 0, this.width, this.height)
+      layer.ctx.drawImage(this.canvas, 0, 0)
     }
   }
 
@@ -179,17 +291,27 @@ export class PixelBuffer {
     if (fillHex) {
       this.ctx.fillStyle = fillHex
       this.ctx.fillRect(0, 0, this.width, this.height)
+      if (this.activeLayer) {
+        this.activeLayer.ctx.fillStyle = fillHex
+        this.activeLayer.ctx.fillRect(0, 0, this.width, this.height)
+      }
     } else {
       this.ctx.clearRect(0, 0, this.width, this.height)
+      if (this.activeLayer) {
+        this.activeLayer.ctx.clearRect(0, 0, this.width, this.height)
+      }
     }
+    this.commitLayers()
   }
 
-  setPixel(x: number, y: number, hex: string, alpha = 1.0) {
+  setPixel(x: number, y: number, hex: string, alpha = 1.0, commit = true) {
     if (x < 0 || x >= this.width || y < 0 || y >= this.height) return
-    this.ctx.globalAlpha = Math.max(0, Math.min(1, alpha))
-    this.ctx.fillStyle = hex
-    this.ctx.fillRect(Math.floor(x), Math.floor(y), 1, 1)
-    this.ctx.globalAlpha = 1.0
+    const ctx = this.layerCtx()
+    ctx.globalAlpha = Math.max(0, Math.min(1, alpha))
+    ctx.fillStyle = hex
+    ctx.fillRect(Math.floor(x), Math.floor(y), 1, 1)
+    ctx.globalAlpha = 1.0
+    if (commit) this.commitLayers()
   }
 
   getPixelHex(x: number, y: number): string {
@@ -198,38 +320,50 @@ export class PixelBuffer {
     return rgbToHex(imgData[0], imgData[1], imgData[2])
   }
 
-  drawBrush(x: number, y: number, colorHex: string, size = 1, opacity = 1.0, shape: 'square' | 'circle' = 'square') {
-    this.ctx.globalAlpha = Math.max(0, Math.min(1, opacity))
-    this.ctx.fillStyle = colorHex
+  drawBrush(
+    x: number,
+    y: number,
+    colorHex: string,
+    size = 1,
+    opacity = 1.0,
+    shape: 'square' | 'circle' = 'square',
+    commit = true
+  ) {
+    const ctx = this.layerCtx()
+    ctx.globalAlpha = Math.max(0, Math.min(1, opacity))
+    ctx.fillStyle = colorHex
     const half = Math.floor(size / 2)
     const px = Math.floor(x) - half
     const py = Math.floor(y) - half
 
     if (shape === 'circle' && size > 2) {
-      this.ctx.beginPath()
-      this.ctx.arc(Math.floor(x) + 0.5, Math.floor(y) + 0.5, size / 2, 0, Math.PI * 2)
-      this.ctx.fill()
+      ctx.beginPath()
+      ctx.arc(Math.floor(x) + 0.5, Math.floor(y) + 0.5, size / 2, 0, Math.PI * 2)
+      ctx.fill()
     } else {
-      this.ctx.fillRect(px, py, size, size)
+      ctx.fillRect(px, py, size, size)
     }
-    this.ctx.globalAlpha = 1.0
+    ctx.globalAlpha = 1.0
+    if (commit) this.commitLayers()
   }
 
-  erase(x: number, y: number, size = 1, shape: 'square' | 'circle' = 'square') {
+  erase(x: number, y: number, size = 1, shape: 'square' | 'circle' = 'square', commit = true) {
+    const ctx = this.layerCtx()
     const half = Math.floor(size / 2)
     const px = Math.floor(x) - half
     const py = Math.floor(y) - half
 
     if (shape === 'circle' && size > 2) {
-      this.ctx.save()
-      this.ctx.globalCompositeOperation = 'destination-out'
-      this.ctx.beginPath()
-      this.ctx.arc(Math.floor(x) + 0.5, Math.floor(y) + 0.5, size / 2, 0, Math.PI * 2)
-      this.ctx.fill()
-      this.ctx.restore()
+      ctx.save()
+      ctx.globalCompositeOperation = 'destination-out'
+      ctx.beginPath()
+      ctx.arc(Math.floor(x) + 0.5, Math.floor(y) + 0.5, size / 2, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.restore()
     } else {
-      this.ctx.clearRect(px, py, size, size)
+      ctx.clearRect(px, py, size, size)
     }
+    if (commit) this.commitLayers()
   }
 
   /**
@@ -251,7 +385,8 @@ export class PixelBuffer {
         const py = Math.floor(y + dy)
         if (px < 0 || px >= this.width || py < 0 || py >= this.height) continue
 
-        const imgData = this.ctx.getImageData(px, py, 1, 1)
+        const ctx = this.layerCtx()
+        const imgData = ctx.getImageData(px, py, 1, 1)
         const d = imgData.data
         if (d[3] === 0) continue // Skip transparent
 
@@ -300,9 +435,10 @@ export class PixelBuffer {
           d[2] = Math.max(0, Math.min(255, d[2] + delta))
         }
 
-        this.ctx.putImageData(imgData, px, py)
+        ctx.putImageData(imgData, px, py)
       }
     }
+    this.commitLayers()
   }
 
   paintAtUV(
@@ -350,12 +486,13 @@ export class PixelBuffer {
       let err = dx - dy
       let cx = x0, cy = y0
       while (true) {
-        this.erase(cx, cy, size)
+        this.erase(cx, cy, size, 'square', false)
         if (cx === x1 && cy === y1) break
         let e2 = 2 * err
         if (e2 > -dy) { err -= dy; cx += sx }
         if (e2 < dx) { err += dx; cy += sy }
       }
+      this.commitLayers()
     } else {
       this.drawLine(x0, y0, x1, y1, color, size, opacity)
     }
@@ -374,7 +511,7 @@ export class PixelBuffer {
     const endY = Math.floor(y1)
 
     while (true) {
-      this.drawBrush(curX, curY, colorHex, size, opacity)
+      this.drawBrush(curX, curY, colorHex, size, opacity, 'square', false)
       if (curX === endX && curY === endY) break
       let e2 = 2 * err
       if (e2 > -dy) {
@@ -386,6 +523,7 @@ export class PixelBuffer {
         curY += sy
       }
     }
+    this.commitLayers()
   }
 
   drawRect(x0: number, y0: number, x1: number, y1: number, colorHex: string, size = 1, filled = false, opacity = 1.0) {
@@ -396,34 +534,38 @@ export class PixelBuffer {
     const w = maxX - minX + 1
     const h = maxY - minY + 1
 
-    this.ctx.globalAlpha = Math.max(0, Math.min(1, opacity))
-    this.ctx.fillStyle = colorHex
+    const ctx = this.layerCtx()
+    ctx.globalAlpha = Math.max(0, Math.min(1, opacity))
+    ctx.fillStyle = colorHex
 
     if (filled) {
-      this.ctx.fillRect(minX, minY, w, h)
+      ctx.fillRect(minX, minY, w, h)
     } else {
-      this.ctx.fillRect(minX, minY, w, size) // Top
-      this.ctx.fillRect(minX, maxY - size + 1, w, size) // Bottom
-      this.ctx.fillRect(minX, minY, size, h) // Left
-      this.ctx.fillRect(maxX - size + 1, minY, size, h) // Right
+      ctx.fillRect(minX, minY, w, size) // Top
+      ctx.fillRect(minX, maxY - size + 1, w, size) // Bottom
+      ctx.fillRect(minX, minY, size, h) // Left
+      ctx.fillRect(maxX - size + 1, minY, size, h) // Right
     }
-    this.ctx.globalAlpha = 1.0
+    ctx.globalAlpha = 1.0
+    this.commitLayers()
   }
 
   drawCircle(cx: number, cy: number, radius: number, colorHex: string, size = 1, filled = false, opacity = 1.0) {
-    this.ctx.globalAlpha = Math.max(0, Math.min(1, opacity))
-    this.ctx.fillStyle = colorHex
-    this.ctx.strokeStyle = colorHex
-    this.ctx.lineWidth = size
+    const ctx = this.layerCtx()
+    ctx.globalAlpha = Math.max(0, Math.min(1, opacity))
+    ctx.fillStyle = colorHex
+    ctx.strokeStyle = colorHex
+    ctx.lineWidth = size
 
-    this.ctx.beginPath()
-    this.ctx.arc(cx, cy, Math.max(1, radius), 0, Math.PI * 2)
+    ctx.beginPath()
+    ctx.arc(cx, cy, Math.max(1, radius), 0, Math.PI * 2)
     if (filled) {
-      this.ctx.fill()
+      ctx.fill()
     } else {
-      this.ctx.stroke()
+      ctx.stroke()
     }
-    this.ctx.globalAlpha = 1.0
+    ctx.globalAlpha = 1.0
+    this.commitLayers()
   }
 
   drawDither(x: number, y: number, colorHex: string, size = 1) {
@@ -438,9 +580,10 @@ export class PixelBuffer {
 
         const offset = getBayerOffset(px, py, 40)
         const ditherColor = rgbToHex(baseRgb.r + offset, baseRgb.g + offset, baseRgb.b + offset)
-        this.setPixel(px, py, ditherColor)
+        this.setPixel(px, py, ditherColor, 1, false)
       }
     }
+    this.commitLayers()
   }
 
   /**
@@ -451,7 +594,8 @@ export class PixelBuffer {
     const y0 = Math.floor(startY)
     if (x0 < 0 || x0 >= this.width || y0 < 0 || y0 >= this.height) return
 
-    const imgData = this.ctx.getImageData(0, 0, this.width, this.height)
+    const ctx = this.layerCtx()
+    const imgData = ctx.getImageData(0, 0, this.width, this.height)
     const data32 = new Uint32Array(imgData.data.buffer)
 
     const fillRgb = hexToRgb(fillHex)
@@ -509,7 +653,8 @@ export class PixelBuffer {
       }
     }
 
-    this.ctx.putImageData(imgData, 0, 0)
+    ctx.putImageData(imgData, 0, 0)
+    this.commitLayers()
   }
 
   // --- Aseprite Special FX & Adjustments ---
@@ -519,7 +664,8 @@ export class PixelBuffer {
    * Adds a solid 1px border around all non-transparent pixels.
    */
   generateOutline(outlineColorHex = '#000000') {
-    const imgData = this.ctx.getImageData(0, 0, this.width, this.height)
+    const ctx = this.layerCtx()
+    const imgData = ctx.getImageData(0, 0, this.width, this.height)
     const data32 = new Uint32Array(imgData.data.buffer)
     const outlineData = new Uint32Array(data32.length)
     outlineData.set(data32)
@@ -550,11 +696,13 @@ export class PixelBuffer {
     }
 
     const resImg = new ImageData(new Uint8ClampedArray(outlineData.buffer), w, h)
-    this.ctx.putImageData(resImg, 0, 0)
+    ctx.putImageData(resImg, 0, 0)
+    this.commitLayers()
   }
 
   adjustBrightness(amount: number) {
-    const imgData = this.ctx.getImageData(0, 0, this.width, this.height)
+    const ctx = this.layerCtx()
+    const imgData = ctx.getImageData(0, 0, this.width, this.height)
     const d = imgData.data
     for (let i = 0; i < d.length; i += 4) {
       if (d[i + 3] === 0) continue
@@ -562,11 +710,13 @@ export class PixelBuffer {
       d[i + 1] = Math.max(0, Math.min(255, d[i + 1] + amount))
       d[i + 2] = Math.max(0, Math.min(255, d[i + 2] + amount))
     }
-    this.ctx.putImageData(imgData, 0, 0)
+    ctx.putImageData(imgData, 0, 0)
+    this.commitLayers()
   }
 
   desaturate() {
-    const imgData = this.ctx.getImageData(0, 0, this.width, this.height)
+    const ctx = this.layerCtx()
+    const imgData = ctx.getImageData(0, 0, this.width, this.height)
     const d = imgData.data
     for (let i = 0; i < d.length; i += 4) {
       if (d[i + 3] === 0) continue
@@ -575,11 +725,13 @@ export class PixelBuffer {
       d[i + 1] = gray
       d[i + 2] = gray
     }
-    this.ctx.putImageData(imgData, 0, 0)
+    ctx.putImageData(imgData, 0, 0)
+    this.commitLayers()
   }
 
   invertColors() {
-    const imgData = this.ctx.getImageData(0, 0, this.width, this.height)
+    const ctx = this.layerCtx()
+    const imgData = ctx.getImageData(0, 0, this.width, this.height)
     const d = imgData.data
     for (let i = 0; i < d.length; i += 4) {
       if (d[i + 3] === 0) continue
@@ -587,47 +739,96 @@ export class PixelBuffer {
       d[i + 1] = 255 - d[i + 1]
       d[i + 2] = 255 - d[i + 2]
     }
-    this.ctx.putImageData(imgData, 0, 0)
+    ctx.putImageData(imgData, 0, 0)
+    this.commitLayers()
   }
 
-  flip(horizontal: boolean, vertical: boolean) {
-    const tempCanvas = document.createElement('canvas')
-    tempCanvas.width = this.width
-    tempCanvas.height = this.height
-    const tempCtx = tempCanvas.getContext('2d')!
-    tempCtx.drawImage(this.canvas, 0, 0)
+  /**
+   * Quantizes / remaps all layer pixels to the nearest colors in a target palette.
+   */
+  remapToPalette(paletteHexes: string[], mode: 'nearest' | 'floyd-steinberg' | 'atkinson' = 'nearest') {
+    if (!paletteHexes || paletteHexes.length === 0) return
+    const ctx = this.layerCtx()
+    if (mode === 'floyd-steinberg') {
+      applyFloydSteinbergDither(ctx, this.width, this.height, paletteHexes)
+    } else if (mode === 'atkinson') {
+      applyAtkinsonDither(ctx, this.width, this.height, paletteHexes)
+    } else {
+      const imgData = ctx.getImageData(0, 0, this.width, this.height)
+      const d = imgData.data
+      const palette = paletteHexes.map(hex => {
+        let clean = hex.replace('#', '')
+        if (clean.length === 3) clean = clean.split('').map(c => c + c).join('')
+        const num = parseInt(clean, 16)
+        return [(num >> 16) & 255, (num >> 8) & 255, num & 255]
+      })
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i + 3] === 0) continue // Preserve transparency
+        const r = d[i], g = d[i + 1], b = d[i + 2]
+        let bestDist = Infinity
+        let bestColor = palette[0]
+        for (const p of palette) {
+          const dr = r - p[0], dg = g - p[1], db = b - p[2]
+          const dist = dr * dr + dg * dg + db * db
+          if (dist < bestDist) {
+            bestDist = dist
+            bestColor = p
+          }
+        }
+        d[i] = bestColor[0]
+        d[i + 1] = bestColor[1]
+        d[i + 2] = bestColor[2]
+      }
+      ctx.putImageData(imgData, 0, 0)
+    }
+    this.commitLayers()
+  }
 
-    this.ctx.save()
-    this.ctx.clearRect(0, 0, this.width, this.height)
-    this.ctx.translate(horizontal ? this.width : 0, vertical ? this.height : 0)
-    this.ctx.scale(horizontal ? -1 : 1, vertical ? -1 : 1)
-    this.ctx.drawImage(tempCanvas, 0, 0)
-    this.ctx.restore()
+  flip(horizontal: boolean, vertical: boolean, allLayers = false) {
+    const targets = allLayers ? this.layers : (this.activeLayer ? [this.activeLayer] : [])
+    for (const layer of targets) {
+      const tempCanvas = document.createElement('canvas')
+      tempCanvas.width = this.width
+      tempCanvas.height = this.height
+      tempCanvas.getContext('2d')!.drawImage(layer.canvas, 0, 0)
+      layer.ctx.save()
+      layer.ctx.clearRect(0, 0, this.width, this.height)
+      layer.ctx.translate(horizontal ? this.width : 0, vertical ? this.height : 0)
+      layer.ctx.scale(horizontal ? -1 : 1, vertical ? -1 : 1)
+      layer.ctx.drawImage(tempCanvas, 0, 0)
+      layer.ctx.restore()
+    }
+    this.commitLayers()
   }
 
   rotate(degrees: 90 | -90 | 180) {
-    const tempCanvas = document.createElement('canvas')
-    tempCanvas.width = this.width
-    tempCanvas.height = this.height
-    const tempCtx = tempCanvas.getContext('2d')!
-    tempCtx.drawImage(this.canvas, 0, 0)
+    const swap = degrees === 90 || degrees === -90
+    const nextW = swap ? this.height : this.width
+    const nextH = swap ? this.width : this.height
 
-    if (degrees === 90 || degrees === -90) {
-      const oldW = this.width
-      const oldH = this.height
-      this.width = oldH
-      this.height = oldW
-      this.canvas.width = this.width
-      this.canvas.height = this.height
-      this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!
+    for (const layer of this.layers) {
+      const tempCanvas = document.createElement('canvas')
+      tempCanvas.width = this.width
+      tempCanvas.height = this.height
+      tempCanvas.getContext('2d')!.drawImage(layer.canvas, 0, 0)
+
+      layer.canvas.width = nextW
+      layer.canvas.height = nextH
+      layer.ctx = layer.canvas.getContext('2d', { willReadFrequently: true })!
+      layer.ctx.save()
+      layer.ctx.clearRect(0, 0, nextW, nextH)
+      layer.ctx.translate(nextW / 2, nextH / 2)
+      layer.ctx.rotate((degrees * Math.PI) / 180)
+      layer.ctx.drawImage(tempCanvas, -tempCanvas.width / 2, -tempCanvas.height / 2)
+      layer.ctx.restore()
     }
 
-    this.ctx.save()
-    this.ctx.clearRect(0, 0, this.width, this.height)
-    this.ctx.translate(this.width / 2, this.height / 2)
-    this.ctx.rotate((degrees * Math.PI) / 180)
-    this.ctx.drawImage(tempCanvas, -tempCanvas.width / 2, -tempCanvas.height / 2)
-    this.ctx.restore()
+    this.width = nextW
+    this.height = nextH
+    this.canvas.width = nextW
+    this.canvas.height = nextH
+    this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!
+    this.composite()
   }
 
   /**
@@ -649,14 +850,79 @@ export class PixelBuffer {
       .map(([hex]) => hex)
   }
 
+  /**
+   * Dilate non-transparent pixels outward by `margin` pixels to prevent UV seam artifacts and filtering bleed.
+   */
+  dilateSeamPadding(margin = 1) {
+    const layer = this.activeLayer
+    if (!layer) return
+    const imgData = layer.ctx.getImageData(0, 0, this.width, this.height)
+    const data = imgData.data
+    const outData = new Uint8ClampedArray(data)
+
+    const w = this.width
+    const h = this.height
+
+    for (let step = 0; step < margin; step++) {
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const idx = (y * w + x) * 4
+          if (data[idx + 3] === 0) {
+            const neighbors = [
+              [x - 1, y],
+              [x + 1, y],
+              [x, y - 1],
+              [x, y + 1]
+            ]
+            for (const [nx, ny] of neighbors) {
+              if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
+                const nIdx = (ny * w + nx) * 4
+                if (data[nIdx + 3] > 0) {
+                  outData[idx] = data[nIdx]
+                  outData[idx + 1] = data[nIdx + 1]
+                  outData[idx + 2] = data[nIdx + 2]
+                  outData[idx + 3] = data[nIdx + 3]
+                  break
+                }
+              }
+            }
+          }
+        }
+      }
+      data.set(outData)
+    }
+
+    layer.ctx.putImageData(imgData, 0, 0)
+    this.composite()
+  }
+
   toDataURL(): string {
     return this.canvas.toDataURL('image/png')
   }
 
   clone(): PixelBuffer {
     const copy = new PixelBuffer(this.width, this.height)
-    copy.ctx.clearRect(0, 0, this.width, this.height)
-    copy.ctx.drawImage(this.canvas, 0, 0)
+    copy.layers = this.layers.map(layer => {
+      const canvas = document.createElement('canvas')
+      canvas.width = this.width
+      canvas.height = this.height
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })!
+      ctx.drawImage(layer.canvas, 0, 0)
+      return {
+        id: layer.id,
+        name: layer.name,
+        visible: layer.visible,
+        opacity: layer.opacity,
+        blendMode: layer.blendMode,
+        canvas,
+        ctx
+      }
+    })
+    copy.activeLayerId = this.activeLayerId
+    if (copy.layers.length === 0) {
+      copy.addLayer('Layer 1')
+    }
+    copy.composite()
     return copy
   }
 
@@ -667,15 +933,14 @@ export class PixelBuffer {
       img.onload = () => {
         try {
           if (autoResize && (img.naturalWidth !== this.width || img.naturalHeight !== this.height)) {
-            this.width = img.naturalWidth
-            this.height = img.naturalHeight
-            this.canvas.width = img.naturalWidth
-            this.canvas.height = img.naturalHeight
-            this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!
+            this.resize(img.naturalWidth, img.naturalHeight, 'crop')
           }
-          this.ctx.imageSmoothingEnabled = false
-          this.ctx.clearRect(0, 0, this.width, this.height)
-          this.ctx.drawImage(img, 0, 0, this.width, this.height)
+          const layer = this.activeLayer
+          const destCtx = layer?.ctx ?? this.ctx
+          destCtx.imageSmoothingEnabled = false
+          destCtx.clearRect(0, 0, this.width, this.height)
+          destCtx.drawImage(img, 0, 0, this.width, this.height)
+          this.composite()
           resolve()
         } catch (err) {
           reject(err)
@@ -696,14 +961,12 @@ export class PixelBuffer {
       const img = new Image()
       img.onload = () => {
         if (autoResize && (img.naturalWidth !== this.width || img.naturalHeight !== this.height)) {
-          this.width = img.naturalWidth
-          this.height = img.naturalHeight
-          this.canvas.width = img.naturalWidth
-          this.canvas.height = img.naturalHeight
-          this.ctx = this.canvas.getContext('2d', { willReadFrequently: true })!
+          this.resize(img.naturalWidth, img.naturalHeight, 'crop')
         }
-        this.ctx.clearRect(0, 0, this.width, this.height)
-        this.ctx.drawImage(img, 0, 0, this.width, this.height)
+        const destCtx = this.activeLayer?.ctx ?? this.ctx
+        destCtx.clearRect(0, 0, this.width, this.height)
+        destCtx.drawImage(img, 0, 0, this.width, this.height)
+        this.composite()
         resolve()
       }
       img.src = url

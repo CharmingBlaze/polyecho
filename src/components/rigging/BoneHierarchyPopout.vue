@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useFloatingDrag } from '../../composables/useFloatingDrag'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
@@ -43,7 +44,7 @@ const pos = ref({ x: Math.max(20, window.innerWidth - 400), y: 70 })
 const width = ref(340)
 const height = ref(520)
 const isMinimized = ref(false)
-const isDragging = ref(false)
+const { startDrag } = useFloatingDrag(pos, { maxPadX: 100, maxPadY: 40 })
 const isResizing = ref(false)
 const searchQuery = ref('')
 const collapsedBranchIds = ref<Set<string>>(new Set())
@@ -57,7 +58,6 @@ const editingSocketName = ref<string>('')
 // Hidden bones visibility set
 const hiddenBoneIds = ref<Set<string>>(new Set())
 
-let dragOffset = { x: 0, y: 0 }
 let resizeStart = { x: 0, y: 0, w: 0, h: 0 }
 
 const selectedBone = computed(() => animationStore.selectedBone)
@@ -201,32 +201,6 @@ function commitSocketRename(boneId: string, socketId: string) {
   editingSocketId.value = null
 }
 
-function startDrag(e: MouseEvent) {
-  if (e.button !== 0) return
-  isDragging.value = true
-  dragOffset = {
-    x: e.clientX - pos.value.x,
-    y: e.clientY - pos.value.y
-  }
-
-  const onMouseMove = (moveEvent: MouseEvent) => {
-    if (!isDragging.value) return
-    const maxX = window.innerWidth - 100
-    const maxY = window.innerHeight - 40
-    pos.value.x = Math.max(0, Math.min(maxX, moveEvent.clientX - dragOffset.x))
-    pos.value.y = Math.max(34, Math.min(maxY, moveEvent.clientY - dragOffset.y))
-  }
-
-  const onMouseUp = () => {
-    isDragging.value = false
-    window.removeEventListener('mousemove', onMouseMove)
-    window.removeEventListener('mouseup', onMouseUp)
-  }
-
-  window.addEventListener('mousemove', onMouseMove)
-  window.addEventListener('mouseup', onMouseUp)
-}
-
 function startResize(e: MouseEvent) {
   e.preventDefault()
   isResizing.value = true
@@ -362,6 +336,7 @@ function closePopout() {
 
 <template>
   <div 
+    data-floating-panel
     v-if="animationStore.showBoneHierarchyPopout"
     class="fixed z-50 bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl flex flex-col font-sans text-xs select-none backdrop-blur-xs overflow-hidden"
     :style="{
@@ -373,7 +348,7 @@ function closePopout() {
   >
     <!-- 1. Header Bar (Draggable) -->
     <div 
-      @mousedown="startDrag"
+      @pointerdown="startDrag"
       class="h-8 bg-ui-header px-2.5 flex items-center justify-between border-b border-ui-borderSubtle cursor-move shrink-0"
     >
       <div class="flex items-center gap-1.5 font-semibold text-ui-textPrimary">

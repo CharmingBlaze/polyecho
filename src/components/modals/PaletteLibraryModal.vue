@@ -3,7 +3,6 @@ import { ref, computed, onMounted } from 'vue'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import { 
-  DEFAULT_PALETTES, 
   loadCustomPalettes, 
   saveCustomPalettes, 
   parseHexPalette, 
@@ -16,7 +15,7 @@ import {
   sortPaletteColors,
   snapColorToPalette
 } from '../../utils/color'
-import { Palette } from '../../types/texture'
+import type { Palette } from '../../types/texture'
 import { 
   X, 
   Search, 
@@ -59,7 +58,7 @@ onMounted(() => {
 const categories = ['All', 'Consoles', 'Pixel Art', 'Biomes', 'Materials', 'Stylized', 'Custom']
 
 const allPalettes = computed<Palette[]>(() => {
-  return [...DEFAULT_PALETTES, ...customPalettes.value]
+  return projectStore.palettes
 })
 
 const filteredPalettes = computed<Palette[]>(() => {
@@ -83,23 +82,18 @@ const filteredPalettes = computed<Palette[]>(() => {
 })
 
 function selectPalette(p: Palette) {
-  projectStore.activePalette = p
+  projectStore.selectPalette(p.id)
   emit('selected', p)
   emit('close')
 }
 
 function handleAddCustomPalette() {
-  const name = newCustomName.value.trim() || `Custom Set ${customPalettes.value.length + 1}`
-  const newPal: Palette = {
-    id: `custom_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-    name,
-    category: 'Custom',
-    isCustom: true,
-    colors: [toolStore.primaryColor || '#ffffff', toolStore.secondaryColor || '#000000', '#be4a2f', '#3b5dc9']
-  }
-  customPalettes.value.push(newPal)
-  saveCustomPalettes(customPalettes.value)
-  projectStore.activePalette = newPal
+  const name = newCustomName.value.trim() || `Custom Set ${projectStore.palettes.filter(p => p.isCustom).length + 1}`
+  projectStore.createPalette(
+    name, 
+    [toolStore.primaryColor || '#ffffff', toolStore.secondaryColor || '#000000', '#be4a2f', '#3b5dc9'],
+    { isCustom: true }
+  )
   showCreateDialog.value = false
   newCustomName.value = ''
   selectedCategory.value = 'Custom'
@@ -109,11 +103,7 @@ function handleDeleteCustomPalette(p: Palette, e: MouseEvent) {
   e.stopPropagation()
   if (!p.isCustom) return
   if (confirm(`Delete custom palette "${p.name}"?`)) {
-    customPalettes.value = customPalettes.value.filter(item => item.id !== p.id)
-    saveCustomPalettes(customPalettes.value)
-    if (projectStore.activePalette.id === p.id) {
-      projectStore.activePalette = DEFAULT_PALETTES[0]
-    }
+    projectStore.deletePalette(p.id)
   }
 }
 

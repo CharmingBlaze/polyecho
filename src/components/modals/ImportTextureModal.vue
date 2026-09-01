@@ -205,6 +205,7 @@ function generateProcessedBuffer(): PixelBuffer | null {
     }
   }
 
+  buffer.syncToActiveLayer()
   return buffer
 }
 
@@ -339,11 +340,15 @@ async function handleImport() {
     projectStore.recordState(`Import & Slice Atlas (${texName}: ${cols}x${rows})`)
 
     // Add Master Atlas texture
-    const masterTex = projectStore.addTexture(`${texName}_Atlas`, targetW, targetH)
-    masterTex.pixelBuffer = buffer
-    masterTex.dataUrl = buffer.toDataURL()
+    const masterTex = projectStore.createTexture(
+      `${texName}_Atlas`,
+      targetW,
+      targetH,
+      buffer.toDataURL(),
+      buffer,
+      { record: false, select: true, atlas: { cols, rows } }
+    )
 
-    // Slice individual tiles
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         const tileBuf = new PixelBuffer(tileW, tileH)
@@ -353,39 +358,35 @@ async function handleImport() {
           c * tileW, r * tileH, tileW, tileH,
           0, 0, tileW, tileH
         )
-        const tileTex = projectStore.addTexture(`${texName}_${r}_${c}`, tileW, tileH)
-        tileTex.pixelBuffer = tileBuf
-        tileTex.dataUrl = tileBuf.toDataURL()
-        projectStore.markTextureUpdated(tileTex.id)
+        tileBuf.syncToActiveLayer()
+        projectStore.createTexture(
+          `${texName}_${r}_${c}`,
+          tileW,
+          tileH,
+          tileBuf.toDataURL(),
+          tileBuf,
+          { record: false, select: false }
+        )
       }
     }
 
-    const targetMatId = props.targetMaterialId || projectStore.activeMesh?.materialId || projectStore.materials[0]?.id
-    if (targetMatId) {
-      projectStore.assignTextureToMaterial(targetMatId, masterTex.id)
-    }
-    projectStore.activeTextureId = masterTex.id
-    projectStore.markTextureUpdated(masterTex.id)
+    projectStore.selectTexture(masterTex.id)
     emit('imported', masterTex.id)
     emit('close')
     return
   }
 
-  // Standard Single Texture Import
-  const newTex = projectStore.addTexture(texName, targetW, targetH)
-  newTex.pixelBuffer = buffer
-  newTex.width = targetW
-  newTex.height = targetH
-  newTex.dataUrl = buffer.toDataURL()
+  projectStore.recordState(`Import Texture Map (${texName})`)
+  const newTex = projectStore.createTexture(
+    texName,
+    targetW,
+    targetH,
+    buffer.toDataURL(),
+    buffer,
+    { record: false, select: true }
+  )
 
-  const targetMatId = props.targetMaterialId || projectStore.activeMesh?.materialId || projectStore.materials[0]?.id
-  if (targetMatId) {
-    projectStore.assignTextureToMaterial(targetMatId, newTex.id)
-  }
-
-  projectStore.activeTextureId = newTex.id
-  projectStore.markTextureUpdated(newTex.id)
-  projectStore.recordState(`Import Texture Map (${newTex.name})`)
+  projectStore.selectTexture(newTex.id)
 
   emit('imported', newTex.id)
   emit('close')

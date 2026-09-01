@@ -67,29 +67,49 @@ export class MoveOperator extends ModalOperator {
     }
 
     if (this.isCtrlHeld && numVal === null) {
-      delta.x = this.snapManager.snapLinear(delta.x, 0.5)
-      delta.y = this.snapManager.snapLinear(delta.y, 0.5)
-      delta.z = this.snapManager.snapLinear(delta.z, 0.5)
+      const step = this.ctx.gridSize || 0.5
+      delta.x = this.snapManager.snapLinear(delta.x, step)
+      delta.y = this.snapManager.snapLinear(delta.y, step)
+      delta.z = this.snapManager.snapLinear(delta.z, step)
     }
 
-    // Apply delta to initial vertex positions
-    const targetVertIds = new Set<number>()
-    if (this.ctx.selectedFaceIds.length > 0) {
-      for (const fId of this.ctx.selectedFaceIds) {
-        const face = this.ctx.mesh.faces.get(fId)
-        if (face) face.vertexIds.forEach(vid => targetVertIds.add(vid))
-      }
-    } else {
-      this.ctx.selectedVertIds.forEach((vid: number) => targetVertIds.add(vid))
+    const targetVertIds = this.collectTargetVertIds()
+    const worldMat = this.ctx.objectMatrix ?? new THREE.Matrix4()
+    const movingWorld: THREE.Vector3[] = []
+    const movingIds: number[] = []
+
+    for (const vId of targetVertIds) {
+      const initPos = this.initialVertices.get(vId)
+      if (!initPos) continue
+      movingIds.push(vId)
+      movingWorld.push(initPos.clone().add(delta))
     }
 
-    for (const [vId, v] of this.ctx.mesh.vertices) {
-      if (targetVertIds.has(vId)) {
-        const initPos = this.initialVertices.get(vId)
-        if (initPos) {
-          v.position.copy(initPos).add(delta)
+    let extra = new THREE.Vector3()
+    if ((this.ctx.snapVertex || this.ctx.snapEdge) && movingWorld.length > 0) {
+      const targets: THREE.Vector3[] = []
+      if (this.ctx.snapVertex) {
+        for (const [id, v] of this.ctx.mesh.vertices) {
+          if (targetVertIds.has(id)) continue
+          targets.push(v.position.clone().applyMatrix4(worldMat))
         }
       }
+      if (this.ctx.snapEdge) {
+        for (const e of this.ctx.mesh.edges.values()) {
+          if (targetVertIds.has(e.v1) || targetVertIds.has(e.v2)) continue
+          const a = this.ctx.mesh.vertices.get(e.v1)?.position
+          const b = this.ctx.mesh.vertices.get(e.v2)?.position
+          if (!a || !b) continue
+          targets.push(a.clone().add(b).multiplyScalar(0.5).applyMatrix4(worldMat))
+        }
+      }
+      const thresh = Math.max(0.06, (this.ctx.gridSize || 0.25) * 0.75)
+      const snap = this.snapManager.findRigidSnapOffset(movingWorld, targets, thresh)
+      if (snap) extra.copy(snap)
+    }
+
+    for (let i = 0; i < movingIds.length; i++) {
+      this.writeWorldPos(movingIds[i], movingWorld[i].add(extra))
     }
 
     this.ctx.mesh.recalculateNormals()

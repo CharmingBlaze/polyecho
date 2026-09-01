@@ -122,6 +122,40 @@ export class HalfEdgeTopology {
   }
 
   /**
+   * Groups selected faces into islands that share an edge (Blender region inset / extrude).
+   */
+  static connectedFaceComponents(mesh: EditableMesh, faceIds: number[]): number[][] {
+    const sel = new Set(faceIds.filter(id => mesh.faces.has(id)))
+    const visited = new Set<number>()
+    const components: number[][] = []
+
+    for (const start of sel) {
+      if (visited.has(start)) continue
+      const stack = [start]
+      visited.add(start)
+      const comp: number[] = []
+      while (stack.length) {
+        const fId = stack.pop()!
+        comp.push(fId)
+        const face = mesh.faces.get(fId)
+        if (!face) continue
+        for (const eId of face.edgeIds) {
+          const edge = mesh.edges.get(eId)
+          if (!edge) continue
+          for (const nId of edge.faceIds) {
+            if (sel.has(nId) && !visited.has(nId)) {
+              visited.add(nId)
+              stack.push(nId)
+            }
+          }
+        }
+      }
+      components.push(comp)
+    }
+    return components
+  }
+
+  /**
    * Edge Loop traversal: steps across quad faces to find contiguous parallel edge chains.
    */
   static findEdgeLoop(mesh: EditableMesh, startEdgeId: number): number[] {

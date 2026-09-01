@@ -1,17 +1,42 @@
-import { ModalOperator } from './ModalOperator'
+import { ModalOperator, OperatorContext } from './ModalOperator'
 import { InsetKernel, InsetResult } from '../mesh/operations/InsetKernel'
 
 export class InsetOperator extends ModalOperator {
   readonly name = 'Inset'
 
   private isOutset = false
-  private depth = 0
+  private individual = false
+  private useBoundary = true
   private lastResult: InsetResult | null = null
+  private startedAt = 0
+
+  begin(ctx: OperatorContext, startPointer: { x: number; y: number }) {
+    super.begin(ctx, startPointer)
+    this.startedAt = performance.now()
+  }
 
   keyDown(event: KeyboardEvent): boolean {
-    if (event.key.toLowerCase() === 'o') {
+    const k = event.key.toLowerCase()
+    if (k === 'i') {
+      event.preventDefault()
+      if (performance.now() - this.startedAt < 80) return true
+      this.individual = !this.individual
+      this.evaluate()
+      this.ctx.onUpdatePreview()
+      this.updateStatus()
+      return true
+    }
+    if (k === 'o') {
       event.preventDefault()
       this.isOutset = !this.isOutset
+      this.evaluate()
+      this.ctx.onUpdatePreview()
+      this.updateStatus()
+      return true
+    }
+    if (k === 'b') {
+      event.preventDefault()
+      this.useBoundary = !this.useBoundary
       this.evaluate()
       this.ctx.onUpdatePreview()
       this.updateStatus()
@@ -24,22 +49,27 @@ export class InsetOperator extends ModalOperator {
     this.restoreSnapshot()
 
     const numThickness = this.numericInput.getValue()
+    const dx = this.currentMouse.x - this.startMouse.x
+    const dy = this.currentMouse.y - this.startMouse.y
+    const scale = this.isShiftHeld ? 400 : 120
 
-    const startDist = Math.hypot(this.startMouse.x - this.pivotScreen.x, this.startMouse.y - this.pivotScreen.y) || 50
-    const curDist = Math.hypot(this.currentMouse.x - this.pivotScreen.x, this.currentMouse.y - this.pivotScreen.y)
-
-    let thickness = numThickness !== null
-      ? numThickness
-      : Math.abs(startDist - curDist) / (this.isShiftHeld ? 300 : 100)
-
-    if (this.isCtrlHeld && numThickness === null) {
-      thickness = this.snapManager.snapLinear(thickness, 0.1)
+    let thickness: number
+    let depth = 0
+    if (numThickness !== null) {
+      thickness = Math.max(0, numThickness)
+    } else if (this.isCtrlHeld) {
+      thickness = Math.abs(dx) / scale
+      depth = -dy / scale
+    } else {
+      thickness = Math.hypot(dx, dy) / scale
     }
 
     this.lastResult = InsetKernel.insetFaces(this.ctx.mesh, this.ctx.selectedFaceIds, {
       thickness,
-      depth: this.depth,
-      outset: this.isOutset
+      depth,
+      outset: this.isOutset,
+      individual: this.individual,
+      boundary: this.useBoundary
     })
   }
 
@@ -52,8 +82,10 @@ export class InsetOperator extends ModalOperator {
   }
 
   updateStatus() {
-    const mode = this.isOutset ? ' Outset' : ' Thickness'
-    const num = this.numericInput.text ? `: ${this.numericInput.text}` : ''
-    this.statusText = `Inset${mode}${num}`
+    const parts = [this.individual ? 'Individual' : 'Region']
+    if (this.isOutset) parts.push('Outset')
+    if (!this.useBoundary) parts.push('No Boundary')
+    const num = this.numericInput.text ? ` ${this.numericInput.text}` : ''
+    this.statusText = `Inset ${parts.join(' ')}${num}  (I individual, O outset, B boundary, Ctrl depth)`
   }
 }

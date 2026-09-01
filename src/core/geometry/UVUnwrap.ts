@@ -239,18 +239,24 @@ export function cubemapCrossUnwrap(mesh: MeshObject): MeshObject {
  * Advanced Disconnected UV Island Segmentation & 2D Shelf Packing
  * Packs all UV islands inside [0..1] with customizable pixel padding.
  */
-export function packUVIslands(mesh: MeshObject, marginPixels = 2, textureSize = 64): MeshObject {
+export function packUVIslands(
+  mesh: MeshObject,
+  marginPixels = 2,
+  textureSize = 64,
+  onlyFaceIndices?: number[]
+): MeshObject {
   const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
   if (newMesh.faces.length === 0) return newMesh
 
   const margin = Math.max(0.001, marginPixels / textureSize)
+  const allowed = onlyFaceIndices && onlyFaceIndices.length > 0
+    ? new Set(onlyFaceIndices)
+    : null
 
-  // 1. Group faces into connected 2D UV islands
   const faceCount = newMesh.faces.length
   const faceVisited = new Array(faceCount).fill(false)
   const islands: number[][] = []
 
-  // Helper to check if two faces share a UV edge
   function shareUvEdge(fAIdx: number, fBIdx: number): boolean {
     const fA = newMesh.faces[fAIdx]
     const fB = newMesh.faces[fBIdx]
@@ -269,7 +275,7 @@ export function packUVIslands(mesh: MeshObject, marginPixels = 2, textureSize = 
   }
 
   for (let i = 0; i < faceCount; i++) {
-    if (faceVisited[i]) continue
+    if (faceVisited[i] || (allowed && !allowed.has(i))) continue
     const island: number[] = [i]
     faceVisited[i] = true
     const queue = [i]
@@ -277,6 +283,7 @@ export function packUVIslands(mesh: MeshObject, marginPixels = 2, textureSize = 
     while (queue.length > 0) {
       const curr = queue.shift()!
       for (let j = 0; j < faceCount; j++) {
+        if (allowed && !allowed.has(j)) continue
         if (!faceVisited[j] && shareUvEdge(curr, j)) {
           faceVisited[j] = true
           island.push(j)
@@ -468,6 +475,151 @@ export function equalizeTexelDensity(mesh: MeshObject): MeshObject {
     for (const uv of m.face.uvs) {
       uv.u = cU + (uv.u - cU) * Math.max(0.1, Math.min(3.0, scale))
       uv.v = cV + (uv.v - cV) * Math.max(0.1, Math.min(3.0, scale))
+    }
+  }
+
+  return newMesh
+}
+
+/**
+ * Sample linear texel density (pixels per world unit) of a specific face.
+ */
+export function sampleFaceTexelDensity(mesh: MeshObject, faceIndex: number, textureSize = 64): number {
+  if (!mesh || !mesh.faces || faceIndex < 0 || faceIndex >= mesh.faces.length) return 16
+  const face = mesh.faces[faceIndex]
+  if (!face || face.uvs.length < 3) return 16
+
+  const vertMap = new Map<string, Vertex>()
+  for (const v of mesh.vertices) vertMap.set(v.id, v)
+  const verts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
+  if (verts.length < 3) return 16
+
+  const p0 = verts[0].position, p1 = verts[1].position, p2 = verts[2].position
+  const e1 = { x: p1.x - p0.x, y: p1.y - p0.y, z: p1.z - p0.z }
+  const e2 = { x: p2.x - p0.x, y: p2.y - p0.y, z: p2.z - p0.z }
+  const crossX = e1.y * e2.z - e1.z * e2.y
+  const crossY = e1.z * e2.x - e1.x * e2.z
+  const crossZ = e1.x * e2.y - e1.y * e2.x
+  const wArea = 0.5 * Math.hypot(crossX, crossY, crossZ)
+
+  const u0 = face.uvs[0], u1 = face.uvs[1], u2 = face.uvs[2]
+  const uvArea = 0.5 * Math.abs((u1.u - u0.u) * (u2.v - u0.v) - (u2.u - u0.u) * (u1.v - u0.v))
+
+  if (wArea <= 0.00001 || uvArea <= 0.0000001) return 16
+
+  const pixelArea = uvArea * (textureSize * textureSize)
+  const density = Math.sqrt(pixelArea / wArea)
+  return Math.round(density * 10) / 10
+}
+
+/**
+ * Scale selected UV islands / faces to an exact target texel density (pixels per world unit).
+ */
+export function applyTargetTexelDensity(
+  mesh: MeshObject,
+  targetDensityPxPerUnit: number,
+  textureSize = 64,
+  targetFaceIndices?: number[]
+): MeshObject {
+  const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
+  if (newMesh.faces.length === 0 || targetDensityPxPerUnit <= 0) return newMesh
+
+  const vertMap = new Map<string, Vertex>()
+  for (const v of newMesh.vertices) vertMap.set(v.id, v)
+
+  const targetSet = targetFaceIndices && targetFaceIndices.length > 0
+    ? new Set(targetFaceIndices)
+    : new Set(newMesh.faces.map((_, i) => i))
+
+  // Find islands among the target faces
+  const faceVisited = new Array(newMesh.faces.length).fill(false)
+  const islands: number[][] = []
+
+  function shareUvEdge(fAIdx: number, fBIdx: number): boolean {
+    const fA = newMesh.faces[fAIdx]
+    const fB = newMesh.faces[fBIdx]
+    if (!fA.uvs || !fB.uvs) return false
+
+    let shared = 0
+    for (const uvA of fA.uvs) {
+      for (const uvB of fB.uvs) {
+        if (Math.abs(uvA.u - uvB.u) < 0.002 && Math.abs(uvA.v - uvB.v) < 0.002) {
+          shared++
+          break
+        }
+      }
+    }
+    return shared >= 2
+  }
+
+  for (let i = 0; i < newMesh.faces.length; i++) {
+    if (!targetSet.has(i) || faceVisited[i]) continue
+    const island: number[] = [i]
+    faceVisited[i] = true
+    const queue = [i]
+
+    while (queue.length > 0) {
+      const curr = queue.shift()!
+      for (let j = 0; j < newMesh.faces.length; j++) {
+        if (!targetSet.has(j) || faceVisited[j]) continue
+        if (shareUvEdge(curr, j)) {
+          faceVisited[j] = true
+          island.push(j)
+          queue.push(j)
+        }
+      }
+    }
+    islands.push(island)
+  }
+
+  for (const island of islands) {
+    let islandWorldArea = 0
+    let islandUvArea = 0
+    let cU = 0, cV = 0, totalVerts = 0
+
+    for (const fIdx of island) {
+      const face = newMesh.faces[fIdx]
+      if (face.uvs.length < 3) continue
+      const verts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
+      if (verts.length < 3) continue
+
+      const p0 = verts[0].position, p1 = verts[1].position, p2 = verts[2].position
+      const e1 = { x: p1.x - p0.x, y: p1.y - p0.y, z: p1.z - p0.z }
+      const e2 = { x: p2.x - p0.x, y: p2.y - p0.y, z: p2.z - p0.z }
+      const crossX = e1.y * e2.z - e1.z * e2.y
+      const crossY = e1.z * e2.x - e1.x * e2.z
+      const crossZ = e1.x * e2.y - e1.y * e2.x
+      const wArea = 0.5 * Math.hypot(crossX, crossY, crossZ)
+
+      const u0 = face.uvs[0], u1 = face.uvs[1], u2 = face.uvs[2]
+      const uvArea = 0.5 * Math.abs((u1.u - u0.u) * (u2.v - u0.v) - (u2.u - u0.u) * (u1.v - u0.v))
+
+      islandWorldArea += wArea
+      islandUvArea += uvArea
+
+      for (const uv of face.uvs) {
+        cU += uv.u; cV += uv.v
+        totalVerts++
+      }
+    }
+
+    if (islandWorldArea <= 0.00001 || islandUvArea <= 0.0000001 || totalVerts === 0) continue
+
+    cU /= totalVerts
+    cV /= totalVerts
+
+    const currentPixelArea = islandUvArea * (textureSize * textureSize)
+    const currentDensity = Math.sqrt(currentPixelArea / islandWorldArea)
+    if (currentDensity <= 0.001) continue
+
+    const scale = targetDensityPxPerUnit / currentDensity
+
+    for (const fIdx of island) {
+      const face = newMesh.faces[fIdx]
+      for (const uv of face.uvs) {
+        uv.u = cU + (uv.u - cU) * scale
+        uv.v = cV + (uv.v - cV) * scale
+      }
     }
   }
 

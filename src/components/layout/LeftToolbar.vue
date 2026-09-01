@@ -1,19 +1,20 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useFloatingDrag } from '../../composables/useFloatingDrag'
 import { useToolStore } from '../../stores/toolStore'
 import { useProjectStore } from '../../stores/projectStore'
 import { useAnimationStore } from '../../stores/animationStore'
 import { SelectMode, ModelToolType } from '../../types/tools'
 import BlenderIcon from '../icons/BlenderIcon.vue'
-import { requestModalTool, requestPrimitiveMenu, type ModalToolCommand } from '../../core/commands/editorCommands'
-import { 
-  GripHorizontal, 
-  ChevronsLeft, 
-  ChevronsRight, 
-  Pin, 
-  PinOff, 
-  Minus, 
-  Plus 
+import { requestModalTool, requestPrimitiveMenu, requestFillFace, type ModalToolCommand } from '../../core/commands/editorCommands'
+import {
+  GripHorizontal,
+  ChevronsLeft,
+  ChevronsRight,
+  Pin,
+  PinOff,
+  Minus,
+  Plus
 } from 'lucide-vue-next'
 
 const toolStore = useToolStore()
@@ -21,6 +22,8 @@ const projectStore = useProjectStore()
 const animationStore = useAnimationStore()
 
 const isUvSelectionMode = computed(() => toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'uv')
+const isMeshWorkspace = computed(() => toolStore.isMeshWorkspace())
+const isModeling = computed(() => toolStore.appMode === 'model')
 const selectedObjectCount = computed(() => projectStore.selectedMeshIds.length || (projectStore.activeMesh ? 1 : 0))
 const hasActiveMesh = computed(() => Boolean(projectStore.activeMesh))
 const hasSelectedFaces = computed(() => projectStore.selectedFaceIds.length > 0)
@@ -45,25 +48,141 @@ const hasFillBoundary = computed(() => {
   return boundary.size >= 3
 })
 
-// Floating / Minimizable Panel States
 const isFloating = ref(true)
-const columns = ref<1 | 2>(2)
+const columnsPref = ref<1 | 2>(2)
 const isMinimized = ref(false)
 const pos = ref({ x: 16, y: 46 })
+const hasMovedToolbar = ref(false)
+const viewAnchor = ref({ left: 16, top: 46, width: 800, height: 600 })
+const { isDragging, startDrag: startFloatingDrag } = useFloatingDrag(pos, {
+  enabled: () => isFloating.value,
+  maxPadX: 60,
+  maxPadY: 80
+})
 
-const isDragging = ref(false)
-let dragOffset = { x: 0, y: 0 }
+function syncViewAnchor() {
+  const el = document.querySelector('[data-viewport-root]') as HTMLElement | null
+  if (!el) return
+  const r = el.getBoundingClientRect()
+  if (r.width < 8 || r.height < 8) return
+  viewAnchor.value = { left: r.left, top: r.top, width: r.width, height: r.height }
+}
+
+function startDrag(e: PointerEvent) {
+  if (isFloating.value) hasMovedToolbar.value = true
+  startFloatingDrag(e)
+}
+
+/** Mesh operators vs mode-specific tools — never stacked. */
+const shelfTab = ref<'ops' | 'context'>('ops')
+
+const contextTabLabel = computed(() => {
+  const mode = toolStore.selectMode
+  if (mode === 'vertex') return 'Vert'
+  if (mode === 'edge') return 'Edge'
+  if (mode === 'face') return 'Face'
+  if (mode === 'origin') return 'Pivot'
+  if (mode === 'bone') return 'Bone'
+  return 'Obj'
+})
+
+const isSingleColWorkspace = computed(() => {
+  const mode = toolStore.appMode
+  return mode === 'blockout' || mode === 'uvpaint' || mode === 'rig' || mode === 'animate'
+})
+
+const columns = computed<1 | 2>(() => (isSingleColWorkspace.value ? 1 : columnsPref.value))
+
+const headerTitle = computed(() => {
+  if (isSingleColWorkspace.value) {
+    return isFloating.value ? 'Drag to move' : undefined
+  }
+  return isFloating.value ? 'Drag to move. Double-click for 1 / 2 columns.' : 'Double-click for 1 / 2 columns.'
+})
+
+const iconBtn = 'w-full h-8 flex items-center justify-center rounded-xs transition cursor-pointer relative disabled:opacity-30 disabled:cursor-not-allowed'
+const gridCls = computed(() => (columns.value === 1 ? 'grid grid-cols-1 gap-1 w-full' : 'grid grid-cols-2 gap-1 w-full'))
+const iconPx = computed(() => (columns.value === 2 ? 17 : 18))
+
+function tone(on: boolean) {
+  return on
+    ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40'
+    : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover border border-transparent'
+}
+
+const panelStyle = computed(() => {
+  if (!isFloating.value) return {}
+  if (!hasMovedToolbar.value) {
+    const a = viewAnchor.value
+    const down = toolStore.appMode === 'blockout' ? 52 : 0
+    return {
+      left: '8px',
+      top: `${a.top + a.height * 0.42 + down}px`,
+      transform: 'translateY(-50%)',
+      maxHeight: `${Math.max(160, a.height - 24 - down)}px`
+    }
+  }
+  const style: Record<string, string> = {
+    left: `${pos.value.x}px`,
+    top: `${pos.value.y}px`
+  }
+  if (!isMinimized.value) {
+    style.maxHeight = `calc(100dvh - ${pos.value.y + 8}px)`
+  }
+  return style
+})
+
+watch(
+  () => toolStore.selectMode,
+  () => {
+    if (isMeshWorkspace.value) shelfTab.value = 'context'
+  }
+)
+
+watch(
+  () => toolStore.appMode,
+  (mode) => {
+    shelfTab.value = mode === 'model' ? 'ops' : 'context'
+    hasMovedToolbar.value = false
+    nextTick(syncViewAnchor)
+  }
+)
+
+watch(
+  () => [isFloating.value, columns.value, isMinimized.value] as const,
+  () => nextTick(syncViewAnchor)
+)
 
 function toggleColumns() {
-  columns.value = columns.value === 2 ? 1 : 2
+  if (isSingleColWorkspace.value) return
+  columnsPref.value = columnsPref.value === 2 ? 1 : 2
 }
 
 function toggleFloating() {
   isFloating.value = !isFloating.value
   if (isFloating.value) {
-    pos.value = { x: 16, y: 46 }
+    hasMovedToolbar.value = false
+    nextTick(syncViewAnchor)
   }
 }
+
+let viewAnchorObserver: ResizeObserver | null = null
+
+onMounted(() => {
+  syncViewAnchor()
+  window.addEventListener('resize', syncViewAnchor)
+  const el = document.querySelector('[data-viewport-root]')
+  if (el && typeof ResizeObserver !== 'undefined') {
+    viewAnchorObserver = new ResizeObserver(() => syncViewAnchor())
+    viewAnchorObserver.observe(el)
+  }
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', syncViewAnchor)
+  viewAnchorObserver?.disconnect()
+  viewAnchorObserver = null
+})
 
 function ensureActiveMeshSelection() {
   if (!projectStore.activeMesh && projectStore.meshes.length > 0) {
@@ -84,59 +203,56 @@ function setSelectMode(mode: SelectMode) {
     }
     toolStore.selectMode = 'bone'
   } else {
-    toolStore.setAppMode('model')
+    if (toolStore.appMode !== 'blockout') toolStore.setAppMode('model')
     ensureActiveMeshSelection()
     toolStore.selectMode = mode
   }
+  shelfTab.value = 'context'
 }
 
 function toggleOriginMode() {
   if (toolStore.selectMode === 'origin') {
     toolStore.selectMode = 'object'
+    shelfTab.value = 'ops'
   } else {
-    toolStore.setAppMode('model')
+    if (toolStore.appMode !== 'blockout') toolStore.setAppMode('model')
     ensureActiveMeshSelection()
     toolStore.selectMode = 'origin'
+    shelfTab.value = 'context'
   }
 }
 
 function setModelTool(tool: ModelToolType) {
-  if (toolStore.appMode === 'model') ensureActiveMeshSelection()
+  if (isMeshWorkspace.value) ensureActiveMeshSelection()
   toolStore.setModelTool(tool)
 }
 
 function startModalOp(opName: ModalToolCommand) {
-  toolStore.setAppMode('model')
-  ensureActiveMeshSelection()
+  if (toolStore.appMode !== 'blockout') toolStore.setAppMode('model')
+  if (opName !== 'polydraw') ensureActiveMeshSelection()
+  if (opName === 'polydraw') toolStore.setModelTool('polydraw')
   requestModalTool(opName)
 }
 
-function startDrag(e: MouseEvent) {
-  if (!isFloating.value) return
-  if (e.button !== 0) return
-
-  isDragging.value = true
-  dragOffset = {
-    x: e.clientX - pos.value.x,
-    y: e.clientY - pos.value.y
+function startMeshOp(opName: ModalToolCommand, editMode?: SelectMode) {
+  if (editMode && (toolStore.selectMode === 'object' || toolStore.selectMode === 'origin' || toolStore.selectMode === 'bone')) {
+    toolStore.setSelectMode(editMode)
   }
+  startModalOp(opName)
+}
 
-  const onMouseMove = (moveEvent: MouseEvent) => {
-    if (!isDragging.value) return
-    const maxX = window.innerWidth - (columns.value === 1 ? 60 : 100)
-    const maxY = window.innerHeight - 80
-    pos.value.x = Math.max(0, Math.min(maxX, moveEvent.clientX - dragOffset.x))
-    pos.value.y = Math.max(34, Math.min(maxY, moveEvent.clientY - dragOffset.y))
+function runSubdivide() {
+  const mode = toolStore.selectMode
+  if (mode === 'vertex' || mode === 'edge' || mode === 'face') {
+    projectStore.performSubdivide(mode)
+    return
   }
+  projectStore.performSubdivide()
+}
 
-  const onMouseUp = () => {
-    isDragging.value = false
-    window.removeEventListener('mousemove', onMouseMove)
-    window.removeEventListener('mouseup', onMouseUp)
-  }
-
-  window.addEventListener('mousemove', onMouseMove)
-  window.addEventListener('mouseup', onMouseUp)
+function runDissolve() {
+  if (toolStore.selectMode === 'edge') projectStore.performDissolve('edge')
+  else projectStore.performDissolve('vertex')
 }
 
 function handleAddBone() {
@@ -158,7 +274,7 @@ function handleDelete() {
 }
 
 function handleOpenAddPrimitive() {
-  toolStore.setAppMode('model')
+  if (toolStore.appMode !== 'blockout') toolStore.setAppMode('model')
   requestPrimitiveMenu()
 }
 
@@ -175,436 +291,397 @@ function handleSymmetrizeBones() {
 </script>
 
 <template>
-  <aside 
-    class="bg-ui-panel border border-ui-borderSubtle flex flex-col items-center py-1.5 select-none z-40 overflow-y-auto font-sans text-xs transition-all duration-75 shadow-2xl"
-    :class="[
-      isFloating ? 'fixed rounded-xs border-ui-borderStrong' : 'relative border-r border-t-0 border-b-0 border-l-0 h-full',
-      columns === 1 ? 'w-[54px]' : 'w-[94px]',
-      isMinimized ? 'h-auto' : ''
-    ]"
-    :style="isFloating ? { left: `${pos.x}px`, top: `${pos.y}px` } : {}"
+  <div
+    class="z-40"
+    :class="isFloating ? 'contents' : 'h-full min-h-0 shrink-0 relative'"
   >
-    <!-- Movable Header & Minimize Bar -->
-    <div 
-      class="w-full px-1.5 py-1 border-b border-ui-borderSubtle flex items-center justify-between text-ui-textMuted select-none mb-1.5 group"
-      :class="{ 'cursor-move bg-ui-header': isFloating, 'cursor-pointer hover:bg-ui-hover': !isFloating }"
-      @mousedown="startDrag"
+  <aside
+    data-floating-panel
+    class="bg-ui-panel border border-ui-borderSubtle flex flex-col z-40 overflow-hidden font-sans text-xs shadow-2xl select-none"
+    :class="[
+      isFloating ? 'fixed rounded-xs border-ui-borderStrong' : 'relative border-r border-t-0 border-b-0 border-l-0 h-full min-h-0',
+      isDragging ? 'cursor-grabbing' : '',
+      columns === 1 ? 'w-[56px]' : 'w-[108px]',
+      isMinimized ? 'h-auto' : '',
+      !isFloating && toolStore.appMode === 'blockout' ? 'pt-6' : ''
+    ]"
+    :style="panelStyle"
+  >
+    <div
+      class="w-full h-7 border-b border-ui-borderSubtle flex items-center text-ui-textMuted shrink-0 group touch-none bg-ui-header"
+      :class="[
+        columns === 1 ? 'px-0.5 justify-between' : 'px-1.5 justify-between',
+        isFloating ? 'cursor-move' : 'cursor-pointer'
+      ]"
+      @pointerdown="startDrag"
       @dblclick="toggleColumns"
-      :title="isFloating ? 'Drag to move toolbar. Double-click to toggle 1/2 columns.' : 'Double-click to toggle 1/2 columns.'"
+      :title="headerTitle"
     >
-      <div class="flex items-center space-x-1">
-        <GripHorizontal class="w-4 h-4 text-ui-textMuted group-hover:text-ui-textSecondary transition" />
+      <div class="flex items-center gap-1 min-w-0">
+        <GripHorizontal class="w-3.5 h-3.5 text-ui-textMuted group-hover:text-ui-textSecondary shrink-0" />
+        <span v-if="columns === 2" class="text-[10px] font-semibold uppercase tracking-wide text-ui-textMuted truncate">Tools</span>
       </div>
-
-      <div class="flex items-center space-x-0.5" @mousedown.stop>
-        <!-- Toggle 1-Col vs 2-Col -->
-        <button 
+      <div class="flex items-center shrink-0" @mousedown.stop @pointerdown.stop>
+        <button
+          v-if="!isSingleColWorkspace"
+          type="button"
           @click="toggleColumns"
-          class="p-0.5 text-ui-textMuted hover:text-ui-textSecondary rounded-xs hover:bg-ui-hover transition"
-          :title="columns === 2 ? 'Collapse to Single Column' : 'Expand to Double Column'"
+          class="p-0.5 text-ui-textMuted hover:text-ui-textSecondary rounded-xs hover:bg-ui-hover"
+          :title="columns === 2 ? 'Single column' : 'Two columns'"
         >
           <ChevronsLeft v-if="columns === 2" class="w-3.5 h-3.5" />
           <ChevronsRight v-else class="w-3.5 h-3.5" />
         </button>
-
-        <!-- Toggle Dock / Float -->
-        <button 
-          @click="toggleFloating"
-          class="p-0.5 text-ui-textMuted hover:text-ui-textSecondary rounded-xs hover:bg-ui-hover transition"
-          :class="{ 'text-ui-accent': isFloating }"
-          :title="isFloating ? 'Dock to Left Edge' : 'Undock / Float Panel'"
-        >
+        <button type="button" @click="toggleFloating" class="p-0.5 rounded-xs hover:bg-ui-hover" :class="isFloating ? 'text-ui-accent' : 'text-ui-textMuted hover:text-ui-textSecondary'" :title="isFloating ? 'Dock left' : 'Float'">
           <PinOff v-if="isFloating" class="w-3.5 h-3.5" />
           <Pin v-else class="w-3.5 h-3.5" />
         </button>
-
-        <!-- Minimize / Fold -->
-        <button 
-          @click="isMinimized = !isMinimized"
-          class="p-0.5 text-ui-textMuted hover:text-ui-textSecondary rounded-xs hover:bg-ui-hover transition"
-          :title="isMinimized ? 'Expand Toolbar' : 'Minimize Toolbar'"
-        >
+        <button type="button" @click="isMinimized = !isMinimized" class="p-0.5 text-ui-textMuted hover:text-ui-textSecondary rounded-xs hover:bg-ui-hover" :title="isMinimized ? 'Expand' : 'Fold'">
           <Plus v-if="isMinimized" class="w-3.5 h-3.5" />
           <Minus v-else class="w-3.5 h-3.5" />
         </button>
       </div>
     </div>
 
-    <!-- Body Content (Hidden when minimized) -->
-    <div v-show="!isMinimized" class="w-full flex flex-col items-center">
-      <!-- 1. SELECTION MODES & MARQUEE TOOL -->
-      <div v-if="toolStore.appMode === 'model' || isUvSelectionMode" class="w-full px-1.5 border-b border-ui-borderSubtle pb-1.5 mb-1.5">
-        <div v-if="columns === 2" class="text-[11px] font-medium text-ui-textMuted mb-1 px-1">{{ isUvSelectionMode ? 'UV Select' : 'Select' }}</div>
-        <div class="grid gap-1.5 w-full" :class="columns === 1 ? 'grid-cols-1' : 'grid-cols-2'">
-          <!-- Select Box / Marquee Tool -->
-          <button 
-            v-if="toolStore.appMode === 'model'"
-            @click="toolStore.isBoxSelectActive = !toolStore.isBoxSelectActive"
-            class="w-full h-9 flex items-center justify-center rounded-xs transition relative cursor-pointer"
-            :class="toolStore.isBoxSelectActive ? 'bg-amber-500/20 text-amber-300 border border-amber-500/60 font-bold shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-            title="Box Select Marquee (B / Ctrl+LMB Drag - One-Shot)"
-          >
-            <BlenderIcon name="marquee" :size="19" :color="toolStore.isBoxSelectActive ? '#f59e0b' : 'currentColor'" />
-            <span v-if="columns === 2" class="absolute bottom-0.5 right-1 text-[9px] font-mono opacity-60">B</span>
-          </button>
+    <div v-show="!isMinimized" class="w-full flex-1 min-h-0 flex flex-col">
+      <!-- Sticky: select + transform -->
+      <div class="shrink-0 px-1.5 pt-1.5 pb-1 space-y-1.5 border-b border-ui-borderSubtle">
+        <div v-if="isMeshWorkspace || isUvSelectionMode">
+          <div v-if="columns === 2" class="text-[9px] font-semibold uppercase tracking-wider text-ui-textMuted px-0.5 mb-1">Select</div>
+          <div :class="gridCls">
+            <button
+              v-if="isMeshWorkspace"
+              type="button"
+              :class="[iconBtn, tone(toolStore.isBoxSelectActive)]"
+              title="Box select (B)"
+              @click="toolStore.isBoxSelectActive = !toolStore.isBoxSelectActive"
+            >
+              <BlenderIcon name="marquee" :size="iconPx" :color="toolStore.isBoxSelectActive ? '#f59e0b' : 'currentColor'" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(toolStore.selectMode === 'object' && isMeshWorkspace)]" :title="isUvSelectionMode ? 'UV island (4)' : 'Object (4 / Tab)'" @click="setSelectMode('object')">
+              <BlenderIcon name="object-mode" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(toolStore.selectMode === 'vertex')]" title="Vertex (1)" @click="setSelectMode('vertex')">
+              <BlenderIcon name="vertex-select" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(toolStore.selectMode === 'edge')]" title="Edge (2)" @click="setSelectMode('edge')">
+              <BlenderIcon name="edge-select" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(toolStore.selectMode === 'face')]" title="Face (3)" @click="setSelectMode('face')">
+              <BlenderIcon name="face-select" :size="iconPx" />
+            </button>
+            <button
+              v-if="isMeshWorkspace"
+              type="button"
+              :class="[iconBtn, tone(toolStore.snapping.grid)]"
+              title="Grid snap (Shift+Tab)"
+              @click="toolStore.snapping.grid = !toolStore.snapping.grid"
+            >
+              <BlenderIcon name="snap" :size="iconPx" />
+            </button>
+          </div>
+        </div>
 
-          <!-- Object Mode (4) -->
-          <button 
-            @click="setSelectMode('object')"
-            class="w-full h-9 flex items-center justify-center rounded-xs transition relative cursor-pointer"
-            :class="toolStore.selectMode === 'object' && toolStore.appMode === 'model' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-            :title="isUvSelectionMode ? 'UV Island Select (4)' : 'Object Mode (4 / Tab)'"
-          >
-            <BlenderIcon name="object-mode" :size="20" />
-            <span v-if="columns === 2" class="absolute bottom-0.5 right-1 text-[9px] font-mono opacity-60">4</span>
-          </button>
-
-          <!-- Origin / Pivot Mode (5) -->
-          <button 
-            v-if="toolStore.appMode === 'model'"
-            @click="toggleOriginMode"
-            class="w-full h-9 flex items-center justify-center rounded-xs transition relative cursor-pointer"
-            :class="toolStore.selectMode === 'origin' && toolStore.appMode === 'model' ? 'bg-amber-500/25 text-amber-300 border border-amber-500/60 font-bold shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-            title="Origin / Pivot Edit (5)"
-          >
-            <BlenderIcon name="origin" :size="20" :color="toolStore.selectMode === 'origin' ? '#f59e0b' : 'currentColor'" />
-            <span v-if="columns === 2" class="absolute bottom-0.5 right-1 text-[9px] font-mono opacity-60">5</span>
-          </button>
-
-          <!-- Vertex Mode (1) -->
-          <button 
-            @click="setSelectMode('vertex')"
-            class="w-full h-9 flex items-center justify-center rounded-xs transition relative cursor-pointer"
-            :class="toolStore.selectMode === 'vertex' && toolStore.appMode === 'model' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-            title="Vertex Select (1)"
-          >
-            <BlenderIcon name="vertex-select" :size="20" />
-            <span v-if="columns === 2" class="absolute bottom-0.5 right-1 text-[9px] font-mono opacity-60">1</span>
-          </button>
-
-          <!-- Edge Mode (2) -->
-          <button 
-            @click="setSelectMode('edge')"
-            class="w-full h-9 flex items-center justify-center rounded-xs transition relative cursor-pointer"
-            :class="toolStore.selectMode === 'edge' && toolStore.appMode === 'model' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-            title="Edge Select (2)"
-          >
-            <BlenderIcon name="edge-select" :size="20" />
-            <span v-if="columns === 2" class="absolute bottom-0.5 right-1 text-[9px] font-mono opacity-60">2</span>
-          </button>
-
-          <!-- Face Mode (3) -->
-          <button 
-            @click="setSelectMode('face')"
-            class="w-full h-9 flex items-center justify-center rounded-xs transition relative cursor-pointer"
-            :class="toolStore.selectMode === 'face' && toolStore.appMode === 'model' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-            title="Face Select (3)"
-          >
-            <BlenderIcon name="face-select" :size="20" />
-            <span v-if="columns === 2" class="absolute bottom-0.5 right-1 text-[9px] font-mono opacity-60">3</span>
-          </button>
-
-          <!-- Bone Mode (6) -->
-          <button 
-            v-if="toolStore.appMode === 'model'"
-            @click="setSelectMode('bone')"
-            class="w-full h-9 flex items-center justify-center rounded-xs transition relative cursor-pointer"
-            :class="toolStore.selectMode === 'bone' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-            title="Bone Selection Mode (6 / Rigging)"
-          >
-            <BlenderIcon name="bone" :size="19" />
-            <span v-if="columns === 2" class="absolute bottom-0.5 right-1 text-[9px] font-mono opacity-60">6</span>
-          </button>
-
-          <!-- Snapping Quick Toggle -->
-          <button 
-            v-if="toolStore.appMode === 'model'"
-            @click="toolStore.snapping.grid = !toolStore.snapping.grid"
-            class="w-full h-9 flex items-center justify-center rounded-xs transition relative cursor-pointer"
-            :class="toolStore.snapping.grid ? 'bg-ui-accentSubtle text-ui-textAccent border border-ui-accent/30 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-            title="Toggle Grid Snapping (Shift+Tab)"
-          >
-            <BlenderIcon name="snap" :size="19" />
-          </button>
+        <div v-if="isMeshWorkspace || toolStore.appMode === 'rig' || toolStore.appMode === 'animate'">
+          <div v-if="columns === 2" class="text-[9px] font-semibold uppercase tracking-wider text-ui-textMuted px-0.5 mb-1">{{ toolStore.appMode === 'blockout' ? 'Draw' : 'Transform' }}</div>
+          <div :class="gridCls">
+            <button
+              v-if="toolStore.appMode === 'blockout'"
+              type="button"
+              :class="[iconBtn, tone(toolStore.modelTool === 'polydraw'), 'order-first']"
+              title="Poly Draw (F)"
+              @click="startModalOp('polydraw')"
+            >
+              <BlenderIcon name="face-select" :size="iconPx" color="#f59e0b" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(toolStore.modelTool === 'move')]" title="Move (G)" @click="setModelTool('move')">
+              <BlenderIcon name="tool-move" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(toolStore.modelTool === 'rotate')]" title="Rotate (R)" @click="setModelTool('rotate')">
+              <BlenderIcon name="tool-rotate" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(toolStore.modelTool === 'scale')]" title="Scale (S)" @click="setModelTool('scale')">
+              <BlenderIcon name="tool-scale" :size="iconPx" />
+            </button>
+            <button
+              v-if="isMeshWorkspace"
+              type="button"
+              :class="[iconBtn, 'text-amber-400 hover:text-amber-300 hover:bg-ui-hover border border-amber-500/25 bg-amber-500/10']"
+              title="Add primitive (Shift+A)"
+              @click="handleOpenAddPrimitive"
+            >
+              <BlenderIcon name="mesh-cube" :size="iconPx" color="#f59e0b" />
+            </button>
+          </div>
         </div>
       </div>
 
-      <!-- 2. TRANSFORM & PLACEMENT TOOLS -->
-      <div v-if="toolStore.appMode === 'model' || toolStore.appMode === 'rig' || toolStore.appMode === 'animate'" class="w-full px-1.5 border-b border-ui-borderSubtle pb-1.5 mb-1.5">
-        <div v-if="columns === 2" class="text-[11px] font-medium text-ui-textMuted mb-1 px-1">Gizmo</div>
-        <div class="grid gap-1.5 w-full" :class="columns === 1 ? 'grid-cols-1' : 'grid-cols-2'">
-          <!-- Move Tool -->
-          <button 
-            @click="setModelTool('move')"
-            class="w-full h-9 flex items-center justify-center rounded-xs transition cursor-pointer"
-            :class="toolStore.modelTool === 'move' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-            title="Move Tool (G / W)"
+      <!-- Modeling: Mesh | current-mode, one page at a time -->
+      <template v-if="isModeling">
+        <div class="shrink-0 mx-1.5 mt-1.5 p-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle grid grid-cols-2 gap-0.5">
+          <button
+            type="button"
+            class="h-6 rounded-xs text-[10px] font-semibold tracking-wide transition"
+            :class="shelfTab === 'ops' ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textMuted hover:text-ui-textSecondary'"
+            title="Extrude, inset, bevel, cuts"
+            @click="shelfTab = 'ops'"
           >
-            <BlenderIcon name="tool-move" :size="20" />
+            Mesh
           </button>
-
-          <!-- Rotate Tool -->
-          <button 
-            @click="setModelTool('rotate')"
-            class="w-full h-9 flex items-center justify-center rounded-xs transition cursor-pointer"
-            :class="toolStore.modelTool === 'rotate' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-            title="Rotate Tool (R)"
+          <button
+            type="button"
+            class="h-6 rounded-xs text-[10px] font-semibold tracking-wide transition"
+            :class="shelfTab === 'context' ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textMuted hover:text-ui-textSecondary'"
+            :title="'Tools for ' + contextTabLabel + ' mode'"
+            @click="shelfTab = 'context'"
           >
-            <BlenderIcon name="tool-rotate" :size="20" />
-          </button>
-
-          <!-- Scale Tool -->
-          <button 
-            @click="setModelTool('scale')"
-            class="w-full h-9 flex items-center justify-center rounded-xs transition cursor-pointer"
-            :class="toolStore.modelTool === 'scale' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-            title="Scale Tool (S)"
-          >
-            <BlenderIcon name="tool-scale" :size="20" />
-          </button>
-
-          <!-- Add Primitive / CAD Shapes Popout Trigger -->
-          <button 
-            v-if="toolStore.appMode === 'model'"
-            @click="handleOpenAddPrimitive"
-            class="w-full h-9 flex items-center justify-center rounded-xs text-amber-400 hover:text-amber-300 hover:bg-ui-hover transition border border-amber-500/30 bg-amber-500/10 cursor-pointer"
-            title="Add Primitive & CAD Shapes (Shift+A)"
-          >
-            <BlenderIcon name="mesh-cube" :size="19" color="#f59e0b" />
+            {{ contextTabLabel }}
           </button>
         </div>
-      </div>
 
-      <!-- 3. CONTEXTUAL ESSENTIAL MODELING TOOLS -->
-      
-      <!-- (A) OBJECT / ORIGIN MODE TOOLS -->
-      <div v-if="toolStore.appMode === 'model' && (toolStore.selectMode === 'object' || toolStore.selectMode === 'origin')" class="w-full px-1.5 flex-1">
-        <div v-if="columns === 2" class="text-[11px] font-medium text-ui-textMuted mb-1 px-1">Object</div>
-        <div class="grid gap-1.5 w-full" :class="columns === 1 ? 'grid-cols-1' : 'grid-cols-2'">
-          <button @click="projectStore.duplicateSelection('object')" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer" title="Duplicate Object (Shift+D)">
-            <BlenderIcon name="duplicate" :size="19" />
+        <div class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-1.5 py-1.5">
+          <div v-if="shelfTab === 'ops'" :class="gridCls">
+            <button type="button" :class="[iconBtn, tone(false)]" title="Extrude (E)" @click="startMeshOp('extrude', 'face')">
+              <BlenderIcon name="tool-extrude" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(false)]" title="Inset (I)" @click="startMeshOp('inset', 'face')">
+              <BlenderIcon name="tool-inset" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(false)]" title="Bevel (Ctrl+B)" @click="startMeshOp('bevel', 'face')">
+              <BlenderIcon name="tool-bevel" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(false)]" title="Loop cut (Ctrl+R)" @click="startMeshOp('loop_cut', 'edge')">
+              <BlenderIcon name="tool-loopcut" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(false)]" title="Knife (K)" @click="startMeshOp('knife', 'edge')">
+              <BlenderIcon name="tool-knife" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(false)]" :disabled="!hasActiveMesh" title="Subdivide / divide" @click="runSubdivide">
+              <BlenderIcon name="tool-subdivide" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(false)]" title="Merge at center (M)" @click="toolStore.setSelectMode('vertex'); projectStore.performMerge('center')">
+              <BlenderIcon name="tool-merge" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(false)]" title="Connect vertices (J)" @click="toolStore.setSelectMode('vertex'); projectStore.performConnectVertices()">
+              <BlenderIcon name="connect-verts" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(false)]" title="Fill (F)" @click="requestFillFace()">
+              <BlenderIcon name="fill-face" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(false)]" title="Dissolve" @click="runDissolve">
+              <BlenderIcon name="dissolve" :size="iconPx" />
+            </button>
+          </div>
+
+          <div v-else-if="toolStore.selectMode === 'object' || toolStore.selectMode === 'origin'" :class="gridCls">
+            <button type="button" :class="[iconBtn, tone(toolStore.selectMode === 'origin')]" title="Edit origin (5)" @click="toggleOriginMode">
+              <BlenderIcon name="origin" :size="iconPx" :color="toolStore.selectMode === 'origin' ? '#f59e0b' : 'currentColor'" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(false)]" title="Duplicate (Shift+D)" @click="projectStore.duplicateSelection('object')">
+              <BlenderIcon name="duplicate" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(false)]" :disabled="selectedObjectCount < 2" title="Join (Ctrl+J)" @click="projectStore.performJoinMeshes()">
+              <BlenderIcon name="join-mesh" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(false)]" :disabled="!hasActiveMesh" title="Clean mesh" @click="projectStore.performCleanupMesh()">
+              <BlenderIcon name="clean-mesh" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(false)]" :disabled="!hasActiveMesh" title="Flip normals" @click="projectStore.performFlipNormals()">
+              <BlenderIcon name="flip-normals" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, 'text-ui-textMuted hover:text-rose-400 hover:bg-rose-950/30 border border-transparent']" title="Delete (X)" @click="handleDelete">
+              <BlenderIcon name="trash" :size="iconPx" />
+            </button>
+          </div>
+
+          <div v-else-if="toolStore.selectMode === 'vertex'" :class="gridCls">
+            <button type="button" :class="[iconBtn, tone(false)]" title="Merge at center (M)" @click="projectStore.performMerge('center')">
+              <BlenderIcon name="tool-merge" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(false)]" title="Merge by distance" @click="projectStore.performMerge('distance', 0.01)">
+              <BlenderIcon name="snap" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(false)]" title="Connect (J)" @click="projectStore.performConnectVertices()">
+              <BlenderIcon name="connect-verts" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(false)]" title="Fill (F)" @click="requestFillFace()">
+              <BlenderIcon name="fill-face" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(false)]" title="Dissolve vertices" @click="projectStore.performDissolve('vertex')">
+              <BlenderIcon name="dissolve" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, 'text-ui-textMuted hover:text-rose-400 hover:bg-rose-950/30 border border-transparent']" title="Delete vertices" @click="handleDelete">
+              <BlenderIcon name="trash" :size="iconPx" />
+            </button>
+          </div>
+
+          <div v-else-if="toolStore.selectMode === 'edge'" :class="gridCls">
+            <button type="button" :class="[iconBtn, tone(false)]" :disabled="!hasTwoSelectedEdges" title="Bridge edges" @click="projectStore.performBridgeEdges()">
+              <BlenderIcon name="bridge-edges" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(false)]" :disabled="!hasSelectedEdges" title="Subdivide edges" @click="projectStore.performSubdivide('edge')">
+              <BlenderIcon name="tool-subdivide" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(false)]" title="Dissolve edges" @click="projectStore.performDissolve('edge')">
+              <BlenderIcon name="dissolve" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(false)]" :disabled="!hasFillBoundary" title="Fill (F)" @click="requestFillFace()">
+              <BlenderIcon name="fill-face" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(false)]" :disabled="!hasFillBoundary" title="Grid fill" @click="projectStore.performGridFill()">
+              <BlenderIcon name="tool-subdivide" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, 'text-ui-textMuted hover:text-rose-400 hover:bg-rose-950/30 border border-transparent']" title="Delete edges" @click="handleDelete">
+              <BlenderIcon name="trash" :size="iconPx" />
+            </button>
+          </div>
+
+          <div v-else-if="toolStore.selectMode === 'face'" :class="gridCls">
+            <button type="button" :class="[iconBtn, tone(false)]" :disabled="!hasSelectedFaces" title="Separate (P)" @click="projectStore.performSeparateMesh()">
+              <BlenderIcon name="separate-mesh" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(false)]" title="Flip normals" @click="projectStore.performFlipNormals()">
+              <BlenderIcon name="flip-normals" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, tone(false)]" :disabled="!hasSelectedFaces" title="Subdivide faces" @click="projectStore.performSubdivide('face')">
+              <BlenderIcon name="tool-subdivide" :size="iconPx" />
+            </button>
+            <button type="button" :class="[iconBtn, 'text-ui-textMuted hover:text-rose-400 hover:bg-rose-950/30 border border-transparent']" title="Delete faces" @click="handleDelete">
+              <BlenderIcon name="trash" :size="iconPx" />
+            </button>
+          </div>
+        </div>
+      </template>
+
+      <!-- Other workspaces: single contextual shelf -->
+      <div v-else class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-1.5 py-1.5">
+        <div v-if="isMeshWorkspace && (toolStore.selectMode === 'object' || toolStore.selectMode === 'origin')" :class="gridCls">
+          <button type="button" :class="[iconBtn, tone(false)]" title="Duplicate (Shift+D)" @click="projectStore.duplicateSelection('object')">
+            <BlenderIcon name="duplicate" :size="iconPx" />
           </button>
-
-          <button @click="projectStore.performJoinMeshes()" :disabled="selectedObjectCount < 2" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="Join Selected Meshes (Ctrl+J)">
-            <BlenderIcon name="join-mesh" :size="20" />
+          <button type="button" :class="[iconBtn, tone(false)]" :disabled="selectedObjectCount < 2" title="Join (Ctrl+J)" @click="projectStore.performJoinMeshes()">
+            <BlenderIcon name="join-mesh" :size="iconPx" />
           </button>
-
-          <button @click="projectStore.performCleanupMesh()" :disabled="!hasActiveMesh" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="Safe Clean Mesh Geometry">
-            <BlenderIcon name="clean-mesh" :size="19" />
+          <button type="button" :class="[iconBtn, tone(false)]" :disabled="!hasActiveMesh" title="Clean mesh" @click="projectStore.performCleanupMesh()">
+            <BlenderIcon name="clean-mesh" :size="iconPx" />
           </button>
-
-          <button @click="projectStore.performFlipNormals()" :disabled="!hasActiveMesh" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="Flip Mesh Normals">
-            <BlenderIcon name="flip-normals" :size="20" />
-          </button>
-
-          <button @click="handleDelete" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textMuted hover:text-rose-400 hover:bg-rose-950/30 transition cursor-pointer" title="Delete Object (Delete / X)">
-            <BlenderIcon name="trash" :size="19" />
+          <button type="button" :class="[iconBtn, 'text-ui-textMuted hover:text-rose-400 hover:bg-rose-950/30 border border-transparent']" title="Delete" @click="handleDelete">
+            <BlenderIcon name="trash" :size="iconPx" />
           </button>
         </div>
-      </div>
 
-      <!-- (B) VERTEX MODE TOOLS -->
-      <div v-else-if="toolStore.appMode === 'model' && toolStore.selectMode === 'vertex'" class="w-full px-1.5 flex-1">
-        <div v-if="columns === 2" class="text-[11px] font-medium text-ui-textMuted mb-1 px-1">Vertex</div>
-        <div class="grid gap-1.5 w-full" :class="columns === 1 ? 'grid-cols-1' : 'grid-cols-2'">
-          <button @click="projectStore.performMerge('center')" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer" title="Merge Vertices at Center (M)">
-            <BlenderIcon name="tool-merge" :size="20" />
+        <div v-else-if="isMeshWorkspace && toolStore.selectMode === 'vertex'" :class="gridCls">
+          <button type="button" :class="[iconBtn, tone(false)]" title="Merge (M)" @click="projectStore.performMerge('center')">
+            <BlenderIcon name="tool-merge" :size="iconPx" />
           </button>
-
-          <button @click="projectStore.performMerge('distance', 0.01)" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer" title="Merge by Distance / Auto Weld">
-            <BlenderIcon name="snap" :size="19" />
+          <button type="button" :class="[iconBtn, tone(false)]" title="Connect (J)" @click="projectStore.performConnectVertices()">
+            <BlenderIcon name="connect-verts" :size="iconPx" />
           </button>
-
-          <button @click="projectStore.performConnectVertices()" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer" title="Connect Selected 2 Vertices (J)">
-            <BlenderIcon name="connect-verts" :size="20" />
+          <button type="button" :class="[iconBtn, tone(false)]" title="Fill (F)" @click="requestFillFace()">
+            <BlenderIcon name="fill-face" :size="iconPx" />
           </button>
-
-          <button @click="projectStore.performFillFace()" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer" title="Fill Face from Vertices (F)">
-            <BlenderIcon name="fill-face" :size="20" />
-          </button>
-
-          <button @click="startModalOp('knife')" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer" title="Knife Topology Tool (K)">
-            <BlenderIcon name="tool-knife" :size="20" />
-          </button>
-
-          <button @click="projectStore.performSubdivide('vertex')" :disabled="projectStore.selectedVertexIds.length === 0" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="Subdivide Faces Touching Selected Vertices">
-            <BlenderIcon name="tool-subdivide" :size="20" />
-          </button>
-
-          <button @click="projectStore.performDissolve('vertex')" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer" title="Dissolve Vertices">
-            <BlenderIcon name="dissolve" :size="20" />
-          </button>
-
-          <button @click="handleDelete" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textMuted hover:text-rose-400 hover:bg-rose-950/30 transition cursor-pointer" title="Delete Vertices (Delete / X)">
-            <BlenderIcon name="trash" :size="19" />
+          <button type="button" :class="[iconBtn, 'text-ui-textMuted hover:text-rose-400 hover:bg-rose-950/30 border border-transparent']" title="Delete" @click="handleDelete">
+            <BlenderIcon name="trash" :size="iconPx" />
           </button>
         </div>
-      </div>
 
-      <!-- (C) EDGE MODE TOOLS -->
-      <div v-else-if="toolStore.appMode === 'model' && toolStore.selectMode === 'edge'" class="w-full px-1.5 flex-1">
-        <div v-if="columns === 2" class="text-[11px] font-medium text-ui-textMuted mb-1 px-1">Edge</div>
-        <div class="grid gap-1.5 w-full" :class="columns === 1 ? 'grid-cols-1' : 'grid-cols-2'">
-          <button @click="startModalOp('loop_cut')" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer" title="Loop Cut & Slide (Ctrl+R)">
-            <BlenderIcon name="tool-loopcut" :size="20" />
+        <div v-else-if="isMeshWorkspace && toolStore.selectMode === 'edge'" :class="gridCls">
+          <button type="button" :class="[iconBtn, tone(false)]" title="Loop cut (Ctrl+R)" @click="startModalOp('loop_cut')">
+            <BlenderIcon name="tool-loopcut" :size="iconPx" />
           </button>
-
-          <button @click="startModalOp('knife')" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer" title="Knife Topology Tool (K)">
-            <BlenderIcon name="tool-knife" :size="20" />
+          <button type="button" :class="[iconBtn, tone(false)]" title="Knife (K)" @click="startModalOp('knife')">
+            <BlenderIcon name="tool-knife" :size="iconPx" />
           </button>
-
-          <button @click="projectStore.performBridgeEdges()" :disabled="!hasTwoSelectedEdges" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="Bridge Selected Edges / Edge Loops">
-            <BlenderIcon name="bridge-edges" :size="20" />
+          <button type="button" :class="[iconBtn, tone(false)]" :disabled="!hasTwoSelectedEdges" title="Bridge" @click="projectStore.performBridgeEdges()">
+            <BlenderIcon name="bridge-edges" :size="iconPx" />
           </button>
-
-          <button @click="projectStore.performSubdivide('edge')" :disabled="!hasSelectedEdges" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="Subdivide Selected Edges">
-            <BlenderIcon name="tool-subdivide" :size="20" />
-          </button>
-
-          <button @click="projectStore.performDissolve('edge')" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer" title="Dissolve Edge">
-            <BlenderIcon name="dissolve" :size="20" />
-          </button>
-
-          <button @click="projectStore.performFillFace()" :disabled="!hasFillBoundary" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="Fill Selected Edge Boundary (F)">
-            <BlenderIcon name="fill-face" :size="20" />
-          </button>
-
-          <button @click="projectStore.performGridFill()" :disabled="!hasFillBoundary" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="Grid Fill Selected Edge Boundary">
-            <BlenderIcon name="tool-subdivide" :size="20" />
-          </button>
-
-          <button @click="handleDelete" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textMuted hover:text-rose-400 hover:bg-rose-950/30 transition cursor-pointer" title="Delete Edges (Delete / X)">
-            <BlenderIcon name="trash" :size="19" />
+          <button type="button" :class="[iconBtn, 'text-ui-textMuted hover:text-rose-400 hover:bg-rose-950/30 border border-transparent']" title="Delete" @click="handleDelete">
+            <BlenderIcon name="trash" :size="iconPx" />
           </button>
         </div>
-      </div>
 
-      <!-- (D) FACE MODE TOOLS -->
-      <div v-else-if="toolStore.appMode === 'model' && toolStore.selectMode === 'face'" class="w-full px-1.5 flex-1">
-        <div v-if="columns === 2" class="text-[11px] font-medium text-ui-textMuted mb-1 px-1">Face</div>
-        <div class="grid gap-1.5 w-full" :class="columns === 1 ? 'grid-cols-1' : 'grid-cols-2'">
-          <button @click="startModalOp('extrude')" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer" title="Extrude Region (E)">
-            <BlenderIcon name="tool-extrude" :size="20" />
+        <div v-else-if="isMeshWorkspace && toolStore.selectMode === 'face'" :class="gridCls">
+          <button type="button" :class="[iconBtn, tone(false)]" title="Extrude (E)" @click="startModalOp('extrude')">
+            <BlenderIcon name="tool-extrude" :size="iconPx" />
           </button>
-
-          <button @click="startModalOp('inset')" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer" title="Inset Faces (I)">
-            <BlenderIcon name="tool-inset" :size="20" />
+          <button type="button" :class="[iconBtn, tone(false)]" title="Inset (I)" @click="startModalOp('inset')">
+            <BlenderIcon name="tool-inset" :size="iconPx" />
           </button>
-
-          <button @click="startModalOp('bevel')" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer" title="Bevel / Chamfer (Ctrl+B)">
-            <BlenderIcon name="tool-bevel" :size="20" />
+          <button type="button" :class="[iconBtn, tone(false)]" title="Bevel (Ctrl+B)" @click="startModalOp('bevel')">
+            <BlenderIcon name="tool-bevel" :size="iconPx" />
           </button>
-
-          <button @click="startModalOp('loop_cut')" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer" title="Loop Cut & Slide (Ctrl+R)">
-            <BlenderIcon name="tool-loopcut" :size="20" />
-          </button>
-
-          <button @click="startModalOp('knife')" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer" title="Knife Topology Tool (K)">
-            <BlenderIcon name="tool-knife" :size="20" />
-          </button>
-
-          <button @click="projectStore.performSubdivide('face')" :disabled="!hasSelectedFaces" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="Subdivide Selected Faces">
-            <BlenderIcon name="tool-subdivide" :size="20" />
-          </button>
-
-          <button @click="projectStore.performSeparateMesh()" :disabled="!hasSelectedFaces" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="Separate Selected Faces into New Object (P)">
-            <BlenderIcon name="separate-mesh" :size="20" />
-          </button>
-
-          <button @click="projectStore.performFlipNormals()" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer" title="Flip Face Normals">
-            <BlenderIcon name="flip-normals" :size="20" />
-          </button>
-
-          <button @click="handleDelete" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textMuted hover:text-rose-400 hover:bg-rose-950/30 transition cursor-pointer" title="Delete Faces (Delete / X)">
-            <BlenderIcon name="trash" :size="19" />
+          <button type="button" :class="[iconBtn, 'text-ui-textMuted hover:text-rose-400 hover:bg-rose-950/30 border border-transparent']" title="Delete" @click="handleDelete">
+            <BlenderIcon name="trash" :size="iconPx" />
           </button>
         </div>
-      </div>
 
-      <!-- (E) UV TOOLS -->
-      <div v-else-if="isUvSelectionMode" class="w-full px-1.5 flex-1">
-        <div v-if="columns === 2" class="text-[11px] font-medium text-ui-textMuted mb-1 px-1">UV</div>
-        <div class="grid gap-1.5 w-full" :class="columns === 1 ? 'grid-cols-1' : 'grid-cols-2'">
-          <button @click="projectStore.performSeamUnwrap()" :disabled="!hasActiveMesh" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="Unwrap Along Marked Seams">
-            <BlenderIcon name="uv" :size="20" />
+        <div v-else-if="isUvSelectionMode" :class="gridCls">
+          <button type="button" :class="[iconBtn, tone(false)]" :disabled="!hasActiveMesh" title="Unwrap seams" @click="projectStore.performSeamUnwrap()">
+            <BlenderIcon name="uv" :size="iconPx" />
           </button>
-          <button @click="projectStore.performPackUVIslands()" :disabled="!hasActiveMesh" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="Pack UV Islands">
-            <BlenderIcon name="object-mode" :size="20" />
+          <button type="button" :class="[iconBtn, tone(false)]" :disabled="!hasActiveMesh" title="Pack islands" @click="projectStore.performPackUVIslands()">
+            <BlenderIcon name="object-mode" :size="iconPx" />
           </button>
-          <button @click="projectStore.markSelectedEdgesAsSeam()" :disabled="!hasSelectedEdges" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="Mark Selected Edges as Seams">
-            <BlenderIcon name="edge-select" :size="20" />
+          <button type="button" :class="[iconBtn, tone(false)]" :disabled="!hasSelectedEdges" title="Mark seam" @click="projectStore.markSelectedEdgesAsSeam()">
+            <BlenderIcon name="edge-select" :size="iconPx" />
           </button>
-          <button @click="projectStore.clearSelectedEdgesSeam()" :disabled="!hasSelectedEdges" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer" title="Clear Seam from Selected Edges">
-            <BlenderIcon name="dissolve" :size="20" />
+          <button type="button" :class="[iconBtn, tone(false)]" :disabled="!hasSelectedEdges" title="Clear seam" @click="projectStore.clearSelectedEdgesSeam()">
+            <BlenderIcon name="dissolve" :size="iconPx" />
           </button>
         </div>
-      </div>
 
-      <!-- (F) PAINTING TOOLS -->
-      <div v-else-if="toolStore.appMode === 'uvpaint' && (toolStore.uvWorkspaceTab === 'paint' || toolStore.uvWorkspaceTab === 'vertex')" class="w-full px-1.5 flex-1">
-        <div v-if="columns === 2" class="text-[11px] font-medium text-ui-textMuted mb-1 px-1">Paint</div>
-        <div class="grid gap-1.5 w-full" :class="columns === 1 ? 'grid-cols-1' : 'grid-cols-2'">
-          <button @click="toolStore.paintTool = 'brush'" class="w-full h-9 flex items-center justify-center rounded-xs transition cursor-pointer" :class="toolStore.paintTool === 'brush' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'" title="Pixel Brush (B)">
-            <BlenderIcon name="brush" :size="20" />
+        <div v-else-if="toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'paint'" :class="gridCls">
+          <button type="button" :class="[iconBtn, tone(toolStore.paintTool === 'brush')]" title="Brush (B)" @click="toolStore.paintTool = 'brush'">
+            <BlenderIcon name="brush" :size="iconPx" />
           </button>
-
-          <button @click="toolStore.paintTool = 'bucket'" class="w-full h-9 flex items-center justify-center rounded-xs transition cursor-pointer" :class="toolStore.paintTool === 'bucket' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'" title="Flood Fill Bucket (G)">
-            <BlenderIcon name="fill" :size="20" />
+          <button type="button" :class="[iconBtn, tone(toolStore.paintTool === 'bucket')]" title="Bucket (G)" @click="toolStore.paintTool = 'bucket'">
+            <BlenderIcon name="fill" :size="iconPx" />
           </button>
-
-          <button @click="toolStore.paintTool = 'dither'" class="w-full h-9 flex items-center justify-center rounded-xs transition cursor-pointer" :class="toolStore.paintTool === 'dither' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'" title="Bayer Dither Brush (D)">
-            <BlenderIcon name="dither" :size="20" />
+          <button type="button" :class="[iconBtn, tone(toolStore.paintTool === 'dither')]" title="Dither (D)" @click="toolStore.paintTool = 'dither'">
+            <BlenderIcon name="dither" :size="iconPx" />
           </button>
-
-          <button @click="toolStore.paintTool = 'eraser'" class="w-full h-9 flex items-center justify-center rounded-xs transition cursor-pointer" :class="toolStore.paintTool === 'eraser' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'" title="Eraser (E)">
-            <BlenderIcon name="eraser" :size="20" />
+          <button type="button" :class="[iconBtn, tone(toolStore.paintTool === 'eraser')]" title="Eraser (E)" @click="toolStore.paintTool = 'eraser'">
+            <BlenderIcon name="eraser" :size="iconPx" />
           </button>
-
-          <button @click="toolStore.paintTool = 'picker'" class="w-full h-9 flex items-center justify-center rounded-xs transition cursor-pointer" :class="toolStore.paintTool === 'picker' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'" title="Eyedropper Color Picker (I)">
-            <BlenderIcon name="picker" :size="20" />
+          <button type="button" :class="[iconBtn, tone(toolStore.paintTool === 'picker')]" title="Picker (I)" @click="toolStore.paintTool = 'picker'">
+            <BlenderIcon name="picker" :size="iconPx" />
           </button>
-
-          <button @click="clearActiveTexture" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textMuted hover:text-rose-400 hover:bg-rose-950/30 transition cursor-pointer" title="Clear Texture Canvas">
-            <BlenderIcon name="trash" :size="19" />
+          <button type="button" :class="[iconBtn, 'text-ui-textMuted hover:text-rose-400 hover:bg-rose-950/30 border border-transparent']" title="Clear canvas" @click="clearActiveTexture">
+            <BlenderIcon name="trash" :size="iconPx" />
           </button>
         </div>
-      </div>
 
-      <!-- (G) RIGGING TOOLS -->
-      <div v-else-if="toolStore.appMode === 'rig'" class="w-full px-1.5 flex-1">
-        <div v-if="columns === 2" class="text-[11px] font-medium text-ui-textMuted mb-1 px-1">Rig</div>
-        <div class="grid gap-1.5 w-full" :class="columns === 1 ? 'grid-cols-1' : 'grid-cols-2'">
-          <button @click="handleAddBone" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer" :title="animationStore.selectedBoneId ? 'Add Child to Selected Bone' : 'Add Root Bone'">
-            <BlenderIcon name="bone" :size="20" />
+        <div v-else-if="toolStore.appMode === 'rig'" :class="gridCls">
+          <button type="button" :class="[iconBtn, tone(false)]" :title="animationStore.selectedBoneId ? 'Add child bone' : 'Add root bone'" @click="handleAddBone">
+            <BlenderIcon name="bone" :size="iconPx" />
           </button>
-
-          <button @click="animationStore.extrudeBone(animationStore.selectedBoneId)" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer" title="Extrude Child Bone (E)">
-            <BlenderIcon name="tool-extrude" :size="20" />
+          <button type="button" :class="[iconBtn, tone(false)]" title="Extrude bone (E)" @click="animationStore.extrudeBone(animationStore.selectedBoneId)">
+            <BlenderIcon name="tool-extrude" :size="iconPx" />
           </button>
-
-          <button @click="animationStore.selectedBoneId ? animationStore.subdivideBone(animationStore.selectedBoneId) : null" :disabled="!animationStore.selectedBoneId" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover disabled:opacity-30 transition cursor-pointer" title="Subdivide Selected Bone">
-            <BlenderIcon name="tool-subdivide" :size="20" />
+          <button type="button" :class="[iconBtn, tone(false)]" :disabled="!animationStore.selectedBoneId" title="Subdivide bone" @click="animationStore.selectedBoneId ? animationStore.subdivideBone(animationStore.selectedBoneId) : null">
+            <BlenderIcon name="tool-subdivide" :size="iconPx" />
           </button>
-
-          <button @click="handleSymmetrizeBones" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer" title="Symmetrize Left Bones across X-Axis">
-            <BlenderIcon name="tool-merge" :size="20" />
+          <button type="button" :class="[iconBtn, tone(false)]" title="Symmetrize" @click="handleSymmetrizeBones">
+            <BlenderIcon name="tool-merge" :size="iconPx" />
           </button>
-
-          <button v-if="animationStore.selectedBoneId" @click="animationStore.deleteBone(animationStore.selectedBoneId)" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textMuted hover:text-rose-400 hover:bg-rose-950/30 transition cursor-pointer" :class="columns === 2 ? 'col-span-2' : ''" title="Delete Selected Bone (Delete / X)">
-            <BlenderIcon name="trash" :size="19" />
+          <button v-if="animationStore.selectedBoneId" type="button" :class="[iconBtn, 'text-ui-textMuted hover:text-rose-400 hover:bg-rose-950/30 border border-transparent', columns === 2 ? 'col-span-2' : '']" title="Delete bone" @click="animationStore.deleteBone(animationStore.selectedBoneId)">
+            <BlenderIcon name="trash" :size="iconPx" />
           </button>
         </div>
-      </div>
 
-      <!-- (H) ANIMATION TOOLS -->
-      <div v-else-if="toolStore.appMode === 'animate'" class="w-full px-1.5 flex-1">
-        <div v-if="columns === 2" class="text-[11px] font-medium text-ui-textMuted mb-1 px-1">Pose</div>
-        <div class="grid gap-1.5 w-full" :class="columns === 1 ? 'grid-cols-1' : 'grid-cols-2'">
-          <button @click="animationStore.resetPose" class="w-full h-9 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer" :class="columns === 2 ? 'col-span-2' : ''" title="Reset Pose (Alt+R)">
-            <BlenderIcon name="keyframe" :size="20" />
+        <div v-else-if="toolStore.appMode === 'animate'" :class="gridCls">
+          <button type="button" :class="[iconBtn, tone(false)]" title="Insert key (I / K)" @click="animationStore.recordCurrentKeyframe()">
+            <BlenderIcon name="keyframe" :size="iconPx" />
+          </button>
+          <button type="button" :class="[iconBtn, tone(false)]" title="Play (Space)" @click="animationStore.togglePlay()">
+            <BlenderIcon name="pose" :size="iconPx" />
+          </button>
+          <button type="button" :class="[iconBtn, tone(false)]" title="Reset pose (Alt+R)" @click="animationStore.resetPose">
+            <BlenderIcon name="tool-rotate" :size="iconPx" />
           </button>
         </div>
       </div>
     </div>
   </aside>
+  </div>
 </template>

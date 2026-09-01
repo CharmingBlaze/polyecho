@@ -1,4 +1,5 @@
 <script setup lang="ts">
+/** UV / Paint workspace tab router. Pixel math lives in `src/core/painting/PixelCanvas.ts`. */
 import { computed } from 'vue'
 import UVEditor from './UVEditor.vue'
 import PixelEditor from './PixelEditor.vue'

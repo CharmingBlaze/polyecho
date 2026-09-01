@@ -18,6 +18,7 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { id: 'bevel', label: 'Bevel Edges / Vertices', category: 'Modeling', defaultKey: 'Ctrl+b', currentKey: 'Ctrl+b' },
   { id: 'loopcut', label: 'Loop Cut and Slide', category: 'Modeling', defaultKey: 'Ctrl+r', currentKey: 'Ctrl+r' },
   { id: 'knife', label: 'Knife Topology', category: 'Modeling', defaultKey: 'k', currentKey: 'k' },
+  { id: 'polydraw', label: 'Poly Draw', category: 'Modeling', defaultKey: 'f', currentKey: 'f' },
   { id: 'subdivide', label: 'Subdivide Mesh', category: 'Modeling', defaultKey: 'w', currentKey: 'w' },
   { id: 'fill_face', label: 'Fill Face from Boundary', category: 'Modeling', defaultKey: 'f', currentKey: 'f' },
   { id: 'connect_verts', label: 'Connect Vertex Path', category: 'Modeling', defaultKey: 'j', currentKey: 'j' },
@@ -62,7 +63,19 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { id: 'save_project', label: 'Save Project JSON', category: 'System', defaultKey: 'Ctrl+s', currentKey: 'Ctrl+s' },
   { id: 'undo', label: 'Undo', category: 'System', defaultKey: 'Ctrl+z', currentKey: 'Ctrl+z' },
   { id: 'redo', label: 'Redo', category: 'System', defaultKey: 'Ctrl+Shift+z', currentKey: 'Ctrl+Shift+z' },
-  { id: 'export_model', label: 'Export 3D Model', category: 'System', defaultKey: 'Ctrl+e', currentKey: 'Ctrl+e' }
+  { id: 'export_model', label: 'Export 3D Model', category: 'System', defaultKey: 'Ctrl+e', currentKey: 'Ctrl+e' },
+
+  // UV & PAINTING
+  { id: 'paint_brush', label: 'Paint Brush', category: 'UV & Painting', defaultKey: 'b', currentKey: 'b' },
+  { id: 'paint_eraser', label: 'Paint Eraser', category: 'UV & Painting', defaultKey: 'e', currentKey: 'e' },
+  { id: 'paint_bucket', label: 'Paint Bucket', category: 'UV & Painting', defaultKey: 'g', currentKey: 'g' },
+  { id: 'paint_picker', label: 'Eyedropper', category: 'UV & Painting', defaultKey: 'i', currentKey: 'i' },
+  { id: 'paint_line', label: 'Line Tool', category: 'UV & Painting', defaultKey: 'l', currentKey: 'l' },
+  { id: 'paint_rect', label: 'Rectangle Tool', category: 'UV & Painting', defaultKey: 'u', currentKey: 'u' },
+  { id: 'paint_circle', label: 'Circle Tool', category: 'UV & Painting', defaultKey: 'c', currentKey: 'c' },
+  { id: 'paint_dither', label: 'Dither Brush', category: 'UV & Painting', defaultKey: 'd', currentKey: 'd' },
+  { id: 'paint_shade', label: 'Shading Brush (UV/Paint)', category: 'UV & Painting', defaultKey: 'h', currentKey: 'h' },
+  { id: 'paint_uv_overlay', label: 'Toggle UV Overlay (Paint)', category: 'UV & Painting', defaultKey: 'o', currentKey: 'o' }
 ]
 
 export const useKeymapStore = defineStore('keymap', () => {

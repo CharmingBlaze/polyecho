@@ -2,7 +2,8 @@ import * as THREE from 'three'
 import { MeshObject } from '../../types/mesh'
 import { AnimationClip, Armature } from '../../types/animation'
 import { meshToThreeGeometry } from '../geometry/Converters'
-import { sampleTrack } from '../animation/Armature'
+import { sampleTrack, resolveMeshBoneParentId } from '../animation/Armature'
+import type { Material } from '../../types/texture'
 
 export interface SpriteSheetOptions {
   frameWidth: number // e.g. 32, 64, 128
@@ -21,7 +22,8 @@ export interface SpriteSheetOptions {
 export function renderSpriteSheet(
   meshes: MeshObject[],
   textureMap: Map<string, THREE.Texture>,
-  options: SpriteSheetOptions
+  options: SpriteSheetOptions,
+  materials?: Material[]
 ): HTMLCanvasElement {
   const { frameWidth, frameHeight, directions, isoAngle, clip, armature, frameStep = 1 } = options
 
@@ -76,7 +78,8 @@ export function renderSpriteSheet(
     selectedFacesGeometry.dispose()
     selectedEdgesGeometry.dispose()
     edgeLinesGeometry.dispose()
-    const texture = textureMap.get(meshObj.materialId) || null
+    const matObj = materials?.find(m => m.id === meshObj.materialId)
+    const texture = (matObj?.textureId && textureMap.get(matObj.textureId)) || null
 
     const mat = new THREE.MeshLambertMaterial({
       map: texture,
@@ -141,11 +144,11 @@ export function renderSpriteSheet(
       }
     }
 
-    // Apply bone parenting to meshes if mesh.parentId is set
     if (armature) {
       for (const [, { threeMesh, baseMesh }] of threeMeshes.entries()) {
-        if (baseMesh.parentId && boneTransforms.has(baseMesh.parentId)) {
-          const bTransform = boneTransforms.get(baseMesh.parentId)!
+        const boneId = resolveMeshBoneParentId(baseMesh, armature.bones)
+        if (boneId && boneTransforms.has(boneId)) {
+          const bTransform = boneTransforms.get(boneId)!
           threeMesh.position.copy(bTransform.position)
           threeMesh.rotation.copy(bTransform.rotation)
           threeMesh.scale.copy(bTransform.scale)

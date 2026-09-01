@@ -1,3 +1,5 @@
+import * as THREE from 'three'
+
 export class SnapManager {
   private precisionAnchorValue = 0
   private precisionAnchorMouse = 0
@@ -32,5 +34,36 @@ export class SnapManager {
 
   snapScale(factor: number, step = 0.1): number {
     return Math.round(factor / step) * step
+  }
+
+  /**
+   * Rigid offset so the closest moving point lands on a snap target
+   * (Blockbench vertex-snap / Blender vertex snap).
+   */
+  static findRigidSnapOffset(
+    moving: THREE.Vector3[],
+    targets: THREE.Vector3[],
+    threshold: number
+  ): THREE.Vector3 | null {
+    let best = threshold
+    let offset: THREE.Vector3 | null = null
+    for (const p of moving) {
+      for (const t of targets) {
+        const d = p.distanceTo(t)
+        if (d < best) {
+          best = d
+          offset = t.clone().sub(p)
+        }
+      }
+    }
+    return offset
+  }
+
+  findRigidSnapOffset(
+    moving: THREE.Vector3[],
+    targets: THREE.Vector3[],
+    threshold: number
+  ): THREE.Vector3 | null {
+    return SnapManager.findRigidSnapOffset(moving, targets, threshold)
   }
 }

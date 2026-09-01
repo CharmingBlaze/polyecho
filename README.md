@@ -117,6 +117,14 @@ npm run build
 
 Open [http://localhost:5173](http://localhost:5173) in your browser.
 
+```bash
+npm run typecheck
+```
+
+## Working on the codebase
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Use [docs/CODEMAP.md](docs/CODEMAP.md) to find modules, [docs/TEXTURES.md](docs/TEXTURES.md) for images/materials/paint target, and [docs/INVARIANTS.md](docs/INVARIANTS.md) before changing mesh IDs, history, or exporters.
+
 ---
 
 ## Tech Stack

@@ -24,6 +24,9 @@ export interface Vertex {
   boneWeights?: Record<string, number> // boneId -> weight (0..1)
 }
 
+/** Per-object normals, matching Blender Object > Shade Flat / Smooth / Auto Smooth. */
+export type MeshShadeMode = 'flat' | 'smooth' | 'auto'
+
 export interface Face {
   id: string
   vertexIds: string[] // 3 or 4 vertices (Tri or Quad)
@@ -48,20 +51,28 @@ export interface MirrorModifier {
   axisZ: boolean
   clipping: boolean
   merge: boolean
-  mergeThreshold: number // e.g. 0.01m
+  mergeThreshold: number
   flipU: boolean
   flipV: boolean
+  /** Cut and keep the + side of each enabled axis before mirroring. */
+  bisect?: boolean
 }
+
+export type SubdivisionType = 'catmull-clark' | 'simple'
 
 export interface SubdivisionModifier {
   enabled: boolean
-  level: number // 1 or 2
+  level: number
+  type?: SubdivisionType
 }
 
 export interface SolidifyModifier {
   enabled: boolean
   thickness: number
+  /** -1 original stays / shell inward, 0 centered, +1 original stays / shell outward. */
   offset: number
+  /** Boundary quads connecting the two shells. Default true. */
+  fillRim?: boolean
 }
 
 export interface BevelModifierConfig {
@@ -88,6 +99,8 @@ export interface MeshObject {
   subdivision?: SubdivisionModifier
   solidify?: SolidifyModifier
   bevelModifier?: BevelModifierConfig
-  shadeMode?: 'flat' | 'smooth'
+  shadeMode?: MeshShadeMode
+  /** Degrees. Edges sharper than this stay flat when `shadeMode` is `auto`. Default 30. */
+  autoSmoothAngle?: number
   seamEdgeIds?: string[]
 }

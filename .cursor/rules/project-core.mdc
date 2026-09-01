@@ -1,0 +1,19 @@
+---
+description: PolyEcho layers, stores, and document model
+alwaysApply: true
+---
+
+# Project core
+
+PolyEcho is a Vue 3 + Pinia + Three.js DCC. Product docs: `README.md`. Layout and data flow: `docs/ARCHITECTURE.md`. File finder: `docs/CODEMAP.md`. Do-not-break list: `docs/INVARIANTS.md`. Workflow: `CONTRIBUTING.md`.
+
+- Keep topology and math in `src/core/`. Vue components call stores or `editorCommands`; they do not implement extrude/unwrap/skinning.
+- Pinia holds serializable editor state. The Three.js scene lives in `Viewport3D.vue`.
+- `MeshObject` (string ids, JSON) is the document. `EditableMesh` (numeric ids, half-edges) is the interactive kernel. Convert only through `MeshBridge`.
+- One-shot ops: clone-in / new-out in `Operations.ts`, wrapped by `projectStore.perform*`, `recordState` before mutate.
+- Interactive tools: `ModalOperator` + kernel, started from the viewport via `operatorManager` / `requestModalTool`.
+- Live shortcuts: `App.vue` (plus the active modal operator). `keymapStore` is the Hotkeys UI. `InputRouter` and `ActionRegistry` are unused scaffolds.
+- If a verb exists as both `perform*` and a modal operator, update both paths (or route the store through the kernel).
+- After mesh or pixel commits, bump `geometryRevision` or `textureRevision`.
+- Do not introduce another framework, store library, or CSS system.
+- Match existing naming (`performX`, `MeshObject`, Pinia setup stores, `<script setup lang="ts">`).

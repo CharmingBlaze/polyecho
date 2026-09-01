@@ -2,6 +2,9 @@
 import { ref, computed } from 'vue'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useProjectStore } from '../../stores/projectStore'
+import { useToolStore } from '../../stores/toolStore'
+import UiSection from '../ui/UiSection.vue'
+import UiButton from '../ui/UiButton.vue'
 import { 
   Plus, 
   Trash2, 
@@ -12,11 +15,13 @@ import {
   FlipHorizontal,
   GitCommitVertical,
   ExternalLink,
-  Link
+  Link,
+  Eye
 } from 'lucide-vue-next'
 
 const animationStore = useAnimationStore()
 const projectStore = useProjectStore()
+const toolStore = useToolStore()
 
 const editingBoneId = ref<string | null>(null)
 const editingName = ref<string>('')
@@ -177,119 +182,71 @@ function handleAttachActiveMeshToSocket(socketId: string) {
 </script>
 
 <template>
-  <div class="h-full w-full bg-ui-panel p-3 text-ui-textPrimary flex flex-col space-y-3 font-sans text-xs select-none overflow-y-auto">
-    <!-- Top Setup Actions Bar -->
-    <div class="space-y-2 border-b border-ui-borderSubtle pb-2.5">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-1.5 font-semibold text-ui-textPrimary">
-          <FolderTree class="w-3.5 h-3.5 text-ui-accent" />
-          <span class="text-[11px] uppercase tracking-wider text-ui-textMuted font-bold">Rig Setup & Skeleton</span>
-        </div>
-        <div class="flex items-center gap-1.5">
-          <span class="text-[10px] text-ui-textMuted font-medium">
-            {{ animationStore.armature.bones.length }} Bones
-          </span>
-          <button 
-            @click="animationStore.toggleBoneHierarchyPopout(true)"
-            class="p-0.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-accent rounded-xs transition cursor-pointer"
-            title="Pop out Floating Bone Hierarchy (H)"
-          >
-            <ExternalLink class="w-3.5 h-3.5" />
-          </button>
-        </div>
+  <div class="flex flex-col select-none text-xs font-sans">
+    <div class="h-7 bg-ui-header border-b border-ui-borderSubtle px-2.5 flex items-center justify-between">
+      <div class="flex items-center space-x-1.5">
+        <FolderTree class="w-3 h-3 text-sky-400" />
+        <span class="text-[11px] font-medium text-ui-textMuted">Skeleton</span>
       </div>
-
-      <!-- Quick Add Toolbar -->
-      <div class="grid grid-cols-2 gap-1.5">
-        <button 
-          @click="handleAddRoot"
-          class="py-1.5 px-2.5 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold text-[11px] flex items-center justify-center gap-1.5 shadow-xs transition cursor-pointer"
-          title="Add Center Root Bone at base of mesh"
+      <div class="flex items-center gap-1.5">
+        <span class="font-mono text-[9px] text-ui-textMuted">{{ animationStore.armature.bones.length }}</span>
+        <button
+          type="button"
+          class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary rounded-xs hover:bg-ui-hover"
+          title="Pop-out hierarchy (H)"
+          @click="animationStore.toggleBoneHierarchyPopout(true)"
         >
-          <Plus class="w-3.5 h-3.5" />
-          <span>Add Bone</span>
-        </button>
-
-        <button 
-          @click="handleToggleDrawBone"
-          class="py-1.5 px-2.5 rounded-xs font-semibold text-[11px] flex items-center justify-center gap-1.5 transition border cursor-pointer"
-          :class="animationStore.clickToPlaceMode ? 'bg-amber-500/20 text-amber-300 border-amber-500/60 shadow-xs' : 'bg-ui-input/70 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
-          title="Click to place bone head and tail directly in 3D viewport (B)"
-        >
-          <Crosshair class="w-3.5 h-3.5" />
-          <span>Draw (B)</span>
-        </button>
-      </div>
-
-      <!-- Secondary Tools -->
-      <div class="grid grid-cols-3 gap-1.5 text-[10px]">
-        <button 
-          @click="handleExtrude"
-          class="py-1 px-1.5 bg-ui-input/70 hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary hover:text-ui-textPrimary rounded-xs font-medium flex items-center justify-center gap-1 transition cursor-pointer"
-          title="Extrude new child bone from active joint (E)"
-        >
-          <GitBranch class="w-3 h-3 text-amber-400" />
-          <span>Extrude (E)</span>
-        </button>
-
-        <button 
-          @click="handleSymmetrize"
-          class="py-1 px-1.5 bg-ui-input/70 hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary hover:text-ui-textPrimary rounded-xs font-medium flex items-center justify-center gap-1 transition cursor-pointer"
-          title="Mirror .L bones across X-axis to .R"
-        >
-          <FlipHorizontal class="w-3 h-3 text-sky-400" />
-          <span>Mirror X</span>
-        </button>
-
-        <button 
-          v-if="selectedBone"
-          @click="handleAddSocket(selectedBone.id)"
-          class="py-1 px-1.5 bg-ui-input/70 hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary hover:text-sky-300 rounded-xs font-medium flex items-center justify-center gap-1 transition cursor-pointer"
-          title="Add accessory/weapon socket to selected bone"
-        >
-          <Wrench class="w-3 h-3 text-sky-400" />
-          <span>+ Socket</span>
+          <ExternalLink class="w-3 h-3" />
         </button>
       </div>
     </div>
 
-    <!-- Empty State Quick Setup (When 0 bones) -->
-    <div v-if="animationStore.armature.bones.length === 0" class="bg-ui-surface/60 p-4 rounded-xs border border-ui-borderSubtle text-center space-y-3 my-auto">
-      <div class="w-9 h-9 mx-auto rounded-full bg-ui-input/80 border border-ui-borderSubtle flex items-center justify-center text-ui-accent">
-        <GitCommitVertical class="w-5 h-5" />
+    <UiSection title="Add" :icon="Plus" hint="E · B" :default-open="true">
+      <div class="grid grid-cols-2 gap-1">
+        <UiButton size="xs" variant="primary" @click="handleAddRoot">
+          <Plus class="w-3 h-3" /> Add
+        </UiButton>
+        <UiButton size="xs" :variant="animationStore.clickToPlaceMode ? 'accent' : 'default'" @click="handleToggleDrawBone">
+          <Crosshair class="w-3 h-3" /> Draw
+        </UiButton>
+        <UiButton size="xs" @click="handleExtrude">
+          <GitBranch class="w-3 h-3" /> Extrude
+        </UiButton>
+        <UiButton size="xs" @click="handleSymmetrize">
+          <FlipHorizontal class="w-3 h-3" /> Mirror X
+        </UiButton>
       </div>
-      <div class="space-y-1">
-        <h4 class="font-semibold text-xs text-ui-textPrimary">No Skeleton Created</h4>
-        <p class="text-[11px] text-ui-textMuted leading-relaxed">
-          Create bones to animate your model. Press <strong>B</strong> or click below to build your custom rig.
-        </p>
-      </div>
-      <div class="space-y-1.5 pt-1">
-        <button 
-          @click="handleAddRoot"
-          class="w-full py-2 px-3 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold text-xs flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer"
-        >
-          <Plus class="w-3.5 h-3.5" />
-          <span>Add Center Bone</span>
-        </button>
-        <button 
-          @click="handleToggleDrawBone"
-          class="w-full py-1.5 px-3 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary rounded-xs font-medium text-[11px] flex items-center justify-center gap-1.5 transition cursor-pointer"
-        >
-          <Crosshair class="w-3 h-3 text-amber-400" />
-          <span>Draw in Viewport (B)</span>
-        </button>
-      </div>
-    </div>
+      <p class="text-[9px] text-ui-textMuted leading-snug">Draw places in the viewport. First bone can auto-weight; later clicks only add joints.</p>
+    </UiSection>
 
-    <!-- Active Hierarchy Tree View -->
-    <div v-else class="flex-1 flex flex-col space-y-2 min-h-0">
-      <div class="flex items-center justify-between text-[10px] text-ui-textMuted font-semibold uppercase tracking-wider">
-        <span>Bone Hierarchy</span>
-        <span class="text-ui-textSecondary truncate max-w-[130px]">{{ selectedSocket ? selectedSocket.socket.name : (selectedBone ? selectedBone.name : 'Select item') }}</span>
-      </div>
+    <UiSection title="Display" :icon="Eye" :default-open="true">
+      <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
+        <span>X-Ray mesh (Alt+Z)</span>
+        <input type="checkbox" v-model="toolStore.viewport.xray" class="accent-amber-500" />
+      </label>
+      <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
+        <span>X-ray bones</span>
+        <input type="checkbox" v-model="animationStore.xrayBones" class="accent-ui-accent" />
+      </label>
+    </UiSection>
 
-      <div class="flex-1 bg-ui-input/50 rounded-xs border border-ui-borderSubtle p-1 space-y-0.5 overflow-y-auto min-h-[160px]">
+    <UiSection
+      v-if="animationStore.armature.bones.length === 0"
+      title="Hierarchy"
+      :icon="GitCommitVertical"
+      :default-open="true"
+    >
+      <p class="text-[10px] text-ui-textMuted leading-snug">No bones yet. Add one at the mesh, or Draw in the viewport.</p>
+    </UiSection>
+
+    <UiSection
+      v-else
+      title="Hierarchy"
+      :icon="GitCommitVertical"
+      :badge="selectedSocket ? selectedSocket.socket.name : (selectedBone?.name || '')"
+      :default-open="true"
+    >
+      <div class="bg-ui-input/50 rounded-xs border border-ui-borderSubtle p-1 space-y-0.5 overflow-y-auto max-h-[280px]">
         <template v-for="root in rootBones" :key="root.id">
           <!-- Root Bone Row -->
           <div 
@@ -423,122 +380,40 @@ function handleAttachActiveMeshToSocket(socketId: string) {
         </template>
       </div>
 
-      <!-- Selected Socket Inspector Tray -->
-      <div v-if="selectedSocket" class="bg-sky-950/20 p-2 rounded-xs border border-ui-borderSubtle space-y-1.5 text-[10px]">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-1 text-sky-300 font-semibold truncate">
-            <Wrench class="w-3 h-3 shrink-0" />
-            <span class="truncate">Socket: {{ selectedSocket.socket.name }}</span>
-            <span class="text-ui-textMuted font-normal">({{ selectedSocket.bone.name }})</span>
-          </div>
-          <button @click="handleRemoveSocket(selectedSocket.bone.id, selectedSocket.socket.id)" class="text-ui-textMuted hover:text-rose-400 p-0.5 transition cursor-pointer">
-            <Trash2 class="w-3 h-3" />
-          </button>
-        </div>
+    </UiSection>
 
-        <div class="flex items-center gap-2">
-          <div class="flex items-center gap-1 flex-1">
-            <span class="text-ui-textMuted">Offset:</span>
-            <input type="number" step="0.1" v-model.number="selectedSocket.socket.position.x" class="w-10 bg-ui-input px-1 py-0.5 text-right rounded-xs border border-ui-borderSubtle font-mono text-ui-textPrimary" title="Offset X" />
-            <input type="number" step="0.1" v-model.number="selectedSocket.socket.position.y" class="w-10 bg-ui-input px-1 py-0.5 text-right rounded-xs border border-ui-borderSubtle font-mono text-ui-textPrimary" title="Offset Y" />
-            <input type="number" step="0.1" v-model.number="selectedSocket.socket.position.z" class="w-10 bg-ui-input px-1 py-0.5 text-right rounded-xs border border-ui-borderSubtle font-mono text-ui-textPrimary" title="Offset Z" />
-          </div>
-          <button 
-            v-if="projectStore.activeMesh"
-            @click="handleAttachActiveMeshToSocket(selectedSocket.socket.id)"
-            class="px-2 py-0.5 bg-sky-600 hover:bg-sky-500 text-white rounded-xs font-semibold flex items-center gap-1 transition cursor-pointer shadow-xs"
-            :title="'Attach ' + projectStore.activeMesh.name + ' to this socket'"
-          >
-            <Link class="w-2.5 h-2.5" />
-            <span>Attach Mesh</span>
-          </button>
-        </div>
+    <UiSection v-if="selectedSocket" title="Socket" :icon="Wrench" :default-open="true">
+      <div class="flex items-center justify-between text-[10px]">
+        <span class="text-sky-300 truncate">{{ selectedSocket.socket.name }} · {{ selectedSocket.bone.name }}</span>
+        <button type="button" class="text-ui-textMuted hover:text-rose-400" @click="handleRemoveSocket(selectedSocket.bone.id, selectedSocket.socket.id)">
+          <Trash2 class="w-3 h-3" />
+        </button>
       </div>
-
-      <!-- Quick Parenting & Spring Physics Inspector for Selected Bone -->
-      <div v-else-if="selectedBone" class="bg-ui-surface/60 p-2 rounded-xs border border-ui-borderSubtle space-y-2">
-        <div class="space-y-1">
-          <div class="text-[10px] text-ui-textMuted font-semibold uppercase">Parent Bone</div>
-          <select 
-            :value="selectedBone.parentId || 'root'"
-            @change="handleReparent(selectedBone.id, ($event.target as HTMLSelectElement).value)"
-            class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-ui-textPrimary text-xs focus:outline-none focus:border-ui-accent cursor-pointer"
-          >
-            <option value="root" class="bg-ui-panel text-ui-textMuted">-- None (Root Bone) --</option>
-            <option 
-              v-for="b in animationStore.armature.bones.filter(b => b.id !== selectedBone?.id)" 
-              :key="b.id" 
-              :value="b.id"
-              class="bg-ui-panel text-ui-textPrimary"
-            >
-              {{ b.name }}
-            </option>
-          </select>
-        </div>
-
-        <!-- Spring / Jiggle Physics Section -->
-        <div class="space-y-1.5 pt-1.5 border-t border-ui-borderSubtle/60">
-          <div class="flex items-center justify-between">
-            <span class="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">Spring Physics (Jiggle)</span>
-            <input 
-              type="checkbox"
-              :checked="selectedBone?.springConstraint?.enabled || false"
-              @change="(e) => {
-                if (!selectedBone) return
-                if (!selectedBone.springConstraint) {
-                  selectedBone.springConstraint = { enabled: true, stiffness: 0.3, damping: 0.25, gravity: 0.0 }
-                } else {
-                  selectedBone.springConstraint.enabled = (e.target as HTMLInputElement).checked
-                }
-              }"
-              class="rounded-xs accent-emerald-500 cursor-pointer"
-            />
-          </div>
-
-          <template v-if="selectedBone && selectedBone.springConstraint?.enabled">
-            <div class="space-y-1 text-[10px]">
-              <div class="flex items-center justify-between text-ui-textMuted">
-                <span>Stiffness:</span>
-                <span class="font-mono text-ui-textPrimary">{{ selectedBone.springConstraint.stiffness }}</span>
-              </div>
-              <input 
-                type="range" 
-                min="0.05" 
-                max="1.0" 
-                step="0.05" 
-                v-model.number="selectedBone.springConstraint.stiffness"
-                class="w-full accent-emerald-500 h-1 bg-ui-input rounded-xs cursor-pointer"
-              />
-
-              <div class="flex items-center justify-between text-ui-textMuted">
-                <span>Damping:</span>
-                <span class="font-mono text-ui-textPrimary">{{ selectedBone.springConstraint.damping }}</span>
-              </div>
-              <input 
-                type="range" 
-                min="0.05" 
-                max="1.0" 
-                step="0.05" 
-                v-model.number="selectedBone.springConstraint.damping"
-                class="w-full accent-emerald-500 h-1 bg-ui-input rounded-xs cursor-pointer"
-              />
-
-              <div class="flex items-center justify-between text-ui-textMuted">
-                <span>Gravity Sag:</span>
-                <span class="font-mono text-ui-textPrimary">{{ selectedBone.springConstraint.gravity }}</span>
-              </div>
-              <input 
-                type="range" 
-                min="0.0" 
-                max="1.0" 
-                step="0.05" 
-                v-model.number="selectedBone.springConstraint.gravity"
-                class="w-full accent-emerald-500 h-1 bg-ui-input rounded-xs cursor-pointer"
-              />
-            </div>
-          </template>
-        </div>
+      <div class="grid grid-cols-3 gap-1">
+        <input type="number" step="0.1" v-model.number="selectedSocket.socket.position.x" class="w-full bg-ui-input px-1 py-0.5 text-right rounded-xs border border-ui-borderSubtle font-mono text-[10px]" title="X" />
+        <input type="number" step="0.1" v-model.number="selectedSocket.socket.position.y" class="w-full bg-ui-input px-1 py-0.5 text-right rounded-xs border border-ui-borderSubtle font-mono text-[10px]" title="Y" />
+        <input type="number" step="0.1" v-model.number="selectedSocket.socket.position.z" class="w-full bg-ui-input px-1 py-0.5 text-right rounded-xs border border-ui-borderSubtle font-mono text-[10px]" title="Z" />
       </div>
-    </div>
+      <UiButton v-if="projectStore.activeMesh" size="xs" class="w-full" @click="handleAttachActiveMeshToSocket(selectedSocket.socket.id)">
+        <Link class="w-3 h-3" /> Attach mesh
+      </UiButton>
+    </UiSection>
+
+    <UiSection v-else-if="selectedBone" title="Parent" :icon="GitBranch" :default-open="true">
+      <select
+        :value="selectedBone.parentId || 'root'"
+        class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-ui-textPrimary text-xs focus:outline-none cursor-pointer"
+        @change="handleReparent(selectedBone.id, ($event.target as HTMLSelectElement).value)"
+      >
+        <option value="root" class="bg-ui-panel text-ui-textMuted">None (root)</option>
+        <option
+          v-for="b in animationStore.armature.bones.filter(b => b.id !== selectedBone?.id)"
+          :key="b.id"
+          :value="b.id"
+          class="bg-ui-panel"
+        >{{ b.name }}</option>
+      </select>
+      <p class="text-[9px] text-ui-textMuted">Rest pose, IK, and spring are on the Bone tab.</p>
+    </UiSection>
   </div>
 </template>

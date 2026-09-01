@@ -6,15 +6,17 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import { useAnimationStore } from '../../stores/animationStore'
+import { useLayoutStore } from '../../stores/layoutStore'
 import { useThemeStore, type ThemeColors } from '../../stores/themeStore'
-import { meshToThreeGeometry, computeBoneWorldMatrix, updateThreeGeometryAttributes } from '../../core/geometry/Converters'
-import { solveCCDIK } from '../../core/animation/IKSolver'
+import { meshToThreeGeometry, computeBoneWorldMatrix, updateThreeGeometryAttributes, resolveMeshShadeMode } from '../../core/geometry/Converters'
+import { setIKTargetAndSolve, solveCCDIK } from '../../core/animation/IKSolver'
+import { resolveMeshBoneParentId } from '../../core/animation/Armature'
 import { sampleTrack } from '../../core/animation/Armature'
 import { SpringPhysicsSolver } from '../../core/animation/SpringPhysics'
 import { createPSXMaterial } from '../../core/shaders/PSXShader'
-import { computeCentroid } from '../../utils/math'
+import { computeCentroid, computeFaceNormal } from '../../utils/math'
 import { snapColorToPalette } from '../../utils/color'
-import { getMeshEdges } from '../../core/geometry/EdgeUtils'
+import { getMeshEdges, getLinkedVertexIds, getLinkedFaceIds } from '../../core/geometry/EdgeUtils'
 import { Vector3D, Edge, Vertex, MeshObject } from '../../types/mesh'
 import { operatorManager } from '../../core/operators/OperatorManager'
 import { OperatorContext } from '../../core/operators/ModalOperator'
@@ -27,11 +29,15 @@ import { BevelOperator } from '../../core/operators/BevelOperator'
 import { KnifeOperator } from '../../core/operators/knife/KnifeOperator'
 import { LoopCutOperator } from '../../core/operators/loopCut/LoopCutOperator'
 import { PrimitivePlacementOperator, PrimitivePlacementMode } from '../../core/operators/placement/PrimitivePlacementOperator'
+import { PolyDrawOperator } from '../../core/operators/PolyDrawOperator'
+import { ScreenGeometry, type ViewQuadrant } from '../../core/geometry/ScreenGeometry'
 import { PrimitiveType } from '../../core/primitives/PrimitiveTypes'
 import { EditableMesh } from '../../core/mesh/MeshKernel'
 import { MeshBridge } from '../../core/mesh/MeshBridge'
 import { EditorEnvironment } from '../../core/render/EditorEnvironment'
 import { ViewportLayerManager } from '../../core/render/ViewportLayers'
+import { SnapManager } from '../../core/transform/SnapManager'
+import { useFloatingDrag } from '../../composables/useFloatingDrag'
 import { 
   Move, 
   RotateCw, 
@@ -49,6 +55,7 @@ import { EDITOR_EVENTS } from '../../core/commands/editorCommands'
 
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
+const layoutStore = useLayoutStore()
 const animationStore = useAnimationStore()
 const themeStore = useThemeStore()
 
@@ -75,6 +82,8 @@ let orbitControls: OrbitControls
 let transformControls: TransformControls
 
 let gridHelper: THREE.GridHelper
+let gridFront: THREE.GridHelper
+let gridSide: THREE.GridHelper
 let axesHelper: THREE.AxesHelper
 
 // Render Layer Architecture
@@ -91,13 +100,179 @@ const raycaster = new THREE.Raycaster()
 const mouse = new THREE.Vector2()
 let isPaintingOn3D = false
 let lastPaintUV: { u: number; v: number } | null = null
+let lastPaintTextureId: string | undefined
 let isGizmoDragging = false
 let pointerDownClientPos = { x: 0, y: 0 }
 let lastHoverClientPos = { x: 0, y: 0 }
 let pointerDownHitMesh = false
+let refDrag: {
+  id: string
+  plane: 'front' | 'side' | 'top'
+  mode: 'pan' | 'scale'
+  startHit: THREE.Vector3
+  startOffsetX: number
+  startOffsetY: number
+  startScale: number
+} | null = null
 
 // Active Quadrant: 'top_left' | 'top_right' | 'bottom_left' | 'bottom_right' | 'main'
-const activeQuadrant = ref<'top_left' | 'top_right' | 'bottom_left' | 'bottom_right' | 'main'>('main')
+const activeQuadrant = ref<ViewQuadrant>('main')
+const refGroup = new THREE.Group()
+refGroup.name = 'BlockoutReferences'
+refGroup.renderOrder = 5
+
+function isTripleView() {
+  return toolStore.appMode === 'blockout'
+}
+
+function isSplitView() {
+  return isTripleView() || toolStore.viewport.quadView
+}
+
+const BLOCKOUT_MIN_FRAC = 0.14
+
+function tripleCols(total: number) {
+  return ScreenGeometry.tripleCols(total)
+}
+
+function tripleHit(x: number, total: number) {
+  const c = tripleCols(total)
+  if (x < c.xSide) return { col: 0 as const, localX: x, localW: c.front, ...c }
+  if (x < c.xPersp) return { col: 1 as const, localX: x - c.xSide, localW: c.side, ...c }
+  return { col: 2 as const, localX: x - c.xPersp, localW: Math.max(1, c.persp), ...c }
+}
+
+const blockoutGridCols = computed(() => {
+  const p = Math.max(BLOCKOUT_MIN_FRAC, 1 - layoutStore.blockoutFrontFrac - layoutStore.blockoutSideFrac)
+  return `${layoutStore.blockoutFrontFrac}fr ${layoutStore.blockoutSideFrac}fr ${p}fr`
+})
+
+const isBlockoutSplitting = ref(false)
+
+function syncBlockoutSplitsToScreen() {
+  ScreenGeometry.blockoutFrontFrac = layoutStore.blockoutFrontFrac
+  ScreenGeometry.blockoutSideFrac = layoutStore.blockoutSideFrac
+}
+
+function startBlockoutSplit(which: 'front-side' | 'side-persp', e: PointerEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  const handle = e.currentTarget as HTMLElement
+  isBlockoutSplitting.value = true
+  try { handle.setPointerCapture(e.pointerId) } catch { /* optional */ }
+
+  const onMove = (move: PointerEvent) => {
+    const rect = containerRef.value?.getBoundingClientRect()
+    if (!rect || rect.width < 8) return
+    const x = (move.clientX - rect.left) / rect.width
+    if (which === 'front-side') {
+      const maxF = 1 - BLOCKOUT_MIN_FRAC - layoutStore.blockoutSideFrac
+      layoutStore.blockoutFrontFrac = Math.min(maxF, Math.max(BLOCKOUT_MIN_FRAC, x))
+    } else {
+      const minX = layoutStore.blockoutFrontFrac + BLOCKOUT_MIN_FRAC
+      const maxX = 1 - BLOCKOUT_MIN_FRAC
+      const split = Math.min(maxX, Math.max(minX, x))
+      layoutStore.blockoutSideFrac = split - layoutStore.blockoutFrontFrac
+    }
+    syncBlockoutSplitsToScreen()
+    onWindowResize()
+  }
+  const onUp = () => {
+    isBlockoutSplitting.value = false
+    handle.removeEventListener('pointermove', onMove)
+    handle.removeEventListener('pointerup', onUp)
+    handle.removeEventListener('pointercancel', onUp)
+    onWindowResize()
+  }
+  handle.addEventListener('pointermove', onMove)
+  handle.addEventListener('pointerup', onUp)
+  handle.addEventListener('pointercancel', onUp)
+}
+
+function resetBlockoutSplits() {
+  layoutStore.resetBlockoutSplits()
+  syncBlockoutSplitsToScreen()
+  onWindowResize()
+}
+
+function isPerspQuadrant(q: ViewQuadrant = activeQuadrant.value) {
+  return q === 'main' || q === 'top_right' || q === 'col_persp'
+}
+
+function viewportKindFromQuadrant(q: ViewQuadrant = activeQuadrant.value): 'persp' | 'top' | 'front' | 'right' {
+  if (q === 'top_left') return 'top'
+  if (q === 'bottom_left' || q === 'col_front') return 'front'
+  if (q === 'bottom_right' || q === 'col_side') return 'right'
+  return 'persp'
+}
+
+function disposeGridHelper(helper: THREE.GridHelper | undefined) {
+  if (!helper || !layers) return
+  layers.gridGroup.remove(helper)
+  helper.geometry.dispose()
+  const mats = helper.material
+  if (Array.isArray(mats)) {
+    for (const m of mats) m.dispose()
+  } else {
+    mats.dispose()
+  }
+}
+
+function buildSceneGrids(major: THREE.Color, minor: THREE.Color) {
+  disposeGridHelper(gridHelper)
+  disposeGridHelper(gridFront)
+  disposeGridHelper(gridSide)
+  gridHelper = new THREE.GridHelper(20, 20, major, minor)
+  gridHelper.position.y = -0.001
+  gridFront = new THREE.GridHelper(20, 20, major, minor)
+  gridFront.rotation.x = Math.PI / 2
+  gridSide = new THREE.GridHelper(20, 20, major, minor)
+  gridSide.rotation.z = Math.PI / 2
+  layers.gridGroup.add(gridHelper, gridFront, gridSide)
+}
+
+function setGridsForView(view: 'floor' | 'front' | 'side') {
+  const show = toolStore.viewport.showGrid
+  if (gridHelper) gridHelper.visible = show && view === 'floor'
+  if (gridFront) gridFront.visible = show && view === 'front'
+  if (gridSide) gridSide.visible = show && view === 'side'
+}
+
+function isMeshSelectionAllowed() {
+  return toolStore.isMeshWorkspace() || (toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'uv')
+}
+
+function meshWorldMatrix(mesh: MeshObject): THREE.Matrix4 {
+  return new THREE.Matrix4().compose(
+    new THREE.Vector3(mesh.position.x, mesh.position.y, mesh.position.z),
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(
+      THREE.MathUtils.degToRad(mesh.rotation.x),
+      THREE.MathUtils.degToRad(mesh.rotation.y),
+      THREE.MathUtils.degToRad(mesh.rotation.z)
+    )),
+    new THREE.Vector3(mesh.scale.x, mesh.scale.y, mesh.scale.z)
+  )
+}
+
+function localToWorld(mesh: MeshObject, local: Vector3D, mat = meshWorldMatrix(mesh)): THREE.Vector3 {
+  return new THREE.Vector3(local.x, local.y, local.z).applyMatrix4(mat)
+}
+
+function worldToLocal(mesh: MeshObject, world: THREE.Vector3, invMat?: THREE.Matrix4): Vector3D {
+  const inv = invMat ?? meshWorldMatrix(mesh).invert()
+  const p = world.clone().applyMatrix4(inv)
+  return { x: p.x, y: p.y, z: p.z }
+}
+
+function pushWorldFan(mesh: MeshObject, faceVerts: Vertex[], positions: number[]) {
+  const mat = meshWorldMatrix(mesh)
+  for (let i = 1; i < faceVerts.length - 1; i++) {
+    const a = localToWorld(mesh, faceVerts[0].position, mat)
+    const b = localToWorld(mesh, faceVerts[i].position, mat)
+    const c = localToWorld(mesh, faceVerts[i + 1].position, mat)
+    positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z)
+  }
+}
 
 // Hover visual objects
 let hoverFaceMesh: THREE.Mesh
@@ -285,7 +460,7 @@ function initThree() {
     }
     if (event.value !== null) {
       orbitControls.enabled = false
-    } else if (!toolStore.viewport.quadView || activeQuadrant.value === 'top_right') {
+    } else if (!isSplitView() || isPerspQuadrant()) {
       if (orbitControls) orbitControls.enabled = true
     }
   })
@@ -306,19 +481,16 @@ function initThree() {
   // Pass 8: Hover overlay (hoverFaceMesh, hoverEdgeMesh, hoverVertexMesh)
   // ----------------------------------------------------
   layers = new ViewportLayerManager(scene)
+  scene.add(refGroup)
 
   // Pass 2: Internal Editor Lighting & Soft Shadow Environment Rig
   editorEnv = new EditorEnvironment(scene, layers.shadowGroup)
 
   // Pass 3: Grid & Axes
-  gridHelper = new THREE.GridHelper(
-    20, 
-    20, 
-    new THREE.Color(themeStore.activeColors.gridMajor), 
+  buildSceneGrids(
+    new THREE.Color(themeStore.activeColors.gridMajor),
     new THREE.Color(themeStore.activeColors.gridMinor)
   )
-  gridHelper.position.y = -0.001
-  layers.gridGroup.add(gridHelper)
 
   axesHelper = new THREE.AxesHelper(1.5)
   axesHelper.setColors(
@@ -343,6 +515,7 @@ function initThree() {
 
   // Build Scene Meshes
   rebuildMeshes()
+  rebuildReferencePlanes()
 
   // ResizeObserver
   if (window.ResizeObserver && containerRef.value) {
@@ -378,10 +551,13 @@ function initHoverVisuals() {
   const edgeMat = new THREE.LineBasicMaterial({
     color: 0xfef08a,
     linewidth: 5,
-    depthTest: false
+    depthTest: false,
+    depthWrite: false,
+    transparent: true
   })
   hoverEdgeMesh = new THREE.Line(new THREE.BufferGeometry(), edgeMat)
   hoverEdgeMesh.visible = false
+  hoverEdgeMesh.renderOrder = 2
   layers.hoverGroup.add(hoverEdgeMesh)
 
   const vertMat = new THREE.PointsMaterial({
@@ -424,16 +600,10 @@ function initHoverVisuals() {
 const textureCache = new Map<string, THREE.CanvasTexture>()
 
 function getThreeTexture(textureId?: string | null): THREE.CanvasTexture | null {
-  if (textureId === null) return null
-  const targetTex = (textureId ? projectStore.textures.find(t => t.id === textureId) : null) || projectStore.activeTexture || projectStore.textures[0]
+  if (!textureId) return null
+  const targetTex = projectStore.textures.find(t => t.id === textureId)
   if (!targetTex || !targetTex.pixelBuffer) {
-    if (!threeTexture) {
-      threeTexture = new THREE.CanvasTexture(projectStore.pixelBuffer.canvas)
-      threeTexture.magFilter = THREE.NearestFilter
-      threeTexture.minFilter = THREE.NearestFilter
-      threeTexture.generateMipmaps = false
-    }
-    return threeTexture
+    return null
   }
 
   let tex = textureCache.get(targetTex.id)
@@ -486,21 +656,48 @@ function updateThreeTexture() {
 }
 
 const isDraggingImageFile = ref(false)
+const dropTargetPane = ref<'front' | 'side' | 'persp' | null>(null)
+
+function paneFromClientX(clientX: number): 'front' | 'side' | 'persp' {
+  const rect = containerRef.value?.getBoundingClientRect()
+  if (!rect) return 'persp'
+  const x = clientX - rect.left
+  const hit = tripleHit(x, rect.width)
+  if (hit.col === 0) return 'front'
+  if (hit.col === 1) return 'side'
+  return 'persp'
+}
 
 function onViewportDragOver(e: DragEvent) {
   if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) {
     isDraggingImageFile.value = true
+    dropTargetPane.value = isTripleView() ? paneFromClientX(e.clientX) : 'persp'
   }
 }
 
-function onViewportDragLeave() {
+function onViewportDragLeave(e: DragEvent) {
+  const next = e.relatedTarget as Node | null
+  if (next && containerRef.value?.contains(next)) return
   isDraggingImageFile.value = false
+  dropTargetPane.value = null
 }
 
 function onViewportDrop(e: DragEvent) {
+  const pane = isTripleView() ? paneFromClientX(e.clientX) : 'persp'
   isDraggingImageFile.value = false
+  dropTargetPane.value = null
   const file = e.dataTransfer?.files?.[0]
   if (!file || !file.type.startsWith('image/')) return
+
+  if (isTripleView() && (pane === 'front' || pane === 'side')) {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : ''
+      if (dataUrl) projectStore.setReferenceOnPlane(pane, dataUrl, file.name)
+    }
+    reader.readAsDataURL(file)
+    return
+  }
 
   const rect = containerRef.value?.getBoundingClientRect()
   if (!rect) return
@@ -531,10 +728,10 @@ function onViewportDrop(e: DragEvent) {
     const img = new Image()
     img.onload = () => {
       const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_')
-      const newTex = projectStore.addTexture(cleanName, img.width || 64, img.height || 64, dataUrl)
+      const newTex = projectStore.createTexture(cleanName, img.width || 64, img.height || 64, dataUrl)
       if (targetMeshId) {
         projectStore.activeMeshId = targetMeshId
-        projectStore.assignTextureToActiveMesh(newTex.id)
+        projectStore.applyTextureToMesh(targetMeshId, newTex.id, 'this_object')
       }
     }
     img.src = dataUrl
@@ -549,10 +746,69 @@ function initTexture() {
   }
 }
 
+function isSkeletalPoseMode() {
+  return toolStore.appMode === 'animate' || (toolStore.appMode === 'rig' && animationStore.isTestPoseActive)
+}
+
+function applyMeshWorldPose(meshObj: MeshObject, target: THREE.Object3D) {
+  let finalPos = new THREE.Vector3(meshObj.position.x, meshObj.position.y, meshObj.position.z)
+  let finalEuler = new THREE.Euler(
+    THREE.MathUtils.degToRad(meshObj.rotation.x),
+    THREE.MathUtils.degToRad(meshObj.rotation.y),
+    THREE.MathUtils.degToRad(meshObj.rotation.z)
+  )
+  let finalScale = new THREE.Vector3(meshObj.scale.x, meshObj.scale.y, meshObj.scale.z)
+
+  if (isSkeletalPoseMode()) {
+    const boundBoneId = resolveMeshBoneParentId(meshObj, animationStore.armature.bones)
+    if (boundBoneId) {
+      const parentBone = animationStore.armature.bones.find(b => b.id === boundBoneId)
+      if (parentBone) {
+        const boneMat = computeBoneWorldMatrix(parentBone, animationStore.armature.bones)
+        const meshQuat = new THREE.Quaternion().setFromEuler(finalEuler)
+        const meshMat = new THREE.Matrix4().compose(finalPos, meshQuat, finalScale)
+        meshMat.premultiply(boneMat)
+        const outQuat = new THREE.Quaternion()
+        meshMat.decompose(finalPos, outQuat, finalScale)
+        finalEuler.setFromQuaternion(outQuat)
+      }
+    } else if (meshObj.parentId) {
+      const parentMesh = projectStore.meshes.find(m => m.id === meshObj.parentId)
+      if (parentMesh) {
+        finalPos.add(new THREE.Vector3(parentMesh.position.x, parentMesh.position.y, parentMesh.position.z))
+        finalEuler.x += THREE.MathUtils.degToRad(parentMesh.rotation.x)
+        finalEuler.y += THREE.MathUtils.degToRad(parentMesh.rotation.y)
+        finalEuler.z += THREE.MathUtils.degToRad(parentMesh.rotation.z)
+        finalScale.multiply(new THREE.Vector3(parentMesh.scale.x, parentMesh.scale.y, parentMesh.scale.z))
+      }
+    }
+  }
+
+  target.position.copy(finalPos)
+  target.rotation.copy(finalEuler)
+  target.scale.copy(finalScale)
+}
+
+function syncMeshHelperTransforms(meshId: string, src: THREE.Object3D) {
+  if (!layers) return
+  const names = [`${meshId}_wire`, `${meshId}_backface`, `${meshId}_sel`, `${meshId}_edges`]
+  const groups = [layers.wireframeGroup, layers.gizmoGroup, layers.selectionGroup, layers.modelGroup]
+  for (const group of groups) {
+    for (const name of names) {
+      const obj = group.getObjectByName(name)
+      if (obj) {
+        obj.position.copy(src.position)
+        obj.rotation.copy(src.rotation)
+        obj.scale.copy(src.scale)
+      }
+    }
+  }
+}
+
 function updateMeshTransformsAndAttributes(): boolean {
   if (!layers || layers.modelGroup.children.length === 0) return false
 
-  const isPoseMode = toolStore.appMode === 'animate' || (toolStore.appMode === 'rig' && animationStore.isTestPoseActive)
+  const isPoseMode = isSkeletalPoseMode()
   const skeletalContext = isPoseMode ? { isPoseMode: true, bones: animationStore.armature.bones } : undefined
   const isWeightPaint = toolStore.appMode === 'rig' && animationStore.isWeightPaintActive
   const weightPaintContext = isWeightPaint ? { isWeightPaint: true, activeBoneId: animationStore.selectedBoneId || '' } : undefined
@@ -562,14 +818,8 @@ function updateMeshTransformsAndAttributes(): boolean {
     if (child instanceof THREE.Mesh) {
       const meshObj = projectStore.meshes.find(m => m.id === child.name)
       if (meshObj) {
-        child.position.set(meshObj.position.x, meshObj.position.y, meshObj.position.z)
-        child.rotation.set(
-          THREE.MathUtils.degToRad(meshObj.rotation.x),
-          THREE.MathUtils.degToRad(meshObj.rotation.y),
-          THREE.MathUtils.degToRad(meshObj.rotation.z)
-        )
-        child.scale.set(meshObj.scale.x, meshObj.scale.y, meshObj.scale.z)
-
+        applyMeshWorldPose(meshObj, child)
+        syncMeshHelperTransforms(meshObj.id, child)
         const ok = updateThreeGeometryAttributes(meshObj, child.geometry, skeletalContext, weightPaintContext)
         if (!ok) allSuccess = false
       }
@@ -577,6 +827,168 @@ function updateMeshTransformsAndAttributes(): boolean {
   }
 
   return allSuccess
+}
+
+function refreshLiveDeform() {
+  if (!updateMeshTransformsAndAttributes() && !isGizmoDragging) {
+    rebuildMeshes()
+  }
+}
+
+function poseReferenceMesh(mesh: THREE.Mesh, img: { plane: string; offsetX: number; offsetY: number; scale: number; opacity: number; flipX: boolean; locked: boolean; id: string }) {
+  const s = Math.max(0.25, img.scale)
+  mesh.scale.set(img.flipX ? -s : s, s, 1)
+  mesh.rotation.set(0, 0, 0)
+  if (img.plane === 'front') {
+    mesh.position.set(img.offsetX, img.offsetY, -0.02)
+  } else if (img.plane === 'side') {
+    mesh.rotation.y = Math.PI / 2
+    mesh.position.set(-0.02, img.offsetY, img.offsetX)
+  } else {
+    mesh.rotation.x = -Math.PI / 2
+    mesh.position.set(img.offsetX, -0.02, img.offsetY)
+  }
+  const mat = mesh.material as THREE.MeshBasicMaterial
+  mat.opacity = img.opacity
+  mat.color.set(projectStore.selectedReferenceId === img.id ? 0xfff4c2 : 0xffffff)
+  mesh.raycast = img.locked ? (() => {}) : THREE.Mesh.prototype.raycast
+}
+
+function syncReferenceTransforms() {
+  const visible = projectStore.referenceImages.filter(img => img.visible && img.dataUrl)
+  if (refGroup.children.length !== visible.length) {
+    rebuildReferencePlanes()
+    return
+  }
+  for (const child of refGroup.children) {
+    if (!(child instanceof THREE.Mesh)) continue
+    const img = projectStore.referenceImages.find(r => r.id === child.userData.refId)
+    if (!img || !img.visible) {
+      rebuildReferencePlanes()
+      return
+    }
+    poseReferenceMesh(child, img)
+  }
+}
+
+function panePlaneFromKind(kind: 'persp' | 'top' | 'front' | 'right'): 'front' | 'side' | 'top' | null {
+  if (kind === 'front') return 'front'
+  if (kind === 'right') return 'side'
+  if (kind === 'top') return 'top'
+  return null
+}
+
+function hitReferencePlane(plane: 'front' | 'side' | 'top'): THREE.Vector3 | null {
+  const p = new THREE.Plane()
+  if (plane === 'front') p.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -0.02))
+  else if (plane === 'side') p.setFromNormalAndCoplanarPoint(new THREE.Vector3(1, 0, 0), new THREE.Vector3(-0.02, 0, 0))
+  else p.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -0.02, 0))
+  const hit = new THREE.Vector3()
+  if (!raycaster.ray.intersectPlane(p, hit)) return null
+  return hit
+}
+
+function beginRefDrag(img: { id: string; plane: 'front' | 'side' | 'top'; offsetX: number; offsetY: number; scale: number; locked: boolean }, event: PointerEvent) {
+  if (img.locked) return false
+  const hit = hitReferencePlane(img.plane)
+  if (!hit) return false
+  projectStore.recordState('Move Reference')
+  projectStore.selectReference(img.id)
+  refDrag = {
+    id: img.id,
+    plane: img.plane,
+    mode: event.shiftKey ? 'scale' : 'pan',
+    startHit: hit.clone(),
+    startOffsetX: img.offsetX,
+    startOffsetY: img.offsetY,
+    startScale: img.scale
+  }
+  pointerDownHitMesh = true
+  orbitControls.enabled = false
+  updateTransformGizmo()
+  return true
+}
+
+function tryBeginReferenceInteraction(event: PointerEvent): boolean {
+  if (toolStore.appMode !== 'blockout') return false
+  const kind = viewportKindFromQuadrant()
+  const pane = panePlaneFromKind(kind)
+  const modelHits = raycaster.intersectObjects(layers.modelGroup.children, true)
+  const refHits = raycaster.intersectObjects(refGroup.children, true).filter(h => h.object.userData.refId)
+
+  if (event.altKey && pane) {
+    const img = projectStore.referenceImages.find(r => r.plane === pane && r.visible && !r.locked)
+    return img ? beginRefDrag(img, event) : false
+  }
+
+  if (modelHits.length > 0) return false
+
+  if (refHits.length > 0) {
+    const id = refHits[0].object.userData.refId as string
+    const img = projectStore.referenceImages.find(r => r.id === id)
+    return img ? beginRefDrag(img, event) : false
+  }
+
+  return false
+}
+
+function applyRefDrag() {
+  if (!refDrag) return
+  const img = projectStore.referenceImages.find(r => r.id === refDrag!.id)
+  if (!img) return
+  const hit = hitReferencePlane(refDrag.plane)
+  if (!hit) return
+  if (refDrag.mode === 'scale') {
+    const pixelDy = lastHoverClientPos.y - pointerDownClientPos.y
+    const next = Math.max(0.5, Math.min(24, refDrag.startScale * (1 - pixelDy * 0.008)))
+    projectStore.updateReferenceImage(img.id, { scale: next }, { rebuild: false })
+    return
+  }
+  const dx = hit.x - refDrag.startHit.x
+  const dy = hit.y - refDrag.startHit.y
+  const dz = hit.z - refDrag.startHit.z
+  if (refDrag.plane === 'front') {
+    projectStore.updateReferenceImage(img.id, { offsetX: refDrag.startOffsetX + dx, offsetY: refDrag.startOffsetY + dy }, { rebuild: false })
+  } else if (refDrag.plane === 'side') {
+    projectStore.updateReferenceImage(img.id, { offsetX: refDrag.startOffsetX + dz, offsetY: refDrag.startOffsetY + dy }, { rebuild: false })
+  } else {
+    projectStore.updateReferenceImage(img.id, { offsetX: refDrag.startOffsetX + dx, offsetY: refDrag.startOffsetY + dz }, { rebuild: false })
+  }
+}
+
+function rebuildReferencePlanes() {
+  while (refGroup.children.length > 0) {
+    const child = refGroup.children[0]
+    refGroup.remove(child)
+    if (child instanceof THREE.Mesh) {
+      child.geometry.dispose()
+      const mat = child.material
+      if (Array.isArray(mat)) mat.forEach(m => m.dispose())
+      else {
+        if (mat.map) mat.map.dispose()
+        mat.dispose()
+      }
+    }
+  }
+
+  for (const img of projectStore.referenceImages) {
+    if (!img.visible || !img.dataUrl) continue
+    const tex = new THREE.TextureLoader().load(img.dataUrl)
+    tex.colorSpace = THREE.SRGBColorSpace
+    tex.flipY = true
+    const geom = new THREE.PlaneGeometry(1, 1)
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex,
+      transparent: true,
+      opacity: img.opacity,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    })
+    const mesh = new THREE.Mesh(geom, mat)
+    mesh.userData.refId = img.id
+    poseReferenceMesh(mesh, img)
+    refGroup.add(mesh)
+  }
 }
 
 function rebuildMeshes() {
@@ -637,9 +1049,16 @@ function rebuildMeshes() {
     let edgeLinesGeomUsed = false
     let ptsGeomUsed = false
 
-    const isSmooth = (meshObj.shadeMode || toolStore.viewport.shadeMode) === 'smooth'
+    const shade = resolveMeshShadeMode(meshObj, toolStore.viewport.shadeMode)
+    const isSmooth = shade !== 'flat'
     const meshMatObj = projectStore.materials.find(m => m.id === meshObj.materialId) || projectStore.materials[0]
-    const meshTex = getThreeTexture(meshMatObj?.textureId)
+    const previewPaintTarget =
+      toolStore.appMode === 'uvpaint' &&
+      meshObj.id === projectStore.activeMeshId &&
+      !!projectStore.activeTextureId
+    const meshTex = getThreeTexture(
+      previewPaintTarget ? projectStore.activeTextureId : meshMatObj?.textureId
+    )
     const baseColor = new THREE.Color(meshMatObj?.color || '#ffffff')
     const roughness = typeof meshMatObj?.roughness === 'number' ? meshMatObj.roughness : 0.75
     const metalness = typeof meshMatObj?.metalness === 'number' ? meshMatObj.metalness : 0.05
@@ -714,7 +1133,11 @@ function rebuildMeshes() {
       psxMat.uniforms.uColorDepth.value = typeof meshMatObj?.colorDepth === 'number' ? meshMatObj.colorDepth : (shadingType === 'dreamcast' ? 0.0 : 32.0)
       psxMat.side = sideSetting
       psxMat.transparent = isTransparent
+      psxMat.depthWrite = !isTransparent
       psxMat.opacity = isXRay ? 0.55 : matOpacity
+      if (psxMat.uniforms.uOpacity) {
+        psxMat.uniforms.uOpacity.value = isXRay ? 0.55 : (matOpacity < 1 ? matOpacity : 1.0)
+      }
       mat = psxMat
     } else if (meshMatObj?.shading === 'unlit') {
       mat = new THREE.MeshBasicMaterial({
@@ -802,43 +1225,7 @@ function rebuildMeshes() {
     threeMesh.castShadow = true
     threeMesh.receiveShadow = true
 
-    let finalPos = new THREE.Vector3(meshObj.position.x, meshObj.position.y, meshObj.position.z)
-    let finalEuler = new THREE.Euler(
-      THREE.MathUtils.degToRad(meshObj.rotation.x),
-      THREE.MathUtils.degToRad(meshObj.rotation.y),
-      THREE.MathUtils.degToRad(meshObj.rotation.z)
-    )
-    let finalScale = new THREE.Vector3(meshObj.scale.x, meshObj.scale.y, meshObj.scale.z)
-
-    if (meshObj.parentId && isPoseMode) {
-      const parentBone = animationStore.armature.bones.find(b => b.id === meshObj.parentId)
-      if (parentBone) {
-        const boneMat = computeBoneWorldMatrix(parentBone, animationStore.armature.bones)
-        finalPos = finalPos.clone().applyMatrix4(boneMat)
-        const bRot = new THREE.Euler(
-          THREE.MathUtils.degToRad(parentBone.rotation.x),
-          THREE.MathUtils.degToRad(parentBone.rotation.y),
-          THREE.MathUtils.degToRad(parentBone.rotation.z)
-        )
-        finalEuler.x += bRot.x
-        finalEuler.y += bRot.y
-        finalEuler.z += bRot.z
-        finalScale.multiply(new THREE.Vector3(parentBone.scale.x, parentBone.scale.y, parentBone.scale.z))
-      } else {
-        const parentMesh = projectStore.meshes.find(m => m.id === meshObj.parentId)
-        if (parentMesh) {
-          finalPos.add(new THREE.Vector3(parentMesh.position.x, parentMesh.position.y, parentMesh.position.z))
-          finalEuler.x += THREE.MathUtils.degToRad(parentMesh.rotation.x)
-          finalEuler.y += THREE.MathUtils.degToRad(parentMesh.rotation.y)
-          finalEuler.z += THREE.MathUtils.degToRad(parentMesh.rotation.z)
-          finalScale.multiply(new THREE.Vector3(parentMesh.scale.x, parentMesh.scale.y, parentMesh.scale.z))
-        }
-      }
-    }
-
-    threeMesh.position.copy(finalPos)
-    threeMesh.rotation.copy(finalEuler)
-    threeMesh.scale.copy(finalScale)
+    applyMeshWorldPose(meshObj, threeMesh)
     threeMesh.userData = { meshId: meshObj.id, faceIndexMap }
     layers.modelGroup.add(threeMesh)
 
@@ -859,16 +1246,32 @@ function rebuildMeshes() {
       layers.modelGroup.add(backMesh)
     }
 
-    // PASS 5: Wireframe overlay
-    if ((toolStore.appMode === 'model' || isXRay || meshMatObj?.wireframe) && toolStore.viewport.shading !== 'wireframe') {
-      const wireMat = new THREE.LineBasicMaterial({ 
-        color: isSelectedMesh ? 0x6366f1 : 0x475569, 
+    // PASS 5: Wireframe overlay — dark crease lines (Blockbench-style), biased in front of the fill.
+    // Skip on the active mesh in edge/vertex mode so cyan/orange/hover lines are not covered.
+    const showCreaseWire = (isXRay || meshMatObj?.wireframe || toolStore.isMeshWorkspace())
+      && toolStore.viewport.shading !== 'wireframe'
+      && !(isSelectedMesh && (toolStore.selectMode === 'edge' || toolStore.selectMode === 'vertex'))
+    if (showCreaseWire) {
+      const wireMat = new THREE.LineBasicMaterial({
+        color: isSelectedMesh ? 0x0b0f19 : 0x1e293b,
         depthTest: !isXRay,
+        depthWrite: false,
         transparent: true,
-        opacity: toolStore.viewport.wireframeOpacity !== undefined ? toolStore.viewport.wireframeOpacity : (isXRay ? 0.85 : 1.0)
+        opacity: Math.max(0.72, toolStore.viewport.wireframeOpacity ?? 0.88),
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2
       })
+      wireMat.onBeforeCompile = (shader) => {
+        shader.vertexShader = shader.vertexShader.replace(
+          '#include <project_vertex>',
+          `#include <project_vertex>
+           gl_Position.z -= 0.0012 * gl_Position.w;`
+        )
+      }
       const wire = new THREE.LineSegments(wireframeGeometry, wireMat)
       wire.name = `${meshObj.id}_wire`
+      wire.renderOrder = 0
       wire.position.copy(threeMesh.position)
       wire.rotation.copy(threeMesh.rotation)
       wire.scale.copy(threeMesh.scale)
@@ -911,7 +1314,7 @@ function rebuildMeshes() {
       }
     }
 
-    const isSelectionAllowed = toolStore.appMode === 'model' || (toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'uv')
+    const isSelectionAllowed = isMeshSelectionAllowed()
 
     // PASS 4: Face Mode Selection Overlay
     if (isSelectionAllowed && toolStore.selectMode === 'face' && isSelectedMesh && selectedFacesGeometry.attributes.position) {
@@ -937,10 +1340,13 @@ function rebuildMeshes() {
         const selEdgeMat = new THREE.LineBasicMaterial({
           color: 0xf59e0b,
           linewidth: 4,
-          depthTest: false
+          depthTest: false,
+          depthWrite: false,
+          transparent: true
         })
         const selEdgeMesh = new THREE.LineSegments(selectedEdgesGeometry, selEdgeMat)
         selEdgeMesh.name = `${meshObj.id}_seledges`
+        selEdgeMesh.renderOrder = 2
         selEdgeMesh.position.copy(threeMesh.position)
         selEdgeMesh.rotation.copy(threeMesh.rotation)
         selEdgeMesh.scale.copy(threeMesh.scale)
@@ -948,9 +1354,16 @@ function rebuildMeshes() {
         selEdgesGeomUsed = true
       }
 
-      const edgeMat = new THREE.LineBasicMaterial({ color: 0x06b6d4, linewidth: 2, depthTest: false })
+      const edgeMat = new THREE.LineBasicMaterial({
+        color: 0x06b6d4,
+        linewidth: 2,
+        depthTest: false,
+        depthWrite: false,
+        transparent: true
+      })
       const edges = new THREE.LineSegments(edgeLinesGeometry, edgeMat)
       edges.name = `${meshObj.id}_edges`
+      edges.renderOrder = 1
       edges.position.copy(threeMesh.position)
       edges.rotation.copy(threeMesh.rotation)
       edges.scale.copy(threeMesh.scale)
@@ -961,7 +1374,13 @@ function rebuildMeshes() {
 
     // PASS 5: Vertex Mode Overlay
     if (isSelectionAllowed && toolStore.selectMode === 'vertex' && isSelectedMesh) {
-      const pMat = new THREE.PointsMaterial({ size: 10, vertexColors: true, sizeAttenuation: false, depthTest: false })
+      const pMat = new THREE.PointsMaterial({
+        size: 9,
+        vertexColors: true,
+        sizeAttenuation: false,
+        depthTest: !toolStore.viewport.xray,
+        depthWrite: false
+      })
       const pts = new THREE.Points(vertexPointsGeometry, pMat)
       pts.name = `${meshObj.id}_pts`
       pts.position.copy(threeMesh.position)
@@ -1116,6 +1535,10 @@ function rebuildMeshes() {
   rebuildBones()
 }
 
+function bonesAreInteractive() {
+  return toolStore.appMode === 'rig' || toolStore.appMode === 'animate'
+}
+
 function rebuildBones() {
   while (boneGroup.children.length > 0) {
     const obj = boneGroup.children[0]
@@ -1138,7 +1561,7 @@ function rebuildBones() {
   boneGroup.visible = true
 
   const isPoseMode = toolStore.appMode === 'animate' || (toolStore.appMode === 'rig' && animationStore.isTestPoseActive)
-  const isXRay = animationStore.xrayBones !== false
+  const isXRay = toolStore.viewport.xray || animationStore.xrayBones !== false
 
   for (const bone of animationStore.armature.bones) {
     let start: THREE.Vector3
@@ -1157,7 +1580,8 @@ function rebuildBones() {
     const length = boneVec.length()
     if (length < 0.001) continue
 
-    const isSelected = bone.id === animationStore.selectedBoneId
+    const overlayOnly = !bonesAreInteractive()
+    const isSelected = !overlayOnly && bone.id === animationStore.selectedBoneId
 
     const dir = boneVec.clone().normalize()
     const up = Math.abs(dir.y) < 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0)
@@ -1190,7 +1614,7 @@ function rebuildBones() {
     const octMat = new THREE.MeshBasicMaterial({
       color: isSelected ? 0xf59e0b : 0x06b6d4,
       transparent: true,
-      opacity: isSelected ? 0.75 : 0.4,
+      opacity: overlayOnly ? (isSelected ? 0.35 : 0.18) : (isSelected ? 0.75 : 0.4),
       side: THREE.DoubleSide,
       depthTest: !isXRay,
       depthWrite: false
@@ -1203,6 +1627,8 @@ function rebuildBones() {
     const wireGeom = new THREE.WireframeGeometry(octGeom)
     const wireMat = new THREE.LineBasicMaterial({
       color: isSelected ? 0xfef08a : 0x38bdf8,
+      transparent: overlayOnly,
+      opacity: overlayOnly ? 0.35 : 1,
       depthTest: !isXRay,
       depthWrite: false
     })
@@ -1349,6 +1775,10 @@ function updateTransformGizmo() {
   }
 
   const activeMesh = projectStore.activeMesh
+  if (toolStore.appMode === 'blockout' && projectStore.selectedReferenceId) {
+    transformControls.detach()
+    return
+  }
   if (!activeMesh) {
     transformControls.detach()
     return
@@ -1367,80 +1797,122 @@ function updateTransformGizmo() {
     transformControls.attach(transformProxy)
     transformControls.setMode('translate')
     return
-  } else if (toolStore.selectMode === 'object') {
-    if (projectStore.selectedMeshIds.length > 1) {
-      const selectedMeshes = projectStore.meshes.filter(m => projectStore.selectedMeshIds.includes(m.id))
-      const centroid = computeCentroid(selectedMeshes.map(m => m.position))
-      transformProxy.position.set(centroid.x, centroid.y, centroid.z)
-      transformProxy.rotation.set(0, 0, 0)
-      transformProxy.scale.set(1, 1, 1)
+  } else if (
+    toolStore.selectMode === 'object' ||
+    (toolStore.selectMode === 'vertex' && projectStore.selectedVertexIds.length > 0) ||
+    (toolStore.selectMode === 'edge' && projectStore.selectedEdgeIds.length > 0) ||
+    (toolStore.selectMode === 'face' && projectStore.selectedFaceIds.length > 0)
+  ) {
+    let centroid: Vector3D
+    let normalVec: THREE.Vector3 | null = null
+
+    if (toolStore.selectMode === 'object') {
+      if (projectStore.selectedMeshIds.length > 1 && toolStore.pivotPoint !== 'active') {
+        const selectedMeshes = projectStore.meshes.filter(m => projectStore.selectedMeshIds.includes(m.id))
+        centroid = computeCentroid(selectedMeshes.map(m => m.position))
+      } else {
+        centroid = { x: activeMesh.position.x, y: activeMesh.position.y, z: activeMesh.position.z }
+      }
+    } else if (toolStore.selectMode === 'vertex' && projectStore.selectedVertexIds.length > 0) {
+      const selectedVerts = activeMesh.vertices.filter(v => projectStore.selectedVertexIds.includes(v.id))
+      const mat = meshWorldMatrix(activeMesh)
+      const worldPts = selectedVerts.map(v => localToWorld(activeMesh, v.position, mat))
+      if (toolStore.pivotPoint === 'active') {
+        const lastVertId = projectStore.selectedVertexIds[projectStore.selectedVertexIds.length - 1]
+        const lastVert = activeMesh.vertices.find(v => v.id === lastVertId)
+        const lastW = lastVert ? localToWorld(activeMesh, lastVert.position, mat) : worldPts[worldPts.length - 1]
+        centroid = { x: lastW.x, y: lastW.y, z: lastW.z }
+      } else {
+        centroid = computeCentroid(worldPts.map(p => ({ x: p.x, y: p.y, z: p.z })))
+      }
+    } else if (toolStore.selectMode === 'edge' && projectStore.selectedEdgeIds.length > 0) {
+      const allEdges = getMeshEdges(activeMesh)
+      const vertMap = new Map(activeMesh.vertices.map(v => [v.id, v]))
+      const mat = meshWorldMatrix(activeMesh)
+      const targetVerts: Vector3D[] = []
+      for (const e of allEdges) {
+        if (projectStore.selectedEdgeIds.includes(e.id)) {
+          const v1 = vertMap.get(e.v1)
+          const v2 = vertMap.get(e.v2)
+          if (v1) {
+            const w = localToWorld(activeMesh, v1.position, mat)
+            targetVerts.push({ x: w.x, y: w.y, z: w.z })
+          }
+          if (v2) {
+            const w = localToWorld(activeMesh, v2.position, mat)
+            targetVerts.push({ x: w.x, y: w.y, z: w.z })
+          }
+        }
+      }
+      centroid = computeCentroid(targetVerts)
+    } else if (toolStore.selectMode === 'face' && projectStore.selectedFaceIds.length > 0) {
+      const selectedFaces = activeMesh.faces.filter(f => projectStore.selectedFaceIds.includes(f.id))
+      const vertMap = new Map(activeMesh.vertices.map(v => [v.id, v]))
+      const mat = meshWorldMatrix(activeMesh)
+      const targetVerts: Vector3D[] = []
+      const normSum = new THREE.Vector3()
+
+      for (const f of selectedFaces) {
+        const fVerts: Vector3D[] = []
+        for (const vid of f.vertexIds) {
+          const v = vertMap.get(vid)
+          if (v) {
+            const w = localToWorld(activeMesh, v.position, mat)
+            targetVerts.push({ x: w.x, y: w.y, z: w.z })
+            fVerts.push(v.position)
+          }
+        }
+        if (fVerts.length >= 3) {
+          const fn = f.normal || computeFaceNormal(fVerts)
+          const worldNorm = new THREE.Vector3(fn.x, fn.y, fn.z).transformDirection(mat)
+          normSum.add(worldNorm)
+        }
+      }
+      centroid = computeCentroid(targetVerts)
+      if (normSum.lengthSq() > 0.001) {
+        normalVec = normSum.normalize()
+      }
     } else {
-      transformProxy.position.set(activeMesh.position.x, activeMesh.position.y, activeMesh.position.z)
+      transformControls.detach()
+      return
+    }
+
+    // Apply Pivot point override
+    if (toolStore.pivotPoint === 'cursor') {
+      transformProxy.position.set(toolStore.cursor3D.x, toolStore.cursor3D.y, toolStore.cursor3D.z)
+    } else {
+      transformProxy.position.set(centroid.x, centroid.y, centroid.z)
+    }
+
+    // Apply Transform Orientation
+    if (toolStore.transformOrientation === 'local') {
       transformProxy.rotation.set(
         THREE.MathUtils.degToRad(activeMesh.rotation.x),
         THREE.MathUtils.degToRad(activeMesh.rotation.y),
         THREE.MathUtils.degToRad(activeMesh.rotation.z)
       )
-      transformProxy.scale.set(activeMesh.scale.x, activeMesh.scale.y, activeMesh.scale.z)
+      transformControls.setSpace('local')
+    } else if (toolStore.transformOrientation === 'view' && activeCamera) {
+      transformProxy.quaternion.copy(activeCamera.quaternion)
+      transformControls.setSpace('local')
+    } else if (toolStore.transformOrientation === 'normal' && normalVec) {
+      const up = Math.abs(normalVec.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0)
+      const right = new THREE.Vector3().crossVectors(up, normalVec).normalize()
+      const orthoUp = new THREE.Vector3().crossVectors(normalVec, right).normalize()
+      const basisMat = new THREE.Matrix4().makeBasis(right, orthoUp, normalVec)
+      transformProxy.quaternion.setFromRotationMatrix(basisMat)
+      transformControls.setSpace('local')
+    } else {
+      transformProxy.rotation.set(0, 0, 0)
+      transformControls.setSpace('world')
     }
-    transformProxy.updateMatrixWorld()
-    transformControls.attach(transformProxy)
-  } else if (toolStore.selectMode === 'vertex' && projectStore.selectedVertexIds.length > 0) {
-    const selectedVerts = activeMesh.vertices.filter(v => projectStore.selectedVertexIds.includes(v.id))
-    const centroid = computeCentroid(selectedVerts.map(v => v.position))
-    transformProxy.position.set(
-      activeMesh.position.x + centroid.x,
-      activeMesh.position.y + centroid.y,
-      activeMesh.position.z + centroid.z
-    )
-    transformProxy.rotation.set(0, 0, 0)
-    transformProxy.scale.set(1, 1, 1)
-    transformProxy.updateMatrixWorld()
-    transformControls.attach(transformProxy)
-  } else if (toolStore.selectMode === 'edge' && projectStore.selectedEdgeIds.length > 0) {
-    const allEdges = getMeshEdges(activeMesh)
-    const vertMap = new Map(activeMesh.vertices.map(v => [v.id, v]))
-    const targetVerts: Vector3D[] = []
-    for (const e of allEdges) {
-      if (projectStore.selectedEdgeIds.includes(e.id)) {
-        const v1 = vertMap.get(e.v1)
-        const v2 = vertMap.get(e.v2)
-        if (v1) targetVerts.push(v1.position)
-        if (v2) targetVerts.push(v2.position)
-      }
-    }
-    const centroid = computeCentroid(targetVerts)
-    transformProxy.position.set(
-      activeMesh.position.x + centroid.x,
-      activeMesh.position.y + centroid.y,
-      activeMesh.position.z + centroid.z
-    )
-    transformProxy.rotation.set(0, 0, 0)
-    transformProxy.scale.set(1, 1, 1)
-    transformProxy.updateMatrixWorld()
-    transformControls.attach(transformProxy)
-  } else if (toolStore.selectMode === 'face' && projectStore.selectedFaceIds.length > 0) {
-    const selectedFaces = activeMesh.faces.filter(f => projectStore.selectedFaceIds.includes(f.id))
-    const vertMap = new Map(activeMesh.vertices.map(v => [v.id, v]))
-    const targetVerts: Vector3D[] = []
-    for (const f of selectedFaces) {
-      for (const vid of f.vertexIds) {
-        const v = vertMap.get(vid)
-        if (v) targetVerts.push(v.position)
-      }
-    }
-    const centroid = computeCentroid(targetVerts)
-    transformProxy.position.set(
-      activeMesh.position.x + centroid.x,
-      activeMesh.position.y + centroid.y,
-      activeMesh.position.z + centroid.z
-    )
-    transformProxy.rotation.set(0, 0, 0)
+
     transformProxy.scale.set(1, 1, 1)
     transformProxy.updateMatrixWorld()
     transformControls.attach(transformProxy)
   } else {
     transformControls.detach()
+    return
   }
 
   if (toolStore.modelTool === 'move') {
@@ -1497,19 +1969,7 @@ function applyTheme(colors: ThemeColors) {
   }
 
   if (layers && layers.gridGroup) {
-    if (gridHelper) {
-      layers.gridGroup.remove(gridHelper)
-      gridHelper.geometry.dispose()
-      ;(gridHelper.material as THREE.Material).dispose()
-    }
-    gridHelper = new THREE.GridHelper(
-      20, 
-      20, 
-      new THREE.Color(colors.gridMajor), 
-      new THREE.Color(colors.gridMinor)
-    )
-    gridHelper.position.y = -0.001
-    layers.gridGroup.add(gridHelper)
+    buildSceneGrids(new THREE.Color(colors.gridMajor), new THREE.Color(colors.gridMinor))
 
     if (axesHelper) {
       axesHelper.setColors(
@@ -1572,12 +2032,9 @@ function onGizmoDragStart() {
 
   const activeMesh = projectStore.activeMesh
   if (activeMesh) {
+    const mat = meshWorldMatrix(activeMesh)
     for (const v of activeMesh.vertices) {
-      dragStartVertexMap.set(v.id, new THREE.Vector3(
-        activeMesh.position.x + v.position.x,
-        activeMesh.position.y + v.position.y,
-        activeMesh.position.z + v.position.z
-      ))
+      dragStartVertexMap.set(v.id, localToWorld(activeMesh, v.position, mat))
     }
   }
 }
@@ -1610,7 +2067,7 @@ function onGizmoObjectChange() {
       s.position.z = Number((transformProxy.position.z - start.z).toFixed(3))
     }
     rebuildBones()
-    rebuildMeshes()
+    refreshLiveDeform()
     return
   }
 
@@ -1618,8 +2075,13 @@ function onGizmoObjectChange() {
     const bone = animationStore.selectedBone
     if (bone) {
       if (animationStore.isTestPoseActive) {
-        if (transformControls.getMode() === 'translate' && (bone.parentId || bone.childrenIds.length > 0)) {
-          solveCCDIK(bone.id, transformProxy.position, animationStore.armature.bones, 2)
+        if (transformControls.getMode() === 'translate' && (bone.ikConstraint?.enabled || bone.parentId || bone.childrenIds.length > 0)) {
+          if (bone.ikConstraint?.enabled) {
+            const chain = bone.ikConstraint.chainLength || 2
+            setIKTargetAndSolve(bone, transformProxy.position, animationStore.armature.bones, chain)
+          } else {
+            solveCCDIK(bone.id, transformProxy.position, animationStore.armature.bones, 2)
+          }
         } else if (transformControls.getMode() === 'rotate') {
           bone.rotation.x = Number(THREE.MathUtils.radToDeg(transformProxy.rotation.x).toFixed(2))
           bone.rotation.y = Number(THREE.MathUtils.radToDeg(transformProxy.rotation.y).toFixed(2))
@@ -1634,7 +2096,7 @@ function onGizmoObjectChange() {
           bone.position.z = Number((transformProxy.position.z - bone.head.z).toFixed(3))
         }
         rebuildBones()
-        rebuildMeshes()
+        refreshLiveDeform()
         return
       }
 
@@ -1710,7 +2172,7 @@ function onGizmoObjectChange() {
         }
       }
       rebuildBones()
-      rebuildMeshes()
+      refreshLiveDeform()
       return
     }
   }
@@ -1718,8 +2180,13 @@ function onGizmoObjectChange() {
   if (toolStore.appMode === 'animate') {
     const bone = animationStore.selectedBone
     if (bone) {
-      if (transformControls.getMode() === 'translate' && (bone.parentId || bone.childrenIds.length > 0)) {
-        solveCCDIK(bone.id, transformProxy.position, animationStore.armature.bones, 2)
+      if (transformControls.getMode() === 'translate' && (bone.ikConstraint?.enabled || bone.parentId || bone.childrenIds.length > 0)) {
+        if (bone.ikConstraint?.enabled) {
+          const chain = bone.ikConstraint.chainLength || 2
+          setIKTargetAndSolve(bone, transformProxy.position, animationStore.armature.bones, chain)
+        } else {
+          solveCCDIK(bone.id, transformProxy.position, animationStore.armature.bones, 2)
+        }
       } else if (transformControls.getMode() === 'rotate') {
         bone.rotation.x = Number(THREE.MathUtils.radToDeg(transformProxy.rotation.x).toFixed(2))
         bone.rotation.y = Number(THREE.MathUtils.radToDeg(transformProxy.rotation.y).toFixed(2))
@@ -1734,10 +2201,7 @@ function onGizmoObjectChange() {
         bone.position.z = Number((transformProxy.position.z - bone.head.z).toFixed(3))
       }
       rebuildBones()
-      rebuildMeshes()
-      if (animationStore.autoKey) {
-        animationStore.recordCurrentKeyframe()
-      }
+      refreshLiveDeform()
       return
     }
 
@@ -1759,10 +2223,6 @@ function onGizmoObjectChange() {
         threeMesh.position.copy(transformProxy.position)
         threeMesh.rotation.copy(transformProxy.rotation)
         threeMesh.scale.copy(transformProxy.scale)
-      }
-
-      if (animationStore.autoKey) {
-        animationStore.recordCurrentKeyframe()
       }
       return
     }
@@ -1938,30 +2398,30 @@ function onGizmoObjectChange() {
       }
     }
 
+    const invMat = meshWorldMatrix(activeMesh).invert()
     for (const v of activeMesh.vertices) {
       if (targetVertIds.has(v.id)) {
         const startWorld = dragStartVertexMap.get(v.id)
         if (startWorld) {
           const transformedWorld = startWorld.clone().applyMatrix4(deltaMatrix)
-          let px = transformedWorld.x - activeMesh.position.x
-          let py = transformedWorld.y - activeMesh.position.y
-          let pz = transformedWorld.z - activeMesh.position.z
+          const local = worldToLocal(activeMesh, transformedWorld, invMat)
+          let px = local.x
+          let py = local.y
+          let pz = local.z
 
           if (activeMesh.mirror?.enabled && activeMesh.mirror.clipping) {
+            const startLocal = worldToLocal(activeMesh, startWorld, invMat)
             if (activeMesh.mirror.axisX) {
-              const startX = startWorld.x - activeMesh.position.x
-              if (startX >= 0 && px < 0) px = 0
-              if (startX <= 0 && px > 0) px = 0
+              if (startLocal.x >= 0 && px < 0) px = 0
+              if (startLocal.x <= 0 && px > 0) px = 0
             }
             if (activeMesh.mirror.axisY) {
-              const startY = startWorld.y - activeMesh.position.y
-              if (startY >= 0 && py < 0) py = 0
-              if (startY <= 0 && py > 0) py = 0
+              if (startLocal.y >= 0 && py < 0) py = 0
+              if (startLocal.y <= 0 && py > 0) py = 0
             }
             if (activeMesh.mirror.axisZ) {
-              const startZ = startWorld.z - activeMesh.position.z
-              if (startZ >= 0 && pz < 0) pz = 0
-              if (startZ <= 0 && pz > 0) pz = 0
+              if (startLocal.z >= 0 && pz < 0) pz = 0
+              if (startLocal.z <= 0 && pz > 0) pz = 0
             }
           }
 
@@ -1972,21 +2432,56 @@ function onGizmoObjectChange() {
       }
     }
 
+    if (toolStore.snapping.vertex || toolStore.snapping.edge) {
+      const moving: THREE.Vector3[] = []
+      const movingVerts: Vertex[] = []
+      for (const v of activeMesh.vertices) {
+        if (!targetVertIds.has(v.id)) continue
+        moving.push(new THREE.Vector3(v.position.x, v.position.y, v.position.z))
+        movingVerts.push(v)
+      }
+      const targets: THREE.Vector3[] = []
+      if (toolStore.snapping.vertex) {
+        for (const v of activeMesh.vertices) {
+          if (targetVertIds.has(v.id)) continue
+          targets.push(new THREE.Vector3(v.position.x, v.position.y, v.position.z))
+        }
+      }
+      if (toolStore.snapping.edge) {
+        for (const e of getMeshEdges(activeMesh)) {
+          if (targetVertIds.has(e.v1) || targetVertIds.has(e.v2)) continue
+          const a = activeMesh.vertices.find(vert => vert.id === e.v1)
+          const b = activeMesh.vertices.find(vert => vert.id === e.v2)
+          if (!a || !b) continue
+          targets.push(new THREE.Vector3(
+            (a.position.x + b.position.x) * 0.5,
+            (a.position.y + b.position.y) * 0.5,
+            (a.position.z + b.position.z) * 0.5
+          ))
+        }
+      }
+      const thresh = Math.max(0.06, toolStore.snapping.gridSize * 0.75)
+      const extra = SnapManager.findRigidSnapOffset(moving, targets, thresh)
+      if (extra) {
+        for (const v of movingVerts) {
+          v.position.x += extra.x
+          v.position.y += extra.y
+          v.position.z += extra.z
+        }
+      }
+    }
+
     // Live X-Symmetry Mirroring
     if (toolStore.viewport.symmetryX) {
       for (const v of activeMesh.vertices) {
         if (!targetVertIds.has(v.id)) {
-          const startV = dragStartVertexMap.get(v.id)
-          if (!startV) continue
           for (const selId of targetVertIds) {
-            const selStart = dragStartVertexMap.get(selId)
-            if (selStart && Math.abs((startV.x - activeMesh.position.x) + (selStart.x - activeMesh.position.x)) < 0.05 && Math.abs(startV.y - selStart.y) < 0.05 && Math.abs(startV.z - selStart.z) < 0.05) {
-              const selCurrent = activeMesh.vertices.find(vert => vert.id === selId)
-              if (selCurrent) {
-                v.position.x = -selCurrent.position.x
-                v.position.y = selCurrent.position.y
-                v.position.z = selCurrent.position.z
-              }
+            const sel = activeMesh.vertices.find(vert => vert.id === selId)
+            if (!sel) continue
+            if (Math.abs(v.position.x + sel.position.x) < 0.05 && Math.abs(v.position.y - sel.position.y) < 0.05 && Math.abs(v.position.z - sel.position.z) < 0.05) {
+              v.position.x = -sel.position.x
+              v.position.y = sel.position.y
+              v.position.z = sel.position.z
             }
           }
         }
@@ -2050,37 +2545,55 @@ function onGizmoObjectChange() {
 }
 
 function commitProxyTransform() {
-  const activeMesh = projectStore.activeMesh
-  if (!activeMesh) return
+  const posing =
+    (toolStore.appMode === 'animate' || toolStore.appMode === 'rig') && !!animationStore.selectedBoneId
 
-  if (toolStore.snapping.autoMerge && (toolStore.selectMode === 'vertex' || toolStore.selectMode === 'edge')) {
+  if (
+    projectStore.activeMesh &&
+    toolStore.snapping.autoMerge &&
+    (toolStore.selectMode === 'vertex' || toolStore.selectMode === 'edge')
+  ) {
     const threshold = toolStore.snapping.autoMergeThreshold || 0.015
-    projectStore.performAutoMerge(activeMesh.id, threshold)
+    projectStore.performAutoMerge(projectStore.activeMesh.id, threshold)
   }
 
-  projectStore.markGeometryUpdated()
+  if (projectStore.activeMesh && !posing) {
+    projectStore.markGeometryUpdated()
+  }
 
-  if (toolStore.appMode === 'animate') {
-    if (animationStore.autoKey) {
-      animationStore.recordCurrentKeyframe()
-    }
+  if (toolStore.appMode === 'animate' && animationStore.autoKey) {
+    animationStore.recordCurrentKeyframe()
   }
 
   isGizmoDragging = false
+  rebuildBones()
   rebuildMeshes()
 }
 
 // Screen-Space NDC calculations
-function findClosestVertexScreen(mesh: MeshObject, maxDistNdc = 0.045): Vertex | null {
+function pickPixelNdc(px: number) {
+  const h = containerRef.value?.clientHeight || 800
+  return (px * 2) / h
+}
+
+function surfaceHitDistance(): number {
+  if (toolStore.viewport.xray || !layers) return Infinity
+  const hits = raycaster.intersectObjects(layers.modelGroup.children, true)
+  return hits[0]?.distance ?? Infinity
+}
+
+function findClosestVertexScreen(mesh: MeshObject, maxDistPx = 14): Vertex | null {
   let closestV: Vertex | null = null
-  let minDist = maxDistNdc
+  let minDist = pickPixelNdc(maxDistPx)
+  const mat = meshWorldMatrix(mesh)
+  const camPos = new THREE.Vector3()
+  activeCamera.getWorldPosition(camPos)
+  const occludeAt = surfaceHitDistance()
 
   for (const v of mesh.vertices) {
-    const worldPos = new THREE.Vector3(
-      mesh.position.x + v.position.x,
-      mesh.position.y + v.position.y,
-      mesh.position.z + v.position.z
-    )
+    const worldPos = localToWorld(mesh, v.position, mat)
+    const dist3 = camPos.distanceTo(worldPos)
+    if (dist3 > occludeAt + 0.06) continue
     const ndc = worldPos.project(activeCamera)
     if (ndc.z > 1 || ndc.z < -1) continue
 
@@ -2093,7 +2606,7 @@ function findClosestVertexScreen(mesh: MeshObject, maxDistNdc = 0.045): Vertex |
   return closestV
 }
 
-function findClosestEdgeScreen(mesh: MeshObject, maxDistNdc = 0.035): Edge | null {
+function findClosestEdgeScreen(mesh: MeshObject, maxDistPx = 10): Edge | null {
   const edges = getMeshEdges(mesh)
   const vertMap = new Map<string, Vertex>()
   for (const v of mesh.vertices) {
@@ -2101,15 +2614,24 @@ function findClosestEdgeScreen(mesh: MeshObject, maxDistNdc = 0.035): Edge | nul
   }
 
   let closestE: Edge | null = null
-  let minDist = maxDistNdc
+  let minDist = pickPixelNdc(maxDistPx)
+  const mat = meshWorldMatrix(mesh)
+  const camPos = new THREE.Vector3()
+  activeCamera.getWorldPosition(camPos)
+  const occludeAt = surfaceHitDistance()
 
   for (const edge of edges) {
     const v1 = vertMap.get(edge.v1)
     const v2 = vertMap.get(edge.v2)
     if (!v1 || !v2) continue
 
-    const p1 = new THREE.Vector3(mesh.position.x + v1.position.x, mesh.position.y + v1.position.y, mesh.position.z + v1.position.z).project(activeCamera)
-    const p2 = new THREE.Vector3(mesh.position.x + v2.position.x, mesh.position.y + v2.position.y, mesh.position.z + v2.position.z).project(activeCamera)
+    const w1 = localToWorld(mesh, v1.position, mat)
+    const w2 = localToWorld(mesh, v2.position, mat)
+    const midDist = camPos.distanceTo(w1.clone().lerp(w2, 0.5))
+    if (midDist > occludeAt + 0.08) continue
+
+    const p1 = w1.project(activeCamera)
+    const p2 = w2.clone().project(activeCamera)
     if ((p1.z > 1 && p2.z > 1) || (p1.z < -1 && p2.z < -1)) continue
 
     const d = distanceToSegment2D(mouse.x, mouse.y, p1.x, p1.y, p2.x, p2.y)
@@ -2139,6 +2661,28 @@ function updateActiveCameraAndQuadrant(event: PointerEvent | MouseEvent) {
 
   const isGizmoActive = isGizmoDragging || transformControls.dragging || (transformControls as any).axis !== null
 
+  if (isTripleView()) {
+    const hit = tripleHit(mousePxX, width)
+    if (hit.col === 0) {
+      activeCamera = cameraFront
+      activeQuadrant.value = 'col_front'
+      orbitControls.enabled = false
+    } else if (hit.col === 1) {
+      activeCamera = cameraRight
+      activeQuadrant.value = 'col_side'
+      orbitControls.enabled = false
+    } else {
+      activeCamera = cameraPersp
+      activeQuadrant.value = 'col_persp'
+      orbitControls.enabled = !isGizmoActive
+    }
+    mouse.x = (hit.localX / hit.localW) * 2 - 1
+    mouse.y = -(mousePxY / height) * 2 + 1
+    transformControls.camera = activeCamera
+    transformControls.enabled = !isGizmoActive
+    return
+  }
+
   if (!toolStore.viewport.quadView) {
     activeCamera = cameraPersp
     activeQuadrant.value = 'main'
@@ -2146,6 +2690,7 @@ function updateActiveCameraAndQuadrant(event: PointerEvent | MouseEvent) {
     mouse.x = (mousePxX / width) * 2 - 1
     mouse.y = -(mousePxY / height) * 2 + 1
     transformControls.camera = cameraPersp
+    transformControls.enabled = true
     return
   }
 
@@ -2307,7 +2852,7 @@ function centerViewOnContents(camType: 'persp' | 'top' | 'front' | 'right' = 'pe
 
   for (const m of meshesToFrame) {
     for (const v of m.vertices) {
-      box.expandByPoint(new THREE.Vector3(m.position.x + v.position.x, m.position.y + v.position.y, m.position.z + v.position.z))
+      box.expandByPoint(localToWorld(m, v.position))
       hasVertices = true
     }
   }
@@ -2349,20 +2894,36 @@ function centerViewOnContents(camType: 'persp' | 'top' | 'front' | 'right' = 'pe
 }
 
 function onWheel(event: WheelEvent) {
-  if (!toolStore.viewport.quadView || !renderer) return
+  if (toolStore.appMode === 'blockout' && event.altKey && projectStore.selectedReferenceId) {
+    event.preventDefault()
+    const img = projectStore.referenceImages.find(r => r.id === projectStore.selectedReferenceId)
+    if (img && !img.locked) {
+      const invert = toolStore.viewport.invertZoom ? -1 : 1
+      const factor = (event.deltaY * invert) < 0 ? 1.08 : 0.92
+      const next = Math.max(0.5, Math.min(24, img.scale * factor))
+      projectStore.updateReferenceImage(img.id, { scale: next }, { rebuild: false })
+    }
+    return
+  }
+  if (!isSplitView() || !renderer) return
   const rect = renderer.domElement.getBoundingClientRect()
   const mousePxX = event.clientX - rect.left
   const mousePxY = event.clientY - rect.top
   const width = rect.width
   const height = rect.height
 
-  const isLeft = mousePxX < width / 2
-  const isTop = mousePxY < height / 2
-
   let cam: THREE.OrthographicCamera | null = null
-  if (isLeft && isTop) cam = cameraTop
-  else if (isLeft && !isTop) cam = cameraFront
-  else if (!isLeft && !isTop) cam = cameraRight
+  if (isTripleView()) {
+    const hit = tripleHit(mousePxX, width)
+    if (hit.col === 0) cam = cameraFront
+    else if (hit.col === 1) cam = cameraRight
+  } else {
+    const isLeft = mousePxX < width / 2
+    const isTop = mousePxY < height / 2
+    if (isLeft && isTop) cam = cameraTop
+    else if (isLeft && !isTop) cam = cameraFront
+    else if (!isLeft && !isTop) cam = cameraRight
+  }
 
   if (cam) {
     event.preventDefault()
@@ -2426,7 +2987,13 @@ function onPointerDown(event: PointerEvent) {
     return
   }
 
-  if (toolStore.appMode === 'uvpaint' && (toolStore.uvWorkspaceTab === 'paint' || toolStore.uvWorkspaceTab === 'vertex')) {
+  if (tryBeginReferenceInteraction(event)) {
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    return
+  }
+
+  if (toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'paint') {
     const hits = raycaster.intersectObjects(layers.modelGroup.children, true)
     if (hits.length > 0) {
       pointerDownHitMesh = true
@@ -2461,13 +3028,14 @@ function onPointerDown(event: PointerEvent) {
       projectStore.recordState('Add Bone')
       const curBone = animationStore.selectedBone
       if (!curBone) {
+        const isFirstBone = animationStore.armature.bones.length === 0
         const rootBone = animationStore.addBoneFromPoints(
           { x: Number(hitPoint.x.toFixed(3)), y: Number(hitPoint.y.toFixed(3)), z: Number(hitPoint.z.toFixed(3)) },
           { x: Number(hitPoint.x.toFixed(3)), y: Number((hitPoint.y + 0.8).toFixed(3)), z: Number(hitPoint.z.toFixed(3)) },
           null,
           `Bone_${animationStore.armature.bones.length + 1}`
         )
-        if (projectStore.activeMesh) {
+        if (isFirstBone && projectStore.activeMesh) {
           animationStore.parentMeshToBone(projectStore.activeMesh.id, rootBone.id)
           animationStore.autoWeightMeshToBones(projectStore.activeMesh)
         }
@@ -2478,9 +3046,6 @@ function onPointerDown(event: PointerEvent) {
           curBone.id,
           `Bone_${animationStore.armature.bones.length + 1}`
         )
-        if (projectStore.activeMesh) {
-          animationStore.autoWeightMeshToBones(projectStore.activeMesh)
-        }
       }
       rebuildBones()
       rebuildMeshes()
@@ -2488,7 +3053,7 @@ function onPointerDown(event: PointerEvent) {
     }
   }
 
-  if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate' || animationStore.showBones || toolStore.selectMode === 'bone') {
+  if (bonesAreInteractive()) {
     const boneHits = raycaster.intersectObjects(boneGroup.children, true)
     if (boneHits.length > 0) {
       pointerDownHitMesh = true
@@ -2523,7 +3088,7 @@ function onPointerDown(event: PointerEvent) {
       }
     }
   }
-    const isSelectionAllowed = toolStore.appMode === 'model' || (toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'uv')
+    const isSelectionAllowed = isMeshSelectionAllowed()
   const activeMesh = projectStore.activeMesh
 
   // 1. Edge Mode Selection
@@ -2554,7 +3119,15 @@ function onPointerDown(event: PointerEvent) {
     const v = findClosestVertexScreen(activeMesh)
     if (v) {
       pointerDownHitMesh = true
-      if (event.shiftKey) {
+      if (event.altKey) {
+        const linked = getLinkedVertexIds(activeMesh, v.id)
+        if (event.shiftKey) {
+          projectStore.selectedVertexIds = Array.from(new Set([...projectStore.selectedVertexIds, ...linked]))
+        } else {
+          projectStore.selectedVertexIds = linked
+        }
+        activeMesh.vertices.forEach(vert => (vert.selected = projectStore.selectedVertexIds.includes(vert.id)))
+      } else if (event.shiftKey) {
         if (projectStore.selectedVertexIds.includes(v.id)) {
           projectStore.selectedVertexIds = projectStore.selectedVertexIds.filter(id => id !== v.id)
           v.selected = false
@@ -2580,6 +3153,7 @@ function onPointerDown(event: PointerEvent) {
     if (!meshObj) return
 
     projectStore.activeMeshId = meshObj.id
+    projectStore.selectedReferenceId = ''
 
     if (toolStore.selectMode === 'object') {
       if (event.shiftKey) {
@@ -2597,7 +3171,15 @@ function onPointerDown(event: PointerEvent) {
       const originalFaceIdx = faceIndexMap[fi]
       if (typeof originalFaceIdx === 'number' && meshObj.faces[originalFaceIdx]) {
         const face = meshObj.faces[originalFaceIdx]
-        if (event.shiftKey) {
+        if (event.altKey) {
+          const linked = getLinkedFaceIds(meshObj, face.id)
+          if (event.shiftKey) {
+            projectStore.selectedFaceIds = Array.from(new Set([...projectStore.selectedFaceIds, ...linked]))
+          } else {
+            projectStore.selectedFaceIds = linked
+          }
+          meshObj.faces.forEach(f => (f.selected = projectStore.selectedFaceIds.includes(f.id)))
+        } else if (event.shiftKey) {
           if (projectStore.selectedFaceIds.includes(face.id)) {
             projectStore.selectedFaceIds = projectStore.selectedFaceIds.filter(id => id !== face.id)
             face.selected = false
@@ -2621,6 +3203,13 @@ function onPointerMove(event: PointerEvent) {
     return
   }
   lastHoverClientPos = { x: event.clientX, y: event.clientY }
+  if (refDrag) {
+    updateActiveCameraAndQuadrant(event)
+    raycaster.setFromCamera(mouse, activeCamera)
+    applyRefDrag()
+    orbitControls.enabled = false
+    return
+  }
   if (isGizmoDragging || transformControls.dragging || (transformControls as any).axis !== null) {
     orbitControls.enabled = false
     return
@@ -2686,13 +3275,9 @@ function applyMarqueeSelection(isShift = false, isAlt = false) {
     if (!activeMesh) return
     const newlySelected: string[] = []
 
+    const mat = meshWorldMatrix(activeMesh)
     for (const v of activeMesh.vertices) {
-      const worldPos = new THREE.Vector3(
-        activeMesh.position.x + v.position.x,
-        activeMesh.position.y + v.position.y,
-        activeMesh.position.z + v.position.z
-      )
-      const screenPt = projectWorldToScreen(worldPos)
+      const screenPt = projectWorldToScreen(localToWorld(activeMesh, v.position, mat))
       if (isInsideBox(screenPt.x, screenPt.y)) {
         newlySelected.push(v.id)
       }
@@ -2718,12 +3303,13 @@ function applyMarqueeSelection(isShift = false, isAlt = false) {
     const vertMap = new Map(activeMesh.vertices.map(v => [v.id, v]))
     const newlySelected: string[] = []
 
+    const mat = meshWorldMatrix(activeMesh)
     for (const edge of allEdges) {
       const v1 = vertMap.get(edge.v1)
       const v2 = vertMap.get(edge.v2)
       if (!v1 || !v2) continue
-      const p1 = projectWorldToScreen(new THREE.Vector3(activeMesh.position.x + v1.position.x, activeMesh.position.y + v1.position.y, activeMesh.position.z + v1.position.z))
-      const p2 = projectWorldToScreen(new THREE.Vector3(activeMesh.position.x + v2.position.x, activeMesh.position.y + v2.position.y, activeMesh.position.z + v2.position.z))
+      const p1 = projectWorldToScreen(localToWorld(activeMesh, v1.position, mat))
+      const p2 = projectWorldToScreen(localToWorld(activeMesh, v2.position, mat))
       const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 }
 
       if (isInsideBox(p1.x, p1.y) || isInsideBox(p2.x, p2.y) || isInsideBox(mid.x, mid.y)) {
@@ -2749,6 +3335,7 @@ function applyMarqueeSelection(isShift = false, isAlt = false) {
     const vertMap = new Map(activeMesh.vertices.map(v => [v.id, v]))
     const newlySelected: string[] = []
 
+    const mat = meshWorldMatrix(activeMesh)
     for (const face of activeMesh.faces) {
       const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
       if (faceVerts.length === 0) continue
@@ -2756,11 +3343,12 @@ function applyMarqueeSelection(isShift = false, isAlt = false) {
       let avgX = 0, avgY = 0, avgZ = 0
       let anyVertInside = false
       for (const v of faceVerts) {
-        const p = projectWorldToScreen(new THREE.Vector3(activeMesh.position.x + v.position.x, activeMesh.position.y + v.position.y, activeMesh.position.z + v.position.z))
+        const w = localToWorld(activeMesh, v.position, mat)
+        const p = projectWorldToScreen(w)
         if (isInsideBox(p.x, p.y)) anyVertInside = true
-        avgX += activeMesh.position.x + v.position.x
-        avgY += activeMesh.position.y + v.position.y
-        avgZ += activeMesh.position.z + v.position.z
+        avgX += w.x
+        avgY += w.y
+        avgZ += w.z
       }
       const centroidPt = projectWorldToScreen(new THREE.Vector3(avgX / faceVerts.length, avgY / faceVerts.length, avgZ / faceVerts.length))
 
@@ -2788,7 +3376,7 @@ function applyMarqueeSelection(isShift = false, isAlt = false) {
       if (!mesh.visible) continue
       let anyInside = false
       for (const v of mesh.vertices) {
-        const p = projectWorldToScreen(new THREE.Vector3(mesh.position.x + v.position.x, mesh.position.y + v.position.y, mesh.position.z + v.position.z))
+        const p = projectWorldToScreen(localToWorld(mesh, v.position))
         if (isInsideBox(p.x, p.y)) {
           anyInside = true
           break
@@ -2814,7 +3402,7 @@ function applyMarqueeSelection(isShift = false, isAlt = false) {
   }
 
   // 5. BONE MODE / RIGGING
-  else if (toolStore.selectMode === 'bone' || toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
+  else if (bonesAreInteractive()) {
     const bones = animationStore.armature.bones
     let matchedBoneId: string | null = null
 
@@ -2837,6 +3425,12 @@ function applyMarqueeSelection(isShift = false, isAlt = false) {
 }
 
 function onPointerUp(event?: PointerEvent) {
+  if (refDrag) {
+    refDrag = null
+    orbitControls.enabled = true
+    updateTransformGizmo()
+    return
+  }
   if (isMarqueeSelecting.value) {
     isMarqueeSelecting.value = false
     orbitControls.enabled = true
@@ -2851,7 +3445,7 @@ function onPointerUp(event?: PointerEvent) {
     const moveDist = Math.hypot(event.clientX - pointerDownClientPos.x, event.clientY - pointerDownClientPos.y)
     // Clean click on empty background deselects
     if (moveDist < 6 && !event.shiftKey) {
-      const isSelectionAllowed = toolStore.appMode === 'model' || (toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'uv')
+      const isSelectionAllowed = isMeshSelectionAllowed()
       if (isSelectionAllowed) {
         if (toolStore.selectMode === 'object') {
           projectStore.deselectAll()
@@ -2880,6 +3474,10 @@ function onPointerUp(event?: PointerEvent) {
   if (isPaintingOn3D) {
     isPaintingOn3D = false
     lastPaintUV = null
+    if (lastPaintTextureId || projectStore.activeTextureId) {
+      projectStore.markTextureUpdated(lastPaintTextureId)
+    }
+    lastPaintTextureId = undefined
     orbitControls.enabled = true
     if (event) {
       event.stopImmediatePropagation()
@@ -2889,7 +3487,7 @@ function onPointerUp(event?: PointerEvent) {
     isGizmoDragging = false
     commitProxyTransform()
   }
-  if (!toolStore.viewport.quadView || activeQuadrant.value === 'top_right') {
+  if (!isSplitView() || isPerspQuadrant()) {
     if ((transformControls as any).axis === null) {
       orbitControls.enabled = true
     }
@@ -2901,8 +3499,9 @@ function onPointerUp(event?: PointerEvent) {
 // G (Grab), R (Rotate), S (Scale), E (Extrude), I (Inset), B (Bevel), K (Knife), Ctrl+R (Loop Cut), Primitive Placement
 // ----------------------------------------------------
 function startModalOperator(tool: string, options?: any) {
-  if (toolStore.appMode !== 'model') return
-  const activeMesh = projectStore.activeMesh
+  if (!toolStore.isMeshWorkspace()) return
+  const useEmptyKernel = tool === 'polydraw' || tool === 'primitive' || tool === 'add_primitive'
+  const activeMesh = useEmptyKernel && tool === 'polydraw' ? null : projectStore.activeMesh
 
   // Bridge active mesh to EditableMesh kernel (or empty mesh if placing new primitive)
   const bridgeData = activeMesh 
@@ -2910,7 +3509,9 @@ function startModalOperator(tool: string, options?: any) {
     : { mesh: new EditableMesh(), strToNumVertId: new Map(), numToStrVertId: new Map(), strToNumFaceId: new Map(), numToStrFaceId: new Map() }
   const editableMesh = bridgeData.mesh
 
-  // Derive selection IDs
+  if (tool === 'inset' && toolStore.selectMode === 'object') return
+
+  // Derive selection IDs — never silently fall back to the whole mesh in component mode
   let selVertIds = projectStore.selectedVertexIds
     .map(id => bridgeData.strToNumVertId.get(id)!)
     .filter(id => id !== undefined)
@@ -2919,22 +3520,45 @@ function startModalOperator(tool: string, options?: any) {
     .map(id => bridgeData.strToNumFaceId.get(id)!)
     .filter(id => id !== undefined)
 
+  let selEdgeIds: number[] = []
+
   if (toolStore.selectMode === 'object') {
     selVertIds = Array.from(editableMesh.vertices.keys())
     selFaceIds = Array.from(editableMesh.faces.keys())
-  } else if (selVertIds.length === 0 && selFaceIds.length === 0) {
-    selFaceIds = Array.from(editableMesh.faces.keys())
-    selVertIds = Array.from(editableMesh.vertices.keys())
+  } else if (toolStore.selectMode === 'edge' && activeMesh) {
+    selVertIds = []
+    selFaceIds = []
+    const meshEdges = getMeshEdges(activeMesh)
+    for (const e of meshEdges) {
+      if (!projectStore.selectedEdgeIds.includes(e.id)) continue
+      const a = bridgeData.strToNumVertId.get(e.v1)
+      const b = bridgeData.strToNumVertId.get(e.v2)
+      if (a == null || b == null) continue
+      selVertIds.push(a, b)
+      for (const ke of editableMesh.edges.values()) {
+        if ((ke.v1 === a && ke.v2 === b) || (ke.v1 === b && ke.v2 === a)) {
+          selEdgeIds.push(ke.id)
+          break
+        }
+      }
+    }
+    selVertIds = Array.from(new Set(selVertIds))
+  } else if (toolStore.selectMode === 'face') {
+    selVertIds = []
+  } else if (toolStore.selectMode === 'vertex') {
+    selFaceIds = []
   }
 
+  if (tool === 'inset' && selFaceIds.length === 0) return
+
   // Determine viewport kind
-  const vpKind = activeQuadrant.value === 'top_left' ? 'top' : (activeQuadrant.value === 'bottom_left' ? 'front' : (activeQuadrant.value === 'bottom_right' ? 'right' : 'persp'))
+  const vpKind = viewportKindFromQuadrant()
 
   const ctx: OperatorContext = {
     mesh: editableMesh,
     selectedVertIds: selVertIds,
     selectedFaceIds: selFaceIds,
-    selectedEdgeIds: [],
+    selectedEdgeIds: selEdgeIds,
     selectedMeshIds: [...projectStore.selectedMeshIds],
     isObjectMode: toolStore.selectMode === 'object',
     camera: activeCamera,
@@ -2945,8 +3569,13 @@ function startModalOperator(tool: string, options?: any) {
     allMeshes: projectStore.meshes,
     viewportKind: vpKind,
     quadrant: activeQuadrant.value,
+    gridSize: toolStore.snapping.gridSize,
+    snapGrid: toolStore.snapping.grid,
+    snapVertex: toolStore.snapping.vertex,
+    snapEdge: toolStore.snapping.edge,
+    objectMatrix: activeMesh ? meshWorldMatrix(activeMesh) : undefined,
     onUpdatePreview: () => {
-      if (activeMesh && tool !== 'primitive' && tool !== 'add_primitive') {
+      if (activeMesh && tool !== 'primitive' && tool !== 'add_primitive' && tool !== 'polydraw') {
         const updatedMeshObj = MeshBridge.editableMeshToMeshObject(
           editableMesh,
           activeMesh,
@@ -2958,7 +3587,9 @@ function startModalOperator(tool: string, options?: any) {
       }
     },
     onCommit: (actionName: string) => {
-      if (activeMesh && tool !== 'primitive' && tool !== 'add_primitive') {
+      if (tool === 'polydraw' && editableMesh.faces.size > 0) {
+        projectStore.addEditableMesh(editableMesh, `Block_${projectStore.meshes.length + 1}`)
+      } else if (activeMesh && tool !== 'primitive' && tool !== 'add_primitive') {
         const updatedMeshObj = MeshBridge.editableMeshToMeshObject(
           editableMesh,
           activeMesh,
@@ -3000,6 +3631,8 @@ function startModalOperator(tool: string, options?: any) {
     operatorManager.start(new KnifeOperator(), ctx, pointerPos)
   } else if (tool === 'loop_cut' || tool === 'loopcut') {
     operatorManager.start(new LoopCutOperator(), ctx, pointerPos)
+  } else if (tool === 'polydraw') {
+    operatorManager.start(new PolyDrawOperator(), ctx, pointerPos)
   } else if (tool === 'primitive' || tool === 'add_primitive') {
     const pType = (options?.primitiveType || 'BOX') as PrimitiveType
     const pMode = options?.mode || PrimitivePlacementMode.CAD_DRAW
@@ -3076,20 +3709,17 @@ function updateActiveMeshVisualsFast() {
 }
 
 function updateHoverState() {
-  const isSelectionAllowed = toolStore.appMode === 'model' || (toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'uv')
+  const isSelectionAllowed = isMeshSelectionAllowed()
   const activeMesh = projectStore.activeMesh
   let hasHover = false
 
   if (isSelectionAllowed && toolStore.selectMode === 'vertex' && activeMesh) {
     const v = findClosestVertexScreen(activeMesh)
     if (v) {
+      const w = localToWorld(activeMesh, v.position)
       const geom = new THREE.BufferGeometry().setAttribute(
         'position', 
-        new THREE.Float32BufferAttribute([
-          activeMesh.position.x + v.position.x,
-          activeMesh.position.y + v.position.y,
-          activeMesh.position.z + v.position.z
-        ], 3)
+        new THREE.Float32BufferAttribute([w.x, w.y, w.z], 3)
       )
       hoverVertexMesh.geometry.dispose()
       hoverVertexMesh.geometry = geom
@@ -3112,8 +3742,8 @@ function updateHoverState() {
       const v1 = vertMap.get(edge.v1)
       const v2 = vertMap.get(edge.v2)
       if (v1 && v2) {
-        const p1 = new THREE.Vector3(activeMesh.position.x + v1.position.x, activeMesh.position.y + v1.position.y, activeMesh.position.z + v1.position.z)
-        const p2 = new THREE.Vector3(activeMesh.position.x + v2.position.x, activeMesh.position.y + v2.position.y, activeMesh.position.z + v2.position.z)
+        const p1 = localToWorld(activeMesh, v1.position)
+        const p2 = localToWorld(activeMesh, v2.position)
         hoverEdgeMesh.geometry.dispose()
         hoverEdgeMesh.geometry = new THREE.BufferGeometry().setFromPoints([p1, p2])
         hoverEdgeMesh.visible = true
@@ -3126,7 +3756,26 @@ function updateHoverState() {
     hoverEdgeMesh.visible = false
   }
 
-  if (isSelectionAllowed && toolStore.selectMode === 'face' && activeMesh) {
+  const uvHoverIds = toolStore.uvHoverFaceIds
+  if (toolStore.appMode === 'uvpaint' && uvHoverIds.length > 0 && activeMesh) {
+    const vertMap = new Map<string, Vertex>()
+    for (const v of activeMesh.vertices) vertMap.set(v.id, v)
+    const idSet = new Set(uvHoverIds)
+    const positions: number[] = []
+    for (const face of activeMesh.faces) {
+      if (!idSet.has(face.id)) continue
+      const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
+      pushWorldFan(activeMesh, faceVerts, positions)
+    }
+    if (positions.length > 0) {
+      hoverFaceMesh.geometry.dispose()
+      hoverFaceMesh.geometry = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+      hoverFaceMesh.visible = true
+      hasHover = true
+    } else {
+      hoverFaceMesh.visible = false
+    }
+  } else if (isSelectionAllowed && toolStore.selectMode === 'face' && activeMesh) {
     const intersects = raycaster.intersectObjects(layers.modelGroup.children, true)
     if (intersects.length > 0 && intersects[0].faceIndex !== undefined && intersects[0].faceIndex !== null) {
       const hit = intersects[0]
@@ -3140,18 +3789,8 @@ function updateHoverState() {
           vertMap.set(v.id, v)
         }
         const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
-
         const positions: number[] = []
-        for (let i = 1; i < faceVerts.length - 1; i++) {
-          const v0 = faceVerts[0]
-          const v1 = faceVerts[i]
-          const v2 = faceVerts[i + 1]
-          positions.push(
-            activeMesh.position.x + v0.position.x, activeMesh.position.y + v0.position.y, activeMesh.position.z + v0.position.z,
-            activeMesh.position.x + v1.position.x, activeMesh.position.y + v1.position.y, activeMesh.position.z + v1.position.z,
-            activeMesh.position.x + v2.position.x, activeMesh.position.y + v2.position.y, activeMesh.position.z + v2.position.z
-          )
-        }
+        pushWorldFan(activeMesh, faceVerts, positions)
 
         hoverFaceMesh.geometry.dispose()
         hoverFaceMesh.geometry = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
@@ -3165,7 +3804,7 @@ function updateHoverState() {
     hoverFaceMesh.visible = false
   }
 
-  if (toolStore.appMode === 'animate' || animationStore.showBones) {
+  if (bonesAreInteractive() && animationStore.showBones) {
     const boneHits = raycaster.intersectObjects(boneGroup.children, true)
     if (boneHits.length > 0) {
       for (const hit of boneHits) {
@@ -3173,7 +3812,14 @@ function updateHoverState() {
           const bId = hit.object.userData.boneId
           const bone = animationStore.armature.bones.find(b => b.id === bId)
           if (bone) {
-            hoverBoneMesh.position.set(bone.head.x, bone.head.y, bone.head.z)
+            const isPoseMode = toolStore.appMode === 'animate' || (toolStore.appMode === 'rig' && animationStore.isTestPoseActive)
+            if (isPoseMode) {
+              const boneMat = computeBoneWorldMatrix(bone, animationStore.armature.bones)
+              const posed = new THREE.Vector3(bone.head.x, bone.head.y, bone.head.z).applyMatrix4(boneMat)
+              hoverBoneMesh.position.copy(posed)
+            } else {
+              hoverBoneMesh.position.set(bone.head.x, bone.head.y, bone.head.z)
+            }
             hoverBoneMesh.visible = true
             hasHover = true
             break
@@ -3224,54 +3870,14 @@ function paintRaycastHit() {
   if (intersects.length === 0) return
   const hit = intersects[0]
 
-  // 1. Direct 3D Vertex Color Painting
-  if (toolStore.paintTarget === 'vertex') {
-    const meshObj = projectStore.meshes.find(m => m.id === hit.object.name)
-    if (!meshObj || !hit.point) return
-
-    const hitPt = hit.point
-    const isPen = toolStore.currentPointerType === 'pen' && toolStore.stylusPressureEnabled
-    const pressureScale = isPen ? (0.3 + toolStore.currentPressure * 0.7) : 1.0
-    const radius = toolStore.vertexBrushRadius * pressureScale
-    const falloff = toolStore.vertexBrushFalloff
-    const paintColor = new THREE.Color(toolStore.vertexPaintColor)
-
-    let changed = false
-    for (const v of meshObj.vertices) {
-      const worldPos = new THREE.Vector3(
-        meshObj.position.x + v.position.x,
-        meshObj.position.y + v.position.y,
-        meshObj.position.z + v.position.z
-      )
-      const dist = worldPos.distanceTo(hitPt)
-      if (dist <= radius) {
-        const t = dist / radius
-        const intensity = (falloff === 0 ? 1 : Math.max(0, 1 - Math.pow(t, 2 - falloff))) * (isPen ? toolStore.currentPressure : 1.0)
-
-        const curColor = new THREE.Color(v.color || '#ffffff')
-        curColor.lerp(paintColor, intensity)
-        v.color = `#${curColor.getHexString()}`
-        changed = true
-      }
-    }
-
-    if (changed) {
-      rebuildMeshes()
-    }
-    return
-  }
-
-  // 2. 2D Texture Pixel Painting
   if (hit.uv) {
     const uv = hit.uv
-    const hitMesh = projectStore.meshes.find(m => m.id === hit.object.name)
-    const hitMat = hitMesh ? projectStore.materials.find(m => m.id === hitMesh.materialId) : null
-    const targetTex = (hitMat?.textureId ? projectStore.textures.find(t => t.id === hitMat.textureId) : null) || projectStore.activeTexture || projectStore.textures[0]
+    const targetTex = projectStore.activeTexture || projectStore.textures[0]
     const pb = targetTex?.pixelBuffer || projectStore.pixelBuffer
     if (!pb) return
 
     if (targetTex && projectStore.activeTextureId !== targetTex.id) {
-      projectStore.activeTextureId = targetTex.id
+      projectStore.selectTexture(targetTex.id)
     }
 
     const px = Math.floor(uv.x * pb.width)
@@ -3304,13 +3910,17 @@ function paintRaycastHit() {
       pb.drawDither(px, py, activeDrawColor, effectiveSize)
     } else if (toolStore.paintTool === 'picker') {
       toolStore.primaryColor = pb.getPixelHex(px, py)
+    } else if (toolStore.paintTool === 'shade') {
+      pb.paintAtUV(uv.x, uv.y, activeDrawColor, effectiveSize, 'shade-light')
+      lastPaintUV = { u: uv.x, v: uv.y }
     }
 
     const hitTex = targetTex ? textureCache.get(targetTex.id) : threeTexture
     if (hitTex) {
       hitTex.needsUpdate = true
     }
-    projectStore.markTextureUpdated(targetTex?.id)
+    lastPaintTextureId = targetTex?.id
+    projectStore.markTexturePreview()
   }
 }
 
@@ -3334,7 +3944,7 @@ function execSpecial(action: string) {
   } else if (action === 'inset') {
     startModalOperator('inset')
   } else if (action === 'fill-face') {
-    projectStore.performFillFace()
+    handleFillFaceEvent()
   } else if (action === 'flip-normals') {
     projectStore.performFlipNormals()
   } else if (action === 'poke') {
@@ -3512,25 +4122,36 @@ function onWindowResize() {
   const height = containerRef.value.clientHeight
   if (width === 0 || height === 0) return
 
-  cameraPersp.aspect = width / height
+  cameraPersp.aspect = isTripleView()
+    ? (tripleCols(width).persp / height) || 1
+    : width / height
   cameraPersp.updateProjectionMatrix()
 
   const frustumSize = 5
-  const quadAspect = (width / 2) / (height / 2) || 1
+  const cols = isTripleView() ? tripleCols(width) : null
+  const splitAspect = isTripleView() && cols
+    ? 1
+    : ((width / 2) / (height / 2)) || 1
 
-  const updateOrtho = (cam: THREE.OrthographicCamera) => {
+  const updateOrtho = (cam: THREE.OrthographicCamera, aspect: number) => {
     const currentZoom = cam.zoom
-    cam.left = -frustumSize * quadAspect / 2
-    cam.right = frustumSize * quadAspect / 2
+    cam.left = -frustumSize * aspect / 2
+    cam.right = frustumSize * aspect / 2
     cam.top = frustumSize / 2
     cam.bottom = -frustumSize / 2
     cam.zoom = currentZoom
     cam.updateProjectionMatrix()
   }
 
-  updateOrtho(cameraTop)
-  updateOrtho(cameraFront)
-  updateOrtho(cameraRight)
+  if (cols) {
+    updateOrtho(cameraFront, (cols.front / height) || 1)
+    updateOrtho(cameraRight, (cols.side / height) || 1)
+    updateOrtho(cameraTop, (cols.front / height) || 1)
+  } else {
+    updateOrtho(cameraTop, splitAspect)
+    updateOrtho(cameraFront, splitAspect)
+    updateOrtho(cameraRight, splitAspect)
+  }
 
   renderer.setSize(width, height)
 }
@@ -3540,6 +4161,14 @@ function animate() {
 
   if (animationStore.armature.bones.length > 0 && (animationStore.isPlaying || animationStore.isTestPoseActive)) {
     SpringPhysicsSolver.step(animationStore.armature.bones)
+  }
+
+  if (
+    animationStore.armature.bones.length > 0 &&
+    isSkeletalPoseMode() &&
+    (animationStore.isPlaying || animationStore.isTestPoseActive || isGizmoDragging)
+  ) {
+    refreshLiveDeform()
   }
 
   if (orbitControls && orbitControls.enabled && !isGizmoDragging && !transformControls.dragging) {
@@ -3554,44 +4183,80 @@ function animate() {
   const width = containerRef.value.clientWidth
   const height = containerRef.value.clientHeight
 
-  if (toolStore.viewport.quadView) {
+  if (axesHelper) axesHelper.visible = toolStore.viewport.showAxes
+
+  if (isTripleView()) {
+    const cols = tripleCols(width)
+    const gizmoHelper = transformControls.getHelper()
+    renderer.setScissorTest(true)
+    renderer.clear()
+
+    gizmoHelper.visible = false
+    setGridsForView('front')
+    renderer.setViewport(0, 0, cols.front, height)
+    renderer.setScissor(0, 0, cols.front, height)
+    gizmoHelper.visible = activeQuadrant.value === 'col_front'
+    renderer.render(scene, cameraFront)
+
+    setGridsForView('side')
+    renderer.setViewport(cols.xSide, 0, cols.side, height)
+    renderer.setScissor(cols.xSide, 0, cols.side, height)
+    gizmoHelper.visible = activeQuadrant.value === 'col_side'
+    renderer.render(scene, cameraRight)
+
+    setGridsForView('floor')
+    renderer.setViewport(cols.xPersp, 0, cols.persp, height)
+    renderer.setScissor(cols.xPersp, 0, cols.persp, height)
+    gizmoHelper.visible = activeQuadrant.value === 'col_persp'
+    renderer.render(scene, cameraPersp)
+
+    renderer.setScissorTest(false)
+  } else if (toolStore.viewport.quadView) {
     const halfW = Math.floor(width / 2)
     const halfH = Math.floor(height / 2)
 
     renderer.setScissorTest(true)
     renderer.clear()
 
-    // 1. Top-Left: Top Ortho View
+    setGridsForView('floor')
     renderer.setViewport(0, halfH, halfW, halfH)
     renderer.setScissor(0, halfH, halfW, halfH)
     renderer.render(scene, cameraTop)
 
-    // 2. Top-Right: Perspective User 3D Camera
+    setGridsForView('floor')
     renderer.setViewport(halfW, halfH, halfW, halfH)
     renderer.setScissor(halfW, halfH, halfW, halfH)
     renderer.render(scene, cameraPersp)
 
-    // 3. Bottom-Left: Front Ortho View
+    setGridsForView('front')
     renderer.setViewport(0, 0, halfW, halfH)
     renderer.setScissor(0, 0, halfW, halfH)
     renderer.render(scene, cameraFront)
 
-    // 4. Bottom-Right: Right Ortho View
+    setGridsForView('side')
     renderer.setViewport(halfW, 0, halfW, halfH)
     renderer.setScissor(halfW, 0, halfW, halfH)
     renderer.render(scene, cameraRight)
 
     renderer.setScissorTest(false)
   } else {
+    setGridsForView('floor')
     renderer.setScissorTest(false)
     renderer.setViewport(0, 0, width, height)
     renderer.clear()
+    if (transformControls) transformControls.getHelper().visible = true
     renderer.render(scene, cameraPersp)
   }
 }
 
 // Watchers
 watch(() => projectStore.meshes, rebuildMeshes, { deep: true })
+watch(() => projectStore.referenceRevision, rebuildReferencePlanes)
+watch(() => projectStore.referenceImages, syncReferenceTransforms, { deep: true })
+watch(() => projectStore.selectedReferenceId, () => {
+  syncReferenceTransforms()
+  updateTransformGizmo()
+})
 watch(() => projectStore.textureRevision, () => {
   if (threeTexture) threeTexture.needsUpdate = true
 })
@@ -3599,7 +4264,21 @@ watch(() => toolStore.appMode, async () => {
   toolStore.isBoxSelectActive = false
   isBoxSelectArmed.value = false
   if (orbitControls) orbitControls.enabled = true
+  if (toolStore.appMode === 'blockout') {
+    activeQuadrant.value = 'col_front'
+    toolStore.setModelTool('move')
+    if (transformControls) {
+      transformControls.enabled = true
+      transformControls.camera = cameraFront
+    }
+  } else if (transformControls) {
+    transformControls.enabled = true
+    transformControls.getHelper().visible = true
+  }
   rebuildMeshes()
+  rebuildBones()
+  rebuildReferencePlanes()
+  onWindowResize()
   await nextTick()
   setTimeout(() => recoverViewportRenderer(), 50)
   setTimeout(() => recoverViewportRenderer(), 150)
@@ -3616,6 +4295,7 @@ watch(() => toolStore.selectMode, () => {
   updateTransformGizmo()
 })
 watch(() => toolStore.modelTool, updateTransformGizmo)
+watch(() => [toolStore.transformOrientation, toolStore.pivotPoint], updateTransformGizmo)
 watch(() => animationStore.selectedBoneId, () => {
   rebuildBones()
   rebuildMeshes()
@@ -3633,10 +4313,22 @@ watch(() => animationStore.isTestPoseActive, () => {
   updateTransformGizmo()
 })
 watch(() => animationStore.currentFrame, () => {
+  rebuildBones()
   if (!updateMeshTransformsAndAttributes()) {
     rebuildMeshes()
   }
 })
+watch(
+  () =>
+    animationStore.armature.bones.map(
+      b => `${b.position.x},${b.position.y},${b.position.z},${b.rotation.x},${b.rotation.y},${b.rotation.z},${b.scale.x},${b.scale.y},${b.scale.z}`
+    ).join('|'),
+  () => {
+    if (!isSkeletalPoseMode() || isGizmoDragging || animationStore.isPlaying) return
+    rebuildBones()
+    refreshLiveDeform()
+  }
+)
 watch(() => toolStore.isBoxSelectActive, (active) => {
   if (orbitControls) {
     orbitControls.enabled = !active
@@ -3647,6 +4339,16 @@ function handleCameraViewEvent(e: any) {
   if (e && e.detail) {
     setCameraView(e.detail)
   }
+}
+
+function handleFillFaceEvent() {
+  const mesh = projectStore.activeMesh
+  const dir = new THREE.Vector3()
+  activeCamera.getWorldDirection(dir)
+  if (mesh) {
+    dir.transformDirection(meshWorldMatrix(mesh).invert())
+  }
+  projectStore.performFillFace({ x: dir.x, y: dir.y, z: dir.z })
 }
 
 function handleBlenderModalEvent(e: any) {
@@ -3684,7 +4386,7 @@ function handleGlobalPointerMove(e: PointerEvent) {
     updateActiveCameraAndQuadrant(e)
     if (operatorManager.activeOperator) {
       (operatorManager.activeOperator as any).ctx.camera = activeCamera
-      const vpKind = activeQuadrant.value === 'top_left' ? 'top' : (activeQuadrant.value === 'bottom_left' ? 'front' : (activeQuadrant.value === 'bottom_right' ? 'right' : 'persp'))
+      const vpKind = viewportKindFromQuadrant()
       ;(operatorManager.activeOperator as any).ctx.viewportKind = vpKind
       ;(operatorManager.activeOperator as any).ctx.quadrant = activeQuadrant.value
     }
@@ -3711,7 +4413,7 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
 
   // Blender Box Select shortcut (B) or Add Bone in Rig Mode
   if ((e.key === 'b' || e.key === 'B') && !e.ctrlKey && !e.metaKey && !e.altKey) {
-    if (toolStore.appMode === 'model') {
+    if (toolStore.isMeshWorkspace()) {
       toolStore.isBoxSelectActive = !toolStore.isBoxSelectActive
       return
     } else if (toolStore.appMode === 'rig') {
@@ -3720,17 +4422,17 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
     }
   }
 
-  // Reset Pose (Alt+R)
   if ((e.key === 'r' || e.key === 'R') && e.altKey) {
     e.preventDefault()
-    animationStore.resetAllBonesToRest()
+    if (toolStore.appMode === 'animate') animationStore.resetPose()
+    else animationStore.resetAllBonesToRest()
     rebuildBones()
     rebuildMeshes()
     return
   }
 
   // Blender Specials Context Menu shortcut (W)
-  if ((e.key === 'w' || e.key === 'W') && !e.ctrlKey && !e.metaKey && !e.altKey && toolStore.appMode === 'model') {
+  if ((e.key === 'w' || e.key === 'W') && !e.ctrlKey && !e.metaKey && !e.altKey && toolStore.isMeshWorkspace()) {
     specialsMenuPos.value = { x: pointerDownClientPos.x || 200, y: pointerDownClientPos.y || 200 }
     showSpecialsMenu.value = !showSpecialsMenu.value
     return
@@ -3780,7 +4482,7 @@ function handleGlobalPointerDown(e: MouseEvent) {
   updateActiveCameraAndQuadrant(e)
   if (operatorManager.activeOperator) {
     (operatorManager.activeOperator as any).ctx.camera = activeCamera
-    const vpKind = activeQuadrant.value === 'top_left' ? 'top' : (activeQuadrant.value === 'bottom_left' ? 'front' : (activeQuadrant.value === 'bottom_right' ? 'right' : 'persp'))
+    const vpKind = viewportKindFromQuadrant()
     ;(operatorManager.activeOperator as any).ctx.viewportKind = vpKind
     ;(operatorManager.activeOperator as any).ctx.quadrant = activeQuadrant.value
   }
@@ -3805,11 +4507,23 @@ function projectWorldToScreen(worldPos: THREE.Vector3): { x: number; y: number }
   const rect = containerRef.value.getBoundingClientRect()
   const proj = worldPos.clone().project(activeCamera)
   
-  if (!toolStore.viewport.quadView) {
+  if (!isSplitView()) {
     return {
       x: (proj.x * 0.5 + 0.5) * rect.width,
       y: (-(proj.y * 0.5) + 0.5) * rect.height
     }
+  }
+
+  if (isTripleView()) {
+    const cols = tripleCols(rect.width)
+    const localY = (-(proj.y * 0.5) + 0.5) * rect.height
+    if (activeQuadrant.value === 'col_front') {
+      return { x: (proj.x * 0.5 + 0.5) * cols.front, y: localY }
+    }
+    if (activeQuadrant.value === 'col_side') {
+      return { x: cols.xSide + (proj.x * 0.5 + 0.5) * cols.side, y: localY }
+    }
+    return { x: cols.xPersp + (proj.x * 0.5 + 0.5) * cols.persp, y: localY }
   }
 
   const halfW = rect.width / 2
@@ -3844,40 +4558,30 @@ function triggerToggleOrientation() {
   operatorManager.handleKeyDown(new KeyboardEvent('keydown', { key: 'o' }))
 }
 
+function triggerInsetIndividual() {
+  operatorManager.handleKeyDown(new KeyboardEvent('keydown', { key: 'i' }))
+}
+
+function triggerInsetBoundary() {
+  operatorManager.handleKeyDown(new KeyboardEvent('keydown', { key: 'b' }))
+}
+
+function triggerInsetOutset() {
+  operatorManager.handleKeyDown(new KeyboardEvent('keydown', { key: 'o' }))
+}
+
 function triggerStepBack() {
   operatorManager.handlePointerDown({ button: 2 } as any)
 }
 
 // Floating & Movable Operator HUD
 const hudPos = ref({ x: typeof window !== 'undefined' ? Math.max(20, Math.round(window.innerWidth / 2 - 220)) : 220, y: 52 })
-const isHudDragging = ref(false)
-let hudDragOffset = { x: 0, y: 0 }
-
-function startHudDrag(e: MouseEvent) {
-  if (e.button !== 0) return
-  isHudDragging.value = true
-  hudDragOffset = {
-    x: e.clientX - hudPos.value.x,
-    y: e.clientY - hudPos.value.y
-  }
-
-  const onMouseMove = (moveEvent: MouseEvent) => {
-    if (!isHudDragging.value) return
-    const maxX = window.innerWidth - 320
-    const maxY = window.innerHeight - 90
-    hudPos.value.x = Math.max(10, Math.min(maxX, moveEvent.clientX - hudDragOffset.x))
-    hudPos.value.y = Math.max(40, Math.min(maxY, moveEvent.clientY - hudDragOffset.y))
-  }
-
-  const onMouseUp = () => {
-    isHudDragging.value = false
-    window.removeEventListener('mousemove', onMouseMove)
-    window.removeEventListener('mouseup', onMouseUp)
-  }
-
-  window.addEventListener('mousemove', onMouseMove)
-  window.addEventListener('mouseup', onMouseUp)
-}
+const { startDrag: startHudDrag } = useFloatingDrag(hudPos, {
+  minX: 10,
+  minY: 40,
+  maxPadX: 320,
+  maxPadY: 90
+})
 
 watch(() => toolStore.viewport.invertZoom, (inv) => {
   if (orbitControls) {
@@ -3902,9 +4606,17 @@ watch(() => toolStore.viewport.shading, () => {
   rebuildMeshes()
 })
 
+watch(() => toolStore.viewport.xray, () => {
+  rebuildMeshes()
+  rebuildBones()
+})
+
 watch(() => projectStore.textureRevision, () => {
   updateThreeTextures()
-  rebuildMeshes()
+})
+
+watch(() => toolStore.uvHoverFaceIds, () => {
+  updateHoverState()
 })
 
 watch(() => [projectStore.activeTextureId, projectStore.textures.length], () => {
@@ -3938,8 +4650,7 @@ watch(() => operatorManager.state.value.active, (active) => {
 })
 
 function toggleBoneVisibility() {
-  toolStore.viewport.showBones = !toolStore.viewport.showBones
-  animationStore.showBones = toolStore.viewport.showBones
+  animationStore.toggleShowBones()
   rebuildBones()
 }
 
@@ -3957,10 +4668,17 @@ watch(() => themeStore.currentThemeId, () => {
   applyTheme(themeStore.activeColors)
 })
 
+watch(
+  () => [layoutStore.blockoutFrontFrac, layoutStore.blockoutSideFrac] as const,
+  () => syncBlockoutSplitsToScreen(),
+  { immediate: true }
+)
+
 onMounted(() => {
   void startViewportRenderer()
   window.addEventListener(EDITOR_EVENTS.cameraView, handleCameraViewEvent)
   window.addEventListener(EDITOR_EVENTS.modalTool, handleBlenderModalEvent)
+  window.addEventListener(EDITOR_EVENTS.fillFace, handleFillFaceEvent)
   window.addEventListener(EDITOR_EVENTS.primitiveCreated, handlePrimitiveCreatedEvent)
   window.addEventListener(EDITOR_EVENTS.startPrimitivePlacement, handleStartPrimitivePlacementEvent)
   window.addEventListener('theme-changed', handleThemeChangedEvent)
@@ -3975,6 +4693,7 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener(EDITOR_EVENTS.cameraView, handleCameraViewEvent)
   window.removeEventListener(EDITOR_EVENTS.modalTool, handleBlenderModalEvent)
+  window.removeEventListener(EDITOR_EVENTS.fillFace, handleFillFaceEvent)
   window.removeEventListener(EDITOR_EVENTS.primitiveCreated, handlePrimitiveCreatedEvent)
   window.removeEventListener(EDITOR_EVENTS.startPrimitivePlacement, handleStartPrimitivePlacementEvent)
   window.removeEventListener('theme-changed', handleThemeChangedEvent)
@@ -4036,7 +4755,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="relative w-full h-full overflow-hidden bg-ui-root flex flex-col">
+  <div data-viewport-root class="relative w-full h-full overflow-hidden bg-ui-root flex flex-col">
     <!-- 3D Canvas Container -->
     <div 
       ref="containerRef" 
@@ -4048,9 +4767,36 @@ onUnmounted(() => {
       <!-- Dedicated 3D Canvas Mount (Preserves Vue UI overlay and LightWave controls) -->
       <div ref="canvasMountRef" class="absolute inset-0 w-full h-full z-0 pointer-events-auto"></div>
 
-      <!-- Drop Image to Apply Texture Overlay -->
+      <!-- Drop Image Overlay -->
+      <div
+        v-if="isDraggingImageFile && isTripleView()"
+        class="absolute inset-0 z-50 grid pointer-events-none"
+        :style="{ gridTemplateColumns: blockoutGridCols }"
+      >
+        <div
+          class="m-1.5 rounded-lg border-2 border-dashed flex flex-col items-center justify-center text-center px-3"
+          :class="dropTargetPane === 'front' ? 'bg-emerald-950/75 border-emerald-400' : 'bg-ui-root/40 border-ui-borderStrong'"
+        >
+          <span class="text-xs font-bold text-white font-mono">Front reference</span>
+          <span class="text-[10px] text-emerald-200 font-mono mt-1">Tracing plane (not a texture)</span>
+        </div>
+        <div
+          class="m-1.5 rounded-lg border-2 border-dashed flex flex-col items-center justify-center text-center px-3"
+          :class="dropTargetPane === 'side' ? 'bg-indigo-950/75 border-indigo-400' : 'bg-ui-root/40 border-ui-borderStrong'"
+        >
+          <span class="text-xs font-bold text-white font-mono">Side reference</span>
+          <span class="text-[10px] text-indigo-200 font-mono mt-1">Tracing plane (not a texture)</span>
+        </div>
+        <div
+          class="m-1.5 rounded-lg border-2 border-dashed flex flex-col items-center justify-center text-center px-3"
+          :class="dropTargetPane === 'persp' ? 'bg-sky-950/75 border-sky-400' : 'bg-ui-root/40 border-ui-borderStrong'"
+        >
+          <span class="text-xs font-bold text-white font-mono">Apply texture</span>
+          <span class="text-[10px] text-sky-200 font-mono mt-1">Assigns to the 3D object</span>
+        </div>
+      </div>
       <div 
-        v-if="isDraggingImageFile"
+        v-else-if="isDraggingImageFile"
         class="absolute inset-3 bg-sky-950/70 backdrop-blur-xs border-2 border-dashed border-sky-400 rounded-lg z-50 flex flex-col items-center justify-center p-6 text-center pointer-events-none shadow-2xl animate-in fade-in"
       >
         <span class="text-sm font-bold text-white font-mono">Drop Image to Apply Texture</span>
@@ -4079,7 +4825,43 @@ onUnmounted(() => {
       </div>
 
       <!-- 1. SINGLE VIEWPORT LIGHTWAVE CONTROLS -->
-      <template v-if="!toolStore.viewport.quadView">
+      <template v-if="!isSplitView()">
+        <!-- Top-Left Transform Space & Pivot Cluster -->
+        <div 
+          v-if="toolStore.appMode === 'model' || toolStore.appMode === 'blockout'"
+          class="absolute top-2.5 left-2.5 z-20 flex items-center gap-1.5 bg-ui-panel/95 text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-md px-2 py-1 text-xs font-mono select-none"
+        >
+          <!-- Transform Orientation -->
+          <div class="flex items-center gap-1">
+            <span class="text-[10px] text-ui-textMuted uppercase font-bold">Space:</span>
+            <select 
+              v-model="toolStore.transformOrientation"
+              class="bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-[11px] text-ui-textPrimary focus:outline-none focus:border-amber-400"
+            >
+              <option value="global">Global</option>
+              <option value="local">Local</option>
+              <option value="normal">Normal</option>
+              <option value="view">View</option>
+              <option value="cursor">3D Cursor</option>
+            </select>
+          </div>
+
+          <div class="h-3 w-px bg-ui-borderSubtle"></div>
+
+          <!-- Pivot Point -->
+          <div class="flex items-center gap-1">
+            <span class="text-[10px] text-ui-textMuted uppercase font-bold">Pivot:</span>
+            <select 
+              v-model="toolStore.pivotPoint"
+              class="bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-[11px] text-ui-textPrimary focus:outline-none focus:border-amber-400"
+            >
+              <option value="median">Median Point</option>
+              <option value="active">Active Element</option>
+              <option value="cursor">3D Cursor</option>
+            </select>
+          </div>
+        </div>
+
         <!-- Top-Right LightWave Nav Cluster (Move, Rotate, Zoom, Center, Maximize) -->
         <div class="absolute top-2.5 right-2.5 z-20 flex items-center bg-ui-panel/95 text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-md divide-x divide-ui-borderSubtle">
           <button 
@@ -4204,7 +4986,123 @@ onUnmounted(() => {
         </div>
       </template>
 
-      <!-- 2. QUAD VIEWPORT LIGHTWAVE CONTROLS -->
+      <!-- 2. BLOCKOUT TRIPLE (Front | Side | Persp) -->
+      <template v-else-if="isTripleView()">
+        <div class="absolute inset-0 z-20 grid pointer-events-none" :style="{ gridTemplateColumns: blockoutGridCols }">
+          <div
+            class="relative min-w-0 border-2"
+            :class="activeQuadrant === 'col_front' ? 'border-emerald-400/85' : 'border-transparent'"
+          >
+            <div class="absolute top-1.5 left-1.5 right-1.5 flex items-center justify-between gap-1 min-w-0">
+              <div class="shrink-0 px-1.5 py-0.5 rounded-xs bg-ui-panel/95 border border-ui-borderStrong text-[10px] font-mono text-ui-textPrimary flex items-center gap-1 shadow-xs">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                <span class="font-bold">Front</span>
+                <span class="text-ui-textMuted">Z</span>
+              </div>
+              <div class="pointer-events-auto flex items-center bg-ui-panel/95 border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle shrink-0">
+                <button type="button" @mousedown="startLightWavePan('front', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-move" title="Pan Front">
+                  <Move class="w-3 h-3" />
+                </button>
+                <button type="button" @mousedown="startLightWaveZoom('front', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-ns-resize" title="Zoom Front">
+                  <Search class="w-3 h-3" />
+                </button>
+                <button type="button" @click="centerViewOnContents('front')" class="p-1 hover:bg-ui-hover text-ui-textSecondary" title="Frame Front">
+                  <Crosshair class="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+          </div>
+          <div
+            class="relative min-w-0 border-2 border-l border-ui-borderStrong/50"
+            :class="activeQuadrant === 'col_side' ? 'border-indigo-400/85' : 'border-transparent'"
+          >
+            <div class="absolute top-1.5 left-1.5 right-1.5 flex items-center justify-between gap-1 min-w-0">
+              <div class="shrink-0 px-1.5 py-0.5 rounded-xs bg-ui-panel/95 border border-ui-borderStrong text-[10px] font-mono text-ui-textPrimary flex items-center gap-1 shadow-xs">
+                <span class="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
+                <span class="font-bold">Side</span>
+                <span class="text-ui-textMuted">X</span>
+              </div>
+              <div class="pointer-events-auto flex items-center bg-ui-panel/95 border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle shrink-0">
+                <button type="button" @mousedown="startLightWavePan('right', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-move" title="Pan Side">
+                  <Move class="w-3 h-3" />
+                </button>
+                <button type="button" @mousedown="startLightWaveZoom('right', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-ns-resize" title="Zoom Side">
+                  <Search class="w-3 h-3" />
+                </button>
+                <button type="button" @click="centerViewOnContents('right')" class="p-1 hover:bg-ui-hover text-ui-textSecondary" title="Frame Side">
+                  <Crosshair class="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+          </div>
+          <div
+            class="relative min-w-0 border-2"
+            :class="activeQuadrant === 'col_persp' ? 'border-amber-400/85' : 'border-transparent'"
+          >
+            <div class="absolute top-1.5 left-1.5 right-1.5 flex items-center justify-between gap-1 min-w-0">
+              <div class="shrink-0 px-1.5 py-0.5 rounded-xs bg-ui-panel/95 border border-ui-borderStrong text-[10px] font-mono text-ui-textPrimary flex items-center gap-1 shadow-xs">
+                <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                <span class="font-bold">Persp</span>
+              </div>
+              <div class="pointer-events-auto flex items-center bg-ui-panel/95 border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle shrink-0">
+                <button type="button" @mousedown="startLightWavePan('persp', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-move" title="Pan">
+                  <Move class="w-3 h-3" />
+                </button>
+                <button type="button" @mousedown="startLightWaveRotate($event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-grab" title="Orbit">
+                  <RotateCw class="w-3 h-3" />
+                </button>
+                <button type="button" @mousedown="startLightWaveZoom('persp', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-ns-resize" title="Zoom">
+                  <Search class="w-3 h-3" />
+                </button>
+                <button type="button" @click="centerViewOnContents('persp')" class="p-1 hover:bg-ui-hover text-ui-textSecondary" title="Frame">
+                  <Crosshair class="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  @click="toolStore.viewport.xray = !toolStore.viewport.xray"
+                  class="p-1"
+                  :class="toolStore.viewport.xray ? 'bg-ui-active text-ui-textAccent' : 'hover:bg-ui-hover text-ui-textSecondary'"
+                  title="X-Ray"
+                >
+                  <BlenderIcon name="xray" :size="13" :color="toolStore.viewport.xray ? 'var(--ui-accent)' : 'currentColor'" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div
+          class="absolute inset-y-0 z-30 w-4 -translate-x-1/2 cursor-col-resize pointer-events-auto group"
+          :class="isBlockoutSplitting ? 'bg-amber-400/25' : 'hover:bg-amber-400/15'"
+          :style="{ left: `${layoutStore.blockoutFrontFrac * 100}%` }"
+          title="Drag to resize Front / Side. Double-click to reset."
+          @pointerdown="startBlockoutSplit('front-side', $event)"
+          @dblclick="resetBlockoutSplits"
+        >
+          <div class="absolute inset-y-3 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-ui-borderStrong group-hover:bg-amber-400" />
+        </div>
+        <div
+          class="absolute inset-y-0 z-30 w-4 -translate-x-1/2 cursor-col-resize pointer-events-auto group"
+          :class="isBlockoutSplitting ? 'bg-amber-400/25' : 'hover:bg-amber-400/15'"
+          :style="{ left: `${(layoutStore.blockoutFrontFrac + layoutStore.blockoutSideFrac) * 100}%` }"
+          title="Drag to resize Side / Persp. Double-click to reset."
+          @pointerdown="startBlockoutSplit('side-persp', $event)"
+          @dblclick="resetBlockoutSplits"
+        >
+          <div class="absolute inset-y-3 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-ui-borderStrong group-hover:bg-amber-400" />
+        </div>
+        <div
+          v-if="!operatorManager.state.value.active"
+          class="absolute bottom-2 left-1/2 z-20 -translate-x-1/2 pointer-events-none max-w-[min(92%,42rem)] px-2.5 py-1 rounded-xs bg-ui-panel/90 border border-ui-borderStrong text-[10px] font-mono text-ui-textSecondary text-center shadow-xs"
+        >
+          <span class="text-amber-400 font-semibold">F</span> Draw
+          · Drag a ref to place it
+          · <span class="text-ui-textMuted">Alt-drag</span> pane’s photo
+          · Shift-drag scale · Alt-wheel scale
+          · Drag the bars to resize panes · double-click resets
+        </div>
+      </template>
+
+      <!-- 3. QUAD VIEWPORT LIGHTWAVE CONTROLS -->
       <template v-else>
         <!-- Center Divider Lines -->
         <div class="absolute inset-x-0 top-1/2 h-px bg-ui-borderStrong/60 pointer-events-none z-10"></div>
@@ -4335,7 +5233,7 @@ onUnmounted(() => {
 
     <!-- Knife & Loop Cut Interactive Screen Overlay Layer -->
     <svg 
-      v-if="operatorManager.state.value.active && (operatorManager.activeOperator instanceof KnifeOperator || operatorManager.activeOperator instanceof LoopCutOperator)"
+      v-if="operatorManager.state.value.active && (operatorManager.activeOperator instanceof KnifeOperator || operatorManager.activeOperator instanceof LoopCutOperator || operatorManager.activeOperator instanceof PolyDrawOperator)"
       class="absolute inset-0 w-full h-full pointer-events-none z-30"
     >
       <!-- Loop Cut Preview Lines -->
@@ -4350,6 +5248,27 @@ onUnmounted(() => {
           stroke="#f59e0b"
           stroke-width="2.5"
           stroke-linecap="round"
+        />
+      </template>
+
+      <template v-if="operatorManager.activeOperator instanceof PolyDrawOperator">
+        <line
+          v-for="(pt, idx) in (operatorManager.activeOperator as PolyDrawOperator).screenPoints.slice(1)"
+          :key="'pd_' + idx"
+          :x1="(operatorManager.activeOperator as PolyDrawOperator).screenPoints[idx].x - (containerRef?.getBoundingClientRect().left || 0)"
+          :y1="(operatorManager.activeOperator as PolyDrawOperator).screenPoints[idx].y - (containerRef?.getBoundingClientRect().top || 0)"
+          :x2="pt.x - (containerRef?.getBoundingClientRect().left || 0)"
+          :y2="pt.y - (containerRef?.getBoundingClientRect().top || 0)"
+          stroke="#f59e0b"
+          stroke-width="2"
+        />
+        <circle
+          v-for="(pt, idx) in (operatorManager.activeOperator as PolyDrawOperator).screenPoints"
+          :key="'pdc_' + idx"
+          :cx="pt.x - (containerRef?.getBoundingClientRect().left || 0)"
+          :cy="pt.y - (containerRef?.getBoundingClientRect().top || 0)"
+          r="4"
+          fill="#f59e0b"
         />
       </template>
 
@@ -4421,13 +5340,14 @@ onUnmounted(() => {
     <!-- Blender Modal Operator Interactive HUD (Floating, Movable & Closable) -->
     <div 
       v-if="operatorManager.state.value.active"
-      class="fixed z-50 flex flex-col bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl font-sans select-none pointer-events-auto max-w-[95vw] min-w-[360px]"
+      data-floating-panel
+      class="fixed z-50 flex flex-col bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl font-sans select-none pointer-events-auto max-w-[95vw] min-w-[360px] hud-panel"
       :style="{ left: `${hudPos.x}px`, top: `${hudPos.y}px` }"
     >
       <!-- Panel Header Bar (Draggable) -->
       <div 
         class="flex items-center justify-between px-2.5 py-1 bg-ui-header border-b border-ui-borderSubtle cursor-move rounded-t-xs text-xs text-ui-textMuted group"
-        @mousedown="startHudDrag"
+        @pointerdown="startHudDrag"
         title="Drag to reposition HUD"
       >
         <div class="flex items-center gap-1.5">
@@ -4495,6 +5415,30 @@ onUnmounted(() => {
               Slow
             </button>
 
+            <button 
+              v-if="operatorManager.state.value.operatorName === 'Inset'"
+              @click="triggerInsetIndividual"
+              class="px-2 py-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[11px] text-ui-textSecondary font-medium active:scale-95 transition"
+              title="Individual faces (I)"
+            >
+              Individual
+            </button>
+            <button 
+              v-if="operatorManager.state.value.operatorName === 'Inset'"
+              @click="triggerInsetBoundary"
+              class="px-2 py-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[11px] text-ui-textSecondary font-medium active:scale-95 transition"
+              title="Inset mesh boundary edges (B)"
+            >
+              Boundary
+            </button>
+            <button 
+              v-if="operatorManager.state.value.operatorName === 'Inset'"
+              @click="triggerInsetOutset"
+              class="px-2 py-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[11px] text-ui-textSecondary font-medium active:scale-95 transition"
+              title="Outset (O)"
+            >
+              Outset
+            </button>
             <button 
               v-if="operatorManager.state.value.operatorName.includes('Primitive')"
               @click="triggerToggleOrientation"

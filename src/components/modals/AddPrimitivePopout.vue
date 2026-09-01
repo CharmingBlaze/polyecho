@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { PrimitiveType } from '../../core/primitives/PrimitiveTypes'
 import { PrimitivePlacementMode } from '../../core/operators/placement/PrimitivePlacementOperator'
+import { useFloatingDrag } from '../../composables/useFloatingDrag'
 import { PlacementOrientation } from '../../core/placement/SurfacePlacementSolver'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import { EDITOR_EVENTS, requestPrimitivePlacement } from '../../core/commands/editorCommands'
@@ -25,34 +26,7 @@ const searchQuery = ref('')
 const placementMode = ref<PrimitivePlacementMode>(PrimitivePlacementMode.CAD_DRAW)
 const orientation = ref<PlacementOrientation>('SURFACE')
 
-const isDragging = ref(false)
-let dragOffset = { x: 0, y: 0 }
-
-function startDrag(e: MouseEvent) {
-  if (e.button !== 0) return
-  isDragging.value = true
-  dragOffset = {
-    x: e.clientX - position.value.x,
-    y: e.clientY - position.value.y
-  }
-
-  const onMouseMove = (moveEvent: MouseEvent) => {
-    if (!isDragging.value) return
-    const maxX = window.innerWidth - 320
-    const maxY = window.innerHeight - 80
-    position.value.x = Math.max(10, Math.min(maxX, moveEvent.clientX - dragOffset.x))
-    position.value.y = Math.max(40, Math.min(maxY, moveEvent.clientY - dragOffset.y))
-  }
-
-  const onMouseUp = () => {
-    isDragging.value = false
-    window.removeEventListener('mousemove', onMouseMove)
-    window.removeEventListener('mouseup', onMouseUp)
-  }
-
-  window.addEventListener('mousemove', onMouseMove)
-  window.addEventListener('mouseup', onMouseUp)
-}
+const { startDrag } = useFloatingDrag(position, { minX: 10, minY: 40, maxPadX: 320, maxPadY: 80 })
 
 interface PrimitiveItem {
   type: PrimitiveType
@@ -166,6 +140,7 @@ defineExpose({
 <template>
   <!-- Floating, Movable, Closable & Minimizable Primitive Panel -->
   <div 
+    data-floating-panel
     v-if="visible" 
     class="fixed z-50 flex flex-col bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl font-sans select-none pointer-events-auto w-[360px] text-xs transition-shadow"
     :style="{ left: `${position.x}px`, top: `${position.y}px` }"
@@ -173,7 +148,7 @@ defineExpose({
     <!-- Panel Draggable Header Bar -->
     <div 
       class="flex items-center justify-between px-2.5 py-1.5 bg-ui-header border-b border-ui-borderSubtle cursor-move rounded-t-xs text-xs text-ui-textMuted group select-none"
-      @mousedown="startDrag"
+      @pointerdown="startDrag"
       title="Drag to move panel"
     >
       <div class="flex items-center space-x-1.5">
@@ -181,7 +156,7 @@ defineExpose({
         <span class="font-semibold text-ui-textPrimary text-xs tracking-wide">Add Primitives & CAD</span>
       </div>
 
-      <div class="flex items-center space-x-1" @mousedown.stop>
+      <div class="flex items-center space-x-1" @mousedown.stop @pointerdown.stop>
         <!-- Minimize Button -->
         <button 
           @click="isMinimized = !isMinimized" 

@@ -25,6 +25,56 @@ export const useLayoutStore = defineStore('layout', () => {
     y: 46 
   })
 
+  type InspectorTab = 'outliner' | 'props' | 'modifiers' | 'material' | 'texture' | 'refs' | 'bindings' | 'weights' | 'skeleton'
+
+  const inspectorTabsByMode: Record<string, InspectorTab[]> = {
+    model: ['outliner', 'props', 'modifiers', 'material', 'texture'],
+    blockout: ['outliner', 'props', 'refs', 'modifiers'],
+    uvpaint: ['outliner', 'props', 'texture', 'material', 'modifiers'],
+    animate: ['outliner', 'props', 'modifiers', 'material', 'texture'],
+    rig: ['skeleton', 'props', 'bindings', 'weights']
+  }
+
+  const inspectorTab = ref<InspectorTab>('outliner')
+  const lastInspectorTabByMode = ref<Record<string, InspectorTab>>({
+    model: 'outliner',
+    blockout: 'refs',
+    uvpaint: 'texture',
+    animate: 'props',
+    rig: 'skeleton'
+  })
+
+  const blockoutFrontFrac = ref(1 / 3)
+  const blockoutSideFrac = ref(1 / 3)
+
+  function resetBlockoutSplits() {
+    blockoutFrontFrac.value = 1 / 3
+    blockoutSideFrac.value = 1 / 3
+  }
+
+  function visibleInspectorTabs(mode: string): InspectorTab[] {
+    return inspectorTabsByMode[mode] || inspectorTabsByMode.model
+  }
+
+  function setInspectorTab(tab: InspectorTab, mode?: string) {
+    inspectorTab.value = tab
+    const key = mode || 'model'
+    lastInspectorTabByMode.value = { ...lastInspectorTabByMode.value, [key]: tab }
+  }
+
+  function restoreInspectorTab(mode: string) {
+    const defaults: Record<string, InspectorTab> = {
+      model: 'outliner',
+      blockout: 'refs',
+      uvpaint: 'texture',
+      animate: 'props',
+      rig: 'skeleton'
+    }
+    const visible = visibleInspectorTabs(mode)
+    const remembered = lastInspectorTabByMode.value[mode] || defaults[mode] || 'outliner'
+    inspectorTab.value = visible.includes(remembered) ? remembered : (visible[0] || 'outliner')
+  }
+
   function toggleLeftToolbar() {
     showLeftToolbar.value = !showLeftToolbar.value
   }
@@ -47,7 +97,7 @@ export const useLayoutStore = defineStore('layout', () => {
     leftToolbarColumns.value = 2
     leftToolbarWidth.value = 74
     leftToolbarHeight.value = 500
-    leftToolbarPos.value = { x: 16, y: 46 }
+    leftToolbarPos.value = { x: 16, y: typeof window !== 'undefined' ? Math.round(window.innerHeight / 2) : 400 }
 
     rightSidebarFloating.value = false
     rightSidebarMinimized.value = false
@@ -57,6 +107,7 @@ export const useLayoutStore = defineStore('layout', () => {
       x: typeof window !== 'undefined' ? Math.max(20, window.innerWidth - 340) : 1000, 
       y: 46 
     }
+    resetBlockoutSplits()
   }
 
   return {
@@ -74,6 +125,14 @@ export const useLayoutStore = defineStore('layout', () => {
     rightSidebarWidth,
     rightSidebarHeight,
     rightSidebarPos,
+    inspectorTab,
+    lastInspectorTabByMode,
+    blockoutFrontFrac,
+    blockoutSideFrac,
+    resetBlockoutSplits,
+    visibleInspectorTabs,
+    setInspectorTab,
+    restoreInspectorTab,
     toggleLeftToolbar,
     toggleRightSidebar,
     toggleStatusBar,

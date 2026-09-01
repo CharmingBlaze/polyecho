@@ -1,6 +1,29 @@
-import { Armature, AnimationClip, AnimationTrack } from '../../types/animation'
-import { Vector3D } from '../../types/mesh'
+import { Armature, AnimationClip, AnimationTrack, Bone } from '../../types/animation'
+import { MeshObject, Vector3D } from '../../types/mesh'
 import { vec3 } from '../../utils/math'
+
+/** Object-to-bone parent. `parentId` stays mesh-to-mesh; `parentBoneId` is the bind. */
+export function resolveMeshBoneParentId(mesh: MeshObject, bones: Bone[]): string | undefined {
+  if (mesh.parentBoneId && bones.some(b => b.id === mesh.parentBoneId)) return mesh.parentBoneId
+  if (mesh.parentType === 'bone' && mesh.parentId && bones.some(b => b.id === mesh.parentId)) return mesh.parentId
+  if (mesh.parentId && bones.some(b => b.id === mesh.parentId)) return mesh.parentId
+  return undefined
+}
+
+export function setMeshBoneParent(mesh: MeshObject, boneId: string | null, armatureId?: string) {
+  if (!boneId) {
+    if (mesh.parentId && mesh.parentBoneId && mesh.parentId === mesh.parentBoneId) {
+      mesh.parentId = undefined
+    }
+    if (mesh.parentType === 'bone') mesh.parentType = undefined
+    mesh.parentBoneId = undefined
+    return
+  }
+  mesh.parentBoneId = boneId
+  mesh.parentType = 'bone'
+  if (armatureId) mesh.armatureId = armatureId
+  if (mesh.parentId === boneId) mesh.parentId = undefined
+}
 
 function genId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).substring(2, 9)}`

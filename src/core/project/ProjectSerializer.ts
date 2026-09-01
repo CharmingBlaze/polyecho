@@ -2,6 +2,7 @@ import { MeshObject } from '../../types/mesh'
 import { Material, Palette, TextureMap } from '../../types/texture'
 import { Armature, AnimationClip } from '../../types/animation'
 import { ViewportSettings } from '../../types/tools'
+import { ReferenceImage } from '../../types/reference'
 
 export interface PsxProjectFile {
   version: '1.0'
@@ -10,7 +11,7 @@ export interface PsxProjectFile {
   savedAt: string
   meshes: MeshObject[]
   textureDataUrl: string
-  textures?: { id: string; name: string; width: number; height: number; dataUrl: string }[]
+  textures?: { id: string; name: string; width: number; height: number; dataUrl: string; atlas?: { cols: number; rows: number } }[]
   activePalette: Palette
   materials: Material[]
   armature: Armature
@@ -18,6 +19,7 @@ export interface PsxProjectFile {
   activeAnimationId: string | null
   currentFrame: number
   viewportSettings: ViewportSettings
+  referenceImages?: ReferenceImage[]
 }
 
 export class ProjectSerializer {
@@ -35,7 +37,8 @@ export class ProjectSerializer {
     activeAnimationId: string | null,
     currentFrame: number,
     viewportSettings: ViewportSettings,
-    textures?: TextureMap[]
+    textures?: TextureMap[],
+    referenceImages?: ReferenceImage[]
   ): string {
     const textureDataUrl = pixelBufferCanvas.toDataURL('image/png')
 
@@ -44,7 +47,8 @@ export class ProjectSerializer {
       name: t.name,
       width: t.width,
       height: t.height,
-      dataUrl: t.pixelBuffer ? t.pixelBuffer.toDataURL() : (t.dataUrl || textureDataUrl)
+      dataUrl: t.pixelBuffer ? t.pixelBuffer.toDataURL() : (t.dataUrl || textureDataUrl),
+      atlas: t.atlas
     }))
 
     const projectData: PsxProjectFile = {
@@ -61,7 +65,8 @@ export class ProjectSerializer {
       animations: JSON.parse(JSON.stringify(animations)),
       activeAnimationId,
       currentFrame,
-      viewportSettings: JSON.parse(JSON.stringify(viewportSettings))
+      viewportSettings: JSON.parse(JSON.stringify(viewportSettings)),
+      referenceImages: JSON.parse(JSON.stringify(referenceImages || []))
     }
 
     return JSON.stringify(projectData, null, 2)

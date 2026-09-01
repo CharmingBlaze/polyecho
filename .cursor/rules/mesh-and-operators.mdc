@@ -1,0 +1,17 @@
+---
+description: Mesh kernel, Operations, and modal operators
+globs: src/core/mesh/**/*.ts,src/core/geometry/**/*.ts,src/core/operators/**/*.ts,src/core/primitives/**/*.ts,src/core/transform/**/*.ts
+alwaysApply: false
+---
+
+# Mesh and operators
+
+- `Operations.ts` works on `MeshObject` and returns a cloned result (see `extrudeFaces`). Preserve `id`, UVs, vertex colors, and `boneWeights`.
+- Kernels under `mesh/operations/` work on `EditableMesh`. They may mutate the kernel during a modal session; cancel must restore `createSnapshot()` / `restoreSnapshot()`.
+- New interactive tool: kernel + `ModalOperator` subclass + `ModalToolCommand` (if started from menus) + start/commit in `Viewport3D.vue`. Look at `ExtrudeOperator` + `ExtrudeKernel`.
+- New primitive: `IPrimitiveBuilder`, register in `PrimitiveRegistry`, then placement UI.
+- Faces are tris or quads; keep `uvs.length === vertexIds.length`.
+- Do not import Vue or Pinia from core mesh/operator files.
+- Selection crossing the bridge must use the id maps from `MeshBridge`.
+- Extrude / inset / bevel (and similar) exist as `Operations.ts` **and** a kernel. Changing one without the other splits menu vs `E`/`I`/`Ctrl+B` behavior.
+- Edge ids are computed, not stored on `MeshObject`.

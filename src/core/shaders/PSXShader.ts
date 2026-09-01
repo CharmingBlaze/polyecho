@@ -23,6 +23,7 @@ export interface PSXShaderUniforms {
   uDreamcastCelOutline: { value: boolean }
   uLightDirection: { value: THREE.Vector3 }
   uAmbientLight: { value: THREE.Color }
+  uOpacity: { value: number }
 }
 
 const vertexShader = /* glsl */ `
@@ -97,6 +98,7 @@ const fragmentShader = /* glsl */ `
   uniform bool uDreamcastSpecular;
   uniform bool uDreamcastCelOutline;
   uniform vec3 uLightDirection;
+  uniform float uOpacity;
 
   varying vec2 vUv;
   varying vec3 vColor;
@@ -254,7 +256,7 @@ const fragmentShader = /* glsl */ `
     if (uConsoleMode == 2 && uDreamcastCelOutline) {
       float edgeDot = dot(normalize(vNormal), normalize(vViewDir));
       if (edgeDot < 0.25) {
-        gl_FragColor = vec4(0.08, 0.08, 0.12, 1.0);
+        gl_FragColor = vec4(0.08, 0.08, 0.12, uOpacity);
         return;
       }
     }
@@ -329,7 +331,7 @@ const fragmentShader = /* glsl */ `
       baseCol = floor(baseCol * uColorDepth + 0.5) / uColorDepth;
     }
 
-    gl_FragColor = vec4(clamp(baseCol, 0.0, 1.0), texColor.a);
+    gl_FragColor = vec4(clamp(baseCol, 0.0, 1.0), texColor.a * uOpacity);
   }
 `
 
@@ -361,7 +363,8 @@ export function createPSXMaterial(texture: THREE.Texture | null = null, resoluti
     uDreamcastSpecular: { value: false },
     uDreamcastCelOutline: { value: false },
     uLightDirection: { value: new THREE.Vector3(0.5, 1.0, 0.8).normalize() },
-    uAmbientLight: { value: new THREE.Color(0.2, 0.2, 0.25) }
+    uAmbientLight: { value: new THREE.Color(0.2, 0.2, 0.25) },
+    uOpacity: { value: 1.0 }
   }
 
   return new THREE.ShaderMaterial({

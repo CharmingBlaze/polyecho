@@ -12,6 +12,8 @@ export interface BoneSocket {
 export interface IKConstraint {
   enabled: boolean
   targetBoneId?: string
+  /** World-space effector when no target bone is set (gizmo / last solve). */
+  targetPosition?: Vector3D
   poleTargetBoneId?: string
   poleAngle?: number // degrees
   chainLength: number // 2 by default

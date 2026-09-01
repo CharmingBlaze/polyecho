@@ -2,7 +2,8 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
-import { generateRetroAtlas } from '../../core/painting/DefaultTextures'
+import TextureSharePrompt from '../modals/TextureSharePrompt.vue'
+import { useTextureApply } from '../../composables/useTextureApply'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import ImportTextureModal from '../modals/ImportTextureModal.vue'
 import PaletteLibraryModal from '../modals/PaletteLibraryModal.vue'
@@ -18,12 +19,21 @@ import {
   Sparkles, 
   Sun, 
   Moon,
-  Plus
+  Plus,
+  Copy,
+  Trash2
 } from 'lucide-vue-next'
 import { generateShadingRamp } from '../../utils/color'
 
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
+const {
+  isOpen: sharePromptOpen,
+  sharedCount: sharePromptCount,
+  applyToActiveMesh,
+  confirm: confirmShareApply,
+  cancel: cancelShareApply
+} = useTextureApply()
 
 // ----------------------------------------------------
 // ACTIVE MESH, MATERIAL & TEXTURE BINDINGS
@@ -32,13 +42,17 @@ const showNewTextureModal = ref(false)
 const newTextureName = ref('')
 const newTextureSize = ref<number>(64)
 
-function handleTextureBindingChange(newTexId: string) {
-  if (projectStore.activeMesh) {
-    projectStore.assignTextureToActiveMesh(newTexId)
-  } else {
-    projectStore.activeTextureId = newTexId
-    projectStore.markTextureUpdated(newTexId)
+function bindTextureToActiveObject(textureId: string) {
+  const mesh = projectStore.activeMesh
+  if (!mesh) {
+    projectStore.selectTexture(textureId)
+    return
   }
+  projectStore.applyTextureToMesh(mesh.id, textureId, 'this_object')
+}
+
+function handleTextureBindingChange(newTexId: string) {
+  bindTextureToActiveObject(newTexId)
   nextTick(() => {
     renderCanvas()
   })
@@ -46,15 +60,20 @@ function handleTextureBindingChange(newTexId: string) {
 
 function handleCreateNewTexture() {
   const name = newTextureName.value.trim() || `Texture_${projectStore.textures.length + 1}`
-  const newTex = projectStore.addTexture(name, newTextureSize.value, newTextureSize.value)
+  const tex = projectStore.createTexture(name, newTextureSize.value, newTextureSize.value)
   if (projectStore.activeMesh) {
-    projectStore.assignTextureToActiveMesh(newTex.id)
+    projectStore.applyTextureToMesh(projectStore.activeMesh.id, tex.id, 'this_object')
   }
   showNewTextureModal.value = false
   newTextureName.value = ''
   nextTick(() => {
     renderCanvas()
   })
+}
+
+function handleApplyPaintTargetToMesh() {
+  if (!projectStore.activeTexture || !projectStore.activeMesh) return
+  applyToActiveMesh(projectStore.activeTexture.id)
 }
 
 // Shading Tool Options State
@@ -110,6 +129,7 @@ let containerResizeObserver: ResizeObserver | null = null
 
 // Interactive Drawing & Shape drag preview states
 let isDrawing = false
+let strokeDirty = false
 let dragStartCoords: { x: number; y: number } | null = null
 let dragCurrentCoords: { x: number; y: number } | null = null
 
@@ -182,13 +202,15 @@ function quantizeCanvasToCurrentPalette() {
   if (!pb || colors.length === 0) return
 
   projectStore.recordState(`Quantize Texture (${projectStore.activePalette.name})`)
+  pb.suspendComposite()
   for (let y = 0; y < pb.height; y++) {
     for (let x = 0; x < pb.width; x++) {
       const curHex = pb.getPixelHex(x, y)
       const closest = snapColorToPalette(curHex, colors)
-      pb.setPixel(x, y, closest)
+      pb.setPixel(x, y, closest, 1, false)
     }
   }
+  pb.resumeComposite()
   projectStore.markTextureUpdated()
 }
 
@@ -214,6 +236,16 @@ function onTextureChanged() {
   })
 }
 
+function handleTextureImported(texId?: string) {
+  const id = texId || projectStore.activeTextureId
+  if (id && projectStore.activeMesh) {
+    projectStore.applyTextureToMesh(projectStore.activeMesh.id, id, 'this_object')
+  }
+  showImportModal.value = false
+  pendingImportFile.value = null
+  onTextureChanged()
+}
+
 function downloadTexturePng() {
   projectStore.pixelBuffer.canvas.toBlob((blob) => {
     if (blob) {
@@ -228,8 +260,7 @@ function downloadTexturePng() {
 }
 
 function resetRetroAtlas() {
-  generateRetroAtlas(projectStore.pixelBuffer)
-  projectStore.markTextureUpdated()
+  projectStore.restoreDefaultTexture()
   renderCanvas()
 }
 
@@ -240,9 +271,17 @@ function clearTexture() {
   renderCanvas()
 }
 
+function syncActiveTextureSize(w: number, h: number) {
+  if (projectStore.activeTexture) {
+    projectStore.activeTexture.width = w
+    projectStore.activeTexture.height = h
+  }
+}
+
 function handleQuickResize(w: number, h: number) {
   projectStore.recordState(`Resize Texture to ${w}x${h}`)
   projectStore.pixelBuffer.resize(w, h, 'crop')
+  syncActiveTextureSize(w, h)
   const maxDim = Math.max(w, h)
   if (maxDim >= 1024) zoom.value = 1
   else if (maxDim >= 512) zoom.value = 2
@@ -256,6 +295,7 @@ function handleQuickResize(w: number, h: number) {
 function applyCustomResize() {
   projectStore.recordState(`Resize Texture to ${resizeW.value}x${resizeH.value}`)
   projectStore.pixelBuffer.resize(resizeW.value, resizeH.value, resizeMode.value)
+  syncActiveTextureSize(resizeW.value, resizeH.value)
   showResizeModal.value = false
   projectStore.markTextureUpdated()
   renderCanvas()
@@ -272,6 +312,11 @@ function onKeyDown(e: KeyboardEvent) {
   if (e.code === 'Space') {
     isSpacePressed.value = true
   }
+  if ((e.key === 'o' || e.key === 'O') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const t = e.target as HTMLElement | null
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+    showUvOverlay.value = !showUvOverlay.value
+  }
 }
 
 function onKeyUp(e: KeyboardEvent) {
@@ -279,6 +324,38 @@ function onKeyUp(e: KeyboardEvent) {
     isSpacePressed.value = false
     isPanning.value = false
   }
+}
+
+function handleAddLayer() {
+  projectStore.recordState('Add Texture Layer')
+  projectStore.pixelBuffer.addLayer()
+  projectStore.markTextureUpdated()
+  renderCanvas()
+}
+
+function handleDeleteLayer(id: string) {
+  projectStore.recordState('Delete Texture Layer')
+  projectStore.pixelBuffer.deleteLayer(id)
+  projectStore.markTextureUpdated()
+  renderCanvas()
+}
+
+function handleDuplicateLayer(id: string) {
+  projectStore.recordState('Duplicate Texture Layer')
+  projectStore.pixelBuffer.duplicateLayer(id)
+  projectStore.markTextureUpdated()
+  renderCanvas()
+}
+
+function handleLayerMetaChange() {
+  projectStore.pixelBuffer.composite()
+  projectStore.markTextureUpdated()
+  renderCanvas()
+}
+
+function setActiveLayer(id: string) {
+  projectStore.pixelBuffer.activeLayerId = id
+  renderCanvas()
 }
 
 function applyAdjustment(action: string) {
@@ -294,19 +371,23 @@ function applyAdjustment(action: string) {
   else if (action === 'flipV') pb.flip(false, true)
   else if (action === 'rot90') pb.rotate(90)
 
+  if (projectStore.activeTexture) {
+    projectStore.activeTexture.width = pb.width
+    projectStore.activeTexture.height = pb.height
+  }
   projectStore.markTextureUpdated()
   renderCanvas()
 }
 
 function getPixelCoords(e: PointerEvent): { x: number; y: number } | null {
-  const canvas = canvasRef.value
-  if (!canvas) return null
-  const rect = canvas.getBoundingClientRect()
+  const el = containerRef.value || canvasRef.value
+  if (!el) return null
+  const rect = el.getBoundingClientRect()
   const mouseX = e.clientX - rect.left
   const mouseY = e.clientY - rect.top
   const ox = panOffset.value.x
   const oy = panOffset.value.y
-  const pb = projectStore.pixelBuffer
+  const pb = projectStore.ensureTextureBuffer(projectStore.activeTexture)
 
   const px = Math.floor((mouseX - ox) / zoom.value)
   const py = Math.floor((mouseY - oy) / zoom.value)
@@ -614,11 +695,12 @@ function onPointerUp(e: PointerEvent) {
 
   const coords = getPixelCoords(e) || dragCurrentCoords
   const tool = toolStore.paintTool
+  const shouldPersist = strokeDirty || (coords && dragStartCoords && (tool === 'line' || tool === 'rect' || tool === 'circle'))
 
   if (coords && dragStartCoords && (tool === 'line' || tool === 'rect' || tool === 'circle')) {
     projectStore.recordState(`Draw ${tool}`)
     const isSecondary = e.button === 2
-    const color = isSecondary ? toolStore.secondaryColor : toolStore.primaryColor
+    const color = resolveDrawColor(isSecondary)
     const size = toolStore.brushSize
     const opacity = toolStore.brushOpacity
     const filled = toolStore.brushFilled
@@ -635,17 +717,29 @@ function onPointerUp(e: PointerEvent) {
       pb.drawCircle(dragStartCoords.x, dragStartCoords.y, radius, color, size, filled, opacity)
     }
 
+    strokeDirty = true
+  }
+
+  if (shouldPersist && tool !== 'picker') {
     projectStore.markTextureUpdated()
     renderCanvas()
   }
-
+  strokeDirty = false
   dragStartCoords = null
   dragCurrentCoords = null
 }
 
+function resolveDrawColor(isSecondary = false): string {
+  const raw = isSecondary ? toolStore.secondaryColor : toolStore.primaryColor
+  if (toolStore.paletteSnapEnabled) {
+    return snapColorToPalette(raw, activePalette.value)
+  }
+  return raw
+}
+
 function drawPixel(x: number, y: number, isSecondary = false, pressure = 1.0) {
-  const pb = projectStore.pixelBuffer
-  const color = isSecondary ? toolStore.secondaryColor : toolStore.primaryColor
+  const pb = projectStore.ensureTextureBuffer(projectStore.activeTexture)
+  const color = resolveDrawColor(isSecondary)
   const size = toolStore.brushSize
   const opacity = toolStore.brushOpacity * (pressure > 0 ? pressure : 1.0)
   const shape = toolStore.brushShape
@@ -658,6 +752,8 @@ function drawPixel(x: number, y: number, isSecondary = false, pressure = 1.0) {
     const picked = pb.getPixelHex(x, y)
     if (isSecondary) toolStore.secondaryColor = picked
     else toolStore.primaryColor = picked
+    renderCanvas()
+    return
   } else if (toolStore.paintTool === 'dither') {
     pb.drawDither(x, y, color, size)
   } else if (toolStore.paintTool === 'shade') {
@@ -675,7 +771,8 @@ function drawPixel(x: number, y: number, isSecondary = false, pressure = 1.0) {
     pb.drawBrush(x, y, color, size, opacity, shape)
   }
 
-  projectStore.markTextureUpdated()
+  strokeDirty = true
+  projectStore.markTexturePreview()
   renderCanvas()
 }
 
@@ -757,10 +854,10 @@ function resetPanZoom() {
     fitZoom = Math.max(0.1, Math.round(fitZoom * 100) / 100)
   }
 
-  zoom.value = Math.max(1, fitZoom)
+  zoom.value = fitZoom
   panOffset.value = {
-    x: Math.max(16, Math.round((w - pb.width * zoom.value) / 2)),
-    y: Math.max(16, Math.round((h - pb.height * zoom.value) / 2))
+    x: Math.round((w - pb.width * zoom.value) / 2),
+    y: Math.round((h - pb.height * zoom.value) / 2)
   }
   isFitToView.value = true
   renderCanvas()
@@ -768,6 +865,12 @@ function resetPanZoom() {
 
 
 watch(() => projectStore.textureRevision, renderCanvas)
+watch(() => projectStore.activeTextureId, () => {
+  nextTick(() => {
+    resetPanZoom()
+    renderCanvas()
+  })
+})
 watch(zoom, renderCanvas)
 watch(showPixelGrid, renderCanvas)
 watch(showUvOverlay, renderCanvas)
@@ -860,16 +963,24 @@ defineExpose({
             :value="projectStore.activeTextureId" 
             @change="handleTextureBindingChange(($event.target as HTMLSelectElement).value)"
             class="bg-transparent text-emerald-400 font-bold font-mono focus:outline-none cursor-pointer max-w-[125px] truncate"
-            title="Texture Map bound to Active Object"
+            title="Paint target — the image this canvas edits"
           >
             <option v-for="t in projectStore.textures" :key="t.id" :value="t.id" class="bg-ui-panel text-ui-textPrimary">
               {{ t.name }} ({{ t.width }}x{{ t.height }})
             </option>
           </select>
+          <button
+            type="button"
+            class="px-1 py-0.5 text-[8.5px] font-bold text-sky-300 hover:bg-ui-hover rounded-xs"
+            title="Apply this paint target to the active object"
+            @click="handleApplyPaintTargetToMesh"
+          >
+            Apply
+          </button>
           <button 
             @click="showNewTextureModal = true"
             class="p-0.5 hover:bg-ui-hover text-emerald-400 rounded-xs transition cursor-pointer"
-            title="Create New Texture Map for this Object"
+            title="Create a new texture (paint target only)"
           >
             <Plus class="w-3 h-3" />
           </button>
@@ -962,7 +1073,7 @@ defineExpose({
             @click="handleCreateNewTexture"
             class="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xs text-xs font-bold transition cursor-pointer shadow-xs"
           >
-            Create & Assign
+            Create
           </button>
           <button 
             @click="showNewTextureModal = false"
@@ -1281,13 +1392,65 @@ defineExpose({
         @pointerleave="onPointerUp"
         @pointercancel="onPointerUp"
       >
+        <!-- Layers (paint workspace — also in Texture inspector) -->
+        <div class="pixel-layers-dock" aria-label="Texture layers">
+          <div class="flex items-center justify-between px-1.5 py-1 border-b border-ui-borderSubtle">
+            <span class="text-[9px] font-bold uppercase text-ui-textMuted">Layers</span>
+            <button
+              type="button"
+              class="text-emerald-400 hover:text-emerald-300 cursor-pointer"
+              title="Add layer"
+              @click="handleAddLayer"
+            >
+              <Plus class="w-3 h-3" />
+            </button>
+          </div>
+          <div class="max-h-40 overflow-y-auto">
+            <button
+              v-for="layer in projectStore.pixelBuffer.layers"
+              :key="layer.id"
+              type="button"
+              class="w-full flex items-center gap-1 px-1.5 py-1 text-left text-[10px] cursor-pointer"
+              :class="projectStore.pixelBuffer.activeLayerId === layer.id ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textSecondary hover:bg-ui-hover'"
+              @click="setActiveLayer(layer.id)"
+            >
+              <input
+                type="checkbox"
+                class="accent-emerald-500 cursor-pointer w-3 h-3"
+                :checked="layer.visible"
+                title="Visibility"
+                @click.stop
+                @change="layer.visible = ($event.target as HTMLInputElement).checked; handleLayerMetaChange()"
+              />
+              <span class="truncate flex-1" :class="{ 'opacity-40': !layer.visible }">{{ layer.name }}</span>
+              <button
+                type="button"
+                class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary"
+                title="Duplicate layer"
+                @click.stop="handleDuplicateLayer(layer.id)"
+              >
+                <Copy class="w-2.5 h-2.5" />
+              </button>
+              <button
+                v-if="projectStore.pixelBuffer.layers.length > 1"
+                type="button"
+                class="p-0.5 text-ui-textMuted hover:text-rose-400"
+                title="Delete layer"
+                @click.stop="handleDeleteLayer(layer.id)"
+              >
+                <Trash2 class="w-2.5 h-2.5" />
+              </button>
+            </button>
+          </div>
+        </div>
+
         <!-- Top Right Floating View Controls -->
         <div class="pixel-view-group" aria-label="Canvas View Controls">
           <button
             @click="showUvOverlay = !showUvOverlay"
             class="pixel-view-toggle"
             :class="{ 'is-active': showUvOverlay }"
-            title="Toggle UV Wireframe Overlay (Alt+Z)"
+            title="Toggle UV Wireframe Overlay (O)"
           >
             <BlenderIcon name="xray" :size="13" />
             <span>UV</span>
@@ -1464,8 +1627,14 @@ defineExpose({
     <ImportTextureModal 
       v-if="showImportModal && pendingImportFile" 
       :file="pendingImportFile" 
-      @imported="() => { showImportModal = false; pendingImportFile = null; onTextureChanged(); }" 
+      @imported="handleTextureImported" 
       @close="showImportModal = false; pendingImportFile = null" 
+    />
+    <TextureSharePrompt
+      v-if="sharePromptOpen"
+      :object-count="sharePromptCount"
+      @confirm="confirmShareApply"
+      @cancel="cancelShareApply"
     />
   </div>
   <!-- Palette Library & Manager Modal -->
@@ -1553,6 +1722,19 @@ defineExpose({
 .pixel-tool-rail {
   width: 36px;
   min-width: 36px;
+}
+
+.pixel-layers-dock {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 10;
+  width: 168px;
+  background: color-mix(in srgb, var(--ui-bg-header) 94%, transparent);
+  border: 1px solid var(--ui-border-strong);
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(8px);
 }
 
 .pixel-view-group {

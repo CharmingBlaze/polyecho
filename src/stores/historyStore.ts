@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, markRaw } from 'vue'
 import { useProjectStore } from './projectStore'
 import { useAnimationStore } from './animationStore'
 import { PixelBuffer } from '../core/painting/PixelCanvas'
@@ -29,6 +29,7 @@ export interface AppSnapshot {
   armature: any
   selectedBoneId: string | null
   currentFrame: number
+  referenceImages?: any[]
 }
 
 export interface HistoryRecord {
@@ -55,7 +56,7 @@ export const useHistoryStore = defineStore('history', () => {
         name: t.name,
         width: t.width,
         height: t.height,
-        pixelBuffer: buf
+        pixelBuffer: markRaw(buf) as PixelBuffer
       }
     })
 
@@ -74,7 +75,8 @@ export const useHistoryStore = defineStore('history', () => {
       textures: texturesSnapshot,
       armature: JSON.parse(JSON.stringify(animationStore.armature)),
       selectedBoneId: animationStore.selectedBoneId,
-      currentFrame: animationStore.currentFrame
+      currentFrame: animationStore.currentFrame,
+      referenceImages: JSON.parse(JSON.stringify(projectStore.referenceImages || []))
     }
   }
 
@@ -104,7 +106,7 @@ export const useHistoryStore = defineStore('history', () => {
           name: t.name,
           width: t.width,
           height: t.height,
-          pixelBuffer: clonedBuf
+          pixelBuffer: markRaw(clonedBuf) as PixelBuffer
         }
       })
       projectStore.textureRevision++
@@ -115,6 +117,8 @@ export const useHistoryStore = defineStore('history', () => {
         animationStore.selectedBoneId = snapshot.selectedBoneId
         animationStore.currentFrame = snapshot.currentFrame
       }
+      projectStore.referenceImages = JSON.parse(JSON.stringify(snapshot.referenceImages || []))
+      projectStore.referenceRevision++
     } finally {
       isApplyingHistory.value = false
       projectStore.markGeometryUpdated()

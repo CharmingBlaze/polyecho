@@ -4,7 +4,9 @@ import { useProjectStore } from '../../stores/projectStore'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useToolStore } from '../../stores/toolStore'
 import BlenderIcon from '../icons/BlenderIcon.vue'
-import { GitBranch, Search, Filter } from 'lucide-vue-next'
+import { GitBranch, Search } from 'lucide-vue-next'
+import { resolveMeshBoneParentId } from '../../core/animation/Armature'
+import type { MeshObject } from '../../types/mesh'
 
 const projectStore = useProjectStore()
 const animationStore = useAnimationStore()
@@ -43,7 +45,6 @@ function selectMesh(id: string, e?: MouseEvent) {
     projectStore.activeMeshId = id
     projectStore.selectedMeshIds = [id]
   }
-  toolStore.appMode = 'model'
 }
 
 function toggleVisibility(id: string) {
@@ -125,24 +126,14 @@ function onDropOnMesh(e: DragEvent, targetId: string) {
     return
   }
 
-  const child = projectStore.meshes.find(m => m.id === draggedMeshId.value)
-  const parent = projectStore.meshes.find(m => m.id === targetId)
-
-  if (child && parent) {
-    projectStore.recordState(`Parent ${child.name} to ${parent.name}`)
-    child.parentId = parent.id
-  }
+  projectStore.parentMesh(draggedMeshId.value, targetId)
 
   draggedMeshId.value = null
   dragOverTargetId.value = null
 }
 
 function unparentMesh(meshId: string) {
-  const mesh = projectStore.meshes.find(m => m.id === meshId)
-  if (mesh && mesh.parentId) {
-    projectStore.recordState(`Clear Parent for ${mesh.name}`)
-    mesh.parentId = undefined
-  }
+  projectStore.unparentMesh(meshId)
 }
 
 function getParentMeshName(parentId?: string): string {
@@ -154,10 +145,14 @@ function getParentMeshName(parentId?: string): string {
   return parentId
 }
 
-function getMeshTexture(mesh: any) {
-  const mat = projectStore.materials.find(m => m.id === mesh.materialId)
-  if (!mat || !mat.textureId) return null
-  return projectStore.textures.find(t => t.id === mat.textureId) || null
+function meshParentLabel(mesh: MeshObject): string {
+  const boneId = resolveMeshBoneParentId(mesh, animationStore.armature.bones)
+  if (boneId) {
+    const b = animationStore.armature.bones.find(x => x.id === boneId)
+    return b ? b.name : boneId
+  }
+  if (mesh.parentId) return getParentMeshName(mesh.parentId)
+  return ''
 }
 
 function handleAddBone() {
@@ -172,24 +167,25 @@ function handleAddBone() {
 
 <template>
   <div class="h-full w-full bg-ui-panel flex flex-col select-none text-xs font-mono">
-    <!-- Header with Tab Switcher & Quick Add -->
-    <div class="h-8 px-2 bg-ui-header border-b border-ui-borderSubtle flex items-center justify-between">
-      <div class="flex items-center space-x-1">
+    <div class="h-7 px-1.5 bg-ui-header border-b border-ui-borderSubtle flex items-center justify-between gap-1">
+      <div class="flex items-center">
         <button 
           @click="activeTab = 'meshes'"
-          class="flex items-center gap-1.5 px-2 h-6 rounded-xs font-bold text-[11px] transition"
-          :class="activeTab === 'meshes' ? 'bg-ui-panel text-ui-textPrimary border-b border-ui-accent shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          class="flex items-center gap-1 px-1.5 h-5 rounded-xs font-semibold text-[10px] transition"
+          :class="activeTab === 'meshes' ? 'bg-ui-panel text-ui-textPrimary' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          title="Scene objects"
         >
-          <BlenderIcon name="mesh-cube" :size="12" />
-          <span>Objects ({{ projectStore.meshes.length }})</span>
+          <BlenderIcon name="mesh-cube" :size="11" />
+          <span>Obj {{ projectStore.meshes.length }}</span>
         </button>
         <button 
           @click="activeTab = 'armature'"
-          class="flex items-center gap-1.5 px-2 h-6 rounded-xs font-bold text-[11px] transition"
-          :class="activeTab === 'armature' ? 'bg-ui-panel text-ui-textPrimary border-b border-ui-accent shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          class="flex items-center gap-1 px-1.5 h-5 rounded-xs font-semibold text-[10px] transition"
+          :class="activeTab === 'armature' ? 'bg-ui-panel text-ui-textPrimary' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          title="Armature bones"
         >
-          <BlenderIcon name="bone" :size="12" />
-          <span>Bones ({{ animationStore.armature.bones.length }})</span>
+          <BlenderIcon name="bone" :size="11" />
+          <span>Bone {{ animationStore.armature.bones.length }}</span>
         </button>
       </div>
 
@@ -240,16 +236,14 @@ function handleAddBone() {
       </div>
     </div>
 
-    <!-- Search Filter Bar -->
-    <div class="px-2 py-1 bg-ui-input border-b border-ui-borderSubtle flex items-center gap-2">
+    <div class="h-6 px-2 bg-ui-input border-b border-ui-borderSubtle flex items-center gap-1.5">
       <Search class="w-3 h-3 text-ui-textMuted shrink-0" />
       <input 
         v-model="searchQuery"
         type="text" 
-        :placeholder="activeTab === 'meshes' ? 'Filter objects...' : 'Filter bones...'"
-        class="bg-transparent text-ui-textPrimary placeholder-ui-textMuted text-[11px] w-full focus:outline-none"
+        :placeholder="activeTab === 'meshes' ? 'Filter…' : 'Filter bones…'"
+        class="bg-transparent text-ui-textPrimary placeholder-ui-textMuted text-[10px] w-full focus:outline-none"
       />
-      <Filter class="w-3 h-3 text-slate-600 shrink-0" />
     </div>
 
     <!-- FULL HEIGHT SCROLLABLE TREE LIST -->
@@ -292,17 +286,15 @@ function handleAddBone() {
                 <span class="font-mono font-bold text-[11px] truncate select-none">
                   {{ mesh.name }}
                 </span>
-                <span 
-                  v-if="getMeshTexture(mesh)" 
-                  class="px-1 py-0.2 rounded-xs bg-sky-500/15 text-sky-300 border border-sky-500/30 text-[8px] font-mono truncate max-w-[70px] shrink-0" 
-                  :title="`Assigned Texture: ${getMeshTexture(mesh)?.name} (${getMeshTexture(mesh)?.width}x${getMeshTexture(mesh)?.height})`"
-                >
-                  {{ getMeshTexture(mesh)?.name }}
-                </span>
-                <span v-if="mesh.parentId" class="text-[9px] text-amber-400/80 font-mono flex items-center gap-0.5">
+                <span v-if="meshParentLabel(mesh)" class="text-[9px] text-amber-400/80 font-mono flex items-center gap-0.5">
                   <span>↳</span>
-                  <span class="truncate">{{ getParentMeshName(mesh.parentId) }}</span>
-                  <button @click.stop="unparentMesh(mesh.id)" class="hover:text-rose-400 ml-0.5 font-bold" title="Unparent Object">×</button>
+                  <span class="truncate">{{ meshParentLabel(mesh) }}</span>
+                  <button
+                    v-if="mesh.parentId && !resolveMeshBoneParentId(mesh, animationStore.armature.bones)"
+                    @click.stop="unparentMesh(mesh.id)"
+                    class="hover:text-rose-400 ml-0.5 font-bold"
+                    title="Unparent Object"
+                  >×</button>
                 </span>
               </div>
               <span 

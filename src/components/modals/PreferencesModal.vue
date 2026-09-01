@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useThemeStore, THEME_PRESETS } from '../../stores/themeStore'
 import { useKeymapStore } from '../../stores/keymapStore'
 import { useToolStore } from '../../stores/toolStore'
+import { useFloatingDrag } from '../../composables/useFloatingDrag'
 import { 
   X, 
   Palette, 
@@ -30,31 +31,7 @@ const activeTab = ref<PrefTab>('themes')
 
 // Movable modal position state
 const modalPos = ref({ x: Math.max(20, Math.round(window.innerWidth / 2 - 420)), y: 60 })
-const isDragging = ref(false)
-let dragOffset = { x: 0, y: 0 }
-
-function startDrag(e: MouseEvent) {
-  if (e.button !== 0) return
-  isDragging.value = true
-  dragOffset = {
-    x: e.clientX - modalPos.value.x,
-    y: e.clientY - modalPos.value.y
-  }
-  const onMouseMove = (moveEvent: MouseEvent) => {
-    if (!isDragging.value) return
-    const maxX = window.innerWidth - 300
-    const maxY = window.innerHeight - 100
-    modalPos.value.x = Math.max(10, Math.min(maxX, moveEvent.clientX - dragOffset.x))
-    modalPos.value.y = Math.max(10, Math.min(maxY, moveEvent.clientY - dragOffset.y))
-  }
-  const onMouseUp = () => {
-    isDragging.value = false
-    window.removeEventListener('mousemove', onMouseMove)
-    window.removeEventListener('mouseup', onMouseUp)
-  }
-  window.addEventListener('mousemove', onMouseMove)
-  window.addEventListener('mouseup', onMouseUp)
-}
+const { startDrag } = useFloatingDrag(modalPos, { minX: 10, minY: 10, maxPadX: 300, maxPadY: 100 })
 
 // ----------------------------------------------------
 // THEMES TAB STATE & FILTERS
@@ -151,13 +128,14 @@ onUnmounted(() => {
   >
     <!-- Draggable Properties Window -->
     <div 
-      class="w-[840px] max-w-[95vw] h-[580px] max-h-[90vh] bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-100"
+      data-floating-panel
+      class="w-[840px] max-w-[95vw] h-[580px] max-h-[90vh] bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl overflow-hidden flex flex-col"
       :style="{ position: 'absolute', left: `${modalPos.x}px`, top: `${modalPos.y}px` }"
     >
       <!-- Titlebar / Header -->
       <div 
-        @mousedown="startDrag"
-        class="h-9 bg-ui-header border-b border-ui-borderSubtle px-3 flex items-center justify-between cursor-move select-none shrink-0"
+        @pointerdown="startDrag"
+        class="h-9 bg-ui-header border-b border-ui-borderSubtle px-3 flex items-center justify-between cursor-move select-none shrink-0 touch-none"
       >
         <div class="flex items-center gap-2 text-xs font-mono font-bold text-ui-textPrimary">
           <GripHorizontal class="w-4 h-4 text-ui-textMuted" />
@@ -436,7 +414,7 @@ onUnmounted(() => {
               <div class="flex items-center justify-between py-1 border-b border-ui-borderSubtle/40">
                 <div>
                   <span class="text-ui-textPrimary font-medium">Wireframe Overlay Opacity</span>
-                  <p class="text-[10px] text-ui-textMuted">Subtle wireframe line brightness over 3D shaded meshes.</p>
+                  <p class="text-[10px] text-ui-textMuted">Dark mesh-edge overlay (creases). Higher = more Blockbench-like.</p>
                 </div>
                 <div class="flex items-center gap-2">
                   <input type="range" min="0.1" max="1.0" step="0.05" v-model.number="toolStore.viewport.wireframeOpacity" class="w-32 accent-amber-500" />

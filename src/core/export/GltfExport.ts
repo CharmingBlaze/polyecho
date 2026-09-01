@@ -3,13 +3,32 @@ import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js'
 import { MeshObject } from '../../types/mesh'
 import { AnimationClip, Armature } from '../../types/animation'
 import { meshToThreeGeometry } from '../geometry/Converters'
+import { resolveMeshBoneParentId } from '../animation/Armature'
+
+import { Material, TextureMap } from '../../types/texture'
+
+/** CanvasTexture per library texture id. Caller must dispose values. */
+export function buildExportTextureMap(textures: TextureMap[]): Map<string, THREE.Texture> {
+  const map = new Map<string, THREE.Texture>()
+  for (const t of textures) {
+    if (!t.pixelBuffer) continue
+    t.pixelBuffer.composite()
+    const tex = new THREE.CanvasTexture(t.pixelBuffer.canvas)
+    tex.magFilter = THREE.NearestFilter
+    tex.minFilter = THREE.NearestFilter
+    tex.colorSpace = THREE.SRGBColorSpace
+    map.set(t.id, tex)
+  }
+  return map
+}
 
 export async function exportToGLTF(
   meshes: MeshObject[],
   textureMap: Map<string, THREE.Texture>,
   clips: AnimationClip[] = [],
   binary = true,
-  armature?: Armature
+  armature?: Armature,
+  materials?: Material[]
 ): Promise<Blob> {
   const scene = new THREE.Scene()
 
@@ -59,6 +78,7 @@ export async function exportToGLTF(
     scene.add(armatureGroup)
 
     skeleton = new THREE.Skeleton(skeletonBones)
+    skeleton.calculateInverses()
   }
 
   // 2. Build Meshes & Skinned Meshes
@@ -78,23 +98,30 @@ export async function exportToGLTF(
     selectedFacesGeometry.dispose()
     selectedEdgesGeometry.dispose()
     edgeLinesGeometry.dispose()
-    const texture = textureMap.get(meshObj.materialId) || null
+
+    const matObj = materials?.find(m => m.id === meshObj.materialId)
+    const texId = matObj?.textureId || null
+    const texture = (texId && textureMap.get(texId)) || null
 
     let material: THREE.Material
+    const baseColor = matObj?.color ? new THREE.Color(matObj.color) : new THREE.Color(0xffffff)
     if (texture) {
       texture.magFilter = THREE.NearestFilter
       texture.minFilter = THREE.NearestFilter
-      material = new THREE.MeshBasicMaterial({
+      material = new THREE.MeshStandardMaterial({
+        name: matObj?.name || meshObj.materialId || 'Material',
         map: texture,
-        vertexColors: true,
+        color: baseColor,
+        roughness: typeof matObj?.roughness === 'number' ? matObj.roughness : 0.8,
+        metalness: typeof matObj?.metalness === 'number' ? matObj.metalness : 0.05,
         side: THREE.DoubleSide
       })
     } else {
       material = new THREE.MeshStandardMaterial({
-        color: 0xcccccc,
-        roughness: 0.8,
-        metalness: 0.1,
-        vertexColors: true,
+        name: matObj?.name || meshObj.materialId || 'Material',
+        color: baseColor,
+        roughness: typeof matObj?.roughness === 'number' ? matObj.roughness : 0.8,
+        metalness: typeof matObj?.metalness === 'number' ? matObj.metalness : 0.05,
         side: THREE.DoubleSide
       })
     }
@@ -113,8 +140,9 @@ export async function exportToGLTF(
       }
 
       // Check if mesh has parent bone or vertex weights
-      const defaultBoneIdx = meshObj.parentBoneId && boneIndexMap.has(meshObj.parentBoneId)
-        ? boneIndexMap.get(meshObj.parentBoneId)!
+      const boundBoneId = armature ? resolveMeshBoneParentId(meshObj, armature.bones) : meshObj.parentBoneId
+      const defaultBoneIdx = boundBoneId && boneIndexMap.has(boundBoneId)
+        ? boneIndexMap.get(boundBoneId)!
         : 0
 
       for (let i = 0; i < vertCount; i++) {

@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { MeshObject, Vertex } from '../../types/mesh'
+import { MeshObject, Vertex, Face, MeshShadeMode } from '../../types/mesh'
 import { Bone } from '../../types/animation'
 import { computeFaceNormal } from '../../utils/math'
 import { getMeshEdges } from './EdgeUtils'
@@ -17,15 +17,21 @@ export interface GeometryBundle {
   vertexIndexMap: string[]
 }
 
-export function computeBoneWorldMatrix(bone: Bone, allBones: Bone[]): THREE.Matrix4 {
+export function computeBoneWorldMatrix(bone: Bone, allBones: Bone[], restPose = false): THREE.Matrix4 {
   const pivot = new THREE.Vector3(bone.head.x, bone.head.y, bone.head.z)
-  const translation = new THREE.Vector3(bone.position.x, bone.position.y, bone.position.z)
-  const euler = new THREE.Euler(
-    THREE.MathUtils.degToRad(bone.rotation.x),
-    THREE.MathUtils.degToRad(bone.rotation.y),
-    THREE.MathUtils.degToRad(bone.rotation.z)
-  )
-  const scale = new THREE.Vector3(bone.scale.x, bone.scale.y, bone.scale.z)
+  const translation = restPose
+    ? new THREE.Vector3(0, 0, 0)
+    : new THREE.Vector3(bone.position.x, bone.position.y, bone.position.z)
+  const euler = restPose
+    ? new THREE.Euler(0, 0, 0)
+    : new THREE.Euler(
+        THREE.MathUtils.degToRad(bone.rotation.x),
+        THREE.MathUtils.degToRad(bone.rotation.y),
+        THREE.MathUtils.degToRad(bone.rotation.z)
+      )
+  const scale = restPose
+    ? new THREE.Vector3(1, 1, 1)
+    : new THREE.Vector3(bone.scale.x, bone.scale.y, bone.scale.z)
 
   const toPivot = new THREE.Matrix4().makeTranslation(-pivot.x, -pivot.y, -pivot.z)
   const trs = new THREE.Matrix4().compose(pivot.clone().add(translation), new THREE.Quaternion().setFromEuler(euler), scale)
@@ -34,11 +40,18 @@ export function computeBoneWorldMatrix(bone: Bone, allBones: Bone[]): THREE.Matr
   if (bone.parentId) {
     const parent = allBones.find(b => b.id === bone.parentId)
     if (parent) {
-      const parentMat = computeBoneWorldMatrix(parent, allBones)
+      const parentMat = computeBoneWorldMatrix(parent, allBones, restPose)
       return new THREE.Matrix4().multiplyMatrices(parentMat, localMat)
     }
   }
   return localMat
+}
+
+/** Linear-blend skin matrix: posed world × inverse bind (rest). */
+export function computeBoneSkinMatrix(bone: Bone, allBones: Bone[]): THREE.Matrix4 {
+  const world = computeBoneWorldMatrix(bone, allBones, false)
+  const rest = computeBoneWorldMatrix(bone, allBones, true)
+  return world.multiply(rest.invert())
 }
 
 export function evaluateSkinning(mesh: MeshObject, vertices: Vertex[], bones: Bone[]): Vertex[] {
@@ -46,7 +59,7 @@ export function evaluateSkinning(mesh: MeshObject, vertices: Vertex[], bones: Bo
 
   const boneMatrixMap = new Map<string, THREE.Matrix4>()
   for (const b of bones) {
-    boneMatrixMap.set(b.id, computeBoneWorldMatrix(b, bones))
+    boneMatrixMap.set(b.id, computeBoneSkinMatrix(b, bones))
   }
 
   const deformed: Vertex[] = []
@@ -129,6 +142,120 @@ export function weightToHeatmapColor(weight: number): THREE.Color {
   return color
 }
 
+export const DEFAULT_AUTO_SMOOTH_ANGLE = 30
+
+export function resolveMeshShadeMode(
+  mesh: MeshObject,
+  globalShadeMode: 'flat' | 'smooth' = 'flat'
+): MeshShadeMode {
+  if (mesh.shadeMode === 'auto' || mesh.shadeMode === 'smooth' || mesh.shadeMode === 'flat') {
+    return mesh.shadeMode
+  }
+  return globalShadeMode
+}
+
+function shadeEdgeKey(a: string, b: string) {
+  return a < b ? `${a}_${b}` : `${b}_${a}`
+}
+
+function addAngleWeightedNormal(
+  faceVerts: Vertex[],
+  faceNormal: THREE.Vector3,
+  vertIndex: number,
+  target: THREE.Vector3
+) {
+  const n = faceVerts.length
+  const prev = faceVerts[(vertIndex - 1 + n) % n].position
+  const curr = faceVerts[vertIndex].position
+  const next = faceVerts[(vertIndex + 1) % n].position
+  const e1 = new THREE.Vector3(prev.x - curr.x, prev.y - curr.y, prev.z - curr.z).normalize()
+  const e2 = new THREE.Vector3(next.x - curr.x, next.y - curr.y, next.z - curr.z).normalize()
+  const dot = Math.max(-1, Math.min(1, e1.dot(e2)))
+  target.addScaledVector(faceNormal, Math.acos(dot))
+}
+
+/** Blender Auto Smooth: split vertex normals across edges sharper than `angleDeg`. */
+function buildAutoSmoothCornerNormals(
+  evalFaces: Face[],
+  vertMap: Map<string, Vertex>,
+  angleDeg: number
+): Map<string, THREE.Vector3> {
+  const faceNormals: THREE.Vector3[] = []
+  const faceVertLists: Vertex[][] = []
+  for (const face of evalFaces) {
+    const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
+    faceVertLists.push(faceVerts)
+    if (faceVerts.length < 3) {
+      faceNormals.push(new THREE.Vector3(0, 1, 0))
+      continue
+    }
+    const fn = computeFaceNormal(faceVerts.map(v => v.position))
+    faceNormals.push(new THREE.Vector3(fn.x, fn.y, fn.z))
+  }
+
+  const edgeFaces = new Map<string, number[]>()
+  for (let fi = 0; fi < evalFaces.length; fi++) {
+    const ids = evalFaces[fi].vertexIds
+    for (let i = 0; i < ids.length; i++) {
+      const key = shadeEdgeKey(ids[i], ids[(i + 1) % ids.length])
+      const arr = edgeFaces.get(key)
+      if (arr) arr.push(fi)
+      else edgeFaces.set(key, [fi])
+    }
+  }
+
+  const sharp = new Set<string>()
+  const cosLimit = Math.cos(THREE.MathUtils.degToRad(angleDeg))
+  for (const [key, fis] of edgeFaces) {
+    if (fis.length !== 2) continue
+    const dot = Math.max(-1, Math.min(1, faceNormals[fis[0]].dot(faceNormals[fis[1]])))
+    if (dot < cosLimit) sharp.add(key)
+  }
+
+  const result = new Map<string, THREE.Vector3>()
+  for (let fi = 0; fi < evalFaces.length; fi++) {
+    const face = evalFaces[fi]
+    const faceVerts = faceVertLists[fi]
+    if (faceVerts.length < 3) continue
+    for (let vi = 0; vi < face.vertexIds.length; vi++) {
+      const vid = face.vertexIds[vi]
+      const cacheKey = `${face.id}:${vid}`
+      if (result.has(cacheKey)) continue
+
+      const acc = new THREE.Vector3()
+      const visited = new Set<number>()
+      const stack = [fi]
+      while (stack.length) {
+        const cur = stack.pop()!
+        if (visited.has(cur)) continue
+        visited.add(cur)
+        const curFace = evalFaces[cur]
+        const curVerts = faceVertLists[cur]
+        const idx = curFace.vertexIds.indexOf(vid)
+        if (idx === -1 || curVerts.length < 3) continue
+        addAngleWeightedNormal(curVerts, faceNormals[cur], idx, acc)
+
+        const n = curFace.vertexIds.length
+        const prevId = curFace.vertexIds[(idx - 1 + n) % n]
+        const nextId = curFace.vertexIds[(idx + 1) % n]
+        for (const other of [prevId, nextId]) {
+          const ek = shadeEdgeKey(vid, other)
+          if (sharp.has(ek)) continue
+          const adj = edgeFaces.get(ek)
+          if (!adj) continue
+          for (const afi of adj) {
+            if (!visited.has(afi) && evalFaces[afi].vertexIds.includes(vid)) stack.push(afi)
+          }
+        }
+      }
+      if (acc.lengthSq() > 1e-6) acc.normalize()
+      else acc.copy(faceNormals[fi])
+      result.set(cacheKey, acc)
+    }
+  }
+  return result
+}
+
 export function meshToThreeGeometry(
   mesh: MeshObject, 
   selectedFaceIds: string[] = [],
@@ -149,11 +276,10 @@ export function meshToThreeGeometry(
     vertMap.set(v.id, v)
   }
 
-  const isSmooth = globalShadeMode === 'smooth' || mesh.shadeMode === 'smooth'
+  const shade = resolveMeshShadeMode(mesh, globalShadeMode)
 
-  // Precompute angle-weighted smooth vertex normals if smooth shading is enabled
   const vertNormalMap = new Map<string, THREE.Vector3>()
-  if (isSmooth) {
+  if (shade === 'smooth') {
     for (const v of evalVertices) {
       vertNormalMap.set(v.id, new THREE.Vector3(0, 0, 0))
     }
@@ -162,23 +288,10 @@ export function meshToThreeGeometry(
       if (faceVerts.length < 3) continue
 
       const fn = computeFaceNormal(faceVerts.map(v => v.position))
-
-      const n = faceVerts.length
-      for (let i = 0; i < n; i++) {
-        const prev = faceVerts[(i - 1 + n) % n].position
-        const curr = faceVerts[i].position
-        const next = faceVerts[(i + 1) % n].position
-
-        const e1 = new THREE.Vector3(prev.x - curr.x, prev.y - curr.y, prev.z - curr.z).normalize()
-        const e2 = new THREE.Vector3(next.x - curr.x, next.y - curr.y, next.z - curr.z).normalize()
-        const dot = Math.max(-1, Math.min(1, e1.dot(e2)))
-        const angle = Math.acos(dot)
-
+      const fnVec = new THREE.Vector3(fn.x, fn.y, fn.z)
+      for (let i = 0; i < faceVerts.length; i++) {
         const vNormal = vertNormalMap.get(faceVerts[i].id)
-        if (vNormal) {
-          const fnVec = new THREE.Vector3(fn.x, fn.y, fn.z)
-          vNormal.addScaledVector(fnVec, angle)
-        }
+        if (vNormal) addAngleWeightedNormal(faceVerts, fnVec, i, vNormal)
       }
     }
     for (const [, vn] of vertNormalMap) {
@@ -186,6 +299,14 @@ export function meshToThreeGeometry(
       else vn.set(0, 1, 0)
     }
   }
+
+  const autoCornerNormals = shade === 'auto'
+    ? buildAutoSmoothCornerNormals(
+      evalFaces,
+      vertMap,
+      mesh.autoSmoothAngle ?? DEFAULT_AUTO_SMOOTH_ANGLE
+    )
+    : null
 
   const positions: number[] = []
   const normals: number[] = []
@@ -202,7 +323,7 @@ export function meshToThreeGeometry(
     const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
     if (faceVerts.length < 3) continue
 
-    const faceNormal = face.normal || computeFaceNormal(faceVerts.map(v => v.position))
+    const faceNormal = computeFaceNormal(faceVerts.map(v => v.position))
     const isFaceSelected = selectedFaceIds.includes(face.id)
 
     // Build wireframe edges
@@ -213,16 +334,38 @@ export function meshToThreeGeometry(
       wireframePositions.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z)
     }
 
-    // Triangulate polygon (Fan triangulation)
-    for (let i = 1; i < faceVerts.length - 1; i++) {
-      const v0 = faceVerts[0]
-      const v1 = faceVerts[i]
-      const v2 = faceVerts[i + 1]
+    // Triangulate polygon. Quads use the shorter diagonal so a pulled corner
+    // does not shear UVs across the worse split (Blender-style).
+    const triIndexSets: number[][] = []
+    if (faceVerts.length === 4) {
+      const d02 =
+        (faceVerts[0].position.x - faceVerts[2].position.x) ** 2 +
+        (faceVerts[0].position.y - faceVerts[2].position.y) ** 2 +
+        (faceVerts[0].position.z - faceVerts[2].position.z) ** 2
+      const d13 =
+        (faceVerts[1].position.x - faceVerts[3].position.x) ** 2 +
+        (faceVerts[1].position.y - faceVerts[3].position.y) ** 2 +
+        (faceVerts[1].position.z - faceVerts[3].position.z) ** 2
+      if (d13 < d02) {
+        triIndexSets.push([0, 1, 3], [1, 2, 3])
+      } else {
+        triIndexSets.push([0, 1, 2], [0, 2, 3])
+      }
+    } else {
+      for (let i = 1; i < faceVerts.length - 1; i++) {
+        triIndexSets.push([0, i, i + 1])
+      }
+    }
+
+    for (const tri of triIndexSets) {
+      const v0 = faceVerts[tri[0]]
+      const v1 = faceVerts[tri[1]]
+      const v2 = faceVerts[tri[2]]
 
       const faceUvs = face.uvs || []
-      const uv0 = faceUvs[0] || { u: 0, v: 0 }
-      const uv1 = faceUvs[i] || { u: 0, v: 0 }
-      const uv2 = faceUvs[i + 1] || { u: 0, v: 0 }
+      const uv0 = faceUvs[tri[0]] || { u: 0, v: 0 }
+      const uv1 = faceUvs[tri[1]] || { u: 0, v: 0 }
+      const uv2 = faceUvs[tri[2]] || { u: 0, v: 0 }
 
       const triVerts = [v0, v1, v2]
       const triUVs = [uv0, uv1, uv2]
@@ -233,9 +376,13 @@ export function meshToThreeGeometry(
 
         positions.push(v.position.x, v.position.y, v.position.z)
 
-        if (isSmooth && vertNormalMap.has(v.id)) {
+        if (shade === 'smooth' && vertNormalMap.has(v.id)) {
           const vn = vertNormalMap.get(v.id)!
           normals.push(vn.x, vn.y, vn.z)
+        } else if (shade === 'auto' && autoCornerNormals) {
+          const vn = autoCornerNormals.get(`${face.id}:${v.id}`)
+          if (vn) normals.push(vn.x, vn.y, vn.z)
+          else normals.push(faceNormal.x, faceNormal.y, faceNormal.z)
         } else {
           normals.push(faceNormal.x, faceNormal.y, faceNormal.z)
         }

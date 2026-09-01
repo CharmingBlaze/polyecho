@@ -210,3 +210,56 @@ export function getEdgeRing(mesh: MeshObject, startEdgeId: string): string[] {
   return Array.from(ring)
 }
 
+export function getLinkedVertexIds(mesh: MeshObject, startVertexId: string): string[] {
+  const edges = getMeshEdges(mesh)
+  const adj = new Map<string, string[]>()
+  for (const e of edges) {
+    if (!adj.has(e.v1)) adj.set(e.v1, [])
+    if (!adj.has(e.v2)) adj.set(e.v2, [])
+    adj.get(e.v1)!.push(e.v2)
+    adj.get(e.v2)!.push(e.v1)
+  }
+  const out = new Set<string>()
+  const stack = [startVertexId]
+  while (stack.length) {
+    const id = stack.pop()!
+    if (out.has(id)) continue
+    out.add(id)
+    for (const n of adj.get(id) || []) stack.push(n)
+  }
+  return Array.from(out)
+}
+
+export function getLinkedFaceIds(mesh: MeshObject, startFaceId: string): string[] {
+  const start = mesh.faces.find(f => f.id === startFaceId)
+  if (!start) return []
+  const edgeKey = (a: string, b: string) => (a < b ? `${a}_${b}` : `${b}_${a}`)
+  const edgeToFaces = new Map<string, string[]>()
+  for (const face of mesh.faces) {
+    const n = face.vertexIds.length
+    for (let i = 0; i < n; i++) {
+      const key = edgeKey(face.vertexIds[i], face.vertexIds[(i + 1) % n])
+      const list = edgeToFaces.get(key) || []
+      list.push(face.id)
+      edgeToFaces.set(key, list)
+    }
+  }
+  const out = new Set<string>()
+  const stack = [startFaceId]
+  while (stack.length) {
+    const id = stack.pop()!
+    if (out.has(id)) continue
+    out.add(id)
+    const face = mesh.faces.find(f => f.id === id)
+    if (!face) continue
+    const n = face.vertexIds.length
+    for (let i = 0; i < n; i++) {
+      const key = edgeKey(face.vertexIds[i], face.vertexIds[(i + 1) % n])
+      for (const other of edgeToFaces.get(key) || []) {
+        if (!out.has(other)) stack.push(other)
+      }
+    }
+  }
+  return Array.from(out)
+}
+

@@ -2,9 +2,12 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
+import { useLayoutStore } from '../../stores/layoutStore'
+import UiSection from '../ui/UiSection.vue'
+import UiButton from '../ui/UiButton.vue'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import { DEFAULT_PALETTES, loadCustomPalettes, saveCustomPalettes } from '../../utils/color'
-import { Palette } from '../../types/texture'
+import type { Palette } from '../../types/texture'
 import { 
   Plus, 
   Trash2, 
@@ -16,84 +19,133 @@ import {
   Sparkles, 
   X, 
   ArrowLeftRight, 
-  Save 
+  Save,
+  Image as ImageIcon,
+  Palette as PaletteIcon,
+  Layers,
+  Monitor,
+  SlidersHorizontal
 } from 'lucide-vue-next'
+import ImportTextureModal from '../modals/ImportTextureModal.vue'
 import { DEFAULT_GRADIENT_PRESETS, loadCustomGradients, saveCustomGradients, SavedGradient } from '../../utils/gradient'
 import { 
   DITHER_PRESETS, 
   DitherPreset, 
-  renderDitherCanvasPreview,
-  applyFloydSteinbergDither,
-  applyAtkinsonDither 
+  renderDitherCanvasPreview
 } from '../../utils/dithering'
 
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
+const layoutStore = useLayoutStore()
 
 // ----------------------------------------------------
 // WORKFLOW TABS
 // ----------------------------------------------------
-type MaterialCategory = 'surface' | 'consoles' | 'dithering' | 'palettes' | 'gradients' | 'all'
+type MaterialCategory = 'surface' | 'consoles' | 'dithering'
 const activeCategory = ref<MaterialCategory>('surface')
 
 // ----------------------------------------------------
 // ACTIVE MATERIAL SELECTION & ASSIGNMENT
 // ----------------------------------------------------
 const activeMesh = computed(() => projectStore.activeMesh)
-const selectedMaterialId = ref<string>(activeMesh.value?.materialId || projectStore.materials[0]?.id || 'default_material')
 
 watch(() => activeMesh.value?.materialId, (newMatId) => {
   if (newMatId) {
-    selectedMaterialId.value = newMatId
+    projectStore.selectMaterial(newMatId)
   }
 }, { immediate: true })
 
-const activeMaterial = computed(() => {
-  return projectStore.materials.find(m => m.id === selectedMaterialId.value) || projectStore.materials[0]
-})
+const activeMaterial = computed(() => projectStore.activeMaterial)
 
 const isAssignedToActiveMesh = computed(() => {
-  return activeMesh.value?.materialId === activeMaterial.value?.id
+  return activeMesh.value?.materialId === projectStore.activeMaterialId
 })
 
+const boundTexture = computed(() => {
+  const id = activeMaterial.value?.textureId
+  if (!id) return null
+  return projectStore.textures.find(t => t.id === id) || null
+})
+
+function openBoundTexture() {
+  if (!boundTexture.value) return
+  projectStore.selectTexture(boundTexture.value.id)
+  layoutStore.setInspectorTab('texture', toolStore.appMode)
+}
+
 const isMaterialShared = computed(() => {
-  if (!activeMesh.value) return false
-  const curMatId = activeMesh.value.materialId || 'default_material'
-  return projectStore.meshes.filter(m => m.materialId === curMatId).length > 1
+  return projectStore.isMaterialShared(projectStore.activeMaterialId)
+})
+
+const sharedMeshesCount = computed(() => {
+  return projectStore.countMeshesUsingMaterial(projectStore.activeMaterialId)
 })
 
 function handleMakeMaterialUnique() {
-  const newMat = projectStore.makeActiveMeshMaterialUnique()
-  if (newMat) {
-    selectedMaterialId.value = newMat.id
+  if (activeMesh.value) {
+    projectStore.forkMaterialForMesh(activeMesh.value.id)
   }
 }
 
 function assignToActiveMesh() {
-  if (activeMaterial.value && activeMesh.value) {
-    projectStore.assignMaterialToActiveMesh(activeMaterial.value.id)
+  if (activeMesh.value) {
+    projectStore.applyMaterialToMesh(activeMesh.value.id, projectStore.activeMaterialId)
   }
 }
 
 function assignToSelectedMeshes() {
-  if (activeMaterial.value) {
-    projectStore.assignMaterialToSelectedMeshes(activeMaterial.value.id)
-  }
+  projectStore.assignMaterialToSelectedMeshes(projectStore.activeMaterialId)
 }
 
 const showCreateTexModal = ref(false)
 const newTexName = ref('')
 const newTexSize = ref(64)
 
+function handleSelectMaterialTexture(texId: string | null) {
+  if (!activeMaterial.value) return
+  projectStore.applyTextureToMaterial(activeMaterial.value.id, texId)
+}
+
 function handleCreateNewTexture() {
   const name = newTexName.value.trim() || `Texture_${projectStore.textures.length + 1}`
-  const newTex = projectStore.addTexture(name, newTexSize.value, newTexSize.value)
+  const newTex = projectStore.createTexture(name, newTexSize.value, newTexSize.value)
   if (activeMaterial.value) {
-    activeMaterial.value.textureId = newTex.id
-    projectStore.markGeometryUpdated()
+    projectStore.applyTextureToMaterial(activeMaterial.value.id, newTex.id, { record: false })
   }
   showCreateTexModal.value = false
   newTexName.value = ''
+}
+
+function handleForkTextureForObject() {
+  if (!activeMesh.value) return
+  projectStore.forkTextureForMesh(activeMesh.value.id)
+}
+
+function handleRestoreAtlasOnMaterial() {
+  const tex = projectStore.restoreDefaultTexture()
+  if (activeMaterial.value) {
+    projectStore.applyTextureToMaterial(activeMaterial.value.id, tex.id, { record: false })
+  }
+}
+
+const importTextureInput = ref<HTMLInputElement | null>(null)
+const showImportModal = ref(false)
+const pendingImportFile = ref<File | null>(null)
+
+function handleImportTexture(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  pendingImportFile.value = file
+  showImportModal.value = true
+  if (importTextureInput.value) importTextureInput.value.value = ''
+}
+
+function handleTextureImported(texId: string) {
+  showImportModal.value = false
+  pendingImportFile.value = null
+  if (activeMaterial.value) {
+    projectStore.applyTextureToMaterial(activeMaterial.value.id, texId)
+  }
 }
 
 // Rename state
@@ -109,64 +161,34 @@ function startRename() {
 
 function commitRename() {
   if (activeMaterial.value && matNameInput.value.trim()) {
-    activeMaterial.value.name = matNameInput.value.trim()
+    projectStore.renameMaterial(activeMaterial.value.id, matNameInput.value.trim())
   }
   editingName.value = false
 }
 
 // Material slot actions
 function handleAddMaterial() {
-  const newMat = projectStore.addMaterial()
+  const newMat = projectStore.createMaterial()
   newMat.shading = 'pbr'
   newMat.roughness = 0.7
   newMat.metalness = 0.05
-  selectedMaterialId.value = newMat.id
-  if (activeMesh.value) {
-    projectStore.assignMaterialToActiveMesh(newMat.id)
-  }
 }
 
 function handleDuplicateMaterial() {
   if (!activeMaterial.value) return
-  const cloned = projectStore.addMaterial(`${activeMaterial.value.name}_Copy`, activeMaterial.value.textureId)
-  cloned.color = activeMaterial.value.color
-  cloned.shading = activeMaterial.value.shading
-  cloned.roughness = activeMaterial.value.roughness
-  cloned.metalness = activeMaterial.value.metalness
-  cloned.emissive = activeMaterial.value.emissive
-  cloned.emissiveIntensity = activeMaterial.value.emissiveIntensity
-  cloned.psxJitter = activeMaterial.value.psxJitter
-  cloned.psxAffine = activeMaterial.value.psxAffine
-  cloned.dither = activeMaterial.value.dither
-  cloned.wireframe = activeMaterial.value.wireframe
-  cloned.saturnMeshAlpha = activeMaterial.value.saturnMeshAlpha
-  cloned.dreamcastVQ = activeMaterial.value.dreamcastVQ
-  cloned.dreamcastSpecular = activeMaterial.value.dreamcastSpecular
-  cloned.dreamcastCelOutline = activeMaterial.value.dreamcastCelOutline
-  selectedMaterialId.value = cloned.id
-  if (activeMesh.value) {
-    projectStore.assignMaterialToActiveMesh(cloned.id)
-  }
+  projectStore.duplicateMaterial(activeMaterial.value.id)
 }
 
 function handleDeleteMaterial() {
   if (activeMaterial.value && projectStore.materials.length > 1) {
     const toDeleteId = activeMaterial.value.id
     projectStore.deleteMaterial(toDeleteId)
-    selectedMaterialId.value = projectStore.materials[0]?.id || 'default_material'
+    projectStore.selectMaterial(projectStore.materials[0]?.id || 'default_material')
   }
 }
 
 function purgeUnusedMaterials() {
-  const usedMatIds = new Set(projectStore.meshes.map(m => m.materialId))
-  const keep = projectStore.materials.filter(m => usedMatIds.has(m.id))
-  if (keep.length === 0 && projectStore.materials.length > 0) {
-    keep.push(projectStore.materials[0])
-  }
-  projectStore.materials = keep
-  if (!keep.some(m => m.id === selectedMaterialId.value)) {
-    selectedMaterialId.value = keep[0]?.id || 'default_material'
-  }
+  projectStore.purgeUnusedMaterials()
 }
 
 // ----------------------------------------------------
@@ -243,10 +265,11 @@ function applyMaterialPreset(p: MaterialPreset) {
   activeMaterial.value.shading = p.shading
   if (p.hasTexture) {
     if (!activeMaterial.value.textureId) {
-      activeMaterial.value.textureId = projectStore.textures[0]?.id || 'tex_default'
+      const fallback = projectStore.textures[0]?.id
+      if (fallback) projectStore.applyTextureToMaterial(activeMaterial.value.id, fallback, { record: false })
     }
   } else {
-    activeMaterial.value.textureId = null
+    projectStore.applyTextureToMaterial(activeMaterial.value.id, null, { record: false })
   }
   if (p.emissive) {
     activeMaterial.value.emissive = p.emissive
@@ -346,15 +369,15 @@ function adjustMaterialColor(action: 'invert' | 'grayscale' | 'brighten' | 'dark
 
   const toHex = (n: number) => n.toString(16).padStart(2, '0')
   const newHex = `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase()
+  projectStore.recordState(`Tint ${action}`)
   activeMaterial.value.color = newHex
   projectStore.markGeometryUpdated()
 }
 
 function clearMaterialTint() {
   if (activeMaterial.value) {
-    activeMaterial.value.color = '#ffffff'
-    toolStore.primaryColor = '#ffffff'
     projectStore.recordState('Clear Material Tint')
+    activeMaterial.value.color = '#ffffff'
     projectStore.markGeometryUpdated()
   }
 }
@@ -395,25 +418,6 @@ function applyDitherPreset(preset: DitherPreset) {
   })
 }
 
-function ditherActiveTextureImage(algorithm: 'floyd' | 'atkinson') {
-  const buf = projectStore.pixelBuffer
-  if (!buf || !buf.ctx) return
-  const pal = activePalette.value?.colors || ['#ffffff', '#000000', '#ef4444', '#22c55e', '#3b82f6', '#f59e0b']
-  if (!pal || pal.length === 0) return
-
-  projectStore.recordState(`Dither Texture (${algorithm === 'floyd' ? 'Floyd-Steinberg' : 'Atkinson'})`)
-  if (algorithm === 'floyd') {
-    applyFloydSteinbergDither(buf.ctx, buf.width, buf.height, pal)
-  } else {
-    applyAtkinsonDither(buf.ctx, buf.width, buf.height, pal)
-  }
-
-  if (projectStore.activeTexture) {
-    projectStore.activeTexture.dataUrl = buf.toDataURL()
-  }
-  projectStore.markTextureUpdated()
-}
-
 // ----------------------------------------------------
 // PALETTE SETS MANAGEMENT
 // ----------------------------------------------------
@@ -428,6 +432,10 @@ onMounted(() => {
   nextTick(() => {
     updateDitherPreview()
   })
+})
+
+watch(activeCategory, (cat) => {
+  if (cat === 'dithering') nextTick(() => updateDitherPreview())
 })
 
 const allPalettes = computed<Palette[]>(() => {
@@ -888,515 +896,307 @@ function rgbToHex(r: number, g: number, b: number): string {
 </script>
 
 <template>
-  <div class="flex flex-col select-none text-xs font-sans p-1.5 space-y-2">
-    <!-- 1. PERSISTENT MATERIAL HEADER & SLOT MANAGER -->
-    <div class="p-2 bg-ui-header rounded-xs border border-ui-borderSubtle space-y-2">
-      <!-- Row 1: Title, Active Pill, and Quick Slot Actions -->
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-1.5 min-w-0">
-          <BlenderIcon name="material" :size="13" color="#f59e0b" class="shrink-0" />
-          <span class="font-bold text-[11px] text-ui-textPrimary whitespace-nowrap">Materials</span>
-          <div 
-            v-if="activeMaterial"
-            class="flex items-center gap-1 px-1.5 py-0.5 bg-ui-surface rounded-xs border border-ui-borderSubtle max-w-[120px] truncate"
-            :title="activeMaterial.name"
-          >
-            <span class="w-2 h-2 rounded-full shrink-0 shadow-2xs border border-black/40" :style="{ backgroundColor: activeMaterial.color }"></span>
-            <span class="text-[9.5px] font-mono text-amber-300 truncate font-bold">{{ activeMaterial.name }}</span>
-          </div>
-        </div>
-        
-        <div class="flex items-center gap-1 shrink-0">
-          <button 
-            @click="handleAddMaterial" 
-            class="p-1 rounded-xs bg-ui-surface hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary border border-ui-borderSubtle transition flex items-center gap-1 text-[9.5px] cursor-pointer" 
-            title="Create New Material Slot"
-          >
-            <Plus class="w-3 h-3 text-emerald-400" />
-            <span>New</span>
-          </button>
-          <button 
-            @click="handleDuplicateMaterial" 
-            class="p-1 rounded-xs bg-ui-surface hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary border border-ui-borderSubtle transition cursor-pointer" 
-            title="Duplicate Active Material"
-          >
-            <Copy class="w-3 h-3" />
-          </button>
-          <button 
-            @click="handleDeleteMaterial" 
-            :disabled="projectStore.materials.length <= 1"
-            class="p-1 rounded-xs bg-ui-surface hover:bg-rose-950/40 text-ui-textMuted hover:text-rose-400 border border-ui-borderSubtle disabled:opacity-30 transition cursor-pointer" 
-            title="Delete Material"
-          >
-            <Trash2 class="w-3 h-3" />
-          </button>
-          <button 
-            @click="purgeUnusedMaterials" 
-            class="p-1 rounded-xs bg-ui-surface hover:bg-amber-950/40 text-ui-textMuted hover:text-amber-400 border border-ui-borderSubtle transition text-[9px] font-mono cursor-pointer" 
-            title="Purge Unused Material Slots"
-          >
-            Purge
-          </button>
-        </div>
+  <div class="flex flex-col select-none text-xs font-sans">
+    <div class="h-7 bg-ui-header border-b border-ui-borderSubtle px-2.5 flex items-center justify-between">
+      <div class="flex items-center space-x-1.5 min-w-0">
+        <BlenderIcon name="material" :size="12" color="#f59e0b" class="shrink-0" />
+        <span class="text-[11px] font-medium text-ui-textMuted">Material</span>
       </div>
+      <span class="font-semibold text-ui-textPrimary truncate max-w-[150px]">
+        {{ activeMaterial?.name || 'No material' }}
+      </span>
+    </div>
 
-      <!-- Row 2: Slot Dropdown Selector & Rename -->
+    <UiSection title="Look" :icon="PaletteIcon" :default-open="true">
+      <template #actions>
+        <UiButton size="xs" variant="ghost" @click="handleAddMaterial" title="New slot — does not assign">
+          <Plus class="w-3 h-3 text-emerald-400" />
+        </UiButton>
+        <UiButton size="xs" variant="ghost" @click="handleDuplicateMaterial" title="Duplicate — does not assign">
+          <Copy class="w-3 h-3" />
+        </UiButton>
+        <UiButton
+          size="xs"
+          variant="ghost"
+          :disabled="projectStore.materials.length <= 1"
+          @click="handleDeleteMaterial"
+          title="Delete material"
+        >
+          <Trash2 class="w-3 h-3" />
+        </UiButton>
+      </template>
+
+      <p class="text-[9px] text-ui-textMuted leading-snug">Inspected slot. Use assigns it to the object.</p>
+
       <div class="flex items-center gap-1.5">
-        <select 
-          v-model="selectedMaterialId"
-          class="flex-1 bg-ui-surface border border-ui-borderDefault rounded-xs px-2 py-1 text-amber-300 font-mono text-[11px] focus:outline-none focus:border-ui-accent cursor-pointer font-bold"
+        <select
+          :value="projectStore.activeMaterialId"
+          @change="projectStore.selectMaterial(($event.target as HTMLSelectElement).value)"
+          class="flex-1 min-w-0 h-5.5 bg-ui-surface border border-ui-borderDefault rounded-xs px-2 text-[11px] font-mono text-amber-300 focus:outline-none focus:border-ui-accent cursor-pointer"
         >
           <option v-for="mat in projectStore.materials" :key="mat.id" :value="mat.id">
-            {{ mat.name }} {{ activeMesh?.materialId === mat.id ? '(Active Object)' : '' }}
+            {{ mat.name }}{{ activeMesh?.materialId === mat.id ? ' · object' : '' }}
           </option>
         </select>
-        <button 
-          v-if="!editingName"
-          @click="startRename"
-          class="px-2 py-1 rounded-xs bg-ui-surface hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary border border-ui-borderSubtle transition text-[9.5px] cursor-pointer"
-          title="Rename Material"
+        <UiButton
+          size="xs"
+          :variant="isAssignedToActiveMesh ? 'accent' : 'default'"
+          :disabled="!activeMesh || isAssignedToActiveMesh"
+          :title="isAssignedToActiveMesh ? 'On the active object' : 'Use this material on the active object'"
+          @click="assignToActiveMesh"
         >
-          Rename
-        </button>
+          <Check v-if="isAssignedToActiveMesh" class="w-3 h-3 text-emerald-400" />
+          <span>{{ isAssignedToActiveMesh ? 'In use' : 'Use' }}</span>
+        </UiButton>
       </div>
 
-      <!-- Inline Rename Field (if editing) -->
-      <div v-if="editingName && activeMaterial" class="flex items-center gap-1.5 pt-0.5">
-        <input 
+      <div v-if="editingName && activeMaterial" class="flex items-center gap-1">
+        <input
           v-model="matNameInput"
           @blur="commitRename"
           @keydown.enter="commitRename"
-          class="flex-1 bg-ui-surface text-ui-textPrimary px-2 py-0.5 rounded-xs font-mono text-xs border border-amber-500 focus:outline-none"
+          class="flex-1 h-5.5 bg-ui-surface text-ui-textPrimary px-2 rounded-xs font-mono text-xs border border-amber-500 focus:outline-none"
           autoFocus
         />
-        <button @click="commitRename" class="px-2 py-0.5 bg-amber-600 text-slate-950 rounded-xs text-[10px] font-bold cursor-pointer">Done</button>
+        <UiButton size="xs" variant="accent" @click="commitRename">Done</UiButton>
       </div>
-
-      <!-- Row 3: Scene Materials Swatch Gallery -->
-      <div class="space-y-1">
-        <div class="flex items-center justify-between text-[9px] text-ui-textMuted uppercase font-semibold">
-          <span>Project Materials ({{ projectStore.materials.length }})</span>
-          <span class="font-mono text-amber-300/80">Click to Select</span>
-        </div>
-        <div class="grid grid-cols-4 gap-1 max-h-20 overflow-y-auto custom-scrollbar p-0.5 bg-ui-input/40 rounded-xs border border-ui-borderSubtle">
-          <button 
-            v-for="mat in projectStore.materials" 
-            :key="mat.id"
-            @click="selectedMaterialId = mat.id"
-            class="p-1 rounded-xs border transition cursor-pointer flex items-center gap-1.5 text-left truncate"
-            :class="selectedMaterialId === mat.id ? 'bg-amber-500/20 text-amber-300 border-amber-500/60 shadow-xs font-bold' : 'bg-ui-surface text-ui-textSecondary border-ui-borderSubtle hover:bg-ui-hover'"
-            :title="`${mat.name} (${mat.shading.toUpperCase()})`"
-          >
-            <span class="w-2.5 h-2.5 rounded-full border border-black/40 shadow-2xs shrink-0" :style="{ backgroundColor: mat.color }"></span>
-            <span class="truncate text-[9px]">{{ mat.name }}</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- Row 4: Apply to Active / Selected Object Buttons & Make Unique -->
-      <div class="grid grid-cols-2 gap-1 pt-0.5">
-        <button 
-          @click="assignToActiveMesh"
-          :disabled="isAssignedToActiveMesh"
-          class="py-1 px-1.5 rounded-xs text-[10px] font-bold border transition flex items-center justify-center gap-1 cursor-pointer"
-          :class="isAssignedToActiveMesh ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50' : 'bg-ui-surface hover:bg-ui-hover text-ui-textPrimary border-ui-borderSubtle'"
-          :title="isAssignedToActiveMesh ? 'Currently assigned to active mesh' : 'Apply this material to the active mesh'"
-        >
-          <Check v-if="isAssignedToActiveMesh" class="w-3 h-3 text-emerald-400" />
-          <span>{{ isAssignedToActiveMesh ? 'Applied to Active' : 'Apply to Active' }}</span>
-        </button>
-        <button 
+      <div v-else class="flex items-center gap-1">
+        <UiButton size="xs" class="flex-1" @click="startRename">Rename</UiButton>
+        <UiButton
+          size="xs"
+          class="flex-1"
+          :title="`Apply to ${projectStore.selectedMeshIds.length} selected`"
           @click="assignToSelectedMeshes"
-          class="py-1 px-1.5 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary hover:text-ui-textPrimary rounded-xs text-[10px] font-medium flex items-center justify-center gap-1 transition cursor-pointer"
-          :title="`Apply this material to all ${projectStore.selectedMeshIds.length} selected objects`"
         >
           <CheckCheck class="w-3 h-3 text-ui-accent" />
-          <span>Apply to Sel ({{ projectStore.selectedMeshIds.length }})</span>
-        </button>
+          Sel ({{ projectStore.selectedMeshIds.length }})
+        </UiButton>
       </div>
 
-      <!-- Shared Material Fork Notice / 1-Click Make Unique -->
-      <div v-if="isMaterialShared && activeMesh" class="flex items-center justify-between p-1.5 bg-amber-500/10 border border-amber-500/30 rounded-xs text-[10px]">
-        <span class="text-amber-300 font-medium">Shared by multiple objects</span>
-        <button 
-          @click="handleMakeMaterialUnique"
-          class="px-2 py-0.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xs shadow-xs transition cursor-pointer"
-          title="Fork this material into a unique instance for this object"
+      <div
+        v-if="isMaterialShared && activeMesh"
+        class="flex items-center justify-between gap-2 px-1.5 h-6 bg-amber-500/10 border border-amber-500/25 rounded-xs"
+      >
+        <span class="text-[10px] text-amber-300 truncate">Shared · {{ sharedMeshesCount }}</span>
+        <UiButton size="xs" variant="accent" @click="handleMakeMaterialUnique" title="Fork for this object">
+          Unique
+        </UiButton>
+      </div>
+
+      <input ref="importTextureInput" type="file" accept="image/*" class="hidden" @change="handleImportTexture" />
+
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          class="w-14 h-14 rounded-xs border border-ui-borderDefault overflow-hidden tex-checker shrink-0 flex items-center justify-center"
+          :class="boundTexture ? 'cursor-pointer hover:border-ui-accent' : 'cursor-default'"
+          :title="boundTexture ? 'Open in Texture tab' : 'No texture'"
+          :disabled="!boundTexture"
+          @click="openBoundTexture"
         >
-          Make Unique
+          <img
+            v-if="boundTexture?.dataUrl"
+            :src="boundTexture.dataUrl"
+            class="w-full h-full object-contain [image-rendering:pixelated]"
+            alt=""
+          />
+          <span v-else class="text-[8px] text-ui-textMuted font-mono">None</span>
+        </button>
+        <div class="flex-1 min-w-0 space-y-1">
+          <select
+            v-if="activeMaterial"
+            :value="activeMaterial.textureId || ''"
+            @change="handleSelectMaterialTexture(($event.target as HTMLSelectElement).value || null)"
+            class="w-full h-5.5 bg-ui-surface border border-ui-borderDefault rounded-xs px-2 text-[11px] font-mono text-sky-300 focus:outline-none focus:border-ui-accent cursor-pointer truncate"
+          >
+            <option value="">None (tint only)</option>
+            <option v-for="tex in projectStore.textures" :key="tex.id" :value="tex.id">
+              {{ tex.name }} {{ tex.width }}×{{ tex.height }}
+            </option>
+          </select>
+          <div class="grid grid-cols-2 gap-1">
+            <UiButton size="xs" @click="showCreateTexModal = true" title="Create and bind to this material">New</UiButton>
+            <UiButton size="xs" @click="importTextureInput?.click()" title="Import onto this material">Import</UiButton>
+            <UiButton size="xs" @click="handleForkTextureForObject" :title="`Copy pixels for ${activeMesh?.name || 'object'}`">Fork</UiButton>
+            <UiButton size="xs" @click="handleRestoreAtlasOnMaterial" title="Bind default atlas">Atlas</UiButton>
+          </div>
+        </div>
+      </div>
+    </UiSection>
+
+    <div class="px-2 py-1.5 bg-ui-panel border-b border-ui-borderSubtle">
+      <div class="flex h-6 rounded-xs bg-ui-input border border-ui-borderSubtle p-0.5">
+        <button
+          v-for="cat in ([
+            { id: 'surface', label: 'Surface' },
+            { id: 'consoles', label: 'Consoles' },
+            { id: 'dithering', label: 'Dither' }
+          ] as const)"
+          :key="cat.id"
+          type="button"
+          class="flex-1 rounded-[2px] text-[10px] font-semibold transition cursor-pointer"
+          :class="activeCategory === cat.id
+            ? 'bg-ui-surface text-ui-textPrimary shadow-xs'
+            : 'text-ui-textMuted hover:text-ui-textSecondary'"
+          @click="activeCategory = cat.id"
+        >
+          {{ cat.label }}
         </button>
       </div>
-    </div>
-
-    <!-- 2. 5-TAB WORKFLOW NAVIGATION STRIP -->
-    <div class="grid grid-cols-5 gap-1 p-0.5 bg-ui-input/70 rounded-xs border border-ui-borderSubtle text-[9.5px]">
-      <button 
-        @click="activeCategory = 'surface'"
-        class="py-1 rounded-xs font-bold transition text-center cursor-pointer border"
-        :class="activeCategory === 'surface' ? 'bg-sky-500/20 text-sky-300 border-sky-500/50 shadow-xs' : 'bg-ui-surface text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
-      >
-        Surface
-      </button>
-      <button 
-        @click="activeCategory = 'consoles'"
-        class="py-1 rounded-xs font-bold transition text-center cursor-pointer border"
-        :class="activeCategory === 'consoles' ? 'bg-rose-500/20 text-rose-300 border-rose-500/50 shadow-xs' : 'bg-ui-surface text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
-      >
-        Consoles
-      </button>
-      <button 
-        @click="activeCategory = 'dithering'"
-        class="py-1 rounded-xs font-bold transition text-center cursor-pointer border"
-        :class="activeCategory === 'dithering' ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-xs' : 'bg-ui-surface text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
-      >
-        Dither
-      </button>
-      <button 
-        @click="activeCategory = 'palettes'"
-        class="py-1 rounded-xs font-bold transition text-center cursor-pointer border"
-        :class="activeCategory === 'palettes' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-xs' : 'bg-ui-surface text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
-      >
-        Palettes
-      </button>
-      <button 
-        @click="activeCategory = 'gradients'"
-        class="py-1 rounded-xs font-bold transition text-center cursor-pointer border"
-        :class="activeCategory === 'gradients' ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/50 shadow-xs' : 'bg-ui-surface text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
-      >
-        Gradients
-      </button>
     </div>
 
     <!-- ==================================================== -->
     <!-- TAB 1: SURFACE & PBR SHADING                         -->
     <!-- ==================================================== -->
-    <div v-show="activeCategory === 'surface' || activeCategory === 'all'" class="space-y-2">
-      <!-- Shader Model Card -->
-      <div class="p-2 bg-ui-input/40 rounded-xs border border-ui-borderSubtle space-y-1.5">
-        <label class="text-[10px] font-semibold text-ui-textMuted uppercase">Shader Model</label>
-        <select 
+    <div v-show="activeCategory === 'surface'">
+      <UiSection title="Shader" :icon="Monitor" :default-open="true">
+        <select
           v-if="activeMaterial"
           v-model="activeMaterial.shading"
-          class="w-full bg-ui-surface border border-ui-borderDefault rounded-xs px-2 py-1 text-ui-textPrimary text-[11px] focus:outline-none focus:border-ui-accent cursor-pointer font-bold"
+          class="w-full h-5.5 bg-ui-surface border border-ui-borderDefault rounded-xs px-2 text-[11px] text-ui-textPrimary focus:outline-none focus:border-ui-accent cursor-pointer"
         >
-          <option value="pbr">PBR Standard (Lit Metallic / Roughness)</option>
-          <option value="psx">PlayStation 1 (Affine + Jitter + 15-Bit Dither)</option>
-          <option value="saturn">Sega Saturn (VDP1 Quads + Mesh Alpha + Gouraud)</option>
-          <option value="dreamcast">Sega Dreamcast (PowerVR VQ + Specular + Cel)</option>
-          <option value="n64">Nintendo 64 (RDP 3-Point Bilinear + TMEM)</option>
-          <option value="textured">Textured Low-Poly (Clean Unlit Retro)</option>
-          <option value="flat">Flat Shading (Faceted Low-Poly Normals)</option>
-          <option value="gouraud">Gouraud (Vertex Normals Smooth)</option>
-          <option value="unlit">Constant Unlit (Pure Color Flat)</option>
+          <option value="pbr">PBR</option>
+          <option value="psx">PS1</option>
+          <option value="saturn">Saturn</option>
+          <option value="dreamcast">Dreamcast</option>
+          <option value="n64">N64</option>
+          <option value="textured">Textured</option>
+          <option value="flat">Flat</option>
+          <option value="gouraud">Gouraud</option>
+          <option value="unlit">Unlit</option>
         </select>
-      </div>
+      </UiSection>
 
-      <!-- Texture Map Assignment Card -->
-      <div v-if="activeMaterial" class="p-2 bg-ui-input/40 rounded-xs border border-ui-borderSubtle space-y-2">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-1.5 text-[10px] font-semibold text-ui-textMuted uppercase">
-            <ImageIcon class="w-3.5 h-3.5 text-sky-400" />
-            <span>Texture Map</span>
-          </div>
-          <span v-if="activeMaterial.textureId" class="text-[9px] font-mono text-amber-300">
-            {{ projectStore.textures.find(t => t.id === activeMaterial.textureId)?.width || 64 }}x{{ projectStore.textures.find(t => t.id === activeMaterial.textureId)?.height || 64 }}px
-          </span>
-          <span v-else class="text-[9px] text-ui-textMuted italic">No Texture (Solid Color)</span>
-        </div>
-
-        <div class="flex items-center gap-1.5">
-          <select 
-            :value="activeMaterial.textureId || ''"
-            @change="activeMaterial.textureId = ($event.target as HTMLSelectElement).value || null; projectStore.markGeometryUpdated()"
-            class="flex-1 bg-ui-surface border border-ui-borderDefault rounded-xs px-2 py-1 text-sky-300 font-mono text-[11px] focus:outline-none focus:border-ui-accent cursor-pointer font-bold truncate"
-          >
-            <option value="">[ None - Solid Color ]</option>
-            <option v-for="tex in projectStore.textures" :key="tex.id" :value="tex.id">
-              {{ tex.name }} ({{ tex.width }}x{{ tex.height }})
-            </option>
-          </select>
-
-          <button 
-            @click="showCreateTexModal = true"
-            class="px-2 py-1 rounded-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/50 transition text-[10px] font-bold cursor-pointer flex items-center gap-1 shrink-0"
-            title="Create new texture"
-          >
-            <Plus class="w-3 h-3" /> New
-          </button>
-        </div>
-
-        <!-- Visual Scene Textures Strip -->
-        <div class="space-y-1">
-          <div class="text-[9px] text-ui-textMuted uppercase font-semibold">Scene Textures (Click to Assign)</div>
-          <div class="grid grid-cols-4 gap-1 max-h-24 overflow-y-auto custom-scrollbar p-1 bg-ui-surface rounded-xs border border-ui-borderSubtle">
-            <button 
-              v-for="tex in projectStore.textures" 
-              :key="tex.id"
-              @click="activeMaterial.textureId = tex.id; projectStore.markGeometryUpdated()"
-              class="p-1 rounded-xs border transition cursor-pointer flex flex-col items-center gap-1 text-center"
-              :class="activeMaterial.textureId === tex.id ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-xs font-bold' : 'bg-ui-input/50 border-ui-borderSubtle hover:bg-ui-hover text-ui-textSecondary'"
-              :title="`Assign ${tex.name} (${tex.width}x${tex.height})`"
-            >
-              <div class="w-8 h-8 rounded-xs overflow-hidden bg-black/40 border border-black/30 flex items-center justify-center">
-                <img v-if="tex.dataUrl" :src="tex.dataUrl" class="w-full h-full object-cover pixelated" />
-                <span v-else class="text-[8px] font-mono opacity-50">{{ tex.width }}</span>
-              </div>
-              <span class="text-[8.5px] truncate max-w-[50px] font-mono leading-none">{{ tex.name }}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Base Color & Tint Card -->
-      <div v-if="activeMaterial" class="p-2 bg-ui-input/40 rounded-xs border border-ui-borderSubtle space-y-1.5">
-        <div class="text-[10px] font-semibold text-ui-textMuted uppercase">Base Tint Color</div>
-        <div class="flex items-center gap-2 bg-ui-surface p-1.5 rounded-xs border border-ui-borderSubtle">
-          <input 
-            type="color" 
+      <UiSection v-if="activeMaterial" title="Tint" :icon="PaletteIcon" :default-open="true">
+        <div class="flex items-center gap-2">
+          <input
+            type="color"
             v-model="activeMaterial.color"
             @change="projectStore.markGeometryUpdated()"
-            class="w-6 h-6 rounded-xs cursor-pointer border border-ui-borderDefault bg-transparent p-0 shrink-0 shadow-xs" 
+            class="w-6 h-6 rounded-xs cursor-pointer border border-ui-borderDefault bg-transparent p-0 shrink-0"
           />
-          <div class="flex-1 flex items-center justify-between">
-            <div class="flex flex-col">
-              <span class="text-ui-textMuted text-[9.5px]">Hex Color</span>
-              <span class="font-mono text-ui-textPrimary text-[11px] font-bold uppercase">{{ activeMaterial.color }}</span>
-            </div>
-            <button 
-              @click="clearMaterialTint"
-              class="px-2 py-0.5 bg-ui-input hover:bg-ui-hover text-ui-textSecondary hover:text-white border border-ui-borderSubtle rounded-xs text-[10px] font-medium transition cursor-pointer"
-              title="Reset tint to pure white"
-            >
-              Reset White
-            </button>
-          </div>
+          <span class="flex-1 font-mono text-[11px] text-ui-textPrimary uppercase truncate">{{ activeMaterial.color }}</span>
+          <UiButton size="xs" @click="clearMaterialTint" title="Reset tint to white">White</UiButton>
         </div>
-      </div>
+      </UiSection>
 
-      <!-- Quick Material Presets Shelf -->
-      <div class="p-2 bg-ui-input/40 rounded-xs border border-ui-borderSubtle space-y-1.5">
-        <div class="flex items-center justify-between">
-          <span class="text-[10px] font-semibold text-ui-textMuted uppercase">Quick Presets</span>
-          <span class="text-[8.5px] text-ui-textMuted font-mono">1-Click</span>
+      <UiSection
+        v-if="activeMaterial && ['pbr', 'textured', 'flat', 'gouraud'].includes(activeMaterial.shading)"
+        title="Surface"
+        :icon="SlidersHorizontal"
+        :default-open="true"
+      >
+        <div class="flex items-center justify-between text-[10px]">
+          <span class="text-ui-textSecondary">Roughness</span>
+          <span class="font-mono text-amber-400">{{ ((activeMaterial.roughness ?? 0.7) * 100).toFixed(0) }}%</span>
         </div>
-        <!-- Filter Pills -->
+        <input type="range" min="0" max="1" step="0.01" v-model.number="activeMaterial.roughness" class="w-full accent-amber-500 bg-ui-input h-1 rounded cursor-pointer" />
+        <div class="flex items-center justify-between text-[10px] pt-1">
+          <span class="text-ui-textSecondary">Metallic</span>
+          <span class="font-mono text-sky-400">{{ ((activeMaterial.metalness ?? 0.05) * 100).toFixed(0) }}%</span>
+        </div>
+        <input type="range" min="0" max="1" step="0.01" v-model.number="activeMaterial.metalness" class="w-full accent-sky-500 bg-ui-input h-1 rounded cursor-pointer" />
+        <div class="flex items-center justify-between text-[10px] pt-1">
+          <span class="text-ui-textSecondary">Emissive</span>
+          <span class="font-mono text-emerald-400">{{ (activeMaterial.emissiveIntensity || 0).toFixed(1) }}×</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <input type="color" v-model="activeMaterial.emissive" class="w-4 h-4 rounded-xs cursor-pointer border border-ui-borderDefault bg-transparent p-0 shrink-0" />
+          <input type="range" min="0" max="5" step="0.1" v-model.number="activeMaterial.emissiveIntensity" class="flex-1 accent-emerald-500 bg-ui-input h-1 rounded cursor-pointer" />
+        </div>
+      </UiSection>
+
+      <UiSection title="Presets" :icon="Sparkles" :default-open="false">
         <div class="flex items-center gap-1 overflow-x-auto pb-0.5 text-[9px] custom-scrollbar">
-          <button 
-            v-for="cat in presetCategories" 
+          <button
+            v-for="cat in presetCategories"
             :key="cat"
+            type="button"
+            class="px-1.5 h-5 rounded-xs border shrink-0 transition cursor-pointer"
+            :class="selectedPresetCategory === cat ? 'bg-ui-active text-ui-textPrimary border-ui-borderStrong' : 'bg-ui-surface text-ui-textSecondary border-ui-borderSubtle hover:bg-ui-hover'"
             @click="selectedPresetCategory = cat"
-            class="px-1.5 py-0.5 rounded-xs border shrink-0 transition cursor-pointer"
-            :class="selectedPresetCategory === cat ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-bold' : 'bg-ui-surface text-ui-textSecondary border-ui-borderSubtle hover:bg-ui-hover'"
           >
             {{ cat }}
           </button>
         </div>
-        <!-- Preset Chips -->
-        <div class="grid grid-cols-4 gap-1">
-          <button 
-            v-for="preset in filteredPresets" 
+        <div class="grid grid-cols-2 gap-1">
+          <button
+            v-for="preset in filteredPresets"
             :key="preset.name"
-            @click="applyMaterialPreset(preset)"
-            class="py-1 px-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle hover:border-amber-500/50 rounded-xs text-[9.5px] font-medium text-ui-textSecondary hover:text-ui-textPrimary flex flex-col items-center gap-1 transition cursor-pointer"
+            type="button"
+            class="h-5.5 px-1.5 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[10px] text-ui-textSecondary hover:text-ui-textPrimary flex items-center gap-1.5 transition cursor-pointer"
             :title="`${preset.name} (${preset.shading.toUpperCase()})`"
+            @click="applyMaterialPreset(preset)"
           >
-            <span class="w-3 h-3 rounded-full border border-black/40 shadow-2xs shrink-0" :style="{ backgroundColor: preset.color }"></span>
-            <span class="truncate w-full text-center">{{ preset.label }}</span>
+            <span class="w-2.5 h-2.5 rounded-full border border-black/40 shrink-0" :style="{ backgroundColor: preset.color }"></span>
+            <span class="truncate">{{ preset.label }}</span>
           </button>
         </div>
-      </div>
+      </UiSection>
 
-      <!-- PBR Properties Card (Active when PBR/lit) -->
-      <div v-if="activeMaterial && ['pbr', 'textured', 'flat', 'gouraud'].includes(activeMaterial.shading)" class="p-2 bg-ui-input/40 rounded-xs border border-ui-borderSubtle space-y-2">
-        <div class="text-[10px] font-semibold text-ui-textMuted uppercase">Surface & Lighting</div>
-
-        <!-- Roughness Slider -->
-        <div class="space-y-1">
-          <div class="flex items-center justify-between text-[10px]">
-            <span class="text-ui-textSecondary font-medium">Roughness:</span>
-            <span class="font-mono text-amber-400 font-bold">{{ ((activeMaterial.roughness ?? 0.7) * 100).toFixed(0) }}%</span>
-          </div>
-          <input 
-            type="range" 
-            min="0" 
-            max="1" 
-            step="0.01" 
-            v-model.number="activeMaterial.roughness" 
-            class="w-full accent-amber-500 bg-ui-input h-1 rounded cursor-pointer" 
-          />
-          <div class="flex justify-between gap-1 text-[8.5px] text-ui-textMuted font-mono pt-0.5">
-            <button @click="activeMaterial.roughness = 0.05" class="hover:text-amber-300">Glossy (5%)</button>
-            <button @click="activeMaterial.roughness = 0.3" class="hover:text-amber-300">Plastic (30%)</button>
-            <button @click="activeMaterial.roughness = 0.7" class="hover:text-amber-300">Satin (70%)</button>
-            <button @click="activeMaterial.roughness = 0.95" class="hover:text-amber-300">Chalk (95%)</button>
-          </div>
+      <UiSection v-if="activeMaterial" title="Blend" :icon="Layers" :default-open="false">
+        <div class="flex items-center justify-between text-[10px]">
+          <span class="text-ui-textSecondary">Opacity</span>
+          <span class="font-mono text-ui-textAccent">{{ Math.round((activeMaterial.opacity ?? 1.0) * 100) }}%</span>
         </div>
-
-        <!-- Metalness Slider -->
-        <div class="space-y-1 pt-1 border-t border-ui-borderSubtle">
-          <div class="flex items-center justify-between text-[10px]">
-            <span class="text-ui-textSecondary font-medium">Metallic:</span>
-            <span class="font-mono text-sky-400 font-bold">{{ ((activeMaterial.metalness ?? 0.05) * 100).toFixed(0) }}%</span>
-          </div>
-          <input 
-            type="range" 
-            min="0" 
-            max="1" 
-            step="0.01" 
-            v-model.number="activeMaterial.metalness" 
-            class="w-full accent-sky-500 bg-ui-input h-1 rounded cursor-pointer" 
-          />
-          <div class="flex justify-between gap-1 text-[8.5px] text-ui-textMuted font-mono pt-0.5">
-            <button @click="activeMaterial.metalness = 0.0" class="hover:text-sky-300">Dielectric (0%)</button>
-            <button @click="activeMaterial.metalness = 0.5" class="hover:text-sky-300">Semi (50%)</button>
-            <button @click="activeMaterial.metalness = 0.9" class="hover:text-sky-300">Chrome (90%)</button>
-            <button @click="activeMaterial.metalness = 1.0" class="hover:text-sky-300">Pure (100%)</button>
-          </div>
-        </div>
-
-        <!-- Emissive Glow Controls -->
-        <div class="space-y-1 pt-1.5 border-t border-ui-borderSubtle">
-          <div class="flex items-center justify-between">
-            <span class="text-[10px] text-ui-textSecondary font-medium">Emissive / Glow</span>
-            <span class="text-[9px] font-mono text-emerald-400 font-bold">{{ (activeMaterial.emissiveIntensity || 0).toFixed(1) }}x</span>
-          </div>
-          <div class="flex items-center gap-1.5 bg-ui-surface p-1 rounded-xs border border-ui-borderSubtle">
-            <input 
-              type="color" 
-              v-model="activeMaterial.emissive" 
-              class="w-4 h-4 rounded-xs cursor-pointer border border-ui-borderDefault bg-transparent p-0 shrink-0" 
-            />
-            <input 
-              type="range" 
-              min="0" 
-              max="5" 
-              step="0.1" 
-              v-model.number="activeMaterial.emissiveIntensity" 
-              class="flex-1 accent-emerald-500 bg-ui-input h-1 rounded cursor-pointer" 
-            />
-          </div>
-        </div>
-      </div>
-
-      <!-- Transparency & Alpha Card -->
-      <div v-if="activeMaterial" class="p-2 bg-ui-input/40 rounded-xs border border-ui-borderSubtle space-y-2">
-        <div class="text-[10px] font-semibold text-ui-textMuted uppercase">Transparency & Alpha</div>
-        
-        <!-- Opacity Slider -->
-        <div class="space-y-1">
-          <div class="flex items-center justify-between text-[10px]">
-            <span class="text-ui-textSecondary font-medium">Opacity:</span>
-            <span class="font-mono text-ui-textAccent font-bold">{{ Math.round((activeMaterial.opacity ?? 1.0) * 100) }}%</span>
-          </div>
-          <input 
-            type="range" 
-            min="0" 
-            max="1" 
-            step="0.01" 
-            v-model.number="activeMaterial.opacity" 
-            class="w-full accent-ui-accent bg-ui-surface h-1 rounded cursor-pointer" 
-          />
-        </div>
-
-        <!-- Blend Mode -->
-        <div class="grid grid-cols-2 gap-1.5">
+        <input type="range" min="0" max="1" step="0.01" v-model.number="activeMaterial.opacity" class="w-full accent-ui-accent bg-ui-surface h-1 rounded cursor-pointer" />
+        <div class="grid grid-cols-2 gap-1.5 pt-1">
           <div>
-            <label class="text-[9px] text-ui-textMuted block mb-0.5">Blend Mode:</label>
-            <select 
-              v-model="activeMaterial.blendMode"
-              class="w-full bg-ui-surface border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-ui-textPrimary text-[10px] focus:outline-none cursor-pointer"
-            >
-              <option value="opaque">Opaque (Solid)</option>
-              <option value="mask">Alpha Clip (Cutout)</option>
-              <option value="blend">Alpha Blend (Glass)</option>
-              <option value="additive">Additive (Glow/Fire)</option>
+            <label class="text-[9px] text-ui-textMuted block mb-0.5">Mode</label>
+            <select v-model="activeMaterial.blendMode" class="w-full h-5.5 bg-ui-surface border border-ui-borderSubtle rounded-xs px-1.5 text-ui-textPrimary text-[10px] focus:outline-none cursor-pointer">
+              <option value="opaque">Opaque</option>
+              <option value="mask">Mask</option>
+              <option value="blend">Blend</option>
+              <option value="additive">Additive</option>
             </select>
           </div>
           <div>
-            <label class="text-[9px] text-ui-textMuted block mb-0.5">Alpha Cutoff:</label>
-            <input 
-              type="range" 
-              min="0" 
-              max="1" 
-              step="0.05" 
+            <label class="text-[9px] text-ui-textMuted block mb-0.5">Cutoff</label>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
               v-model.number="activeMaterial.alphaTest"
               :disabled="activeMaterial.blendMode !== 'mask'"
-              class="w-full accent-amber-500 bg-ui-surface h-1 rounded cursor-pointer disabled:opacity-30 mt-1.5" 
+              class="w-full accent-amber-500 bg-ui-surface h-1 rounded cursor-pointer disabled:opacity-30 mt-2"
             />
           </div>
         </div>
-      </div>
+      </UiSection>
 
-      <!-- Geometry & Rendering Card -->
-      <div v-if="activeMaterial" class="p-2 bg-ui-input/40 rounded-xs border border-ui-borderSubtle space-y-1.5">
-        <div class="text-[10px] font-semibold text-ui-textMuted uppercase">Render Options</div>
-        <label class="flex items-center justify-between cursor-pointer bg-ui-surface p-1.5 rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault transition">
-          <span class="text-ui-textSecondary text-[10.5px]">Double-Sided Rendering</span>
-          <input 
-            type="checkbox" 
-            v-model="activeMaterial.doubleSided" 
-            class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" 
-          />
+      <UiSection v-if="activeMaterial" title="Flags" :icon="Layers" :default-open="false">
+        <template #actions>
+          <UiButton size="xs" variant="ghost" @click="purgeUnusedMaterials" title="Drop unused slots">Purge</UiButton>
+        </template>
+        <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
+          <span class="text-ui-textSecondary text-[10px]">Double-sided</span>
+          <input type="checkbox" v-model="activeMaterial.doubleSided" class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
         </label>
-        <label class="flex items-center justify-between cursor-pointer bg-ui-surface p-1.5 rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault transition">
-          <span class="text-ui-textSecondary text-[10.5px]">Wireframe Overlay Lines</span>
-          <input 
-            type="checkbox" 
-            v-model="activeMaterial.wireframe" 
-            class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" 
-          />
+        <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
+          <span class="text-ui-textSecondary text-[10px]">Wireframe</span>
+          <input type="checkbox" v-model="activeMaterial.wireframe" class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
         </label>
-      </div>
+      </UiSection>
     </div>
 
     <!-- ==================================================== -->
     <!-- TAB 2: CONSOLES & HARDWARE EMULATION                 -->
     <!-- ==================================================== -->
-    <div v-show="activeCategory === 'consoles' || activeCategory === 'all'" class="space-y-2">
-      <!-- 1-Click Console Hero Selector Cards -->
-      <div class="p-2 bg-ui-input/40 rounded-xs border border-ui-borderSubtle space-y-1.5">
-        <div class="text-[10px] font-semibold text-ui-textMuted uppercase">1-Click Hardware Profile</div>
-        <div class="grid grid-cols-4 gap-1">
-          <button 
-            @click="applyConsoleProfile('psx')"
-            class="py-1.5 px-1 rounded-xs border text-center transition cursor-pointer flex flex-col items-center gap-0.5"
-            :class="activeMaterial?.shading === 'psx' ? 'bg-rose-500/20 text-rose-300 border-rose-500/60 font-bold shadow-xs' : 'bg-ui-surface text-ui-textSecondary border-ui-borderSubtle hover:bg-ui-hover'"
-          >
-            <span class="text-[10px] font-bold">PS1</span>
-            <span class="text-[7.5px] text-ui-textMuted">RGB555</span>
-          </button>
-          <button 
-            @click="applyConsoleProfile('saturn')"
-            class="py-1.5 px-1 rounded-xs border text-center transition cursor-pointer flex flex-col items-center gap-0.5"
-            :class="activeMaterial?.shading === 'saturn' ? 'bg-sky-500/20 text-sky-300 border-sky-500/60 font-bold shadow-xs' : 'bg-ui-surface text-ui-textSecondary border-ui-borderSubtle hover:bg-ui-hover'"
-          >
-            <span class="text-[10px] font-bold">Saturn</span>
-            <span class="text-[7.5px] text-ui-textMuted">VDP1</span>
-          </button>
-          <button 
-            @click="applyConsoleProfile('dreamcast')"
-            class="py-1.5 px-1 rounded-xs border text-center transition cursor-pointer flex flex-col items-center gap-0.5"
-            :class="activeMaterial?.shading === 'dreamcast' ? 'bg-amber-500/20 text-amber-300 border-amber-500/60 font-bold shadow-xs' : 'bg-ui-surface text-ui-textSecondary border-ui-borderSubtle hover:bg-ui-hover'"
-          >
-            <span class="text-[10px] font-bold">Dreamcast</span>
-            <span class="text-[7.5px] text-ui-textMuted">PowerVR</span>
-          </button>
-          <button 
-            @click="applyConsoleProfile('n64')"
-            class="py-1.5 px-1 rounded-xs border text-center transition cursor-pointer flex flex-col items-center gap-0.5"
-            :class="activeMaterial?.shading === 'n64' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/60 font-bold shadow-xs' : 'bg-ui-surface text-ui-textSecondary border-ui-borderSubtle hover:bg-ui-hover'"
-          >
-            <span class="text-[10px] font-bold">N64</span>
-            <span class="text-[7.5px] text-ui-textMuted">RDP</span>
-          </button>
+    <div v-show="activeCategory === 'consoles'">
+      <UiSection title="Profile" :icon="Tv" :default-open="true">
+        <p class="text-[9px] text-ui-textMuted leading-snug">Sets shader + common flags. Tune below.</p>
+        <div class="grid grid-cols-2 gap-1">
+          <UiButton size="xs" :active="activeMaterial?.shading === 'psx'" @click="applyConsoleProfile('psx')">PS1</UiButton>
+          <UiButton size="xs" :active="activeMaterial?.shading === 'saturn'" @click="applyConsoleProfile('saturn')">Saturn</UiButton>
+          <UiButton size="xs" :active="activeMaterial?.shading === 'dreamcast'" @click="applyConsoleProfile('dreamcast')">Dreamcast</UiButton>
+          <UiButton size="xs" :active="activeMaterial?.shading === 'n64'" @click="applyConsoleProfile('n64')">N64</UiButton>
         </div>
-      </div>
+      </UiSection>
 
-      <!-- PlayStation 1 Panel -->
-      <div v-if="activeMaterial && activeMaterial.shading === 'psx'" class="p-2 bg-rose-950/20 rounded-xs border border-rose-500/30 space-y-1.5">
-        <div class="text-[9.5px] font-bold text-rose-300 uppercase">Sony PlayStation 1 Controls</div>
-        <label class="flex items-center justify-between cursor-pointer bg-ui-surface p-1.5 rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault transition">
-          <span class="text-ui-textSecondary text-[10.5px]">Fixed-Point Vertex Jitter</span>
+      <UiSection v-if="activeMaterial && activeMaterial.shading === 'psx'" title="PS1" :icon="Tv" :default-open="true">
+        <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
+          <span class="text-ui-textSecondary text-[10px]">Vertex jitter</span>
           <input 
             type="checkbox" 
             v-model="activeMaterial.psxJitter"
@@ -1404,8 +1204,8 @@ function rgbToHex(r: number, g: number, b: number): string {
             class="rounded-xs text-rose-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" 
           />
         </label>
-        <label class="flex items-center justify-between cursor-pointer bg-ui-surface p-1.5 rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault transition">
-          <span class="text-ui-textSecondary text-[10.5px]">Affine Texture Distortion</span>
+        <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
+          <span class="text-ui-textSecondary text-[10px]">Affine warp</span>
           <input 
             type="checkbox" 
             v-model="activeMaterial.psxAffine"
@@ -1413,8 +1213,8 @@ function rgbToHex(r: number, g: number, b: number): string {
             class="rounded-xs text-rose-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" 
           />
         </label>
-        <label class="flex items-center justify-between cursor-pointer bg-ui-surface p-1.5 rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault transition">
-          <span class="text-ui-textSecondary text-[10.5px]">15-Bit Bayer Hardware Dither</span>
+        <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
+          <span class="text-ui-textSecondary text-[10px]">Hardware dither</span>
           <input 
             type="checkbox" 
             v-model="activeMaterial.dither"
@@ -1422,255 +1222,154 @@ function rgbToHex(r: number, g: number, b: number): string {
             class="rounded-xs text-rose-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" 
           />
         </label>
-      </div>
+      </UiSection>
 
-      <!-- Sega Saturn Panel -->
-      <div v-if="activeMaterial && activeMaterial.shading === 'saturn'" class="p-2 bg-sky-950/20 rounded-xs border border-sky-500/30 space-y-1.5">
-        <div class="text-[9.5px] font-bold text-sky-300 uppercase">Sega Saturn (VDP1 / VDP2)</div>
-        <label class="flex items-center justify-between cursor-pointer bg-ui-surface p-1.5 rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault transition">
-          <span class="text-ui-textSecondary text-[10.5px]">VDP1 Mesh Alpha Dropouts</span>
-          <input 
-            type="checkbox" 
-            v-model="activeMaterial.saturnMeshAlpha"
-            @change="projectStore.markGeometryUpdated()"
-            class="rounded-xs text-sky-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" 
-          />
+      <UiSection v-if="activeMaterial && activeMaterial.shading === 'saturn'" title="Saturn" :icon="Tv" :default-open="true">
+        <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
+          <span class="text-ui-textSecondary text-[10px]">Mesh alpha</span>
+          <input type="checkbox" v-model="activeMaterial.saturnMeshAlpha" @change="projectStore.markGeometryUpdated()" class="rounded-xs text-sky-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
         </label>
-        <label class="flex items-center justify-between cursor-pointer bg-ui-surface p-1.5 rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault transition">
-          <span class="text-ui-textSecondary text-[10.5px]">Forward Quad Mapping (Affine)</span>
-          <input 
-            type="checkbox" 
-            v-model="activeMaterial.psxAffine"
-            @change="projectStore.markGeometryUpdated()"
-            class="rounded-xs text-sky-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" 
-          />
+        <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
+          <span class="text-ui-textSecondary text-[10px]">Affine quads</span>
+          <input type="checkbox" v-model="activeMaterial.psxAffine" @change="projectStore.markGeometryUpdated()" class="rounded-xs text-sky-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
         </label>
-      </div>
+      </UiSection>
 
-      <!-- Sega Dreamcast Panel -->
-      <div v-if="activeMaterial && activeMaterial.shading === 'dreamcast'" class="p-2 bg-amber-950/20 rounded-xs border border-amber-500/30 space-y-1.5">
-        <div class="text-[9.5px] font-bold text-amber-300 uppercase">Sega Dreamcast (PowerVR CLX2)</div>
-        <label class="flex items-center justify-between cursor-pointer bg-ui-surface p-1.5 rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault transition">
-          <span class="text-ui-textSecondary text-[10.5px]">PowerVR VQ Texture Compression</span>
-          <input 
-            type="checkbox" 
-            v-model="activeMaterial.dreamcastVQ"
-            @change="projectStore.markGeometryUpdated()"
-            class="rounded-xs text-amber-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" 
-          />
+      <UiSection v-if="activeMaterial && activeMaterial.shading === 'dreamcast'" title="Dreamcast" :icon="Tv" :default-open="true">
+        <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
+          <span class="text-ui-textSecondary text-[10px]">VQ look</span>
+          <input type="checkbox" v-model="activeMaterial.dreamcastVQ" @change="projectStore.markGeometryUpdated()" class="rounded-xs text-amber-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
         </label>
-        <label class="flex items-center justify-between cursor-pointer bg-ui-surface p-1.5 rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault transition">
-          <span class="text-ui-textSecondary text-[10.5px]">Arcade Specular Highlight Sheen</span>
-          <input 
-            type="checkbox" 
-            v-model="activeMaterial.dreamcastSpecular"
-            @change="projectStore.markGeometryUpdated()"
-            class="rounded-xs text-amber-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" 
-          />
+        <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
+          <span class="text-ui-textSecondary text-[10px]">Specular</span>
+          <input type="checkbox" v-model="activeMaterial.dreamcastSpecular" @change="projectStore.markGeometryUpdated()" class="rounded-xs text-amber-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
         </label>
-        <label class="flex items-center justify-between cursor-pointer bg-ui-surface p-1.5 rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault transition">
-          <span class="text-ui-textSecondary text-[10.5px]">Jet Set Radio Cel Outline</span>
-          <input 
-            type="checkbox" 
-            v-model="activeMaterial.dreamcastCelOutline"
-            @change="projectStore.markGeometryUpdated()"
-            class="rounded-xs text-amber-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" 
-          />
+        <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
+          <span class="text-ui-textSecondary text-[10px]">Cel outline</span>
+          <input type="checkbox" v-model="activeMaterial.dreamcastCelOutline" @change="projectStore.markGeometryUpdated()" class="rounded-xs text-amber-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
         </label>
-      </div>
+      </UiSection>
 
-      <!-- Global CRT Filter -->
-      <div class="p-2 bg-ui-input/40 rounded-xs border border-ui-borderSubtle space-y-1.5">
-        <label class="flex items-center justify-between cursor-pointer bg-ui-surface p-1.5 rounded-xs border border-ui-borderSubtle hover:border-ui-borderDefault transition">
-          <span class="text-ui-textSecondary text-[10.5px] flex items-center gap-1.5">
-            <Tv class="w-3.5 h-3.5 text-ui-textMuted" />
-            <span>Global CRT Scanlines Filter</span>
-          </span>
-          <input 
-            type="checkbox" 
-            v-model="toolStore.viewport.crtFilter" 
-            class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" 
-          />
+      <UiSection title="Viewport" :icon="Tv" :default-open="false">
+        <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
+          <span class="text-ui-textSecondary text-[10px]">CRT scanlines</span>
+          <input type="checkbox" v-model="toolStore.viewport.crtFilter" class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
         </label>
-      </div>
+      </UiSection>
     </div>
 
     <!-- ==================================================== -->
     <!-- TAB 3: DITHERING ENGINE                              -->
     <!-- ==================================================== -->
-    <div v-show="activeCategory === 'dithering' || activeCategory === 'all'" class="space-y-2">
-      <div v-if="activeMaterial" class="p-2 bg-ui-input/40 rounded-xs border border-ui-borderSubtle space-y-2">
-        <!-- Dither Toggle Row -->
-        <div class="flex items-center justify-between">
-          <label class="flex items-center gap-1.5 text-[10.5px] font-semibold text-ui-textPrimary cursor-pointer">
-            <input 
-              type="checkbox" 
-              v-model="activeMaterial.dither"
+    <div v-show="activeCategory === 'dithering'">
+      <UiSection v-if="activeMaterial" title="Dither" :icon="Sparkles" :default-open="true">
+        <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
+          <span class="text-ui-textSecondary text-[10px]">GPU dither</span>
+          <input
+            type="checkbox"
+            v-model="activeMaterial.dither"
+            @change="projectStore.markGeometryUpdated()"
+            class="rounded-xs text-amber-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer"
+          />
+        </label>
+
+        <template v-if="activeMaterial.dither">
+          <canvas
+            ref="ditherPreviewCanvasRef"
+            width="280"
+            height="64"
+            class="w-full h-16 rounded-xs border border-ui-borderSubtle bg-black block"
+          ></canvas>
+
+          <select
+            v-model="activeMaterial.ditherPattern"
+            class="w-full h-5.5 bg-ui-surface border border-ui-borderSubtle rounded-xs px-2 text-ui-textPrimary text-[10px] focus:outline-none cursor-pointer"
+            @change="projectStore.markGeometryUpdated(); updateDitherPreview()"
+          >
+            <option value="bayer4x4">Bayer 4×4</option>
+            <option value="bayer8x8">Bayer 8×8</option>
+            <option value="bayer2x2">Bayer 2×2</option>
+            <option value="bayer16x16">Bayer 16×16</option>
+            <option value="bluenoise">Blue noise</option>
+            <option value="halftone">Halftone</option>
+            <option value="crosshatch">Crosshatch</option>
+            <option value="horizontal_lines">Scanlines</option>
+            <option value="vertical_lines">Aperture</option>
+            <option value="checker">Checker</option>
+            <option value="noise">Noise</option>
+          </select>
+
+          <div class="grid grid-cols-2 gap-1.5">
+            <select
+              v-model="activeMaterial.ditherSpace"
+              class="h-5.5 bg-ui-surface border border-ui-borderSubtle rounded-xs px-1.5 text-ui-textPrimary text-[10px] focus:outline-none cursor-pointer"
               @change="projectStore.markGeometryUpdated()"
-              class="rounded-xs text-amber-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" 
-            />
-            <span class="flex items-center gap-1">
-              <Sparkles class="w-3 h-3 text-amber-400" />
-              <span>Enable GPU Dithering</span>
-            </span>
-          </label>
-          <span class="text-[9px] font-mono font-bold text-amber-400" v-if="activeMaterial.dither">LIVE GPU</span>
-        </div>
-
-        <div v-if="activeMaterial.dither" class="space-y-2 pt-1 border-t border-ui-borderSubtle">
-          <!-- Live Preview Canvas -->
-          <div class="space-y-1">
-            <div class="flex items-center justify-between text-[9px] text-amber-300 font-bold uppercase">
-              <span>Live Matrix Dither Preview</span>
-              <span class="text-[8px] text-ui-textMuted font-mono">Sphere & Ramp</span>
-            </div>
-            <canvas 
-              ref="ditherPreviewCanvasRef" 
-              width="280" 
-              height="80" 
-              class="w-full h-20 rounded-xs border border-ui-borderSubtle bg-black block shadow-inner"
-            ></canvas>
-          </div>
-
-          <!-- 1-Click Dither Presets Shelf -->
-          <div class="space-y-1 pt-1 border-t border-ui-borderSubtle">
-            <div class="flex items-center justify-between text-[9px] text-ui-textMuted font-semibold uppercase">
-              <span>1-Click Dither Presets</span>
-              <span class="text-[8px] font-mono text-amber-400">Presets</span>
-            </div>
-            <div class="grid grid-cols-3 gap-1">
-              <button 
-                v-for="dp in DITHER_PRESETS" 
-                :key="dp.id"
-                @click="applyDitherPreset(dp)"
-                class="p-1 rounded-xs bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle hover:border-amber-400 text-left transition cursor-pointer flex flex-col"
-                :title="dp.description"
-              >
-                <span class="text-[9px] font-bold text-ui-textPrimary truncate">{{ dp.name }}</span>
-                <span class="text-[7.5px] font-mono text-ui-textMuted uppercase truncate">{{ dp.pattern }} · {{ dp.colorDepth ? dp.colorDepth + 'lv' : '24b' }}</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- Matrix Pattern Selector -->
-          <div class="space-y-1 pt-1 border-t border-ui-borderSubtle">
-            <label class="text-[9.5px] text-ui-textSecondary font-medium">Matrix Pattern:</label>
-            <select 
-              v-model="activeMaterial.ditherPattern"
-              @change="projectStore.markGeometryUpdated(); updateDitherPreview()"
-              class="w-full bg-ui-surface border border-ui-borderSubtle rounded-xs px-2 py-1 text-ui-textPrimary text-[10px] focus:outline-none cursor-pointer font-medium"
             >
-              <option value="bayer4x4">4x4 Bayer Matrix (PS1 Retro Standard)</option>
-              <option value="bayer8x8">8x8 Bayer Matrix (Fine Smooth Grain)</option>
-              <option value="bayer2x2">2x2 Bayer Matrix (Coarse Chaff / PC-98)</option>
-              <option value="bayer16x16">16x16 Bayer Matrix (Ultra-Smooth 256-Level)</option>
-              <option value="bluenoise">Blue Noise Stochastic (Film Grain Anti-Banding)</option>
-              <option value="halftone">Manga Screen Tone (Clustered Dots)</option>
-              <option value="crosshatch">Comic Crosshatch (45° Diagonal Etching)</option>
-              <option value="horizontal_lines">Interlaced Scanlines (Retro CRT TV)</option>
-              <option value="vertical_lines">Aperture Grille (Arcade CRT Striping)</option>
-              <option value="checker">Checkerboard 50% (Crosshatch Weave)</option>
-              <option value="noise">Film Grain Stochastic (Random Noise)</option>
+              <option value="screen">Screen</option>
+              <option value="uv">UV</option>
+              <option value="world">World</option>
+            </select>
+            <select
+              v-model="activeMaterial.ditherChannel"
+              class="h-5.5 bg-ui-surface border border-ui-borderSubtle rounded-xs px-1.5 text-ui-textPrimary text-[10px] focus:outline-none cursor-pointer"
+              @change="projectStore.markGeometryUpdated(); updateDitherPreview()"
+            >
+              <option value="rgb">RGB</option>
+              <option value="luma">Luma</option>
+              <option value="alpha">Alpha</option>
             </select>
           </div>
 
-          <!-- Coordinate Space & Target Channel -->
-          <div class="grid grid-cols-2 gap-1.5 pt-1">
-            <div class="space-y-0.5">
-              <label class="text-[9px] text-ui-textMuted font-medium">Coordinate Space:</label>
-              <select 
-                v-model="activeMaterial.ditherSpace"
-                @change="projectStore.markGeometryUpdated()"
-                class="w-full bg-ui-surface border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-ui-textPrimary text-[9.5px] focus:outline-none cursor-pointer"
-              >
-                <option value="screen">Screen Space (Lens)</option>
-                <option value="uv">UV Surface (Mesh)</option>
-                <option value="world">World Triplanar</option>
-              </select>
-            </div>
-            <div class="space-y-0.5">
-              <label class="text-[9px] text-ui-textMuted font-medium">Target Channel:</label>
-              <select 
-                v-model="activeMaterial.ditherChannel"
-                @change="projectStore.markGeometryUpdated(); updateDitherPreview()"
-                class="w-full bg-ui-surface border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-ui-textPrimary text-[9.5px] focus:outline-none cursor-pointer"
-              >
-                <option value="rgb">All RGB Channels</option>
-                <option value="luma">Luma (Hue Pure)</option>
-                <option value="alpha">Screen-Door Alpha</option>
-              </select>
-            </div>
+          <div class="flex items-center justify-between text-[10px]">
+            <span class="text-ui-textSecondary">Strength</span>
+            <span class="font-mono text-amber-400">{{ Math.round(((activeMaterial.ditherLevel ?? 32) / 32) * 100) }}%</span>
           </div>
+          <input
+            type="range"
+            min="4"
+            max="64"
+            step="1"
+            v-model.number="activeMaterial.ditherLevel"
+            class="w-full accent-amber-500 bg-ui-surface h-1 rounded cursor-pointer"
+            @input="projectStore.markGeometryUpdated(); updateDitherPreview()"
+          />
 
-          <!-- Dither Strength & Color Depth -->
-          <div class="space-y-1 pt-1">
-            <div class="flex items-center justify-between text-[9.5px]">
-              <span class="text-ui-textSecondary font-medium">Dither Strength:</span>
-              <span class="font-mono text-amber-400 font-bold">{{ Math.round(((activeMaterial.ditherLevel ?? 32) / 32) * 100) }}%</span>
-            </div>
-            <input 
-              type="range" 
-              min="4" 
-              max="64" 
-              step="1" 
-              v-model.number="activeMaterial.ditherLevel" 
-              @input="projectStore.markGeometryUpdated(); updateDitherPreview()"
-              class="w-full accent-amber-500 bg-ui-surface h-1 rounded cursor-pointer" 
-            />
-          </div>
+          <select
+            v-model.number="activeMaterial.colorDepth"
+            class="w-full h-5.5 bg-ui-surface border border-ui-borderSubtle rounded-xs px-2 text-ui-textPrimary text-[10px] focus:outline-none cursor-pointer"
+            @change="projectStore.markGeometryUpdated(); updateDitherPreview()"
+          >
+            <option :value="32">15-bit (32)</option>
+            <option :value="16">12-bit (16)</option>
+            <option :value="8">8-bit (8)</option>
+            <option :value="4">4-bit (4)</option>
+            <option :value="2">2-tone</option>
+            <option :value="0">24-bit</option>
+          </select>
+        </template>
+      </UiSection>
 
-          <div class="space-y-1">
-            <div class="flex items-center justify-between text-[9.5px]">
-              <span class="text-ui-textSecondary font-medium">Color Depth Quantizer:</span>
-              <span class="font-mono text-ui-textAccent text-[9px]">{{ activeMaterial.colorDepth ? activeMaterial.colorDepth + ' Levels' : '24-Bit Smooth' }}</span>
-            </div>
-            <select 
-              v-model.number="activeMaterial.colorDepth"
-              @change="projectStore.markGeometryUpdated(); updateDitherPreview()"
-              class="w-full bg-ui-surface border border-ui-borderSubtle rounded-xs px-2 py-1 text-ui-textPrimary text-[10px] focus:outline-none cursor-pointer font-medium"
-            >
-              <option :value="32">15-Bit PSX RGB555 (32 levels per channel)</option>
-              <option :value="16">12-Bit Retro (16 levels per channel)</option>
-              <option :value="8">8-Bit Low-Fi (8 levels per channel)</option>
-              <option :value="4">4-Bit Extreme Posterize (4 levels)</option>
-              <option :value="2">1-Bit / 2-Tone High Contrast (2 levels)</option>
-              <option :value="0">Full 24-Bit TrueColor (Smooth)</option>
-            </select>
-          </div>
-
-          <!-- 2D Texture Image Error Diffusion Actions -->
-          <div class="pt-1.5 border-t border-ui-borderSubtle space-y-1">
-            <div class="flex items-center justify-between text-[9px] text-ui-textMuted font-semibold uppercase">
-              <span>2D Texture Palette Dither</span>
-              <span class="font-mono text-[8px] text-indigo-300">Bake to Map</span>
-            </div>
-            <div class="grid grid-cols-2 gap-1">
-              <button 
-                @click="ditherActiveTextureImage('floyd')"
-                class="py-1 px-1.5 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle hover:border-indigo-400 text-ui-textSecondary hover:text-white rounded-xs text-[9px] font-medium transition cursor-pointer flex flex-col items-center"
-                title="Convert entire texture using Floyd-Steinberg error diffusion against active palette"
-              >
-                <span class="font-bold">Floyd-Steinberg</span>
-                <span class="text-[7.5px] text-ui-textMuted">Smooth Diffusion</span>
-              </button>
-              <button 
-                @click="ditherActiveTextureImage('atkinson')"
-                class="py-1 px-1.5 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle hover:border-indigo-400 text-ui-textSecondary hover:text-white rounded-xs text-[9px] font-medium transition cursor-pointer flex flex-col items-center"
-                title="Convert entire texture using Atkinson dithering against active palette"
-              >
-                <span class="font-bold">Atkinson Dither</span>
-                <span class="text-[7.5px] text-ui-textMuted">Crisp Edge 1-Bit</span>
-              </button>
-            </div>
-          </div>
+      <UiSection v-if="activeMaterial?.dither" title="Presets" :icon="Sparkles" :default-open="false">
+        <div class="grid grid-cols-2 gap-1">
+          <button
+            v-for="dp in DITHER_PRESETS"
+            :key="dp.id"
+            type="button"
+            class="h-5.5 px-1.5 rounded-xs bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle text-left text-[10px] text-ui-textSecondary hover:text-ui-textPrimary truncate cursor-pointer"
+            :title="dp.description"
+            @click="applyDitherPreset(dp)"
+          >
+            {{ dp.name }}
+          </button>
         </div>
-      </div>
+        <p class="text-[9px] text-ui-textMuted leading-snug">Shader only. Bake Floyd / Atkinson on Texture → Pixels.</p>
+      </UiSection>
     </div>
 
     <!-- ==================================================== -->
     <!-- TAB 4: PALETTES & COLOR HARMONIES                    -->
     <!-- ==================================================== -->
-    <div v-show="activeCategory === 'palettes' || activeCategory === 'all'" class="space-y-2">
+    <div v-show="false" class="space-y-2">
       <!-- Quick Color Adjustments Card -->
       <div class="p-2 bg-ui-input/40 rounded-xs border border-ui-borderSubtle space-y-1.5">
         <div class="text-[10px] font-semibold text-ui-textMuted uppercase">Color Adjustment Quick Filters</div>
@@ -1812,7 +1511,7 @@ function rgbToHex(r: number, g: number, b: number): string {
     <!-- ==================================================== -->
     <!-- TAB 5: GRADIENTS & VERTEX BAKES                      -->
     <!-- ==================================================== -->
-    <div v-show="activeCategory === 'gradients' || activeCategory === 'all'" class="space-y-2">
+    <div v-show="false" class="space-y-2">
       <!-- Multi-Stop Gradient Designer Card -->
       <div class="p-2 bg-ui-input/40 rounded-xs border border-ui-borderSubtle space-y-2">
         <div class="flex items-center justify-between">
@@ -2135,5 +1834,25 @@ function rgbToHex(r: number, g: number, b: number): string {
         </div>
       </div>
     </div>
+    <ImportTextureModal 
+      v-if="showImportModal && pendingImportFile" 
+      :file="pendingImportFile" 
+      :target-material-id="activeMaterial?.id"
+      @close="() => { showImportModal = false; pendingImportFile = null }"
+      @imported="handleTextureImported"
+    />
   </div>
 </template>
+
+<style scoped>
+.tex-checker {
+  background-color: #18181b;
+  background-image:
+    linear-gradient(45deg, #27272a 25%, transparent 25%),
+    linear-gradient(-45deg, #27272a 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #27272a 75%),
+    linear-gradient(-45deg, transparent 75%, #27272a 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 0 4px, 4px -4px, -4px 0;
+}
+</style>

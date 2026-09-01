@@ -1,4 +1,4 @@
-export type AppMode = 'model' | 'uvpaint' | 'rig' | 'animate' | 'export'
+export type AppMode = 'model' | 'blockout' | 'uvpaint' | 'rig' | 'animate' | 'export'
 
 export type SelectMode = 'object' | 'vertex' | 'edge' | 'face' | 'origin' | 'bone'
 
@@ -13,6 +13,7 @@ export type ModelToolType =
   | 'inset'
   | 'subdivide'
   | 'knife'
+  | 'polydraw'
   | 'merge'
   | 'delete'
   | 'flip_normals'
@@ -75,7 +76,7 @@ export interface ViewportSettings {
   resolutionScale: number // 1 = crisp, 0.5 = 240p retro, 0.25 = 120p
   quadView: boolean // Professional 4-split view (Top, Front, Right, Persp)
   xray: boolean // Blender X-Ray mode (transparent meshes, see through & select occluded elements)
-  shadeMode: 'flat' | 'smooth' // 'flat' (face normals, default for low-poly) | 'smooth' (interpolated vertex normals)
+  shadeMode: 'flat' | 'smooth' // Fallback when a mesh has no shadeMode; object Shade Flat/Smooth/Auto is MeshObject.shadeMode
   symmetryX: boolean // Live X-axis mirror modeling
   symmetryY: boolean
   symmetryZ: boolean

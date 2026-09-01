@@ -1,0 +1,14 @@
+---
+description: Vue SFC and editor chrome
+globs: src/**/*.vue
+alwaysApply: false
+---
+
+# Vue UI
+
+- `<script setup lang="ts">`. Reuse `src/components/ui/` before adding one-off controls.
+- Viewport WebGL stays in `Viewport3D.vue`. Other panels dispatch `editorCommands` or call stores.
+- Bind tools to existing menus (`HeaderMenu`, `LeftToolbar`, command palette) and `keymapStore` when the user should see the shortcut.
+- Do not copy `meshes` into local reactive state for editing; mutate through the project store so undo and the viewport stay aligned.
+- Tailwind classes + current theme CSS variables (`themeStore`). No new component library.
+- Lucide or existing Blender-style icons. Keep labels short; this is a DCC, not a marketing page.

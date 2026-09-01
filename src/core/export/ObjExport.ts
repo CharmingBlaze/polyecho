@@ -88,14 +88,31 @@ export function exportToOBJ(meshes: MeshObject[], mtlName = 'model.mtl'): string
   return output
 }
 
-export function exportToMTL(materialId: string, textureFileName = 'texture.png'): string {
-  return `# PolyEcho Material Export
-newmtl ${materialId}
-Ka 1.000 1.000 1.000
-Kd 1.000 1.000 1.000
-Ks 0.000 0.000 0.000
-d 1.0
-illum 1
-map_Kd ${textureFileName}
-`
+export interface MtlMaterialDef {
+  id: string
+  name?: string
+  color?: string
+  textureFileName?: string
+}
+
+export function exportToMTL(materialIdOrList: string | MtlMaterialDef[], textureFileName = 'texture.png'): string {
+  let output = `# PolyEcho Low-Poly Material Export\n\n`
+  const list: MtlMaterialDef[] = Array.isArray(materialIdOrList)
+    ? materialIdOrList
+    : [{ id: materialIdOrList, textureFileName }]
+
+  for (const mat of list) {
+    output += `newmtl ${mat.id}\n`
+    output += `Ka 1.000 1.000 1.000\n`
+    const c = mat.color ? new THREE.Color(mat.color) : new THREE.Color(1, 1, 1)
+    output += `Kd ${c.r.toFixed(3)} ${c.g.toFixed(3)} ${c.b.toFixed(3)}\n`
+    output += `Ks 0.000 0.000 0.000\n`
+    output += `d 1.0\n`
+    output += `illum 1\n`
+    if (mat.textureFileName) {
+      output += `map_Kd ${mat.textureFileName}\n`
+    }
+    output += `\n`
+  }
+  return output
 }

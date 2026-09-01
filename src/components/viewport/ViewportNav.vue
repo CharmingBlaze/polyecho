@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useToolStore } from '../../stores/toolStore'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useProjectStore } from '../../stores/projectStore'
@@ -25,6 +25,13 @@ const showOrientationMenu = ref(false)
 const showPivotMenu = ref(false)
 const showSnapMenu = ref(false)
 const showOverlaysMenu = ref(false)
+
+const objectShade = computed(() => projectStore.activeMesh?.shadeMode || toolStore.viewport.shadeMode)
+
+function applyObjectShade(mode: 'flat' | 'smooth' | 'auto') {
+  projectStore.setShadeMode(mode)
+  if (mode !== 'auto') toolStore.viewport.shadeMode = mode
+}
 
 const emit = defineEmits<{
   (e: 'setCameraView', view: 'persp' | 'top' | 'front' | 'right' | 'iso'): void
@@ -76,7 +83,7 @@ function triggerCommandPalette() {
             :color="toolStore.selectMode === 'object' ? '#f59e0b' : '#38bdf8'" 
           />
           <span>
-            {{ toolStore.appMode === 'animate' ? 'Pose Mode' : toolStore.appMode === 'rig' ? 'Rig Mode' : toolStore.appMode === 'uvpaint' ? 'Paint Mode' : toolStore.selectMode === 'object' ? 'Object Mode' : 'Edit Mode' }}
+            {{ toolStore.appMode === 'animate' ? 'Pose Mode' : toolStore.appMode === 'rig' ? 'Rig Mode' : toolStore.appMode === 'uvpaint' ? 'Paint Mode' : toolStore.appMode === 'blockout' ? 'Blockout' : toolStore.selectMode === 'object' ? 'Object Mode' : 'Edit Mode' }}
           </span>
           <ChevronDown class="w-3 h-3 text-ui-textMuted" />
         </button>
@@ -375,7 +382,12 @@ function triggerCommandPalette() {
 
           <label class="flex items-center justify-between cursor-pointer py-0.5 hover:bg-ui-hover px-1 rounded-xs">
             <span class="text-slate-300">Show Bones</span>
-            <input type="checkbox" v-model="animationStore.showBones" class="rounded-xs text-amber-500" />
+            <input
+              type="checkbox"
+              :checked="animationStore.showBones"
+              class="rounded-xs text-amber-500"
+              @change="animationStore.setShowBones(!animationStore.showBones)"
+            />
           </label>
 
           <!-- Wireframe Opacity -->
@@ -442,21 +454,30 @@ function triggerCommandPalette() {
       <!-- 3. Flat vs Smooth Shading Mode Selector -->
       <div class="flex items-center bg-ui-input rounded-xs p-0.5 border border-ui-borderDefault">
         <button 
-          @click="toolStore.viewport.shadeMode = 'flat'" 
+          @click="applyObjectShade('flat')" 
           class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="toolStore.viewport.shadeMode === 'flat' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
-          title="Flat Shading (Face Normals - Low-Poly Default)"
+          :class="objectShade === 'flat' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          title="Shade Flat — one normal per face"
         >
           <span>Flat</span>
         </button>
 
         <button 
-          @click="toolStore.viewport.shadeMode = 'smooth'" 
+          @click="applyObjectShade('smooth')" 
           class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="toolStore.viewport.shadeMode === 'smooth' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
-          title="Smooth Shading (Vertex Normals)"
+          :class="objectShade === 'smooth' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          title="Shade Smooth — interpolated vertex normals"
         >
           <span>Smooth</span>
+        </button>
+
+        <button 
+          @click="applyObjectShade('auto')" 
+          class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
+          :class="objectShade === 'auto' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          title="Shade Auto Smooth — smooth, keep sharp edges by angle"
+        >
+          <span>Auto</span>
         </button>
       </div>
 

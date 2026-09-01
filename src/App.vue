@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import HeaderMenu from './components/layout/HeaderMenu.vue'
 import LeftToolbar from './components/layout/LeftToolbar.vue'
 import RightSidebar from './components/layout/RightSidebar.vue'
@@ -15,7 +15,7 @@ import BlenderPieMenu from './components/viewport/BlenderPieMenu.vue'
 import CommandPaletteModal from './components/modals/CommandPaletteModal.vue'
 import PreferencesModal from './components/modals/PreferencesModal.vue'
 import BoneHierarchyPopout from './components/rigging/BoneHierarchyPopout.vue'
-import { ChevronLeft } from 'lucide-vue-next'
+import { ChevronLeft, RotateCcw } from 'lucide-vue-next'
 
 import { useToolStore } from './stores/toolStore'
 import { useProjectStore } from './stores/projectStore'
@@ -25,7 +25,8 @@ import { useLayoutStore } from './stores/layoutStore'
 import { useThemeStore } from './stores/themeStore'
 import { useKeymapStore } from './stores/keymapStore'
 import { ProjectSerializer } from './core/project/ProjectSerializer'
-import { EDITOR_EVENTS, requestCameraView, requestModalTool } from './core/commands/editorCommands'
+import { EDITOR_EVENTS, requestCameraView, requestModalTool, requestFillFace } from './core/commands/editorCommands'
+import { setupDefaultActions } from './core/commands/setupDefaultActions'
 import { operatorManager } from './core/operators/OperatorManager'
 
 const toolStore = useToolStore()
@@ -36,10 +37,30 @@ const layoutStore = useLayoutStore()
 const themeStore = useThemeStore()
 const keymapStore = useKeymapStore()
 
+setupDefaultActions(projectStore, toolStore, animationStore, historyStore)
+
+function isMeshWorkspace() {
+  return toolStore.isMeshWorkspace()
+}
+
 const showExportModal = ref(false)
 const showHotkeyModal = ref(false)
 const showNewProjectModal = ref(false)
 const showPreferencesModal = ref(false)
+
+watch(
+  () => toolStore.appMode,
+  (mode) => {
+    if (mode === 'uvpaint') projectStore.syncPaintTargetFromMesh()
+  }
+)
+
+watch(
+  () => projectStore.activeMeshId,
+  () => {
+    if (toolStore.appMode === 'uvpaint') projectStore.syncPaintTargetFromMesh()
+  }
+)
 
 // UV / Paint Split Pane Resizing
 const uvSplitRatio = ref<number>(50) // percentage
@@ -130,7 +151,8 @@ function handleKeyDown(e: KeyboardEvent) {
         animationStore.armature.activeClipId,
         animationStore.currentFrame,
         toolStore.viewport,
-        projectStore.textures
+        projectStore.textures,
+        projectStore.referenceImages
       )
       ProjectSerializer.downloadProject(jsonStr, projectStore.projectName || 'PSX_Model')
       return
@@ -172,7 +194,7 @@ function handleKeyDown(e: KeyboardEvent) {
   // Loop Cut Shortcut (Ctrl+R)
   if ((e.ctrlKey || e.metaKey) && (e.key === 'r' || e.key === 'R')) {
     e.preventDefault()
-    if (toolStore.appMode === 'model') {
+    if (isMeshWorkspace()) {
       requestModalTool('loop_cut')
     }
     return
@@ -181,7 +203,7 @@ function handleKeyDown(e: KeyboardEvent) {
   // Bevel (Model) / Bind to Bone (Rig/Animate) Shortcut (Ctrl+B)
   if ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'B')) {
     e.preventDefault()
-    if (toolStore.appMode === 'model') {
+    if (isMeshWorkspace()) {
       requestModalTool('bevel')
     } else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
       const mode = toolStore.selectMode === 'object' ? 'object' : (toolStore.selectMode === 'edge' ? 'edges' : (toolStore.selectMode === 'vertex' ? 'vertices' : 'faces'))
@@ -228,6 +250,7 @@ function handleKeyDown(e: KeyboardEvent) {
   // Modifier shortcuts that were not handled above belong to the focused
   // workspace component. Do not also run a plain-key action in this handler.
   if (e.ctrlKey || e.metaKey || e.altKey) return
+  if (operatorManager.state.value.active) return
 
   // Desktop Numpad View Hotkeys
   if (e.code === 'Numpad7') {
@@ -261,7 +284,7 @@ function handleKeyDown(e: KeyboardEvent) {
   switch (e.key.toLowerCase()) {
     case 'tab':
       e.preventDefault()
-      toolStore.setAppMode('model')
+      if (!isMeshWorkspace()) toolStore.setAppMode('model')
       if (!projectStore.activeMesh && projectStore.meshes.length > 0) {
         projectStore.activeMeshId = projectStore.meshes[0].id
         projectStore.selectedMeshIds = [projectStore.meshes[0].id]
@@ -269,7 +292,7 @@ function handleKeyDown(e: KeyboardEvent) {
       toolStore.selectMode = toolStore.selectMode === 'object' ? 'face' : 'object'
       break
     case '1':
-      toolStore.setAppMode('model')
+      if (!isMeshWorkspace()) toolStore.setAppMode('model')
       if (!projectStore.activeMesh && projectStore.meshes.length > 0) {
         projectStore.activeMeshId = projectStore.meshes[0].id
         projectStore.selectedMeshIds = [projectStore.meshes[0].id]
@@ -277,7 +300,7 @@ function handleKeyDown(e: KeyboardEvent) {
       toolStore.selectMode = 'vertex'
       break
     case '2':
-      toolStore.setAppMode('model')
+      if (!isMeshWorkspace()) toolStore.setAppMode('model')
       if (!projectStore.activeMesh && projectStore.meshes.length > 0) {
         projectStore.activeMeshId = projectStore.meshes[0].id
         projectStore.selectedMeshIds = [projectStore.meshes[0].id]
@@ -285,7 +308,7 @@ function handleKeyDown(e: KeyboardEvent) {
       toolStore.selectMode = 'edge'
       break
     case '3':
-      toolStore.setAppMode('model')
+      if (!isMeshWorkspace()) toolStore.setAppMode('model')
       if (!projectStore.activeMesh && projectStore.meshes.length > 0) {
         projectStore.activeMeshId = projectStore.meshes[0].id
         projectStore.selectedMeshIds = [projectStore.meshes[0].id]
@@ -293,7 +316,7 @@ function handleKeyDown(e: KeyboardEvent) {
       toolStore.selectMode = 'face'
       break
     case '4':
-      toolStore.setAppMode('model')
+      if (!isMeshWorkspace()) toolStore.setAppMode('model')
       if (!projectStore.activeMesh && projectStore.meshes.length > 0) {
         projectStore.activeMeshId = projectStore.meshes[0].id
         projectStore.selectedMeshIds = [projectStore.meshes[0].id]
@@ -301,7 +324,7 @@ function handleKeyDown(e: KeyboardEvent) {
       toolStore.selectMode = 'object'
       break
     case '5':
-      toolStore.setAppMode('model')
+      if (!isMeshWorkspace()) toolStore.setAppMode('model')
       if (!projectStore.activeMesh && projectStore.meshes.length > 0) {
         projectStore.activeMeshId = projectStore.meshes[0].id
         projectStore.selectedMeshIds = [projectStore.meshes[0].id]
@@ -309,10 +332,10 @@ function handleKeyDown(e: KeyboardEvent) {
       toolStore.selectMode = 'origin'
       break
     case 'p':
-      if (toolStore.appMode === 'model') {
+      if (isMeshWorkspace()) {
         if (toolStore.selectMode === 'face' || toolStore.selectMode === 'edge' || toolStore.selectMode === 'vertex') {
           projectStore.performSeparateMesh()
-        } else {
+        } else if (toolStore.appMode === 'model') {
           toolStore.selectMode = 'origin'
         }
       }
@@ -324,7 +347,7 @@ function handleKeyDown(e: KeyboardEvent) {
       toolStore.selectMode = 'bone'
       break
     case 'g':
-      if (toolStore.appMode === 'model') {
+      if (isMeshWorkspace()) {
         requestModalTool('grab')
       } else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
         toolStore.setModelTool('move')
@@ -335,35 +358,44 @@ function handleKeyDown(e: KeyboardEvent) {
     case 'w':
       if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
         toolStore.setModelTool('move')
-      } else if (toolStore.appMode === 'uvpaint') {
-        toolStore.setPaintTool('bucket')
       }
       break
+    case 'l':
+      if (toolStore.appMode === 'uvpaint') toolStore.setPaintTool('line')
+      break
+    case 'u':
+      if (toolStore.appMode === 'uvpaint') toolStore.setPaintTool('rect')
+      break
+    case 'c':
+      if (toolStore.appMode === 'uvpaint') toolStore.setPaintTool('circle')
+      break
     case 'r':
-      if (toolStore.appMode === 'model') {
+      if (isMeshWorkspace()) {
         requestModalTool('rotate')
       } else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
         toolStore.setModelTool('rotate')
       }
       break
     case 's':
-      if (toolStore.appMode === 'model') {
+      if (isMeshWorkspace()) {
         requestModalTool('scale')
       } else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
         toolStore.setModelTool('scale')
       }
       break
     case 'e':
-      if (toolStore.appMode === 'model') {
+      if (isMeshWorkspace()) {
         requestModalTool('extrude')
-      } else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
+      } else if (toolStore.appMode === 'rig') {
         animationStore.extrudeBone(animationStore.selectedBoneId)
       } else if (toolStore.appMode === 'uvpaint') {
         toolStore.setPaintTool('eraser')
       }
       break
     case 'i':
-      if (toolStore.appMode === 'model') {
+      if (toolStore.appMode === 'animate') {
+        animationStore.recordCurrentKeyframe()
+      } else if (isMeshWorkspace()) {
         requestModalTool('inset')
       } else if (toolStore.appMode === 'uvpaint') {
         toolStore.setPaintTool('picker')
@@ -375,15 +407,38 @@ function handleKeyDown(e: KeyboardEvent) {
       }
       break
     case 'k':
-      if (toolStore.appMode === 'model') {
+      if (toolStore.appMode === 'animate') {
+        animationStore.recordCurrentKeyframe()
+      } else if (isMeshWorkspace()) {
         requestModalTool('knife')
       }
       break
+    case 'arrowleft':
+      if (toolStore.appMode === 'animate') {
+        animationStore.setFrame(animationStore.currentFrame - 1)
+      }
+      break
+    case 'arrowright':
+      if (toolStore.appMode === 'animate') {
+        animationStore.setFrame(animationStore.currentFrame + 1)
+      }
+      break
+    case ',':
+      if (toolStore.appMode === 'animate') {
+        animationStore.setFrame(animationStore.currentFrame - 1)
+      }
+      break
+    case '.':
+      if (toolStore.appMode === 'animate') {
+        animationStore.setFrame(animationStore.currentFrame + 1)
+      }
+      break
     case 'f':
-      if (toolStore.appMode === 'model') projectStore.performFillFace()
+      if (toolStore.appMode === 'blockout') requestModalTool('polydraw')
+      else if (toolStore.appMode === 'model') requestFillFace()
       break
     case 'm':
-      if (toolStore.appMode === 'model') projectStore.performMerge('center')
+      if (isMeshWorkspace()) projectStore.performMerge('center')
       break
     case 'd':
       if (toolStore.appMode === 'uvpaint') toolStore.setPaintTool('dither')
@@ -392,6 +447,8 @@ function handleKeyDown(e: KeyboardEvent) {
       if (e.shiftKey || toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
         e.preventDefault()
         animationStore.toggleBoneHierarchyPopout()
+      } else if (toolStore.appMode === 'uvpaint') {
+        toolStore.setPaintTool('shade')
       }
       break
     case ' ':
@@ -402,7 +459,7 @@ function handleKeyDown(e: KeyboardEvent) {
       break
     case 'delete':
     case 'x':
-      if (toolStore.appMode === 'model') {
+      if (isMeshWorkspace()) {
         if (toolStore.selectMode === 'object') projectStore.performDelete('object')
         else if (toolStore.selectMode === 'face') projectStore.performDelete('face')
         else if (toolStore.selectMode === 'edge') projectStore.performDelete('edge')
@@ -422,15 +479,30 @@ function handleOpenExportCommand() {
   showExportModal.value = true
 }
 
+function formatTimeAgo(timestamp?: number): string {
+  if (!timestamp) return 'earlier'
+  const diffSec = Math.floor((Date.now() - timestamp) / 1000)
+  if (diffSec < 60) return 'just now'
+  const diffMin = Math.floor(diffSec / 60)
+  if (diffMin < 60) return `${diffMin}m ago`
+  const diffHours = Math.floor(diffMin / 60)
+  if (diffHours < 24) return `${diffHours}h ago`
+  return new Date(timestamp).toLocaleDateString()
+}
+
+async function handleRestoreAutosave() {
+  await projectStore.restoreAutosaveSession()
+}
+
 onMounted(async () => {
   themeStore.initTheme()
   keymapStore.initKeymaps()
+  layoutStore.showRightSidebar = true
   window.addEventListener('keydown', handleKeyDown)
   window.addEventListener(EDITOR_EVENTS.openExport, handleOpenExportCommand)
 
-  if (await projectStore.checkAutosaveSession()) {
-    await projectStore.restoreAutosaveSession()
-  }
+  // Check if an unsaved recovery session is available, but start with a clean fresh scene
+  await projectStore.checkAutosaveSession()
 })
 
 onUnmounted(() => {
@@ -449,49 +521,77 @@ onUnmounted(() => {
       @new-project="showNewProjectModal = true"
     />
 
+    <!-- Document Recovery Banner (Microsoft Word / Docs Style) -->
+    <div 
+      v-if="projectStore.showRecoveryBanner && projectStore.autosaveRecord" 
+      class="bg-amber-950/80 border-b border-amber-500/40 px-4 py-1.5 flex items-center justify-between text-xs text-amber-200 z-40 backdrop-blur-md shrink-0 shadow-md"
+    >
+      <div class="flex items-center gap-2 min-w-0">
+        <RotateCcw class="w-4 h-4 text-amber-400 shrink-0" />
+        <span class="truncate">
+          <strong class="font-bold text-amber-300">Document Recovery:</strong> Unsaved session found from <span class="font-mono text-amber-100">{{ formatTimeAgo(projectStore.autosaveRecord.updatedAt) }}</span> ({{ projectStore.autosaveRecord.name || 'Project' }} • {{ projectStore.autosaveRecord.meshes?.length || 1 }} mesh{{ (projectStore.autosaveRecord.meshes?.length || 1) === 1 ? '' : 'es' }}).
+        </span>
+      </div>
+      <div class="flex items-center gap-2 shrink-0 ml-4">
+        <button 
+          @click="handleRestoreAutosave" 
+          class="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded-xs transition text-[11px] cursor-pointer shadow-xs flex items-center gap-1"
+        >
+          <RotateCcw class="w-3 h-3" /> Recover Session
+        </button>
+        <button 
+          @click="projectStore.dismissRecoverySession()" 
+          class="px-2.5 py-1 bg-ui-surface hover:bg-ui-hover text-ui-textSecondary hover:text-white border border-ui-borderSubtle rounded-xs transition text-[11px] cursor-pointer"
+        >
+          Dismiss
+        </button>
+        <button 
+          @click="projectStore.discardRecoverySession()" 
+          class="px-2 py-1 text-rose-400 hover:text-rose-300 hover:underline transition text-[10.5px] cursor-pointer" 
+          title="Delete autosave data and keep current clean file"
+        >
+          Discard
+        </button>
+      </div>
+    </div>
+
     <!-- Main Workspace Area -->
-    <div class="flex-1 flex overflow-hidden">
-      <!-- Left Tool Palette -->
-      <LeftToolbar v-if="layoutStore.showLeftToolbar" />
+    <div class="flex-1 flex overflow-hidden relative min-h-0">
+      <main class="flex-1 flex flex-col overflow-hidden bg-ui-root relative min-w-0 min-h-0">
+        <div class="flex-1 flex overflow-hidden relative min-h-0">
+          <LeftToolbar v-if="layoutStore.showLeftToolbar" />
 
-      <!-- Center Work Area -->
-      <main class="flex-1 flex flex-col overflow-hidden bg-ui-root relative">
-        
-        <!-- 3D Viewport / UV Paint Viewport Split -->
-        <div class="flex-1 flex overflow-hidden relative">
-          <!-- 3D Viewport Pane (Left in UV mode, Full in Model/Rig/Animate mode) -->
-          <div 
-            class="h-full relative flex flex-col overflow-hidden transition-[width] duration-75"
-            :class="{ 'transition-none': isUvSplitting }"
-            :style="{ width: toolStore.appMode === 'uvpaint' ? uvSplitRatio + '%' : '100%' }"
-          >
-            <Viewport3D />
-          </div>
+          <div class="flex-1 flex overflow-hidden relative min-w-0 min-h-0">
+            <div 
+              class="h-full relative flex flex-col overflow-hidden transition-[width] duration-75 min-w-0"
+              :class="{ 'transition-none': isUvSplitting }"
+              :style="{ width: toolStore.appMode === 'uvpaint' ? uvSplitRatio + '%' : '100%' }"
+            >
+              <Viewport3D />
+            </div>
 
-          <!-- Vertical Draggable Resizer Bar (between 3D Viewport & UV Canvas) -->
-          <div 
-            v-if="toolStore.appMode === 'uvpaint'"
-            @mousedown="startUvSplit"
-            @dblclick="toggleUvSplitPreset"
-            class="w-1.5 h-full bg-ui-header hover:bg-ui-hover border-x border-ui-borderSubtle cursor-col-resize flex items-center justify-center transition group shrink-0 relative select-none z-10"
-            title="Drag left/right to resize 3D vs UV Canvas. Double-click to toggle layout."
-          >
-            <div class="h-12 w-0.5 rounded-full bg-ui-borderDefault group-hover:bg-ui-accent transition"></div>
-          </div>
+            <div 
+              v-if="toolStore.appMode === 'uvpaint'"
+              @mousedown="startUvSplit"
+              @dblclick="toggleUvSplitPreset"
+              class="w-1.5 h-full bg-ui-header hover:bg-ui-hover border-x border-ui-borderSubtle cursor-col-resize flex items-center justify-center transition group shrink-0 relative select-none z-10"
+              title="Drag left/right to resize 3D vs UV Canvas. Double-click to toggle layout."
+            >
+              <div class="h-12 w-0.5 rounded-full bg-ui-borderDefault group-hover:bg-ui-accent transition"></div>
+            </div>
 
-          <!-- 2D UV & Pixel Canvas Pane (Right in UV mode) -->
-          <div 
-            v-if="toolStore.appMode === 'uvpaint'" 
-            class="h-full bg-ui-panel relative flex flex-col overflow-hidden transition-[width] duration-75"
-            :class="{ 'transition-none': isUvSplitting }"
-            :style="{ width: (100 - uvSplitRatio) + '%' }"
-          >
-            <PixelCanvas />
+            <div 
+              v-if="toolStore.appMode === 'uvpaint'" 
+              class="h-full bg-ui-panel relative flex flex-col overflow-hidden transition-[width] duration-75"
+              :class="{ 'transition-none': isUvSplitting }"
+              :style="{ width: (100 - uvSplitRatio) + '%' }"
+            >
+              <PixelCanvas />
+            </div>
           </div>
         </div>
 
-        <!-- Bottom Animation Timeline (Visible when in Animate mode) -->
-        <div v-if="toolStore.appMode === 'animate'" class="w-full">
+        <div v-if="toolStore.appMode === 'animate'" class="w-full shrink-0">
           <Timeline />
         </div>
       </main>

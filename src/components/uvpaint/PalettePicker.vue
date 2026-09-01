@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import { useToolStore } from '../../stores/toolStore'
 import { useProjectStore } from '../../stores/projectStore'
-import { DEFAULT_PALETTES, loadCustomPalettes, saveCustomPalettes, snapColorToPalette, generateShadingRamp } from '../../utils/color'
-import { Palette } from '../../types/texture'
+import { saveCustomPalettes, generateShadingRamp } from '../../utils/color'
+import type { Palette } from '../../types/texture'
 import PaletteLibraryModal from '../modals/PaletteLibraryModal.vue'
 import UiSection from '../ui/UiSection.vue'
 import { ChevronDown, Pipette, Plus, Trash2, X, Sparkles } from 'lucide-vue-next'
@@ -12,7 +12,6 @@ const toolStore = useToolStore()
 const projectStore = useProjectStore()
 
 const showPaletteLibrary = ref(false)
-const customPalettes = ref<Palette[]>([])
 const showNewPaletteDialog = ref(false)
 const newPaletteName = ref('')
 
@@ -20,16 +19,12 @@ const activeShadingRamp = computed(() => {
   return generateShadingRamp(toolStore.primaryColor || '#ffffff')
 })
 
-onMounted(() => {
-  customPalettes.value = loadCustomPalettes()
-})
-
 const allPalettes = computed<Palette[]>(() => {
-  return [...DEFAULT_PALETTES, ...customPalettes.value]
+  return projectStore.palettes
 })
 
 function selectPalette(p: Palette) {
-  projectStore.activePalette = p
+  projectStore.selectPalette(p.id)
 }
 
 function setColor(hex: string) {
@@ -42,17 +37,8 @@ function setSecondaryColor(e: MouseEvent, hex: string) {
 }
 
 function createNewCustomPalette() {
-  const name = newPaletteName.value.trim() || `Custom Set ${customPalettes.value.length + 1}`
-  const newPal: Palette = {
-    id: `custom_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-    name,
-    category: 'Custom',
-    isCustom: true,
-    colors: [toolStore.primaryColor, toolStore.secondaryColor, '#ffffff', '#000000']
-  }
-  customPalettes.value.push(newPal)
-  saveCustomPalettes(customPalettes.value)
-  projectStore.activePalette = newPal
+  const name = newPaletteName.value.trim() || `Custom Set ${projectStore.palettes.filter(p => p.isCustom).length + 1}`
+  projectStore.createPalette(name, [toolStore.primaryColor, toolStore.secondaryColor, '#ffffff', '#000000'], { isCustom: true })
   showNewPaletteDialog.value = false
   newPaletteName.value = ''
 }
@@ -63,20 +49,11 @@ function addCurrentColorToPalette() {
   if (cur.isCustom) {
     if (!cur.colors.includes(colorToAdd)) {
       cur.colors.push(colorToAdd)
-      saveCustomPalettes(customPalettes.value)
+      saveCustomPalettes(projectStore.palettes.filter(p => p.isCustom))
     }
   } else {
     // Clone preset into a custom palette
-    const cloned: Palette = {
-      id: `custom_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      name: `${cur.name} (Custom)`,
-      category: 'Custom',
-      isCustom: true,
-      colors: [...cur.colors, colorToAdd]
-    }
-    customPalettes.value.push(cloned)
-    saveCustomPalettes(customPalettes.value)
-    projectStore.activePalette = cloned
+    projectStore.createPalette(`${cur.name} (Custom)`, [...cur.colors, colorToAdd], { isCustom: true })
   }
 }
 
@@ -84,31 +61,18 @@ function removeColorFromPalette(idx: number) {
   const cur = projectStore.activePalette
   if (cur.isCustom && cur.colors.length > 1) {
     cur.colors.splice(idx, 1)
-    saveCustomPalettes(customPalettes.value)
+    saveCustomPalettes(projectStore.palettes.filter(p => p.isCustom))
   }
 }
 
 function deleteCurrentCustomPalette() {
-  const cur = projectStore.activePalette
-  if (!cur.isCustom) return
-  customPalettes.value = customPalettes.value.filter(p => p.id !== cur.id)
-  saveCustomPalettes(customPalettes.value)
-  projectStore.activePalette = DEFAULT_PALETTES[0]
+  projectStore.deletePalette(projectStore.activePaletteId)
 }
 
-function quantizeActiveTexture() {
-  const pb = projectStore.pixelBuffer
-  const paletteColors = projectStore.activePalette.colors
-  if (!pb || !paletteColors || paletteColors.length === 0) return
-
-  for (let y = 0; y < pb.height; y++) {
-    for (let x = 0; x < pb.width; x++) {
-      const curHex = pb.getPixelHex(x, y)
-      const closest = snapColorToPalette(curHex, paletteColors)
-      pb.setPixel(x, y, closest)
-    }
+function quantizeActiveTexture(mode: 'nearest' | 'floyd-steinberg' | 'atkinson' = 'nearest') {
+  if (projectStore.activeTexture) {
+    projectStore.applyPaletteToTexture(projectStore.activeTexture.id, projectStore.activePaletteId, mode)
   }
-  projectStore.markTextureUpdated()
 }
 </script>
 
@@ -159,9 +123,9 @@ function quantizeActiveTexture() {
               style="background-color: #14161a !important; color: #d8dbe0 !important;"
               class="w-full appearance-none border border-ui-borderDefault hover:border-ui-borderStrong focus:border-ui-accent rounded-xs pl-2.5 pr-7 h-7 text-xs font-sans focus:outline-none cursor-pointer transition shadow-inner"
             >
-              <optgroup label="Custom Color Sets" v-if="customPalettes.length > 0">
+              <optgroup label="Custom Color Sets" v-if="allPalettes.some(p => p.isCustom)">
                 <option 
-                  v-for="pal in customPalettes" 
+                  v-for="pal in allPalettes.filter(p => p.isCustom)" 
                   :key="pal.id" 
                   :value="pal.id"
                   style="background-color: #14161a; color: #d8dbe0;"
@@ -171,7 +135,7 @@ function quantizeActiveTexture() {
               </optgroup>
               <optgroup label="Preset Palettes">
                 <option 
-                  v-for="pal in DEFAULT_PALETTES" 
+                  v-for="pal in allPalettes.filter(p => !p.isCustom)" 
                   :key="pal.id" 
                   :value="pal.id"
                   style="background-color: #14161a; color: #d8dbe0;"
@@ -341,7 +305,7 @@ function quantizeActiveTexture() {
               Browse Library...
             </button>
             <button 
-              @click="quantizeActiveTexture" 
+              @click="() => quantizeActiveTexture('nearest')" 
               class="px-1.5 py-0.5 rounded-xs bg-ui-panel hover:bg-ui-hover border border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary transition cursor-pointer"
               title="Quantize all pixels in the active texture to this palette"
             >

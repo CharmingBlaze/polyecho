@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import * as THREE from 'three'
 import { useProjectStore } from '../../stores/projectStore'
 import { exportToOBJ, exportToMTL } from '../../core/export/ObjExport'
-import { exportToGLTF } from '../../core/export/GltfExport'
+import { exportToGLTF, buildExportTextureMap } from '../../core/export/GltfExport'
 import { renderSpriteSheet } from '../../core/export/SpriteSheet'
 import { useAnimationStore } from '../../stores/animationStore'
 import { Download, X, Box, Sparkles, Image, Film } from 'lucide-vue-next'
@@ -68,26 +67,15 @@ const isExportingGltf = ref(false)
 async function handleExportGLTF(binary: boolean) {
   if (isExportingGltf.value) return
   isExportingGltf.value = true
-  const textureMap = new Map<string, THREE.Texture>()
+  const textureMap = buildExportTextureMap(projectStore.textures)
   try {
-    for (const mat of projectStore.materials) {
-      const texObj = projectStore.getTextureForMaterial(mat.id)
-      if (texObj && texObj.pixelBuffer) {
-        const tex = new THREE.CanvasTexture(texObj.pixelBuffer.canvas)
-        textureMap.set(mat.id, tex)
-      }
-    }
-    if (textureMap.size === 0) {
-      const tex = new THREE.CanvasTexture(projectStore.pixelBuffer.canvas)
-      textureMap.set('default_material', tex)
-    }
-
     const blob = await exportToGLTF(
       projectStore.meshes, 
       textureMap, 
       animationStore.armature.clips, 
       binary,
-      animationStore.armature
+      animationStore.armature,
+      projectStore.materials
     )
     downloadFile(blob, `${projectStore.projectName}.${binary ? 'glb' : 'gltf'}`)
     emit('close')
@@ -100,35 +88,73 @@ async function handleExportGLTF(binary: boolean) {
   }
 }
 
-function handleExportOBJ() {
-  const objText = exportToOBJ(projectStore.meshes, `${projectStore.projectName}.mtl`)
-  const mtlText = exportToMTL('default_material', `${projectStore.projectName}_texture.png`)
+function textureFileName(tex: { id: string; name: string }, used: Set<string>): string {
+  const base = `${(tex.name || 'texture').replace(/[^\w.-]+/g, '_')}.png`
+  if (!used.has(base)) {
+    used.add(base)
+    return base
+  }
+  const unique = `${(tex.name || 'texture').replace(/[^\w.-]+/g, '_')}_${tex.id.slice(-6)}.png`
+  used.add(unique)
+  return unique
+}
 
-  // Download OBJ
+function handleExportOBJ() {
+  const usedNames = new Set<string>()
+  const fileByTexId = new Map<string, string>()
+  const mtlList = projectStore.materials.map(mat => {
+    const texObj = mat.textureId ? projectStore.getTextureById(mat.textureId) : undefined
+    let textureFileNameStr: string | undefined
+    if (texObj) {
+      if (!fileByTexId.has(texObj.id)) {
+        fileByTexId.set(texObj.id, textureFileName(texObj, usedNames))
+      }
+      textureFileNameStr = fileByTexId.get(texObj.id)
+    }
+    return {
+      id: mat.id,
+      name: mat.name,
+      color: mat.color,
+      textureFileName: textureFileNameStr
+    }
+  })
+  const objText = exportToOBJ(projectStore.meshes, `${projectStore.projectName}.mtl`)
+  const mtlText = exportToMTL(mtlList)
+
   const objBlob = new Blob([objText], { type: 'text/plain' })
   downloadFile(objBlob, `${projectStore.projectName}.obj`)
 
-  // Download MTL
   const mtlBlob = new Blob([mtlText], { type: 'text/plain' })
   downloadFile(mtlBlob, `${projectStore.projectName}.mtl`)
 
-  // Download Texture PNG
-  handleExportTexture()
+  for (const [texId, fileName] of fileByTexId) {
+    const texObj = projectStore.getTextureById(texId)
+    if (!texObj?.pixelBuffer) continue
+    texObj.pixelBuffer.composite()
+    const t = texObj
+    const name = fileName
+    t.pixelBuffer.canvas.toBlob((blob: Blob | null) => {
+      if (blob) downloadFile(blob, name)
+    })
+  }
   emit('close')
 }
 
 function handleExportTexture() {
-  projectStore.pixelBuffer.canvas.toBlob((blob) => {
+  const tex = projectStore.activeTexture
+  const buf = tex?.pixelBuffer || projectStore.pixelBuffer
+  if (!buf) return
+  buf.composite()
+  buf.canvas.toBlob((blob: Blob | null) => {
     if (blob) {
-      downloadFile(blob, `${projectStore.projectName}_texture.png`)
+      const name = tex ? textureFileName(tex, new Set()) : `${projectStore.projectName}_texture.png`
+      downloadFile(blob, name)
     }
   })
 }
 
 function handleExportSpriteSheet() {
-  const tex = new THREE.CanvasTexture(projectStore.pixelBuffer.canvas)
-  const textureMap = new Map<string, THREE.Texture>()
-  textureMap.set('default_material', tex)
+  const textureMap = buildExportTextureMap(projectStore.textures)
 
   const targetClip = selectedClipId.value ? animationStore.armature.clips.find(c => c.id === selectedClipId.value) : null
 
@@ -141,9 +167,9 @@ function handleExportSpriteSheet() {
     clip: targetClip,
     armature: animationStore.armature,
     frameStep: frameStep.value
-  })
+  }, projectStore.materials)
 
-  tex.dispose()
+  for (const tex of textureMap.values()) tex.dispose()
   textureMap.clear()
 
   canvas.toBlob((blob) => {

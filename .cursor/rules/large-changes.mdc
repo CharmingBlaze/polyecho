@@ -1,0 +1,16 @@
+---
+description: How to take multi-file modeling and pipeline work
+alwaysApply: true
+---
+
+# Large changes
+
+This app is one Vite SPA. A modeling or export feature usually spans types, core, a store, input, and UI.
+
+1. Read the code map and open the existing sibling (another primitive, operator, or exporter) before adding files.
+2. Change one layer at a time: types → core → store/history → `App.vue` / `editorCommands` → Vue.
+3. Do not drive-by refactor `Viewport3D.vue` or `projectStore.ts`. Touch only the hooks you need (event listener, `perform*`, revision bump).
+4. Wire every new user action to history and to the surface that already hosts similar actions (header, command palette, or keymap)—not a one-off key handler in a random panel.
+5. After coding, typecheck (`npm run typecheck`) and verify the flow in the running editor, including undo and a neighboring workspace (Model / UV / Rig / Animate).
+6. Update `docs/CODEMAP.md` when you add a module.
+7. Prefer a small follow-up over a repo-wide rename or format pass.

@@ -107,7 +107,7 @@ const fps = computed(() => animationStore.activeClip?.fps || 12)
 const maxFrames = computed(() => animationStore.activeClip?.durationFrames || 24)
 
 const timeSecondsFormatted = computed({
-  get: () => `${(animationStore.currentFrame / fps.value).toFixed(2)} s`,
+  get: () => (animationStore.currentFrame / fps.value).toFixed(2),
   set: (val: string) => {
     const num = parseFloat(val)
     if (!isNaN(num)) {
@@ -115,6 +115,9 @@ const timeSecondsFormatted = computed({
     }
   }
 })
+
+const framePadWidth = computed(() => Math.max(2, String(maxFrames.value).length))
+const paddedFrame = computed(() => String(animationStore.currentFrame).padStart(framePadWidth.value, '0'))
 
 const clipDurationSeconds = computed({
   get: () => Number(((animationStore.activeClip?.durationFrames || 24) / fps.value).toFixed(1)),
@@ -206,7 +209,7 @@ function toggleChannelCellKeyframe(targetId: string, targetType: 'mesh' | 'bone'
 
 function handleAddClip() {
   if (!newClipName.value.trim()) return
-  animationStore.addClip(newClipName.value.trim(), 24, 12)
+  animationStore.createClip(newClipName.value.trim(), 24, 12)
   newClipName.value = 'New_Action'
   showNewClipModal.value = false
 }
@@ -659,7 +662,10 @@ function handleGraphSvgClick(e: MouseEvent) {
           <span class="text-ui-textMuted text-[10px] pr-1">s</span>
           <span class="text-ui-borderDefault px-1">|</span>
           <span class="text-ui-textMuted text-[10px] mr-1">f:</span>
-          <span class="font-mono font-bold text-ui-textPrimary text-xs">{{ animationStore.currentFrame }}</span>
+          <span
+            class="font-mono font-bold text-ui-textPrimary text-xs tabular-nums text-right inline-block"
+            :style="{ width: `${framePadWidth}ch` }"
+          >{{ paddedFrame }}</span>
           <div class="flex flex-col ml-1.5 border-l border-ui-borderSubtle pl-1 space-y-0.5">
             <button @click="stepTime(1)" class="text-[8px] text-ui-textMuted hover:text-ui-textPrimary leading-none">▲</button>
             <button @click="stepTime(-1)" class="text-[8px] text-ui-textMuted hover:text-ui-textPrimary leading-none">▼</button>
@@ -849,7 +855,7 @@ function handleGraphSvgClick(e: MouseEvent) {
           :title="`Frame ${animationStore.currentFrame} (${timeSecondsFormatted}s)`"
         >
           <div class="w-3.5 h-3.5 bg-rose-500 rounded-xs shadow-[0_0_8px_rgba(244,63,94,0.9)] flex items-center justify-center border border-rose-300 group-hover:scale-110 transition-transform">
-            <span class="text-[7px] font-bold text-white font-mono leading-none">{{ animationStore.currentFrame }}</span>
+            <span class="text-[7px] font-bold text-white font-mono leading-none tabular-nums">{{ paddedFrame }}</span>
           </div>
           <div class="w-0 h-0 border-l-[3px] border-l-transparent border-r-[3px] border-r-transparent border-t-[4px] border-t-rose-500"></div>
         </div>
