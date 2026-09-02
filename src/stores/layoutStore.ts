@@ -14,6 +14,7 @@ export const useLayoutStore = defineStore('layout', () => {
   const leftToolbarWidth = ref<number>(74)
   const leftToolbarHeight = ref<number>(500)
   const leftToolbarPos = ref<{ x: number; y: number }>({ x: 16, y: 46 })
+  const leftToolbarHasMoved = ref(false)
 
   // Right Sidebar States
   const rightSidebarFloating = ref<boolean>(false)
@@ -98,6 +99,7 @@ export const useLayoutStore = defineStore('layout', () => {
     leftToolbarWidth.value = 74
     leftToolbarHeight.value = 500
     leftToolbarPos.value = { x: 16, y: typeof window !== 'undefined' ? Math.round(window.innerHeight / 2) : 400 }
+    leftToolbarHasMoved.value = false
 
     rightSidebarFloating.value = false
     rightSidebarMinimized.value = false
@@ -120,6 +122,7 @@ export const useLayoutStore = defineStore('layout', () => {
     leftToolbarWidth,
     leftToolbarHeight,
     leftToolbarPos,
+    leftToolbarHasMoved,
     rightSidebarFloating,
     rightSidebarMinimized,
     rightSidebarWidth,

@@ -173,4 +173,21 @@ export class ScreenGeometry {
 
     return { hit: false, point: new THREE.Vector2(), tA, tB }
   }
+
+  /** World-space dashed rubber-band for Poly Draw / Poly Build. */
+  static dashedPreviewLine(positions: number[], color: number): THREE.LineSegments {
+    const geom = new THREE.BufferGeometry()
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+    const mat = new THREE.LineDashedMaterial({
+      color,
+      dashSize: 0.07,
+      gapSize: 0.045,
+      depthTest: false
+    })
+    const line = new THREE.LineSegments(geom, mat)
+    line.computeLineDistances()
+    line.renderOrder = 80
+    line.userData.ignorePick = true
+    return line
+  }
 }

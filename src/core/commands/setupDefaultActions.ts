@@ -69,11 +69,23 @@ export function setupDefaultActions(
     },
     {
       id: 'polydraw',
-      label: 'Poly Draw',
+      label: 'Poly Draw (Blockout)',
       category: 'Modeling',
       shortcut: 'f',
       icon: 'face-select',
-      handler: () => requestModalTool('polydraw')
+      handler: () => {
+        if (toolStore.appMode === 'blockout') requestModalTool('polydraw')
+      }
+    },
+    {
+      id: 'polybuild',
+      label: 'Poly Build (Blockout)',
+      category: 'Modeling',
+      shortcut: 'v',
+      icon: 'vertex-select',
+      handler: () => {
+        if (toolStore.appMode === 'blockout') requestModalTool('polybuild')
+      }
     },
     {
       id: 'grab',
@@ -115,12 +127,12 @@ export function setupDefaultActions(
     },
     {
       id: 'fill_face',
-      label: 'Fill Face from Boundary',
+      label: 'Fill Face from Boundary (Model)',
       category: 'Topology',
       shortcut: 'f',
       icon: 'face-select',
       handler: () => {
-        if (projectStore.activeMesh) {
+        if (toolStore.appMode === 'model' && projectStore.activeMesh) {
           requestFillFace()
         }
       }

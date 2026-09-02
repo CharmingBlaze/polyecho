@@ -25,7 +25,7 @@ import { useLayoutStore } from './stores/layoutStore'
 import { useThemeStore } from './stores/themeStore'
 import { useKeymapStore } from './stores/keymapStore'
 import { ProjectSerializer } from './core/project/ProjectSerializer'
-import { EDITOR_EVENTS, requestCameraView, requestModalTool, requestFillFace } from './core/commands/editorCommands'
+import { EDITOR_EVENTS, requestCameraView, requestModalTool, requestFillFace, requestPrimitivePlacement, requestOpenPie, requestToggleUvOverlay } from './core/commands/editorCommands'
 import { setupDefaultActions } from './core/commands/setupDefaultActions'
 import { operatorManager } from './core/operators/OperatorManager'
 
@@ -100,46 +100,49 @@ function toggleUvSplitPreset() {
   }
 }
 
-function handleKeyDown(e: KeyboardEvent) {
-  if (['INPUT', 'SELECT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
-    return
-  }
+function bindGeometryMode() {
+  return toolStore.selectMode === 'object'
+    ? 'object'
+    : (toolStore.selectMode === 'edge' ? 'edges' : (toolStore.selectMode === 'vertex' ? 'vertices' : 'faces'))
+}
 
-  // Ctrl / Cmd combos
-  if (e.ctrlKey || e.metaKey) {
-    if (e.key === 'z' || e.key === 'Z') {
-      e.preventDefault()
-      if (operatorManager.state.value.active) return
-      if (e.shiftKey) {
-        historyStore.redo()
-      } else {
-        historyStore.undo()
-      }
+function ensureMeshContext() {
+  if (!isMeshWorkspace()) toolStore.setAppMode('model')
+  if (!projectStore.activeMesh && projectStore.meshes.length > 0) {
+    projectStore.activeMeshId = projectStore.meshes[0].id
+    projectStore.selectedMeshIds = [projectStore.meshes[0].id]
+  }
+}
+
+function resolveKeymapAction(ids: string[]): string | null {
+  const mode = toolStore.appMode
+  if (mode === 'uvpaint') {
+    const paint = ids.find(id => id.startsWith('paint_'))
+    if (paint) return paint
+  }
+  if (ids.includes('fill_face') || ids.includes('polydraw')) {
+    if (mode === 'blockout' && ids.includes('polydraw')) return 'polydraw'
+    if (mode === 'model' && ids.includes('fill_face')) return 'fill_face'
+  }
+  if (ids.includes('box_select') && mode !== 'uvpaint') return 'box_select'
+  for (const id of ids) {
+    if (id.startsWith('paint_') && mode !== 'uvpaint') continue
+    if (id === 'fill_face' || id === 'polydraw' || id === 'polybuild') continue
+    return id
+  }
+  if (mode === 'blockout' && ids.includes('polybuild')) return 'polybuild'
+  return null
+}
+
+function runKeymapAction(id: string) {
+  switch (id) {
+    case 'undo':
+      if (!operatorManager.state.value.active) historyStore.undo()
       return
-    }
-    if (e.key === 'y' || e.key === 'Y') {
-      e.preventDefault()
-      if (operatorManager.state.value.active) return
-      historyStore.redo()
+    case 'redo':
+      if (!operatorManager.state.value.active) historyStore.redo()
       return
-    }
-    if (e.key === 'c' || e.key === 'C') {
-      e.preventDefault()
-      projectStore.copySelection(toolStore.selectMode)
-      return
-    }
-    if (e.key === 'v' || e.key === 'V') {
-      e.preventDefault()
-      projectStore.pasteClipboard()
-      return
-    }
-    if (e.key === 'j' || e.key === 'J') {
-      e.preventDefault()
-      projectStore.performJoinMeshes()
-      return
-    }
-    if (e.key === 's' || e.key === 'S') {
-      e.preventDefault()
+    case 'save_project': {
       const jsonStr = ProjectSerializer.serialize(
         projectStore.projectName,
         projectStore.meshes,
@@ -157,9 +160,229 @@ function handleKeyDown(e: KeyboardEvent) {
       ProjectSerializer.downloadProject(jsonStr, projectStore.projectName || 'PSX_Model')
       return
     }
-    if (e.key === 'e' || e.key === 'E') {
-      e.preventDefault()
+    case 'export_model':
       showExportModal.value = true
+      return
+    case 'open_preferences':
+      showPreferencesModal.value = true
+      return
+    case 'command_palette':
+      window.dispatchEvent(new CustomEvent('open-command-palette'))
+      return
+    case 'toggle_xray':
+      toolStore.viewport.xray = !toolStore.viewport.xray
+      return
+    case 'toggle_snap':
+      toolStore.snapping.grid = !toolStore.snapping.grid
+      return
+    case 'shading_pie':
+      requestOpenPie('shading')
+      return
+    case 'snap_pie':
+      requestOpenPie('snap')
+      return
+    case 'view_top':
+      toolStore.viewport.quadView = false
+      requestCameraView('top')
+      return
+    case 'view_front':
+      toolStore.viewport.quadView = false
+      requestCameraView('front')
+      return
+    case 'view_right':
+      toolStore.viewport.quadView = false
+      requestCameraView('right')
+      return
+    case 'view_camera':
+      toolStore.viewport.quadView = false
+      requestCameraView('iso')
+      return
+    case 'select_all':
+      projectStore.selectAll(toolStore.selectMode)
+      return
+    case 'deselect_all':
+      projectStore.deselectAll()
+      return
+    case 'box_select':
+      if (isMeshWorkspace()) toolStore.isBoxSelectActive = !toolStore.isBoxSelectActive
+      return
+    case 'duplicate':
+      projectStore.duplicateSelection(toolStore.selectMode)
+      return
+    case 'join_meshes':
+      projectStore.performJoinMeshes()
+      return
+    case 'add_primitive':
+      requestPrimitivePlacement({ type: 'BOX' })
+      return
+    case 'mode_vertex':
+      ensureMeshContext()
+      toolStore.selectMode = 'vertex'
+      return
+    case 'mode_edge':
+      ensureMeshContext()
+      toolStore.selectMode = 'edge'
+      return
+    case 'mode_face':
+      ensureMeshContext()
+      toolStore.selectMode = 'face'
+      return
+    case 'mode_object':
+      ensureMeshContext()
+      toolStore.selectMode = 'object'
+      return
+    case 'mode_origin':
+      ensureMeshContext()
+      toolStore.selectMode = 'origin'
+      return
+    case 'mode_bone':
+      if (toolStore.appMode !== 'animate') toolStore.setAppMode('rig')
+      toolStore.selectMode = 'bone'
+      return
+    case 'toggle_edit_object':
+      ensureMeshContext()
+      toolStore.selectMode = toolStore.selectMode === 'object' ? 'face' : 'object'
+      return
+    case 'grab':
+      if (isMeshWorkspace()) requestModalTool('grab')
+      else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') toolStore.setModelTool('move')
+      return
+    case 'rotate':
+      if (isMeshWorkspace()) requestModalTool('rotate')
+      else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') toolStore.setModelTool('rotate')
+      return
+    case 'scale':
+      if (isMeshWorkspace()) requestModalTool('scale')
+      else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') toolStore.setModelTool('scale')
+      return
+    case 'extrude':
+      if (isMeshWorkspace()) requestModalTool('extrude')
+      else if (toolStore.appMode === 'rig') animationStore.extrudeBone(animationStore.selectedBoneId)
+      return
+    case 'extrude_individual':
+      if (isMeshWorkspace()) requestModalTool('extrude')
+      return
+    case 'inset':
+      if (toolStore.appMode === 'animate') animationStore.recordCurrentKeyframe()
+      else if (isMeshWorkspace()) requestModalTool('inset')
+      return
+    case 'bevel':
+      if (isMeshWorkspace()) requestModalTool('bevel')
+      else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
+        animationStore.bindSelectedGeometry(bindGeometryMode())
+      }
+      return
+    case 'loopcut':
+      if (isMeshWorkspace()) requestModalTool('loop_cut')
+      return
+    case 'knife':
+      if (toolStore.appMode === 'animate') animationStore.recordCurrentKeyframe()
+      else if (isMeshWorkspace()) requestModalTool('knife')
+      return
+    case 'fill_face':
+      if (toolStore.appMode === 'model') requestFillFace()
+      return
+    case 'polydraw':
+      if (toolStore.appMode === 'blockout') requestModalTool('polydraw')
+      return
+    case 'polybuild':
+      if (toolStore.appMode === 'blockout') requestModalTool('polybuild')
+      return
+    case 'subdivide':
+      if (isMeshWorkspace() && projectStore.activeMesh) projectStore.performSubdivide()
+      else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') toolStore.setModelTool('move')
+      return
+    case 'connect_verts':
+      if (isMeshWorkspace()) projectStore.performConnectVertices()
+      return
+    case 'merge_verts':
+      if (isMeshWorkspace()) projectStore.performMerge('center')
+      return
+    case 'flip_normals':
+      if (isMeshWorkspace()) projectStore.performFlipNormals()
+      return
+    case 'delete_element':
+      if (isMeshWorkspace()) {
+        if (toolStore.selectMode === 'object') projectStore.performDelete('object')
+        else if (toolStore.selectMode === 'face') projectStore.performDelete('face')
+        else if (toolStore.selectMode === 'edge') projectStore.performDelete('edge')
+        else projectStore.performDelete('vertex')
+      } else if (toolStore.appMode === 'rig' && animationStore.selectedBoneId) {
+        animationStore.deleteBone(animationStore.selectedBoneId)
+      }
+      return
+    case 'separate_mesh':
+      if (isMeshWorkspace()) {
+        if (toolStore.selectMode === 'face' || toolStore.selectMode === 'edge' || toolStore.selectMode === 'vertex') {
+          projectStore.performSeparateMesh()
+        } else if (toolStore.appMode === 'model') {
+          toolStore.selectMode = 'origin'
+        }
+      }
+      return
+    case 'paint_brush':
+      if (toolStore.appMode === 'uvpaint') toolStore.setPaintTool('brush')
+      return
+    case 'paint_eraser':
+      if (toolStore.appMode === 'uvpaint') toolStore.setPaintTool('eraser')
+      return
+    case 'paint_bucket':
+      if (toolStore.appMode === 'uvpaint') toolStore.setPaintTool('bucket')
+      return
+    case 'paint_picker':
+      if (toolStore.appMode === 'uvpaint') toolStore.setPaintTool('picker')
+      return
+    case 'paint_line':
+      if (toolStore.appMode === 'uvpaint') toolStore.setPaintTool('line')
+      return
+    case 'paint_rect':
+      if (toolStore.appMode === 'uvpaint') toolStore.setPaintTool('rect')
+      return
+    case 'paint_circle':
+      if (toolStore.appMode === 'uvpaint') toolStore.setPaintTool('circle')
+      return
+    case 'paint_dither':
+      if (toolStore.appMode === 'uvpaint') toolStore.setPaintTool('dither')
+      return
+    case 'paint_shade':
+      if (toolStore.appMode === 'uvpaint') toolStore.setPaintTool('shade')
+      return
+    case 'paint_uv_overlay':
+      if (toolStore.appMode === 'uvpaint') requestToggleUvOverlay()
+      return
+  }
+}
+
+function tryKeymapDispatch(e: KeyboardEvent): boolean {
+  const ids = keymapStore.matchingActionIds(e)
+  if (!ids.length) return false
+  const id = resolveKeymapAction(ids)
+  if (!id) return false
+  if (operatorManager.state.value.active && id !== 'command_palette') return false
+  e.preventDefault()
+  runKeymapAction(id)
+  return true
+}
+
+function handleKeyDown(e: KeyboardEvent) {
+  if (['INPUT', 'SELECT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
+    return
+  }
+
+  if (e.ctrlKey || e.metaKey) {
+    if (e.key === 'c' || e.key === 'C') {
+      e.preventDefault()
+      projectStore.copySelection(toolStore.selectMode)
+      return
+    }
+    if (e.key === 'v' || e.key === 'V') {
+      e.preventDefault()
+      projectStore.pasteClipboard()
+      return
+    }
+    if (e.key === 'y' || e.key === 'Y') {
+      e.preventDefault()
+      if (!operatorManager.state.value.active) historyStore.redo()
       return
     }
     if (e.key === 'n' || e.key === 'N') {
@@ -172,55 +395,20 @@ function handleKeyDown(e: KeyboardEvent) {
       projectStore.restoreAutosaveSession()
       return
     }
-    if (e.key === ',' || e.key === '<') {
-      e.preventDefault()
-      showPreferencesModal.value = true
-      return
-    }
     if ((e.key === 'q' || e.key === 'Q') && e.altKey) {
       e.preventDefault()
       toolStore.viewport.quadView = !toolStore.viewport.quadView
       return
     }
-  }
-
-  // Alt+Z: Toggle X-Ray Mode (Blender)
-  if (e.altKey && (e.key === 'z' || e.key === 'Z') && !e.ctrlKey && !e.metaKey) {
-    e.preventDefault()
-    toolStore.viewport.xray = !toolStore.viewport.xray
-    return
-  }
-
-  // Loop Cut Shortcut (Ctrl+R)
-  if ((e.ctrlKey || e.metaKey) && (e.key === 'r' || e.key === 'R')) {
-    e.preventDefault()
-    if (isMeshWorkspace()) {
-      requestModalTool('loop_cut')
+    if (e.key === 'p' || e.key === 'P') {
+      e.preventDefault()
+      if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
+        animationStore.bindSelectedGeometry(bindGeometryMode())
+      }
+      return
     }
-    return
   }
 
-  // Bevel (Model) / Bind to Bone (Rig/Animate) Shortcut (Ctrl+B)
-  if ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'B')) {
-    e.preventDefault()
-    if (isMeshWorkspace()) {
-      requestModalTool('bevel')
-    } else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
-      const mode = toolStore.selectMode === 'object' ? 'object' : (toolStore.selectMode === 'edge' ? 'edges' : (toolStore.selectMode === 'vertex' ? 'vertices' : 'faces'))
-      animationStore.bindSelectedGeometry(mode)
-    }
-    return
-  }
-
-  // Parent to Bone (Ctrl+P) / Unbind (Alt+P) (Blender)
-  if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
-    e.preventDefault()
-    if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
-      const mode = toolStore.selectMode === 'object' ? 'object' : (toolStore.selectMode === 'edge' ? 'edges' : (toolStore.selectMode === 'vertex' ? 'vertices' : 'faces'))
-      animationStore.bindSelectedGeometry(mode)
-    }
-    return
-  }
   if (e.altKey && (e.key === 'p' || e.key === 'P') && !e.ctrlKey && !e.metaKey) {
     e.preventDefault()
     if ((toolStore.appMode === 'rig' || toolStore.appMode === 'animate') && projectStore.activeMesh) {
@@ -229,236 +417,42 @@ function handleKeyDown(e: KeyboardEvent) {
     return
   }
 
-  // Duplicate Shortcut (Shift+D)
-  if (e.shiftKey && (e.key === 'd' || e.key === 'D')) {
-    e.preventDefault()
-    projectStore.duplicateSelection(toolStore.selectMode)
-    return
-  }
+  if (tryKeymapDispatch(e)) return
 
-  // Select All (A) / Deselect All (Alt+A)
-  if (e.key === 'a' || e.key === 'A') {
-    e.preventDefault()
-    if (e.altKey) {
-      projectStore.deselectAll()
-    } else {
-      projectStore.selectAll(toolStore.selectMode)
-    }
-    return
-  }
-
-  // Modifier shortcuts that were not handled above belong to the focused
-  // workspace component. Do not also run a plain-key action in this handler.
   if (e.ctrlKey || e.metaKey || e.altKey) return
   if (operatorManager.state.value.active) return
 
-  // Desktop Numpad View Hotkeys
-  if (e.code === 'Numpad7') {
-    e.preventDefault()
-    toolStore.viewport.quadView = false
-    // Emit top view via custom event or global viewport event
-    requestCameraView('top')
-    return
-  } else if (e.code === 'Numpad1') {
-    e.preventDefault()
-    toolStore.viewport.quadView = false
-    requestCameraView('front')
-    return
-  } else if (e.code === 'Numpad3') {
-    e.preventDefault()
-    toolStore.viewport.quadView = false
-    requestCameraView('right')
-    return
-  } else if (e.code === 'Numpad0') {
-    e.preventDefault()
-    toolStore.viewport.quadView = false
-    requestCameraView('iso')
-    return
-  } else if (e.code === 'Numpad5') {
+  if (e.code === 'Numpad5') {
     e.preventDefault()
     toolStore.viewport.quadView = !toolStore.viewport.quadView
     return
   }
 
-  // General Hotkeys
   switch (e.key.toLowerCase()) {
-    case 'tab':
-      e.preventDefault()
-      if (!isMeshWorkspace()) toolStore.setAppMode('model')
-      if (!projectStore.activeMesh && projectStore.meshes.length > 0) {
-        projectStore.activeMeshId = projectStore.meshes[0].id
-        projectStore.selectedMeshIds = [projectStore.meshes[0].id]
-      }
-      toolStore.selectMode = toolStore.selectMode === 'object' ? 'face' : 'object'
-      break
-    case '1':
-      if (!isMeshWorkspace()) toolStore.setAppMode('model')
-      if (!projectStore.activeMesh && projectStore.meshes.length > 0) {
-        projectStore.activeMeshId = projectStore.meshes[0].id
-        projectStore.selectedMeshIds = [projectStore.meshes[0].id]
-      }
-      toolStore.selectMode = 'vertex'
-      break
-    case '2':
-      if (!isMeshWorkspace()) toolStore.setAppMode('model')
-      if (!projectStore.activeMesh && projectStore.meshes.length > 0) {
-        projectStore.activeMeshId = projectStore.meshes[0].id
-        projectStore.selectedMeshIds = [projectStore.meshes[0].id]
-      }
-      toolStore.selectMode = 'edge'
-      break
-    case '3':
-      if (!isMeshWorkspace()) toolStore.setAppMode('model')
-      if (!projectStore.activeMesh && projectStore.meshes.length > 0) {
-        projectStore.activeMeshId = projectStore.meshes[0].id
-        projectStore.selectedMeshIds = [projectStore.meshes[0].id]
-      }
-      toolStore.selectMode = 'face'
-      break
-    case '4':
-      if (!isMeshWorkspace()) toolStore.setAppMode('model')
-      if (!projectStore.activeMesh && projectStore.meshes.length > 0) {
-        projectStore.activeMeshId = projectStore.meshes[0].id
-        projectStore.selectedMeshIds = [projectStore.meshes[0].id]
-      }
-      toolStore.selectMode = 'object'
-      break
-    case '5':
-      if (!isMeshWorkspace()) toolStore.setAppMode('model')
-      if (!projectStore.activeMesh && projectStore.meshes.length > 0) {
-        projectStore.activeMeshId = projectStore.meshes[0].id
-        projectStore.selectedMeshIds = [projectStore.meshes[0].id]
-      }
-      toolStore.selectMode = 'origin'
-      break
-    case 'p':
-      if (isMeshWorkspace()) {
-        if (toolStore.selectMode === 'face' || toolStore.selectMode === 'edge' || toolStore.selectMode === 'vertex') {
-          projectStore.performSeparateMesh()
-        } else if (toolStore.appMode === 'model') {
-          toolStore.selectMode = 'origin'
-        }
-      }
-      break
-    case '6':
-      if (toolStore.appMode !== 'animate') {
-        toolStore.setAppMode('rig')
-      }
-      toolStore.selectMode = 'bone'
-      break
-    case 'g':
-      if (isMeshWorkspace()) {
-        requestModalTool('grab')
-      } else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
-        toolStore.setModelTool('move')
-      } else if (toolStore.appMode === 'uvpaint') {
-        toolStore.setPaintTool('bucket')
-      }
-      break
     case 'w':
       if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
         toolStore.setModelTool('move')
       }
       break
-    case 'l':
-      if (toolStore.appMode === 'uvpaint') toolStore.setPaintTool('line')
-      break
-    case 'u':
-      if (toolStore.appMode === 'uvpaint') toolStore.setPaintTool('rect')
-      break
-    case 'c':
-      if (toolStore.appMode === 'uvpaint') toolStore.setPaintTool('circle')
-      break
-    case 'r':
-      if (isMeshWorkspace()) {
-        requestModalTool('rotate')
-      } else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
-        toolStore.setModelTool('rotate')
-      }
-      break
-    case 's':
-      if (isMeshWorkspace()) {
-        requestModalTool('scale')
-      } else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
-        toolStore.setModelTool('scale')
-      }
-      break
-    case 'e':
-      if (isMeshWorkspace()) {
-        requestModalTool('extrude')
-      } else if (toolStore.appMode === 'rig') {
-        animationStore.extrudeBone(animationStore.selectedBoneId)
-      } else if (toolStore.appMode === 'uvpaint') {
-        toolStore.setPaintTool('eraser')
-      }
-      break
-    case 'i':
-      if (toolStore.appMode === 'animate') {
-        animationStore.recordCurrentKeyframe()
-      } else if (isMeshWorkspace()) {
-        requestModalTool('inset')
-      } else if (toolStore.appMode === 'uvpaint') {
-        toolStore.setPaintTool('picker')
-      }
-      break
-    case 'b':
-      if (toolStore.appMode === 'uvpaint') {
-        toolStore.setPaintTool('brush')
-      }
-      break
-    case 'k':
-      if (toolStore.appMode === 'animate') {
-        animationStore.recordCurrentKeyframe()
-      } else if (isMeshWorkspace()) {
-        requestModalTool('knife')
-      }
-      break
     case 'arrowleft':
-      if (toolStore.appMode === 'animate') {
-        animationStore.setFrame(animationStore.currentFrame - 1)
-      }
+    case ',':
+      if (toolStore.appMode === 'animate') animationStore.setFrame(animationStore.currentFrame - 1)
       break
     case 'arrowright':
-      if (toolStore.appMode === 'animate') {
-        animationStore.setFrame(animationStore.currentFrame + 1)
-      }
-      break
-    case ',':
-      if (toolStore.appMode === 'animate') {
-        animationStore.setFrame(animationStore.currentFrame - 1)
-      }
-      break
     case '.':
-      if (toolStore.appMode === 'animate') {
-        animationStore.setFrame(animationStore.currentFrame + 1)
-      }
-      break
-    case 'f':
-      if (toolStore.appMode === 'blockout') requestModalTool('polydraw')
-      else if (toolStore.appMode === 'model') requestFillFace()
-      break
-    case 'm':
-      if (isMeshWorkspace()) projectStore.performMerge('center')
-      break
-    case 'd':
-      if (toolStore.appMode === 'uvpaint') toolStore.setPaintTool('dither')
+      if (toolStore.appMode === 'animate') animationStore.setFrame(animationStore.currentFrame + 1)
       break
     case 'h':
       if (e.shiftKey || toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
         e.preventDefault()
         animationStore.toggleBoneHierarchyPopout()
-      } else if (toolStore.appMode === 'uvpaint') {
-        toolStore.setPaintTool('shade')
       }
       break
     case ' ':
       e.preventDefault()
-      if (toolStore.appMode === 'animate') {
-        animationStore.togglePlay()
-      }
+      if (toolStore.appMode === 'animate') animationStore.togglePlay()
       break
     case 'delete':
-    case 'x':
       if (isMeshWorkspace()) {
         if (toolStore.selectMode === 'object') projectStore.performDelete('object')
         else if (toolStore.selectMode === 'face') projectStore.performDelete('face')

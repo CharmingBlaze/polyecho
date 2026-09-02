@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useToolStore } from '../../stores/toolStore'
 import { useProjectStore } from '../../stores/projectStore'
+import { EDITOR_EVENTS, type PieMenuCommand } from '../../core/commands/editorCommands'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 
 export type PieMenuType = 'shading' | 'mode' | 'snap'
@@ -84,34 +85,21 @@ function handleSnap(action: 'sel-grid' | 'sel-cursor' | 'cursor-origin' | 'curso
   closePie()
 }
 
+function onOpenPie(e: Event) {
+  const type = (e as CustomEvent<PieMenuCommand>).detail
+  if (type !== 'shading' && type !== 'mode' && type !== 'snap') return
+  if (visible.value && menuType.value === type) {
+    closePie()
+    return
+  }
+  openPie(type)
+}
+
 function handleKeyDown(e: KeyboardEvent) {
   if (['INPUT', 'SELECT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
     return
   }
 
-  // Z key: Shading Pie Menu (if no modifiers)
-  if ((e.key === 'z' || e.key === 'Z') && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-    e.preventDefault()
-    if (visible.value && menuType.value === 'shading') {
-      closePie()
-    } else {
-      openPie('shading')
-    }
-    return
-  }
-
-  // Shift + S: Snap Pie Menu
-  if ((e.key === 's' || e.key === 'S') && e.shiftKey && !e.ctrlKey && !e.metaKey) {
-    e.preventDefault()
-    if (visible.value && menuType.value === 'snap') {
-      closePie()
-    } else {
-      openPie('snap')
-    }
-    return
-  }
-
-  // Ctrl + Tab: Mode Pie Menu
   if (e.key === 'Tab' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault()
     if (visible.value && menuType.value === 'mode') {
@@ -130,11 +118,13 @@ function handleKeyDown(e: KeyboardEvent) {
 onMounted(() => {
   window.addEventListener('pointermove', onPointerMove)
   window.addEventListener('keydown', handleKeyDown)
+  window.addEventListener(EDITOR_EVENTS.openPie, onOpenPie)
 })
 
 onUnmounted(() => {
   window.removeEventListener('pointermove', onPointerMove)
   window.removeEventListener('keydown', handleKeyDown)
+  window.removeEventListener(EDITOR_EVENTS.openPie, onOpenPie)
 })
 </script>
 

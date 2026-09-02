@@ -56,6 +56,15 @@ function canvasLooksEmpty(ctx: CanvasRenderingContext2D) {
   return true
 }
 
+function uvToPixel(u: number, v: number, width: number, height: number): { x: number; y: number } {
+  const safeU = Number.isFinite(u) ? Math.max(0, Math.min(1, u)) : 0
+  const safeV = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0
+  return {
+    x: Math.min(width - 1, Math.floor(safeU * width)),
+    y: Math.min(height - 1, Math.floor((1 - safeV) * height))
+  }
+}
+
 export class PixelBuffer {
   width: number
   height: number
@@ -378,9 +387,10 @@ export class PixelBuffer {
     hueShift = false, 
     palette?: string[]
   ) {
-    const half = Math.floor(size / 2)
-    for (let dy = -half; dy <= half; dy++) {
-      for (let dx = -half; dx <= half; dx++) {
+    const start = -Math.floor(size / 2)
+    const end = start + Math.max(1, size)
+    for (let dy = start; dy < end; dy++) {
+      for (let dx = start; dx < end; dx++) {
         const px = Math.floor(x + dx)
         const py = Math.floor(y + dy)
         if (px < 0 || px >= this.width || py < 0 || py >= this.height) continue
@@ -449,8 +459,7 @@ export class PixelBuffer {
     tool: 'brush' | 'eraser' | 'shade-light' | 'shade-dark' = 'brush',
     opacity = 1.0
   ) {
-    const px = Math.floor(u * this.width)
-    const py = Math.floor((1 - v) * this.height)
+    const { x: px, y: py } = uvToPixel(u, v, this.width, this.height)
 
     if (tool === 'eraser') {
       this.erase(px, py, size)
@@ -471,34 +480,60 @@ export class PixelBuffer {
     color: string, 
     size = 1, 
     tool: 'brush' | 'eraser' = 'brush',
-    opacity = 1.0
+    opacity = 1.0,
+    shape: 'square' | 'circle' = 'square'
   ) {
-    const x0 = Math.floor(u0 * this.width)
-    const y0 = Math.floor((1 - v0) * this.height)
-    const x1 = Math.floor(u1 * this.width)
-    const y1 = Math.floor((1 - v1) * this.height)
+    const start = uvToPixel(u0, v0, this.width, this.height)
+    const end = uvToPixel(u1, v1, this.width, this.height)
+    const x0 = start.x
+    const y0 = start.y
+    const x1 = end.x
+    const y1 = end.y
 
     if (tool === 'eraser') {
-      let dx = Math.abs(x1 - x0)
-      let dy = Math.abs(y1 - y0)
-      let sx = x0 < x1 ? 1 : -1
-      let sy = y0 < y1 ? 1 : -1
-      let err = dx - dy
-      let cx = x0, cy = y0
-      while (true) {
-        this.erase(cx, cy, size, 'square', false)
-        if (cx === x1 && cy === y1) break
-        let e2 = 2 * err
-        if (e2 > -dy) { err -= dy; cx += sx }
-        if (e2 < dx) { err += dx; cy += sy }
-      }
-      this.commitLayers()
+      this.eraseLine(x0, y0, x1, y1, size, shape)
     } else {
-      this.drawLine(x0, y0, x1, y1, color, size, opacity)
+      this.drawLine(x0, y0, x1, y1, color, size, opacity, shape)
     }
   }
 
-  drawLine(x0: number, y0: number, x1: number, y1: number, colorHex: string, size = 1, opacity = 1.0) {
+  eraseLine(
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    size = 1,
+    shape: 'square' | 'circle' = 'square'
+  ) {
+    let dx = Math.abs(x1 - x0)
+    let dy = Math.abs(y1 - y0)
+    const sx = x0 < x1 ? 1 : -1
+    const sy = y0 < y1 ? 1 : -1
+    let err = dx - dy
+    let cx = Math.floor(x0)
+    let cy = Math.floor(y0)
+    const endX = Math.floor(x1)
+    const endY = Math.floor(y1)
+    while (true) {
+      this.erase(cx, cy, size, shape, false)
+      if (cx === endX && cy === endY) break
+      const e2 = 2 * err
+      if (e2 > -dy) { err -= dy; cx += sx }
+      if (e2 < dx) { err += dx; cy += sy }
+    }
+    this.commitLayers()
+  }
+
+  drawLine(
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    colorHex: string,
+    size = 1,
+    opacity = 1.0,
+    shape: 'square' | 'circle' = 'square'
+  ) {
     let dx = Math.abs(x1 - x0)
     let dy = Math.abs(y1 - y0)
     let sx = x0 < x1 ? 1 : -1
@@ -511,7 +546,7 @@ export class PixelBuffer {
     const endY = Math.floor(y1)
 
     while (true) {
-      this.drawBrush(curX, curY, colorHex, size, opacity, 'square', false)
+      this.drawBrush(curX, curY, colorHex, size, opacity, shape, false)
       if (curX === endX && curY === endY) break
       let e2 = 2 * err
       if (e2 > -dy) {
@@ -569,11 +604,12 @@ export class PixelBuffer {
   }
 
   drawDither(x: number, y: number, colorHex: string, size = 1) {
-    const half = Math.floor(size / 2)
+    const start = -Math.floor(size / 2)
+    const end = start + Math.max(1, size)
     const baseRgb = hexToRgb(colorHex)
 
-    for (let dy = -half; dy <= half; dy++) {
-      for (let dx = -half; dx <= half; dx++) {
+    for (let dy = start; dy < end; dy++) {
+      for (let dx = start; dx < end; dx++) {
         const px = Math.floor(x + dx)
         const py = Math.floor(y + dy)
         if (px < 0 || px >= this.width || py < 0 || py >= this.height) continue
@@ -973,4 +1009,3 @@ export class PixelBuffer {
     })
   }
 }
-

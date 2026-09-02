@@ -35,7 +35,7 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/stores/historyStore.ts` | Undo / redo |
 | `src/stores/layoutStore.ts` | Panel chrome, inspector tab per workspace, Blockout pane split fractions |
 | `src/stores/themeStore.ts` | Themes |
-| `src/stores/keymapStore.ts` | Hotkeys UI list (not the live dispatcher) |
+| `src/stores/keymapStore.ts` | Live shortcut chords + Preferences remaps (`App.vue` matches events here) |
 
 ## Mesh and modeling
 
@@ -50,7 +50,7 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/core/geometry/Operations.ts` | One-shot `MeshObject` ops (fill loop/winding, 2-vert connect, merge, dissolve, …) |
 | `src/core/geometry/Primitives.ts` | Legacy cube / plane helpers |
 | `src/core/geometry/Converters.ts` | Three.js `BufferGeometry`, including object shade flat/smooth/auto-smooth normals |
-| `src/core/geometry/ScreenGeometry.ts` | Screen rays, pane rects, Blockout column splits |
+| `src/core/geometry/ScreenGeometry.ts` | Screen rays, pane rects, Blockout column splits, dashed Poly Draw / Poly Build preview |
 | `src/core/geometry/EdgeUtils.ts` | Loops / rings |
 | `src/core/geometry/UVUnwrap.ts` | Planar / box / cylindrical |
 | `src/core/geometry/Modifiers.ts` | Stack (`Mirror` → `Subdiv` → `Solidify`) + defaults + apply |
@@ -76,6 +76,7 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/core/operators/loopCut/LoopCutOperator.ts` | Loop cut |
 | `src/core/operators/placement/PrimitivePlacementOperator.ts` | Shift+A placement |
 | `src/core/operators/PolyDrawOperator.ts` | Blockout / Modeling outline + extrude |
+| `src/core/operators/PolyBuildOperator.ts` | Blockout: snap to existing mesh verts, then fill quads |
 | `src/core/mesh/operations/PolyDrawKernel.ts` | Planar face from clicked points |
 | `src/core/commands/editorCommands.ts` | Window events into the viewport (`requestModalTool`, `requestFillFace`, …) |
 | `src/core/commands/ActionRegistry.ts` | Centralized command registry with scope, category & shortcuts (`docs/SYSTEMS.md`) |
@@ -83,6 +84,7 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/core/profiles/ModelProfiles.ts` | Target engine profiles (PSX, Godot 4, Unity, Blockbench) & budget validation |
 | `src/core/input/InputRouter.ts` | Key routing utilities |
 | `src/core/transform/SnapManager.ts` | Linear/angle/scale snap; `findRigidSnapOffset` (vertex/edge, whole selection) |
+| `src/core/transform/LiveSymmetry.ts` | Live X/Y/Z counterpart follow (gizmo + G/R/S) |
 | `src/core/transform/` | Pivot, numeric input, coordinate spaces |
 
 ## Paint, UV, animation, I/O
@@ -107,7 +109,7 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | Folder | Role |
 | :--- | :--- |
 | `src/components/layout/` | Header, toolbars, status (`DockviewLayout.vue` exists but is not mounted) |
-| `src/components/viewport/` | 3D view (`Viewport3D`: picking, `updateTransformGizmo`, fill camera, modal start), nav magnet/snap UI, pie menu |
+| `src/components/viewport/` | 3D view (`Viewport3D`: picking, gizmo, fill camera, modal start). `ViewportNav.vue` is the Space/pivot/snap/shade/overlay bar. |
 | `src/components/inspector/` | Transform, material, texture, modifiers, references (`ReferenceProps`), animation (`AnimationInspector` = Animate workspace) |
 | `src/components/outliner/` | Object tree |
 | `src/components/uvpaint/` | UV editor, pixel editor (`PixelCanvas.vue` is the UV/Paint tab router), palettes |

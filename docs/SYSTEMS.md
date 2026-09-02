@@ -12,7 +12,7 @@ Instead of scattering keyboard listeners and hardcoding actions across multiple 
 ### Key Files
 - `src/core/commands/ActionRegistry.ts`: Defines `CommandAction`, scope grouping, category definitions, shortcut normalization, and execution methods.
 - `src/core/commands/setupDefaultActions.ts`: Bootstraps and registers standard modeling, selection, transform, topology, shading, UV, and system actions.
-- `src/stores/keymapStore.ts`: Tracks customized keybindings and persists user remappings in `localStorage`.
+- `src/stores/keymapStore.ts`: Live chord matching (`eventMatches` / `matchingActionIds`) plus remaps in `localStorage`. `App.vue` is the dispatcher.
 - `src/components/modals/CommandPaletteModal.vue`: Dynamically queries `actionRegistry.getAll()` to show all searchable tools and updated shortcut badges.
 
 ### How to Add a New Action

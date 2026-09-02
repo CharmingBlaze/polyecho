@@ -324,18 +324,20 @@ export class PolyDrawOperator extends ModalOperator {
     if (!this.ctx.previewGroup) return
     this.disposePreview()
     const pts = [...this.points]
-    if (this.hoverPoint) pts.push(this.hoverPoint)
+    const closing = this.points.length >= 3 && this.isNearFirst()
+    if (this.hoverPoint && !closing) pts.push(this.hoverPoint)
     if (pts.length < 2) return
 
     const positions: number[] = []
     for (let i = 0; i < pts.length - 1; i++) {
       positions.push(pts[i].x, pts[i].y, pts[i].z, pts[i + 1].x, pts[i + 1].y, pts[i + 1].z)
     }
-    const geom = new THREE.BufferGeometry()
-    geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
-    const mat = new THREE.LineBasicMaterial({ color: 0xf59e0b, depthTest: false })
-    this.previewLine = new THREE.LineSegments(geom, mat)
-    this.previewLine.renderOrder = 80
+    if (closing) {
+      const first = pts[0]
+      const last = pts[pts.length - 1]
+      positions.push(last.x, last.y, last.z, first.x, first.y, first.z)
+    }
+    this.previewLine = ScreenGeometry.dashedPreviewLine(positions, closing ? 0x34d399 : 0xf59e0b)
     this.ctx.previewGroup.add(this.previewLine)
   }
 

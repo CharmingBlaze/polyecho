@@ -43,10 +43,13 @@ Viewport Key/Click  →  ModalOperator Session  →  EditableMesh Kernel  →  M
 - Restores initial snapshot onto `EditableMesh` and store.
 - Re-enables `OrbitControls` with zero changes recorded in history.
 
-### Snapping (viewport magnet menu)
+### Snapping (`ViewportNav.vue`)
 
-- **Grid**: `MoveOperator` increments the grab delta by `gridSize` when **Ctrl** is held (magnet-on-by-default must not freeze small grabs at zero).
-- **Vertex / edge midpoint**: closest moving vertex (or gizmo-dragged component verts) pulls the **entire** selection by one offset so topology does not squash. Same idea as Blockbench’s vertex snap, but continuous during G / gizmo drag rather than a two-click tool.
+Live controls sit next to Space / Pivot in the viewport bar. Magnet + chevron: grid size, vertex, edge midpoint, face center.
+
+- **Grid / magnet**: status bar shows `gridSize`. **G** increment-snaps only with **Ctrl**. Magnet-on-by-default must not round grab delta (that froze small moves).
+- **Vertex / edge / face**: closest moving point to a non-moving target; **one** rigid offset (`SnapManager.findRigidSnapOffset`) on grab, component gizmo drag, and object-mode gizmo (other meshes).
+- **Object gizmo + Ctrl**: snaps object translation to `gridSize`.
 
 ---
 
@@ -65,6 +68,7 @@ Viewport Key/Click  →  ModalOperator Session  →  EditableMesh Kernel  →  M
 | **Drag** | Primitive Placement | `PrimitivePlacementOperator` | Interactive click-and-drag grid spawner for boxes, cylinders, and spheres. |
 | **F** (Model) | Fill | one-shot `Operations.fillFaceFromVertices` | See **Fill (F)** below. Not a modal operator. |
 | **F** (Blockout) | Poly Draw | `PolyDrawOperator` | Front/Side silhouette or Persp ground/face, close, then extrude. New mesh on commit. |
+| **V** (Blockout) | Poly Build | `PolyBuildOperator` | First click locks a plane (mesh face under the cursor, or the view plane through the mesh). Later clicks stay on that plane so Front/Side/Persp agree. Empty = new vert, old vert = reuse, first vert / Enter / F = fill. |
 
 ---
 
@@ -132,7 +136,7 @@ Their mesh is vertex-dict faces + UV-by-vertex-id. **Do not** replace `MeshObjec
 | `mesh_editing.js` create_face / camera invert | Fill winding + 2-vert connect | Dict topology |
 | `vertex_snap.js` | Rigid offset during G / gizmo | Two-click pick tool, cube scale-from-verts |
 | `transform/` TransformerModule | Same lifecycle as `ModalOperator` | Replacing gizmos with their `transform_gizmo.js` |
-| `mirror_modeling.ts` live counterpart | — | Extra clone mesh (viewport `symmetryX` already mirrors gizmo verts) |
+| `mirror_modeling.ts` live counterpart | Viewport Mirror X/Y/Z follows existing opposite verts (`LiveSymmetry.ts`) on gizmo + G/R/S | Extra clone mesh / topology copy |
 | `generate_bounding_box.ts`, splines, weight paint | — | Minecraft voxels / other domains |
 | `auto_fix` after ops | — | Optional later (merge coincident, split concave) |
 

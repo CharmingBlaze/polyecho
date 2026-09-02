@@ -14,6 +14,7 @@ export type ModelToolType =
   | 'subdivide'
   | 'knife'
   | 'polydraw'
+  | 'polybuild'
   | 'merge'
   | 'delete'
   | 'flip_normals'

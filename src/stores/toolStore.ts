@@ -88,6 +88,7 @@ export const useToolStore = defineStore('tool', () => {
   }
 
   function setAppMode(mode: AppMode) {
+    const leavingBlockout = appMode.value === 'blockout' && mode !== 'blockout'
     appMode.value = mode
     isBoxSelectActive.value = false
     if ((mode === 'model' || mode === 'blockout' || mode === 'uvpaint') && (selectMode.value === 'bone' || selectMode.value === 'origin')) {
@@ -98,6 +99,8 @@ export const useToolStore = defineStore('tool', () => {
     if (mode === 'blockout') {
       selectMode.value = 'object'
       modelTool.value = 'move'
+    } else if (leavingBlockout && (modelTool.value === 'polydraw' || modelTool.value === 'polybuild')) {
+      modelTool.value = 'select'
     }
   }
 

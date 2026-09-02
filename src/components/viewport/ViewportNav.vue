@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useToolStore } from '../../stores/toolStore'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useProjectStore } from '../../stores/projectStore'
 import BlenderIcon from '../icons/BlenderIcon.vue'
-import { 
-  LayoutGrid, 
+import {
+  LayoutGrid,
   ChevronDown,
   Magnet,
   Crosshair,
@@ -13,504 +13,591 @@ import {
   Layers,
   Compass,
   Check,
-  FlipHorizontal
+  FlipHorizontal,
 } from 'lucide-vue-next'
+import type { PivotPoint, TransformOrientation } from '../../types/tools'
+import { EDITOR_EVENTS, requestCameraView } from '../../core/commands/editorCommands'
+
+type NavMenu = 'mode' | 'space' | 'snap' | 'view' | 'overlays' | 'shade' | null
+type CameraView = 'persp' | 'top' | 'front' | 'right' | 'iso'
 
 const toolStore = useToolStore()
 const animationStore = useAnimationStore()
 const projectStore = useProjectStore()
 
-const showModeMenu = ref(false)
-const showOrientationMenu = ref(false)
-const showPivotMenu = ref(false)
-const showSnapMenu = ref(false)
-const showOverlaysMenu = ref(false)
+const openMenu = ref<NavMenu>(null)
+const cameraView = ref<CameraView>('persp')
+const modeBtn = ref<HTMLButtonElement | null>(null)
+const spaceBtn = ref<HTMLButtonElement | null>(null)
+const snapBtn = ref<HTMLButtonElement | null>(null)
+const viewBtn = ref<HTMLButtonElement | null>(null)
+const overlayBtn = ref<HTMLButtonElement | null>(null)
+const shadeBtn = ref<HTMLButtonElement | null>(null)
+const menuBtn = {
+  mode: modeBtn,
+  space: spaceBtn,
+  snap: snapBtn,
+  view: viewBtn,
+  overlays: overlayBtn,
+  shade: shadeBtn
+}
+const popStyle = ref({ top: 0, left: 0, width: 220 })
+
+const POP_WIDTH: Record<Exclude<NavMenu, null>, number> = {
+  mode: 160,
+  space: 256,
+  snap: 192,
+  view: 160,
+  overlays: 220,
+  shade: 160
+}
+
+const POP_ALIGN_RIGHT: Exclude<NavMenu, null>[] = ['view', 'overlays', 'shade']
+
+function placePop() {
+  const menu = openMenu.value
+  if (!menu) return
+  const el = menuBtn[menu].value
+  if (!el) return
+  const r = el.getBoundingClientRect()
+  const width = POP_WIDTH[menu]
+  let left = POP_ALIGN_RIGHT.includes(menu) ? r.right - width : r.left
+  if (left < 8) left = 8
+  if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - width - 8)
+  popStyle.value = { top: r.bottom + 4, left, width }
+}
 
 const objectShade = computed(() => projectStore.activeMesh?.shadeMode || toolStore.viewport.shadeMode)
+const snapTargetOn = computed(() => toolStore.snapping.vertex || toolStore.snapping.edge || toolStore.snapping.face)
+const overlayOn = computed(() =>
+  toolStore.viewport.faceOrientation || !toolStore.viewport.showGrid || !toolStore.viewport.showAxes
+)
+
+const modeLabel = computed(() => {
+  if (toolStore.appMode === 'animate') return 'Pose'
+  if (toolStore.appMode === 'rig') return 'Rig'
+  if (toolStore.appMode === 'uvpaint') return 'Paint'
+  if (toolStore.appMode === 'blockout') return 'Blockout'
+  return toolStore.selectMode === 'object' ? 'Object' : 'Edit'
+})
+
+const showObjectEdit = computed(() => toolStore.appMode === 'model')
+const showComponentSelect = computed(() =>
+  toolStore.appMode === 'model' && toolStore.selectMode !== 'object' && toolStore.selectMode !== 'origin'
+)
+
+const pivotLabel: Record<PivotPoint, string> = {
+  median: 'Median',
+  active: 'Active',
+  individual: 'Indiv',
+  cursor: 'Cursor',
+}
+
+const viewLabel: Record<CameraView, string> = {
+  persp: 'Persp',
+  top: 'Top',
+  front: 'Front',
+  right: 'Right',
+  iso: 'Iso',
+}
+
+const shadingModes = [
+  { id: 'textured' as const, icon: 'shading-textured' as const, title: 'Textured' },
+  { id: 'solid' as const, icon: 'shading-solid' as const, title: 'Solid' },
+  { id: 'wireframe' as const, icon: 'shading-wire' as const, title: 'Wireframe' },
+  { id: 'psx' as const, icon: 'shading-rendered' as const, title: 'PSX preview' },
+]
+
+function onCameraViewEvent(e: Event) {
+  const view = (e as CustomEvent).detail as CameraView | undefined
+  if (view) cameraView.value = view
+}
+
+function toggleMenu(menu: Exclude<NavMenu, null>) {
+  openMenu.value = openMenu.value === menu ? null : menu
+  if (openMenu.value) nextTick(placePop)
+}
+
+function closeMenus() {
+  openMenu.value = null
+}
+
+function onDocPointerDown(e: PointerEvent) {
+  const root = (e.target as HTMLElement | null)?.closest?.('[data-vp-nav]')
+  if (!root) closeMenus()
+}
+
+function setEditMode(mode: 'vertex' | 'edge' | 'face' | 'bone') {
+  toolStore.selectMode = mode
+  if (mode !== 'bone') projectStore.clearSubSelections()
+}
+
+function setInteractionMode(mode: 'object' | 'edit') {
+  toolStore.setAppMode('model')
+  if (mode === 'object') {
+    toolStore.selectMode = 'object'
+  } else if (toolStore.selectMode === 'object' || toolStore.selectMode === 'origin') {
+    toolStore.selectMode = 'face'
+  }
+  closeMenus()
+}
+
+function setOrientation(ori: TransformOrientation) {
+  toolStore.transformOrientation = ori
+}
+
+function setPivot(piv: PivotPoint) {
+  toolStore.pivotPoint = piv
+}
 
 function applyObjectShade(mode: 'flat' | 'smooth' | 'auto') {
   projectStore.setShadeMode(mode)
   if (mode !== 'auto') toolStore.viewport.shadeMode = mode
+  closeMenus()
 }
 
-const emit = defineEmits<{
-  (e: 'setCameraView', view: 'persp' | 'top' | 'front' | 'right' | 'iso'): void
-  (e: 'openCommandPalette'): void
-}>()
-
-function setEditMode(mode: 'vertex' | 'edge' | 'face') {
-  toolStore.selectMode = mode
-  projectStore.clearSubSelections()
+function setView(view: CameraView) {
+  requestCameraView(view)
+  closeMenus()
 }
 
-function setInteractionMode(mode: 'object' | 'edit' | 'uvpaint' | 'rig' | 'animate') {
-  if (mode === 'object') {
-    toolStore.setAppMode('model')
-    toolStore.selectMode = 'object'
-  } else if (mode === 'edit') {
-    toolStore.setAppMode('model')
-    if (toolStore.selectMode === 'object' || toolStore.selectMode === 'origin') {
-      toolStore.selectMode = 'face'
-    }
-  } else if (mode === 'uvpaint') {
-    toolStore.setAppMode('uvpaint')
-  } else if (mode === 'rig') {
-    toolStore.setAppMode('rig')
-  } else if (mode === 'animate') {
-    toolStore.setAppMode('animate')
-  }
-  showModeMenu.value = false
+function toggleSymmetry(axis: 'X' | 'Y' | 'Z') {
+  if (axis === 'X') toolStore.viewport.symmetryX = !toolStore.viewport.symmetryX
+  else if (axis === 'Y') toolStore.viewport.symmetryY = !toolStore.viewport.symmetryY
+  else toolStore.viewport.symmetryZ = !toolStore.viewport.symmetryZ
 }
 
 function triggerCommandPalette() {
+  closeMenus()
   window.dispatchEvent(new CustomEvent('open-command-palette'))
 }
+
+watch(openMenu, (menu) => {
+  if (menu) nextTick(placePop)
+})
+
+onMounted(() => {
+  document.addEventListener('pointerdown', onDocPointerDown)
+  window.addEventListener(EDITOR_EVENTS.cameraView, onCameraViewEvent)
+  window.addEventListener('resize', placePop)
+})
+onUnmounted(() => {
+  document.removeEventListener('pointerdown', onDocPointerDown)
+  window.removeEventListener(EDITOR_EVENTS.cameraView, onCameraViewEvent)
+  window.removeEventListener('resize', placePop)
+})
 </script>
 
 <template>
-  <div class="h-ui-toolbar bg-ui-panel border-b border-ui-borderSubtle px-2 flex items-center justify-between text-xs text-ui-textSecondary select-none z-10 font-mono gap-2 overflow-x-auto custom-scrollbar">
-    <!-- Left: Interaction Mode, Component Selectors, Transform Orientation, Pivot, Snapping & Symmetry -->
-    <div class="flex items-center space-x-1.5 shrink-0">
-      <!-- 1. Mode Dropdown Pill -->
+  <div
+    data-vp-nav
+    class="h-8 shrink-0 bg-ui-panel border-b border-ui-borderSubtle px-2.5 flex items-center text-[11px] text-ui-textSecondary select-none z-20 font-mono overflow-x-auto custom-scrollbar"
+  >
+    <!-- Interact -->
+    <div class="flex items-center gap-1.5 min-w-0">
       <div class="relative">
-        <button 
-          @click="showModeMenu = !showModeMenu"
-          class="h-6 px-2 bg-ui-input hover:bg-ui-hover text-ui-textPrimary border border-ui-borderDefault rounded-xs flex items-center space-x-1.5 font-bold text-[11px] transition shadow-xs"
+        <button
+          ref="modeBtn"
+          type="button"
+          class="h-6 pl-1.5 pr-1 rounded-xs flex items-center gap-1.5 text-[11px] font-semibold transition"
+          :class="showObjectEdit
+            ? 'bg-ui-input border border-ui-borderDefault text-ui-textPrimary hover:bg-ui-hover'
+            : 'text-ui-textMuted cursor-default'"
+          :disabled="!showObjectEdit"
+          title="Interaction mode (Tab)"
+          @click="showObjectEdit && toggleMenu('mode')"
         >
-          <BlenderIcon 
-            :name="toolStore.selectMode === 'object' ? 'mesh-cube' : toolStore.appMode === 'animate' ? 'bone' : 'vertex-select'" 
-            :size="12" 
-            :color="toolStore.selectMode === 'object' ? '#f59e0b' : '#38bdf8'" 
+          <BlenderIcon
+            :name="toolStore.selectMode === 'object' ? 'mesh-cube' : toolStore.appMode === 'animate' ? 'bone' : 'vertex-select'"
+            :size="12"
+            :color="toolStore.selectMode === 'object' ? 'var(--ui-accent)' : '#38bdf8'"
           />
-          <span>
-            {{ toolStore.appMode === 'animate' ? 'Pose Mode' : toolStore.appMode === 'rig' ? 'Rig Mode' : toolStore.appMode === 'uvpaint' ? 'Paint Mode' : toolStore.appMode === 'blockout' ? 'Blockout' : toolStore.selectMode === 'object' ? 'Object Mode' : 'Edit Mode' }}
-          </span>
-          <ChevronDown class="w-3 h-3 text-ui-textMuted" />
+          <span>{{ modeLabel }}</span>
+          <ChevronDown v-if="showObjectEdit" class="w-3 h-3 text-ui-textMuted" />
         </button>
-
-        <div 
-          v-if="showModeMenu"
-          class="absolute left-0 top-full mt-1 w-44 bg-[#1c1f26] border border-ui-borderStrong rounded-xs shadow-2xl z-50 p-1 divide-y divide-ui-borderSubtle text-xs"
-        >
-          <div class="py-0.5">
-            <button 
-              @click="setInteractionMode('object')" 
-              class="w-full text-left px-2 py-1.5 hover:bg-ui-hover rounded-xs flex items-center justify-between"
-              :class="{ 'text-amber-400 font-bold': toolStore.selectMode === 'object' && toolStore.appMode === 'model' }"
-            >
-              <div class="flex items-center gap-2">
-                <BlenderIcon name="mesh-cube" :size="12" color="#f59e0b" />
-                <span>Object Mode</span>
-              </div>
-              <span class="text-[10px] text-ui-textMuted font-mono">Tab</span>
-            </button>
-
-            <button 
-              @click="setInteractionMode('edit')" 
-              class="w-full text-left px-2 py-1.5 hover:bg-ui-hover rounded-xs flex items-center justify-between"
-              :class="{ 'text-sky-400 font-bold': toolStore.selectMode !== 'object' && toolStore.appMode === 'model' }"
-            >
-              <div class="flex items-center gap-2">
-                <BlenderIcon name="vertex-select" :size="12" color="#38bdf8" />
-                <span>Edit Mode</span>
-              </div>
-              <span class="text-[10px] text-ui-textMuted font-mono">Tab</span>
-            </button>
-          </div>
-
-          <div class="py-0.5">
-            <button 
-              @click="setInteractionMode('uvpaint')" 
-              class="w-full text-left px-2 py-1.5 hover:bg-ui-hover rounded-xs flex items-center gap-2 text-ui-textPrimary"
-            >
-              <BlenderIcon name="uv" :size="12" color="#34d399" />
-              <span>Texture Paint</span>
-            </button>
-
-            <button 
-              @click="setInteractionMode('rig')" 
-              class="w-full text-left px-2 py-1.5 hover:bg-ui-hover rounded-xs flex items-center gap-2 text-ui-textPrimary"
-            >
-              <BlenderIcon name="bone" :size="12" color="#a855f7" />
-              <span>Rigging Mode</span>
-            </button>
-
-            <button 
-              @click="setInteractionMode('animate')" 
-              class="w-full text-left px-2 py-1.5 hover:bg-ui-hover rounded-xs flex items-center gap-2 text-ui-textPrimary"
-            >
-              <BlenderIcon name="keyframe" :size="12" color="#ec4899" />
-              <span>Pose Mode</span>
-            </button>
-          </div>
-        </div>
       </div>
 
-      <!-- 2. Edit Mode Component Selectors (Vertices, Edges, Faces, Bones) -->
-      <div 
-        v-if="toolStore.appMode === 'model' && toolStore.selectMode !== 'object'"
-        class="flex items-center bg-ui-input rounded-xs p-0.5 border border-ui-borderDefault"
+      <div
+        v-if="showComponentSelect"
+        class="flex items-center h-6 px-0.5 rounded-xs bg-ui-input border border-ui-borderDefault"
       >
-        <button 
-          @click="setEditMode('vertex')" 
-          class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="toolStore.selectMode === 'vertex' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
-          title="Vertex Select (1)"
+        <button
+          type="button"
+          class="w-6 h-5 rounded-xs flex items-center justify-center"
+          :class="toolStore.selectMode === 'vertex' ? 'bg-ui-active text-ui-textPrimary' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          title="Vertex (1)"
+          @click="setEditMode('vertex')"
         >
           <BlenderIcon name="vertex-select" :size="11" />
-          <span>1</span>
         </button>
-
-        <button 
-          @click="setEditMode('edge')" 
-          class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="toolStore.selectMode === 'edge' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
-          title="Edge Select (2)"
+        <button
+          type="button"
+          class="w-6 h-5 rounded-xs flex items-center justify-center"
+          :class="toolStore.selectMode === 'edge' ? 'bg-ui-active text-ui-textPrimary' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          title="Edge (2)"
+          @click="setEditMode('edge')"
         >
           <BlenderIcon name="edge-select" :size="11" />
-          <span>2</span>
         </button>
-
-        <button 
-          @click="setEditMode('face')" 
-          class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="toolStore.selectMode === 'face' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
-          title="Face Select (3)"
+        <button
+          type="button"
+          class="w-6 h-5 rounded-xs flex items-center justify-center"
+          :class="toolStore.selectMode === 'face' ? 'bg-ui-active text-ui-textPrimary' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          title="Face (3)"
+          @click="setEditMode('face')"
         >
           <BlenderIcon name="face-select" :size="11" />
-          <span>3</span>
-        </button>
-
-        <button 
-          @click="toolStore.selectMode = 'bone'" 
-          class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="toolStore.selectMode === 'bone' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
-          title="Bone Select (6)"
-        >
-          <BlenderIcon name="bone" :size="11" />
-          <span>6</span>
         </button>
       </div>
+    </div>
 
-      <!-- 3. Transform Orientation Dropdown (Global, Local, Normal, View) -->
-      <div class="relative">
-        <button 
-          @click="showOrientationMenu = !showOrientationMenu; showPivotMenu = false; showSnapMenu = false"
-          class="h-6 px-1.5 bg-ui-input hover:bg-ui-hover text-ui-textPrimary border border-ui-borderDefault rounded-xs flex items-center space-x-1 text-[10px] font-mono transition"
-          title="Transform Orientation (Global, Local, Normal, View)"
-        >
-          <Compass class="w-3 h-3 text-sky-400" />
-          <span class="capitalize">{{ toolStore.transformOrientation }}</span>
-          <ChevronDown class="w-2.5 h-2.5 text-ui-textMuted" />
-        </button>
+    <div class="w-px h-4 bg-ui-borderSubtle mx-2 shrink-0" />
 
-        <div 
-          v-if="showOrientationMenu"
-          class="absolute left-0 top-full mt-1 w-32 bg-[#1c1f26] border border-ui-borderStrong rounded-xs shadow-2xl z-50 p-1 text-[11px]"
-        >
-          <button 
-            v-for="ori in (['global', 'local', 'normal', 'view', 'cursor'] as const)"
-            :key="ori"
-            @click="toolStore.transformOrientation = ori; showOrientationMenu = false"
-            class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between capitalize"
-            :class="{ 'text-sky-400 font-bold': toolStore.transformOrientation === ori }"
-          >
-            <span>{{ ori }}</span>
-            <Check v-if="toolStore.transformOrientation === ori" class="w-3 h-3 text-sky-400" />
-          </button>
-        </div>
-      </div>
+    <!-- Transform -->
+    <div class="relative shrink-0">
+      <button
+        ref="spaceBtn"
+        type="button"
+        class="h-6 px-1.5 rounded-xs bg-ui-input border border-ui-borderDefault text-ui-textPrimary hover:bg-ui-hover flex items-center gap-1.5"
+        title="Transform space and pivot"
+        @click="toggleMenu('space')"
+      >
+        <Compass class="w-3 h-3 text-sky-400 shrink-0" />
+        <span class="capitalize">{{ toolStore.transformOrientation }}</span>
+        <span class="text-ui-textMuted">·</span>
+        <Crosshair class="w-3 h-3 text-ui-textAccent shrink-0" />
+        <span>{{ pivotLabel[toolStore.pivotPoint] }}</span>
+        <ChevronDown class="w-3 h-3 text-ui-textMuted" />
+      </button>
+    </div>
 
-      <!-- 4. Transform Pivot Point Dropdown (Median Point, Individual, Cursor) -->
-      <div class="relative">
-        <button 
-          @click="showPivotMenu = !showPivotMenu; showOrientationMenu = false; showSnapMenu = false"
-          class="h-6 px-1.5 bg-ui-input hover:bg-ui-hover text-ui-textPrimary border border-ui-borderDefault rounded-xs flex items-center space-x-1 text-[10px] font-mono transition"
-          title="Pivot Point (Median Point, Individual Origins, 3D Cursor)"
-        >
-          <Crosshair class="w-3 h-3 text-amber-400" />
-          <span class="capitalize">{{ toolStore.pivotPoint === 'median' ? 'Median' : toolStore.pivotPoint === 'individual' ? 'Indiv' : 'Cursor' }}</span>
-          <ChevronDown class="w-2.5 h-2.5 text-ui-textMuted" />
-        </button>
+    <div class="w-px h-4 bg-ui-borderSubtle mx-2 shrink-0" />
 
-        <div 
-          v-if="showPivotMenu"
-          class="absolute left-0 top-full mt-1 w-36 bg-[#1c1f26] border border-ui-borderStrong rounded-xs shadow-2xl z-50 p-1 text-[11px]"
-        >
-          <button 
-            v-for="piv in ([
-              { id: 'median', label: 'Median Point' },
-              { id: 'individual', label: 'Individual Origins' },
-              { id: 'cursor', label: '3D Cursor' }
-            ] as const)"
-            :key="piv.id"
-            @click="toolStore.pivotPoint = piv.id; showPivotMenu = false"
-            class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between"
-            :class="{ 'text-amber-400 font-bold': toolStore.pivotPoint === piv.id }"
-          >
-            <span>{{ piv.label }}</span>
-            <Check v-if="toolStore.pivotPoint === piv.id" class="w-3 h-3 text-amber-400" />
-          </button>
-        </div>
-      </div>
-
-      <!-- 5. Snapping Controls & Magnet Toggle (Shift+Tab) -->
-      <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderDefault p-0.5">
-        <button 
+    <!-- Snap + mirror -->
+    <div class="flex items-center gap-1.5 shrink-0">
+      <div class="relative flex items-center h-6 rounded-xs bg-ui-input border border-ui-borderDefault">
+        <button
+          type="button"
+          class="h-full px-1.5 flex items-center gap-1 rounded-l-xs"
+          :class="toolStore.snapping.grid ? 'text-ui-textAccent' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          title="Grid increment (Ctrl while grabbing). Magnet does not lock G to the grid."
           @click="toolStore.snapping.grid = !toolStore.snapping.grid"
-          class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="toolStore.snapping.grid ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/50 shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
-          title="Toggle Snapping (Shift+Tab)"
         >
-          <Magnet class="w-3 h-3" :class="toolStore.snapping.grid ? 'text-amber-400' : 'text-slate-400'" />
-          <span class="text-[9px]">{{ toolStore.snapping.gridSize }}m</span>
+          <Magnet class="w-3 h-3" />
+          <span class="text-[10px] tabular-nums">{{ toolStore.snapping.gridSize }}</span>
         </button>
-
-        <div class="relative">
-          <button 
-            @click="showSnapMenu = !showSnapMenu; showOrientationMenu = false; showPivotMenu = false"
-            class="px-1 py-0.5 hover:bg-ui-hover rounded-xs text-ui-textMuted hover:text-ui-textPrimary"
-            title="Snapping Settings & Step Size"
-          >
-            <ChevronDown class="w-2.5 h-2.5" />
-          </button>
-
-          <div 
-            v-if="showSnapMenu"
-            class="absolute left-0 top-full mt-1 w-44 bg-[#1c1f26] border border-ui-borderStrong rounded-xs shadow-2xl z-50 p-1.5 space-y-1.5 text-[11px]"
-          >
-            <div class="text-[10px] text-ui-textMuted font-bold uppercase tracking-wider px-1">Snap Grid Size</div>
-            <div class="grid grid-cols-4 gap-1 px-1">
-              <button 
-                v-for="sz in [0.1, 0.25, 0.5, 1.0]"
-                :key="sz"
-                @click="toolStore.snapping.gridSize = sz; showSnapMenu = false"
-                class="py-0.5 text-center rounded-xs border text-[10px]"
-                :class="toolStore.snapping.gridSize === sz ? 'bg-amber-500/20 text-amber-300 border-amber-500/60 font-bold' : 'bg-ui-input border-ui-borderSubtle text-ui-textMuted hover:text-white'"
-              >
-                {{ sz }}m
-              </button>
-            </div>
-
-            <div class="border-t border-ui-borderSubtle pt-1.5 space-y-1 px-1">
-              <div class="text-[10px] text-ui-textMuted font-bold uppercase tracking-wider">Snap Targets</div>
-              <label class="flex items-center justify-between cursor-pointer py-0.5">
-                <span class="text-slate-300">Vertex Snap</span>
-                <input type="checkbox" v-model="toolStore.snapping.vertex" class="rounded-xs text-amber-500" />
-              </label>
-              <label class="flex items-center justify-between cursor-pointer py-0.5">
-                <span class="text-slate-300">Edge Midpoint</span>
-                <input type="checkbox" v-model="toolStore.snapping.edge" class="rounded-xs text-amber-500" />
-              </label>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 6. Mesh Symmetry / Mirror X Real-Time Toggle -->
-      <button 
-        @click="toolStore.viewport.symmetryX = !toolStore.viewport.symmetryX"
-        class="h-6 px-1.5 rounded-xs border text-[10px] flex items-center space-x-1 transition"
-        :class="toolStore.viewport.symmetryX ? 'bg-amber-500/20 text-amber-300 border-amber-500/60 font-bold shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault hover:text-ui-textPrimary'"
-        title="Live X-Axis Mesh Symmetry / Mirror Modeling"
-      >
-        <FlipHorizontal class="w-3 h-3" :class="toolStore.viewport.symmetryX ? 'text-amber-400' : 'text-slate-400'" />
-        <span>Sym X</span>
-      </button>
-    </div>
-
-    <!-- Center: Camera Quick View Selector -->
-    <div class="flex items-center space-x-1.5 shrink-0">
-      <div v-if="!toolStore.viewport.quadView" class="flex items-center bg-ui-input rounded-xs px-1.5 py-0.5 border border-ui-borderDefault text-[10px]">
-        <span class="text-ui-textMuted mr-1">View:</span>
-        <select 
-          @change="emit('setCameraView', ($event.target as HTMLSelectElement).value as any)"
-          class="bg-transparent text-ui-textAccent font-bold focus:outline-none cursor-pointer"
+        <button
+          ref="snapBtn"
+          type="button"
+          class="h-full px-1 border-l border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary relative"
+          title="Snap increment and targets"
+          @click="toggleMenu('snap')"
         >
-          <option value="persp" class="bg-ui-panel text-ui-textPrimary">User Perspective</option>
-          <option value="top" class="bg-ui-panel text-ui-textPrimary">Top Ortho (Num 7)</option>
-          <option value="front" class="bg-ui-panel text-ui-textPrimary">Front Ortho (Num 1)</option>
-          <option value="right" class="bg-ui-panel text-ui-textPrimary">Right Ortho (Num 3)</option>
-          <option value="iso" class="bg-ui-panel text-ui-textPrimary">Isometric (Num 0)</option>
-        </select>
+          <ChevronDown class="w-3 h-3" />
+          <span
+            v-if="snapTargetOn"
+            class="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-ui-accent"
+          />
+        </button>
       </div>
 
-      <div v-else class="text-[10px] text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-xs border border-amber-500/30 font-bold">
-        Quad View
+      <div
+        class="flex items-center h-6 pl-1 pr-0.5 gap-0.5 rounded-xs bg-ui-input border border-ui-borderDefault"
+        title="Live mirror while dragging vertices"
+      >
+        <FlipHorizontal class="w-3 h-3 text-ui-textMuted mx-0.5" />
+        <button
+          v-for="axis in (['X', 'Y', 'Z'] as const)"
+          :key="axis"
+          type="button"
+          class="w-5 h-5 rounded-xs text-[10px] font-bold"
+          :class="(axis === 'X' ? toolStore.viewport.symmetryX : axis === 'Y' ? toolStore.viewport.symmetryY : toolStore.viewport.symmetryZ)
+            ? 'bg-ui-accentSubtle text-ui-textAccent'
+            : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          :title="'Live ' + axis + ' symmetry'"
+          @click="toggleSymmetry(axis)"
+        >{{ axis }}</button>
       </div>
     </div>
 
-    <!-- Right: Overlays, Shading, X-Ray, Bones, Search Palette & Quad Toggle -->
-    <div class="flex items-center space-x-1.5 shrink-0">
-      <!-- 1. Viewport Overlays Dropdown (Diagnostics, Face Orientation, Grid, Wireframe Opacity) -->
+    <div class="flex-1 min-w-3" />
+
+    <!-- Look -->
+    <div class="flex items-center gap-1.5 shrink-0">
       <div class="relative">
-        <button 
-          @click="showOverlaysMenu = !showOverlaysMenu"
-          class="h-6 px-1.5 bg-ui-input hover:bg-ui-hover text-ui-textPrimary border border-ui-borderDefault rounded-xs flex items-center space-x-1 text-[10px] font-mono transition"
-          :class="{ 'border-sky-500/50 text-sky-300 font-bold': toolStore.viewport.faceOrientation }"
-          title="Viewport Overlays & Diagnostics (Face Orientation, Grid, Axes)"
+        <button
+          ref="viewBtn"
+          type="button"
+          class="h-6 px-1.5 rounded-xs bg-ui-input border border-ui-borderDefault text-ui-textPrimary hover:bg-ui-hover flex items-center gap-1"
+          title="Camera view"
+          @click="toggleMenu('view')"
         >
-          <Layers class="w-3 h-3 text-sky-400" />
-          <span>Overlays</span>
-          <ChevronDown class="w-2.5 h-2.5 text-ui-textMuted" />
-        </button>
-
-        <div 
-          v-if="showOverlaysMenu"
-          class="absolute right-0 top-full mt-1 w-52 bg-[#1c1f26] border border-ui-borderStrong rounded-xs shadow-2xl z-50 p-2 space-y-2 text-[11px]"
-        >
-          <div class="text-[10px] text-ui-textMuted font-bold uppercase tracking-wider">Geometry Overlays</div>
-          
-          <!-- Face Orientation Check (Cobalt Blue vs Crimson Red) -->
-          <label class="flex items-center justify-between cursor-pointer py-0.5 hover:bg-ui-hover px-1 rounded-xs">
-            <div class="flex items-center gap-1.5">
-              <span class="w-2 h-2 rounded-full" :class="toolStore.viewport.faceOrientation ? 'bg-sky-400' : 'bg-slate-600'"></span>
-              <span class="text-slate-200 font-medium">Face Orientation</span>
-            </div>
-            <input type="checkbox" v-model="toolStore.viewport.faceOrientation" class="rounded-xs text-sky-500" />
-          </label>
-
-          <label class="flex items-center justify-between cursor-pointer py-0.5 hover:bg-ui-hover px-1 rounded-xs">
-            <span class="text-slate-300">Show 3D Grid</span>
-            <input type="checkbox" v-model="toolStore.viewport.showGrid" class="rounded-xs text-amber-500" />
-          </label>
-
-          <label class="flex items-center justify-between cursor-pointer py-0.5 hover:bg-ui-hover px-1 rounded-xs">
-            <span class="text-slate-300">Show World Axes</span>
-            <input type="checkbox" v-model="toolStore.viewport.showAxes" class="rounded-xs text-amber-500" />
-          </label>
-
-          <label class="flex items-center justify-between cursor-pointer py-0.5 hover:bg-ui-hover px-1 rounded-xs">
-            <span class="text-slate-300">Show Bones</span>
-            <input
-              type="checkbox"
-              :checked="animationStore.showBones"
-              class="rounded-xs text-amber-500"
-              @change="animationStore.setShowBones(!animationStore.showBones)"
-            />
-          </label>
-
-          <!-- Wireframe Opacity -->
-          <div class="border-t border-ui-borderSubtle pt-1.5 space-y-1">
-            <div class="flex items-center justify-between text-[10px] text-ui-textMuted">
-              <span>Wireframe Opacity</span>
-              <span class="font-mono">{{ Math.round(toolStore.viewport.wireframeOpacity * 100) }}%</span>
-            </div>
-            <input 
-              type="range" 
-              min="0.1" 
-              max="1.0" 
-              step="0.05"
-              v-model.number="toolStore.viewport.wireframeOpacity" 
-              class="w-full h-1 bg-ui-borderStrong rounded-lg appearance-none cursor-pointer accent-amber-500"
-            />
-          </div>
-        </div>
-      </div>
-
-      <!-- 2. Shading Modes -->
-      <div class="flex items-center bg-ui-input rounded-xs p-0.5 border border-ui-borderDefault">
-        <button 
-          @click="toolStore.viewport.shading = 'textured'" 
-          class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="toolStore.viewport.shading === 'textured' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
-          title="Textured Shading"
-        >
-          <BlenderIcon name="shading-textured" :size="11" />
-          <span>Tex</span>
-        </button>
-
-        <button 
-          @click="toolStore.viewport.shading = 'solid'" 
-          class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="toolStore.viewport.shading === 'solid' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
-          title="Solid Shading"
-        >
-          <BlenderIcon name="shading-solid" :size="11" />
-          <span>Solid</span>
-        </button>
-
-        <button 
-          @click="toolStore.viewport.shading = 'wireframe'" 
-          class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="toolStore.viewport.shading === 'wireframe' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
-          title="Wireframe Mode"
-        >
-          <BlenderIcon name="shading-wire" :size="11" />
-          <span>Wire</span>
-        </button>
-
-        <button 
-          @click="toolStore.viewport.shading = 'psx'" 
-          class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="toolStore.viewport.shading === 'psx' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
-          title="PSX Retro Preview"
-        >
-          <BlenderIcon name="shading-rendered" :size="11" />
-          <span>PSX</span>
+          <span class="text-ui-textMuted">View</span>
+          <span class="text-ui-textAccent font-semibold">{{ toolStore.viewport.quadView ? 'Quad' : viewLabel[cameraView] }}</span>
+          <ChevronDown class="w-3 h-3 text-ui-textMuted" />
         </button>
       </div>
 
-      <!-- 3. Flat vs Smooth Shading Mode Selector -->
-      <div class="flex items-center bg-ui-input rounded-xs p-0.5 border border-ui-borderDefault">
-        <button 
-          @click="applyObjectShade('flat')" 
-          class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="objectShade === 'flat' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
-          title="Shade Flat — one normal per face"
+      <div class="relative">
+        <button
+          ref="overlayBtn"
+          type="button"
+          class="h-6 w-6 rounded-xs border flex items-center justify-center relative"
+          :class="overlayOn
+            ? 'bg-ui-accentSubtle text-ui-textAccent border-ui-accent/40'
+            : 'bg-ui-input text-ui-textMuted border-ui-borderDefault hover:text-ui-textPrimary'"
+          title="Overlays"
+          @click="toggleMenu('overlays')"
         >
-          <span>Flat</span>
-        </button>
-
-        <button 
-          @click="applyObjectShade('smooth')" 
-          class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="objectShade === 'smooth' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
-          title="Shade Smooth — interpolated vertex normals"
-        >
-          <span>Smooth</span>
-        </button>
-
-        <button 
-          @click="applyObjectShade('auto')" 
-          class="px-1.5 py-0.5 rounded-xs text-[10px] flex items-center space-x-1 transition"
-          :class="objectShade === 'auto' ? 'bg-ui-active text-ui-textPrimary font-bold border border-ui-borderStrong shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary'"
-          title="Shade Auto Smooth — smooth, keep sharp edges by angle"
-        >
-          <span>Auto</span>
+          <Layers class="w-3 h-3" />
         </button>
       </div>
 
-      <!-- 4. X-Ray Mode Toggle (Blender Alt+Z) -->
-      <button 
-        @click="toolStore.viewport.xray = !toolStore.viewport.xray" 
-        class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs border text-[10px] transition"
-        :class="toolStore.viewport.xray ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-bold shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault hover:text-ui-textPrimary'"
-        title="Toggle X-Ray (Translucent Mesh & Occluded Selection) (Alt+Z)"
+      <div class="flex items-center h-6 px-0.5 rounded-xs bg-ui-input border border-ui-borderDefault">
+        <button
+          v-for="mode in shadingModes"
+          :key="mode.id"
+          type="button"
+          class="w-6 h-5 rounded-xs flex items-center justify-center"
+          :class="toolStore.viewport.shading === mode.id ? 'bg-ui-active text-ui-textPrimary' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          :title="mode.title"
+          @click="toolStore.viewport.shading = mode.id"
+        >
+          <BlenderIcon :name="mode.icon" :size="11" />
+        </button>
+      </div>
+
+      <div class="relative">
+        <button
+          ref="shadeBtn"
+          type="button"
+          class="h-6 px-1.5 rounded-xs bg-ui-input border border-ui-borderDefault text-ui-textPrimary hover:bg-ui-hover flex items-center gap-1"
+          title="Object shade"
+          @click="toggleMenu('shade')"
+        >
+          <span class="capitalize">{{ objectShade }}</span>
+          <ChevronDown class="w-3 h-3 text-ui-textMuted" />
+        </button>
+      </div>
+
+      <button
+        type="button"
+        class="h-6 w-6 rounded-xs border flex items-center justify-center"
+        :class="toolStore.viewport.xray
+          ? 'bg-ui-accentSubtle text-ui-textAccent border-ui-accent/40'
+          : 'bg-ui-input text-ui-textMuted border-ui-borderDefault hover:text-ui-textPrimary'"
+        title="X-Ray (Alt+Z)"
+        @click="toolStore.viewport.xray = !toolStore.viewport.xray"
       >
-        <BlenderIcon name="xray" :size="11" :color="toolStore.viewport.xray ? '#f59e0b' : 'currentColor'" />
-        <span>X-Ray</span>
+        <BlenderIcon name="xray" :size="11" :color="toolStore.viewport.xray ? 'var(--ui-accent)' : 'currentColor'" />
       </button>
 
-      <!-- 5. Quick Command Search Palette Trigger (F3 / Space) -->
-      <button 
+      <button
+        type="button"
+        class="h-6 w-6 rounded-xs bg-ui-input border border-ui-borderDefault text-ui-textMuted hover:text-ui-textPrimary flex items-center justify-center"
+        title="Command search (F3)"
         @click="triggerCommandPalette"
-        class="p-1 text-ui-textMuted hover:text-ui-textPrimary rounded-xs bg-ui-input border border-ui-borderDefault hover:bg-ui-hover transition"
-        title="Command Search Menu (F3 / Space)"
       >
-        <Search class="w-3 h-3 text-amber-400" />
+        <Search class="w-3 h-3" />
       </button>
 
-      <!-- 6. Quad View Toggle -->
-      <button 
-        @click="toolStore.viewport.quadView = !toolStore.viewport.quadView" 
-        class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs border text-[10px] transition"
-        :class="toolStore.viewport.quadView ? 'bg-ui-accentSubtle text-ui-textAccent border-ui-accent/40 font-bold shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault hover:text-ui-textPrimary'"
-        title="Toggle Quad View (Top/Front/Right/Persp) (Ctrl+Alt+Q)"
+      <button
+        type="button"
+        class="h-6 w-6 rounded-xs border flex items-center justify-center"
+        :class="toolStore.viewport.quadView
+          ? 'bg-ui-accentSubtle text-ui-textAccent border-ui-accent/40'
+          : 'bg-ui-input text-ui-textMuted border-ui-borderDefault hover:text-ui-textPrimary'"
+        title="Quad view (Ctrl+Alt+Q)"
+        @click="toolStore.viewport.quadView = !toolStore.viewport.quadView"
       >
         <LayoutGrid class="w-3 h-3" />
-        <span>Quad</span>
       </button>
     </div>
   </div>
+
+  <Teleport to="body">
+    <div
+      v-if="openMenu"
+      data-vp-nav
+      class="fixed z-[80] bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl font-mono text-ui-textSecondary text-[11px]"
+      :style="{ top: popStyle.top + 'px', left: popStyle.left + 'px', width: popStyle.width + 'px' }"
+      @pointerdown.stop
+    >
+      <div v-if="openMenu === 'mode'" class="p-1">
+        <button
+          type="button"
+          class="w-full text-left px-2 py-1.5 hover:bg-ui-hover rounded-xs flex items-center justify-between"
+          :class="{ 'text-ui-textAccent font-semibold': toolStore.selectMode === 'object' }"
+          @click="setInteractionMode('object')"
+        >
+          <span class="flex items-center gap-2">
+            <BlenderIcon name="mesh-cube" :size="12" color="var(--ui-accent)" />
+            Object
+          </span>
+          <span class="text-[10px] text-ui-textMuted">Tab</span>
+        </button>
+        <button
+          type="button"
+          class="w-full text-left px-2 py-1.5 hover:bg-ui-hover rounded-xs flex items-center justify-between"
+          :class="{ 'text-sky-400 font-semibold': toolStore.selectMode !== 'object' }"
+          @click="setInteractionMode('edit')"
+        >
+          <span class="flex items-center gap-2">
+            <BlenderIcon name="vertex-select" :size="12" color="#38bdf8" />
+            Edit
+          </span>
+          <span class="text-[10px] text-ui-textMuted">Tab</span>
+        </button>
+      </div>
+
+      <div v-else-if="openMenu === 'space'" class="p-2 grid grid-cols-2 gap-2">
+        <div>
+          <div class="px-1 pb-1 text-[9px] font-bold uppercase tracking-wider text-ui-textMuted">Space</div>
+          <button
+            v-for="ori in (['global', 'local', 'normal', 'view'] as const)"
+            :key="ori"
+            type="button"
+            class="w-full text-left px-1.5 py-1 rounded-xs capitalize hover:bg-ui-hover flex items-center justify-between"
+            :class="{ 'text-sky-400 font-semibold': toolStore.transformOrientation === ori }"
+            @click="setOrientation(ori)"
+          >
+            <span>{{ ori }}</span>
+            <Check v-if="toolStore.transformOrientation === ori" class="w-3 h-3" />
+          </button>
+        </div>
+        <div>
+          <div class="px-1 pb-1 text-[9px] font-bold uppercase tracking-wider text-ui-textMuted">Pivot</div>
+          <button
+            v-for="piv in ([
+              { id: 'median' as const, label: 'Median' },
+              { id: 'active' as const, label: 'Active' },
+              { id: 'cursor' as const, label: '3D Cursor' },
+            ])"
+            :key="piv.id"
+            type="button"
+            class="w-full text-left px-1.5 py-1 rounded-xs hover:bg-ui-hover flex items-center justify-between"
+            :class="{ 'text-ui-textAccent font-semibold': toolStore.pivotPoint === piv.id }"
+            @click="setPivot(piv.id)"
+          >
+            <span>{{ piv.label }}</span>
+            <Check v-if="toolStore.pivotPoint === piv.id" class="w-3 h-3" />
+          </button>
+        </div>
+      </div>
+
+      <div v-else-if="openMenu === 'snap'" class="p-2 space-y-2">
+        <div class="text-[9px] font-bold uppercase tracking-wider text-ui-textMuted">Increment</div>
+        <div class="grid grid-cols-4 gap-1">
+          <button
+            v-for="sz in [0.1, 0.25, 0.5, 1.0]"
+            :key="sz"
+            type="button"
+            class="py-1 rounded-xs border text-[10px]"
+            :class="toolStore.snapping.gridSize === sz
+              ? 'bg-ui-accentSubtle text-ui-textAccent border-ui-accent/40 font-semibold'
+              : 'border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary'"
+            @click="toolStore.snapping.gridSize = sz"
+          >{{ sz }}</button>
+        </div>
+        <div class="border-t border-ui-borderSubtle pt-1.5 space-y-1">
+          <div class="text-[9px] font-bold uppercase tracking-wider text-ui-textMuted">Snap to</div>
+          <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5">
+            <span>Vertex</span>
+            <input type="checkbox" v-model="toolStore.snapping.vertex" class="rounded-xs accent-ui-accent" />
+          </label>
+          <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5">
+            <span>Edge midpoint</span>
+            <input type="checkbox" v-model="toolStore.snapping.edge" class="rounded-xs accent-ui-accent" />
+          </label>
+          <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5">
+            <span>Face center</span>
+            <input type="checkbox" v-model="toolStore.snapping.face" class="rounded-xs accent-ui-accent" />
+          </label>
+        </div>
+      </div>
+
+      <div v-else-if="openMenu === 'view'" class="p-1">
+        <button
+          v-for="opt in ([
+            { id: 'persp' as const, label: 'Perspective', hint: '' },
+            { id: 'top' as const, label: 'Top', hint: 'Num 7' },
+            { id: 'front' as const, label: 'Front', hint: 'Num 1' },
+            { id: 'right' as const, label: 'Right', hint: 'Num 3' },
+            { id: 'iso' as const, label: 'Isometric', hint: 'Num 0' },
+          ])"
+          :key="opt.id"
+          type="button"
+          class="w-full text-left px-2 py-1 rounded-xs hover:bg-ui-hover flex items-center justify-between"
+          :class="{ 'text-ui-textAccent font-semibold': cameraView === opt.id && !toolStore.viewport.quadView }"
+          @click="toolStore.viewport.quadView = false; setView(opt.id)"
+        >
+          <span>{{ opt.label }}</span>
+          <span v-if="opt.hint" class="text-[10px] text-ui-textMuted">{{ opt.hint }}</span>
+        </button>
+      </div>
+
+      <div v-else-if="openMenu === 'overlays'" class="p-2 space-y-1.5">
+        <div class="text-[9px] font-bold uppercase tracking-wider text-ui-textMuted">Overlays</div>
+        <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5 hover:bg-ui-hover rounded-xs">
+          <span>Face orientation</span>
+          <input type="checkbox" v-model="toolStore.viewport.faceOrientation" class="rounded-xs accent-ui-accent" />
+        </label>
+        <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5 hover:bg-ui-hover rounded-xs">
+          <span>Grid</span>
+          <input type="checkbox" v-model="toolStore.viewport.showGrid" class="rounded-xs accent-ui-accent" />
+        </label>
+        <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5 hover:bg-ui-hover rounded-xs">
+          <span>World axes</span>
+          <input type="checkbox" v-model="toolStore.viewport.showAxes" class="rounded-xs accent-ui-accent" />
+        </label>
+        <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5 hover:bg-ui-hover rounded-xs">
+          <span>Bones</span>
+          <input
+            type="checkbox"
+            :checked="animationStore.showBones"
+            class="rounded-xs accent-ui-accent"
+            @change="animationStore.setShowBones(!animationStore.showBones)"
+          />
+        </label>
+        <div class="border-t border-ui-borderSubtle pt-1.5 space-y-1">
+          <div class="flex items-center justify-between text-[10px] text-ui-textMuted">
+            <span>Wire opacity</span>
+            <span class="tabular-nums">{{ Math.round(toolStore.viewport.wireframeOpacity * 100) }}%</span>
+          </div>
+          <input
+            type="range"
+            min="0.1"
+            max="1.0"
+            step="0.05"
+            v-model.number="toolStore.viewport.wireframeOpacity"
+            class="w-full h-1 bg-ui-borderStrong rounded-lg appearance-none cursor-pointer accent-ui-accent"
+          />
+        </div>
+      </div>
+
+      <div v-else-if="openMenu === 'shade'" class="p-1">
+        <button
+          type="button"
+          class="w-full text-left px-2 py-1.5 rounded-xs hover:bg-ui-hover"
+          :class="{ 'text-ui-textAccent font-semibold': objectShade === 'flat' }"
+          title="One normal per face"
+          @click="applyObjectShade('flat')"
+        >Flat</button>
+        <button
+          type="button"
+          class="w-full text-left px-2 py-1.5 rounded-xs hover:bg-ui-hover"
+          :class="{ 'text-ui-textAccent font-semibold': objectShade === 'smooth' }"
+          title="Interpolated vertex normals"
+          @click="applyObjectShade('smooth')"
+        >Smooth</button>
+        <button
+          type="button"
+          class="w-full text-left px-2 py-1.5 rounded-xs hover:bg-ui-hover"
+          :class="{ 'text-ui-textAccent font-semibold': objectShade === 'auto' }"
+          title="Smooth, keep sharp edges by angle"
+          @click="applyObjectShade('auto')"
+        >Auto smooth</button>
+      </div>
+    </div>
+  </Teleport>
 </template>

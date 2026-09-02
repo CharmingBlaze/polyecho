@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, toRef, watch } from 'vue'
 import { useFloatingDrag } from '../../composables/useFloatingDrag'
 import { useToolStore } from '../../stores/toolStore'
 import { useProjectStore } from '../../stores/projectStore'
 import { useAnimationStore } from '../../stores/animationStore'
+import { useLayoutStore } from '../../stores/layoutStore'
 import { SelectMode, ModelToolType } from '../../types/tools'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import { requestModalTool, requestPrimitiveMenu, requestFillFace, type ModalToolCommand } from '../../core/commands/editorCommands'
@@ -20,6 +21,7 @@ import {
 const toolStore = useToolStore()
 const projectStore = useProjectStore()
 const animationStore = useAnimationStore()
+const layoutStore = useLayoutStore()
 
 const isUvSelectionMode = computed(() => toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'uv')
 const isMeshWorkspace = computed(() => toolStore.isMeshWorkspace())
@@ -48,11 +50,23 @@ const hasFillBoundary = computed(() => {
   return boundary.size >= 3
 })
 
-const isFloating = ref(true)
-const columnsPref = ref<1 | 2>(2)
-const isMinimized = ref(false)
-const pos = ref({ x: 16, y: 46 })
-const hasMovedToolbar = ref(false)
+const isFloating = computed({
+  get: () => layoutStore.leftToolbarFloating,
+  set: (v: boolean) => { layoutStore.leftToolbarFloating = v }
+})
+const columnsPref = computed({
+  get: () => layoutStore.leftToolbarColumns,
+  set: (v: 1 | 2) => { layoutStore.leftToolbarColumns = v }
+})
+const isMinimized = computed({
+  get: () => layoutStore.leftToolbarMinimized,
+  set: (v: boolean) => { layoutStore.leftToolbarMinimized = v }
+})
+const pos = toRef(layoutStore, 'leftToolbarPos')
+const hasMovedToolbar = computed({
+  get: () => layoutStore.leftToolbarHasMoved,
+  set: (v: boolean) => { layoutStore.leftToolbarHasMoved = v }
+})
 const viewAnchor = ref({ left: 16, top: 46, width: 800, height: 600 })
 const { isDragging, startDrag: startFloatingDrag } = useFloatingDrag(pos, {
   enabled: () => isFloating.value,
@@ -73,7 +87,7 @@ function startDrag(e: PointerEvent) {
   startFloatingDrag(e)
 }
 
-/** Mesh operators vs mode-specific tools — never stacked. */
+/** Mesh operators vs mode-specific tools — never stacked. User picks the tab; selection must not flip it. */
 const shelfTab = ref<'ops' | 'context'>('ops')
 
 const contextTabLabel = computed(() => {
@@ -131,13 +145,6 @@ const panelStyle = computed(() => {
   }
   return style
 })
-
-watch(
-  () => toolStore.selectMode,
-  () => {
-    if (isMeshWorkspace.value) shelfTab.value = 'context'
-  }
-)
 
 watch(
   () => toolStore.appMode,
@@ -207,18 +214,15 @@ function setSelectMode(mode: SelectMode) {
     ensureActiveMeshSelection()
     toolStore.selectMode = mode
   }
-  shelfTab.value = 'context'
 }
 
 function toggleOriginMode() {
   if (toolStore.selectMode === 'origin') {
     toolStore.selectMode = 'object'
-    shelfTab.value = 'ops'
   } else {
     if (toolStore.appMode !== 'blockout') toolStore.setAppMode('model')
     ensureActiveMeshSelection()
     toolStore.selectMode = 'origin'
-    shelfTab.value = 'context'
   }
 }
 
@@ -229,8 +233,8 @@ function setModelTool(tool: ModelToolType) {
 
 function startModalOp(opName: ModalToolCommand) {
   if (toolStore.appMode !== 'blockout') toolStore.setAppMode('model')
-  if (opName !== 'polydraw') ensureActiveMeshSelection()
-  if (opName === 'polydraw') toolStore.setModelTool('polydraw')
+  if (opName !== 'polydraw' && opName !== 'polybuild') ensureActiveMeshSelection()
+  if (opName === 'polydraw' || opName === 'polybuild') toolStore.setModelTool(opName)
   requestModalTool(opName)
 }
 
@@ -388,11 +392,31 @@ function handleSymmetrizeBones() {
             <button
               v-if="toolStore.appMode === 'blockout'"
               type="button"
-              :class="[iconBtn, tone(toolStore.modelTool === 'polydraw'), 'order-first']"
-              title="Poly Draw (F)"
+              :class="[
+                iconBtn,
+                'order-first',
+                toolStore.modelTool === 'polydraw'
+                  ? 'bg-ui-accent/20 text-ui-textAccent border border-ui-accent/50 shadow-[inset_0_0_0_1px_rgba(245,158,11,0.25)]'
+                  : 'bg-amber-500/10 text-amber-300 border border-amber-500/30 hover:bg-amber-500/15'
+              ]"
+              title="Poly Draw (F) — silhouette + extrude a new volume"
               @click="startModalOp('polydraw')"
             >
               <BlenderIcon name="face-select" :size="iconPx" color="#f59e0b" />
+            </button>
+            <button
+              v-if="toolStore.appMode === 'blockout'"
+              type="button"
+              :class="[
+                iconBtn,
+                toolStore.modelTool === 'polybuild'
+                  ? 'bg-sky-500/20 text-sky-300 border border-sky-400/50'
+                  : 'text-sky-300/80 hover:text-sky-200 hover:bg-sky-500/10 border border-sky-500/25'
+              ]"
+              title="Poly Build (V) — click empty space for a new vert, click an old vert to reuse it, close the loop to make a face"
+              @click="startModalOp('polybuild')"
+            >
+              <BlenderIcon name="vertex-select" :size="iconPx" color="#38bdf8" />
             </button>
             <button type="button" :class="[iconBtn, tone(toolStore.modelTool === 'move')]" title="Move (G)" @click="setModelTool('move')">
               <BlenderIcon name="tool-move" :size="iconPx" />

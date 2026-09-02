@@ -9,7 +9,9 @@ export const EDITOR_EVENTS = {
   startPrimitivePlacement: 'editor:start-primitive-placement',
   primitiveCreated: 'editor:primitive-created',
   openExport: 'editor:open-export',
-  fillFace: 'editor:fill-face'
+  fillFace: 'editor:fill-face',
+  openPie: 'editor:open-pie',
+  toggleUvOverlay: 'editor:toggle-uv-overlay'
 } as const
 
 export type ModalToolCommand =
@@ -22,6 +24,7 @@ export type ModalToolCommand =
   | 'knife'
   | 'loop_cut'
   | 'polydraw'
+  | 'polybuild'
 
 export type CameraViewCommand = 'persp' | 'top' | 'front' | 'right' | 'iso'
 export type ExportFormatCommand = 'glb' | 'obj'
@@ -59,4 +62,14 @@ export function requestExport(format?: ExportFormatCommand) {
 
 export function requestFillFace() {
   window.dispatchEvent(new CustomEvent(EDITOR_EVENTS.fillFace))
+}
+
+export type PieMenuCommand = 'shading' | 'mode' | 'snap'
+
+export function requestOpenPie(menu: PieMenuCommand) {
+  window.dispatchEvent(new CustomEvent(EDITOR_EVENTS.openPie, { detail: menu }))
+}
+
+export function requestToggleUvOverlay() {
+  window.dispatchEvent(new CustomEvent(EDITOR_EVENTS.toggleUvOverlay))
 }

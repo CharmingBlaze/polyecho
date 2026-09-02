@@ -23,7 +23,7 @@ export class ScaleOperator extends ModalOperator {
       factor = this.snapManager.snapScale(factor, 0.1)
     }
 
-    const basis = PivotManager.getBasis(this.orientation, this.ctx.camera)
+    const basis = PivotManager.getBasis(this.orientation, this.ctx.camera, undefined, this.ctx.objectEuler)
 
     const targetVertIds = this.collectTargetVertIds()
 
@@ -69,6 +69,7 @@ export class ScaleOperator extends ModalOperator {
       }
     }
 
+    this.applyLiveSymmetry()
     this.ctx.mesh.recalculateNormals()
   }
 

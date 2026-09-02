@@ -2,6 +2,8 @@ import { MeshObject, Vertex, Face, Vector3D } from '../../types/mesh'
 import { addVec3, scaleVec3, computeCentroid, computeFaceNormal, subVec3, lengthVec3, crossVec3, normalizeVec3, dotVec3 } from '../../utils/math'
 import { MeshBridge } from '../mesh/MeshBridge'
 import { InsetKernel } from '../mesh/operations/InsetKernel'
+import { ExtrudeKernel } from '../mesh/operations/ExtrudeKernel'
+import { BevelKernel } from '../mesh/operations/BevelKernel'
 
 function genId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).substring(2, 9)}`
@@ -18,76 +20,35 @@ export interface OperationResult {
  * creating connecting side quad faces and moving the front face outward.
  */
 export function extrudeFaces(mesh: MeshObject, faceIds: string[], distance = 0.5): OperationResult {
-  const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
-  const targetFaceIndices = newMesh.faces
-    .map((f, i) => (faceIds.includes(f.id) ? i : -1))
-    .filter(i => i !== -1)
-
-  if (targetFaceIndices.length === 0) {
-    return { mesh: newMesh, selectedFaceIds: faceIds, selectedVertexIds: [] }
+  if (faceIds.length === 0) {
+    return { mesh, selectedFaceIds: faceIds, selectedVertexIds: [] }
   }
 
-  const newSelectedFaces: string[] = []
-  const newSelectedVerts: string[] = []
-
-  for (const fIdx of targetFaceIndices) {
-    const originalFace = newMesh.faces[fIdx]
-    const vertMap = new Map<string, Vertex>()
-    for (const v of newMesh.vertices) {
-      vertMap.set(v.id, v)
-    }
-
-    const faceVerts = originalFace.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
-    const normal = originalFace.normal || computeFaceNormal(faceVerts.map(v => v.position))
-    const offset = scaleVec3(normal, distance)
-
-    // Create new extruded vertices
-    const newVertIds: string[] = []
-    for (const v of faceVerts) {
-      const newVId = genId('v_ext')
-      newMesh.vertices.push({
-        id: newVId,
-        position: addVec3(v.position, offset),
-        color: v.color || '#ffffff',
-        selected: true
-      })
-      newVertIds.push(newVId)
-      newSelectedVerts.push(newVId)
-    }
-
-    // Build connecting side quad walls
-    const count = originalFace.vertexIds.length
-    for (let i = 0; i < count; i++) {
-      const next = (i + 1) % count
-      const vOld1 = originalFace.vertexIds[i]
-      const vOld2 = originalFace.vertexIds[next]
-      const vNew1 = newVertIds[i]
-      const vNew2 = newVertIds[next]
-
-      newMesh.faces.push({
-        id: genId('f_side'),
-        vertexIds: [vOld1, vOld2, vNew2, vNew1],
-        uvs: [
-          { u: 0, v: 0 },
-          { u: 1, v: 0 },
-          { u: 1, v: 1 },
-          { u: 0, v: 1 }
-        ],
-        materialIndex: originalFace.materialIndex,
-        selected: false
-      })
-    }
-
-    // Replace original face vertices with new extruded vertices
-    originalFace.vertexIds = newVertIds
-    originalFace.selected = true
-    newSelectedFaces.push(originalFace.id)
+  const bridge = MeshBridge.meshObjectToEditableMesh(mesh)
+  const numFaces = faceIds
+    .map(id => bridge.strToNumFaceId.get(id))
+    .filter((id): id is number => id !== undefined)
+  if (numFaces.length === 0) {
+    return { mesh, selectedFaceIds: faceIds, selectedVertexIds: [] }
   }
 
+  const result = ExtrudeKernel.extrudeFaces(bridge.mesh, numFaces)
+  const offset = result.regionNormal.clone().multiplyScalar(distance)
+  for (const vid of result.newVertexIds) {
+    bridge.mesh.vertices.get(vid)?.position.add(offset)
+  }
+  bridge.mesh.recalculateNormals()
+
+  const out = MeshBridge.editableMeshToMeshObject(
+    bridge.mesh,
+    mesh,
+    bridge.numToStrVertId,
+    bridge.numToStrFaceId
+  )
   return {
-    mesh: newMesh,
-    selectedFaceIds: newSelectedFaces,
-    selectedVertexIds: newSelectedVerts
+    mesh: out,
+    selectedFaceIds: result.extrudedFaceIds.map(id => bridge.numToStrFaceId.get(id) || `f_${id}`),
+    selectedVertexIds: result.newVertexIds.map(id => bridge.numToStrVertId.get(id) || `v_${id}`)
   }
 }
 
@@ -297,80 +258,33 @@ export function deleteElements(mesh: MeshObject, mode: 'vertex' | 'edge' | 'face
  * Bevels / Chamfers selected faces with an offset distance.
  */
 export function bevelFaces(mesh: MeshObject, faceIds: string[], offset = 0.2): OperationResult {
-  const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
-  const targetFaceIndices = newMesh.faces
-    .map((f, i) => (faceIds.includes(f.id) ? i : -1))
-    .filter(i => i !== -1)
-
-  if (targetFaceIndices.length === 0) {
-    return { mesh: newMesh, selectedFaceIds: faceIds, selectedVertexIds: [] }
+  if (faceIds.length === 0) {
+    return { mesh, selectedFaceIds: faceIds, selectedVertexIds: [] }
   }
 
-  const newSelectedFaces: string[] = []
-  const newSelectedVerts: string[] = []
-
-  for (const fIdx of targetFaceIndices) {
-    const face = newMesh.faces[fIdx]
-    const vertMap = new Map<string, Vertex>()
-    for (const v of newMesh.vertices) {
-      vertMap.set(v.id, v)
-    }
-
-    const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
-    const centroid = computeCentroid(faceVerts.map(v => v.position))
-    const normal = face.normal || computeFaceNormal(faceVerts.map(v => v.position))
-
-    const newVertIds: string[] = []
-    const scaleFactor = Math.max(0.05, Math.min(0.95, 1 - (offset / 1.5)))
-    for (const v of faceVerts) {
-      const newVId = genId('v_bev')
-      const toCenter = subVec3(centroid, v.position)
-      const insetPos = addVec3(v.position, scaleVec3(toCenter, 1 - scaleFactor))
-      const chamferPos = addVec3(insetPos, scaleVec3(normal, offset * 0.3))
-
-      newMesh.vertices.push({
-        id: newVId,
-        position: chamferPos,
-        color: v.color || '#ffffff',
-        selected: true
-      })
-      newVertIds.push(newVId)
-      newSelectedVerts.push(newVId)
-    }
-
-    // Create perimeter bevel chamfer quad faces
-    const count = face.vertexIds.length
-    for (let i = 0; i < count; i++) {
-      const next = (i + 1) % count
-      const vOld1 = face.vertexIds[i]
-      const vOld2 = face.vertexIds[next]
-      const vNew1 = newVertIds[i]
-      const vNew2 = newVertIds[next]
-
-      newMesh.faces.push({
-        id: genId('f_bevel_quad'),
-        vertexIds: [vOld1, vOld2, vNew2, vNew1],
-        uvs: [
-          { u: 0, v: 0 },
-          { u: 1, v: 0 },
-          { u: 1, v: 1 },
-          { u: 0, v: 1 }
-        ],
-        materialIndex: face.materialIndex,
-        selected: false
-      })
-    }
-
-    // Update center face
-    face.vertexIds = newVertIds
-    face.selected = true
-    newSelectedFaces.push(face.id)
+  const bridge = MeshBridge.meshObjectToEditableMesh(mesh)
+  const numFaces = faceIds
+    .map(id => bridge.strToNumFaceId.get(id))
+    .filter((id): id is number => id !== undefined)
+  if (numFaces.length === 0) {
+    return { mesh, selectedFaceIds: faceIds, selectedVertexIds: [] }
   }
 
+  const result = BevelKernel.bevelFaces(bridge.mesh, numFaces, {
+    width: Math.max(0.001, offset),
+    segments: 1,
+    clampOverlap: true
+  })
+  const out = MeshBridge.editableMeshToMeshObject(
+    bridge.mesh,
+    mesh,
+    bridge.numToStrVertId,
+    bridge.numToStrFaceId
+  )
   return {
-    mesh: newMesh,
-    selectedFaceIds: newSelectedFaces,
-    selectedVertexIds: newSelectedVerts
+    mesh: out,
+    selectedFaceIds: result.beveledFaceIds.map(id => bridge.numToStrFaceId.get(id) || `f_${id}`),
+    selectedVertexIds: result.beveledVertexIds.map(id => bridge.numToStrVertId.get(id) || `v_${id}`)
   }
 }
 

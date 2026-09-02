@@ -1066,7 +1066,7 @@ export const useProjectStore = defineStore('project', () => {
           width: t.width,
           height: t.height,
           dataUrl: t.pixelBuffer ? t.pixelBuffer.canvas.toDataURL() : '',
-          atlas: t.atlas
+          atlas: t.atlas ? { ...t.atlas } : undefined
         }))
 
         await ProjectStorage.saveProject({

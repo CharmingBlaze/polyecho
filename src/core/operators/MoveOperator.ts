@@ -48,7 +48,7 @@ export class MoveOperator extends ModalOperator {
     const hit = TransformSolver.rayPlaneIntersect(this.currentRay, this.pivot, this.ctx.camera)
     if (hit) this.currentHit.copy(hit)
 
-    const basis = PivotManager.getBasis(this.orientation, this.ctx.camera)
+    const basis = PivotManager.getBasis(this.orientation, this.ctx.camera, undefined, this.ctx.objectEuler)
     const numVal = this.numericInput.getValue()
 
     let delta = TransformSolver.solveMoveDelta(
@@ -86,7 +86,7 @@ export class MoveOperator extends ModalOperator {
     }
 
     let extra = new THREE.Vector3()
-    if ((this.ctx.snapVertex || this.ctx.snapEdge) && movingWorld.length > 0) {
+    if ((this.ctx.snapVertex || this.ctx.snapEdge || this.ctx.snapFace) && movingWorld.length > 0) {
       const targets: THREE.Vector3[] = []
       if (this.ctx.snapVertex) {
         for (const [id, v] of this.ctx.mesh.vertices) {
@@ -103,6 +103,20 @@ export class MoveOperator extends ModalOperator {
           targets.push(a.clone().add(b).multiplyScalar(0.5).applyMatrix4(worldMat))
         }
       }
+      if (this.ctx.snapFace) {
+        for (const f of this.ctx.mesh.faces.values()) {
+          if (f.vertexIds.every(id => targetVertIds.has(id))) continue
+          const c = new THREE.Vector3()
+          let n = 0
+          for (const id of f.vertexIds) {
+            const p = this.ctx.mesh.vertices.get(id)?.position
+            if (!p) continue
+            c.add(p)
+            n++
+          }
+          if (n > 0) targets.push(c.multiplyScalar(1 / n).applyMatrix4(worldMat))
+        }
+      }
       const thresh = Math.max(0.06, (this.ctx.gridSize || 0.25) * 0.75)
       const snap = this.snapManager.findRigidSnapOffset(movingWorld, targets, thresh)
       if (snap) extra.copy(snap)
@@ -112,6 +126,7 @@ export class MoveOperator extends ModalOperator {
       this.writeWorldPos(movingIds[i], movingWorld[i].add(extra))
     }
 
+    this.applyLiveSymmetry()
     this.ctx.mesh.recalculateNormals()
   }
 

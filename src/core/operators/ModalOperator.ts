@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { EditableMesh, MeshSnapshot } from '../mesh/MeshKernel'
 import { NumericInput } from '../transform/NumericInput'
 import { SnapManager } from '../transform/SnapManager'
+import { applyLiveSymmetry } from '../transform/LiveSymmetry'
 import { AxisConstraint, TransformOrientation, PivotMode } from '../transform/TransformTypes'
 import type { ViewQuadrant } from '../geometry/ScreenGeometry'
 import { ScreenGeometry } from '../geometry/ScreenGeometry'
@@ -26,8 +27,16 @@ export interface OperatorContext {
   snapGrid?: boolean
   snapVertex?: boolean
   snapEdge?: boolean
+  snapFace?: boolean
+  symmetryX?: boolean
+  symmetryY?: boolean
+  symmetryZ?: boolean
   /** Object TRS so G/R/S run in world space then write local verts. */
   objectMatrix?: THREE.Matrix4
+  /** Initial G/R/S space from the viewport header (X still cycles). */
+  startOrientation?: TransformOrientation
+  cursorWorld?: THREE.Vector3
+  objectEuler?: THREE.Euler
   onUpdatePreview: () => void
   onCommit: (actionName: string) => void
   onCancel: () => void
@@ -73,6 +82,8 @@ export abstract class ModalOperator {
     this.startMouse = { x: startPointer.x, y: startPointer.y }
     this.currentMouse = { x: startPointer.x, y: startPointer.y }
 
+    if (ctx.startOrientation) this.orientation = ctx.startOrientation
+
     this.initPivot()
     this.numericInput.reset()
     this.updateStatus()
@@ -101,6 +112,19 @@ export abstract class ModalOperator {
     v.position.copy(world).applyMatrix4(this.worldToLocal)
   }
 
+  protected applyLiveSymmetry() {
+    if (this.ctx.isObjectMode) return
+    applyLiveSymmetry(
+      [...this.ctx.mesh.vertices.values()].map(v => ({ id: v.id, position: v.position })),
+      this.collectTargetVertIds(),
+      {
+        x: this.ctx.symmetryX,
+        y: this.ctx.symmetryY,
+        z: this.ctx.symmetryZ,
+      }
+    )
+  }
+
   protected initPivot() {
     const positions: THREE.Vector3[] = []
     for (const vid of this.collectTargetVertIds()) {
@@ -109,7 +133,17 @@ export abstract class ModalOperator {
     }
 
     this.pivot.set(0, 0, 0)
-    if (positions.length > 0) {
+    if (this.ctx.pivotMode === 'CURSOR' && this.ctx.cursorWorld) {
+      this.pivot.copy(this.ctx.cursorWorld)
+    } else if (this.ctx.pivotMode === 'ACTIVE_ELEMENT') {
+      const last = this.ctx.selectedVertIds[this.ctx.selectedVertIds.length - 1]
+      const active = last != null ? this.initialVertices.get(last) : undefined
+      if (active) this.pivot.copy(active)
+      else if (positions.length > 0) {
+        positions.forEach(p => this.pivot.add(p))
+        this.pivot.divideScalar(positions.length)
+      }
+    } else if (positions.length > 0) {
       positions.forEach(p => this.pivot.add(p))
       this.pivot.divideScalar(positions.length)
     }
@@ -190,6 +224,10 @@ export abstract class ModalOperator {
 
   wheel(_event: WheelEvent): boolean {
     return false
+  }
+
+  syncPointerFromEvent(e: { clientX: number; clientY: number }) {
+    this.currentMouse = { x: e.clientX, y: e.clientY }
   }
 
   handlePointerDown(_button: number): boolean {

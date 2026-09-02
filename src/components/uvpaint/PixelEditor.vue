@@ -8,6 +8,7 @@ import BlenderIcon from '../icons/BlenderIcon.vue'
 import ImportTextureModal from '../modals/ImportTextureModal.vue'
 import PaletteLibraryModal from '../modals/PaletteLibraryModal.vue'
 import { DEFAULT_PALETTES, loadCustomPalettes, saveCustomPalettes, snapColorToPalette, type Palette } from '../../utils/color'
+import { useFloatingDrag } from '../../composables/useFloatingDrag'
 import { 
   ZoomIn, 
   ZoomOut, 
@@ -21,9 +22,16 @@ import {
   Moon,
   Plus,
   Copy,
-  Trash2
+  Trash2,
+  Layers,
+  GripHorizontal,
+  Minus,
+  X,
+  Eye,
+  EyeOff
 } from 'lucide-vue-next'
 import { generateShadingRamp } from '../../utils/color'
+import { EDITOR_EVENTS } from '../../core/commands/editorCommands'
 
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
@@ -107,6 +115,16 @@ const zoom = ref<number>(6)
 const isFitToView = ref<boolean>(true)
 const showUvOverlay = ref<boolean>(true)
 const showPixelGrid = ref<boolean>(true)
+const layersPanelOpen = ref(true)
+const layersMinimized = ref(false)
+const layersPos = ref({ x: 88, y: 120 })
+const { isDragging: layersDragging, startDrag: startLayersDrag } = useFloatingDrag(layersPos, {
+  minX: 8,
+  minY: 36,
+  maxPadX: 220,
+  maxPadY: 72
+})
+const paintLayerCount = computed(() => projectStore.pixelBuffer.layers.length)
 
 const paintTools = [
   { id: 'brush', icon: 'brush', key: 'B', title: 'Pencil / Brush Tool' },
@@ -132,6 +150,7 @@ let isDrawing = false
 let strokeDirty = false
 let dragStartCoords: { x: number; y: number } | null = null
 let dragCurrentCoords: { x: number; y: number } | null = null
+let lastDrawCoords: { x: number; y: number } | null = null
 
 // Custom Resize Modal State
 const showResizeModal = ref(false)
@@ -312,11 +331,10 @@ function onKeyDown(e: KeyboardEvent) {
   if (e.code === 'Space') {
     isSpacePressed.value = true
   }
-  if ((e.key === 'o' || e.key === 'O') && !e.ctrlKey && !e.metaKey && !e.altKey) {
-    const t = e.target as HTMLElement | null
-    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
-    showUvOverlay.value = !showUvOverlay.value
-  }
+}
+
+function onToggleUvOverlay() {
+  showUvOverlay.value = !showUvOverlay.value
 }
 
 function onKeyUp(e: KeyboardEvent) {
@@ -356,6 +374,24 @@ function handleLayerMetaChange() {
 function setActiveLayer(id: string) {
   projectStore.pixelBuffer.activeLayerId = id
   renderCanvas()
+}
+
+function toggleLayersPanel() {
+  if (layersPanelOpen.value && !layersMinimized.value) {
+    layersPanelOpen.value = false
+    return
+  }
+  layersPanelOpen.value = true
+  layersMinimized.value = false
+}
+
+function closeLayersPanel() {
+  layersPanelOpen.value = false
+}
+
+function toggleLayerVisible(layer: { visible: boolean }) {
+  layer.visible = !layer.visible
+  handleLayerMetaChange()
 }
 
 function applyAdjustment(action: string) {
@@ -603,6 +639,7 @@ function onPointerDown(e: PointerEvent) {
   isDrawing = true
   dragStartCoords = { ...coords }
   dragCurrentCoords = { ...coords }
+  lastDrawCoords = null
 
   const tool = toolStore.paintTool
   if (tool === 'line' || tool === 'rect' || tool === 'circle') {
@@ -610,7 +647,7 @@ function onPointerDown(e: PointerEvent) {
     return
   }
 
-  projectStore.recordState('Pixel Paint')
+  if (tool !== 'picker') projectStore.recordState('Pixel Paint')
   drawPixel(coords.x, coords.y, e.button === 2, e.pressure)
 }
 
@@ -727,6 +764,7 @@ function onPointerUp(e: PointerEvent) {
   strokeDirty = false
   dragStartCoords = null
   dragCurrentCoords = null
+  lastDrawCoords = null
 }
 
 function resolveDrawColor(isSecondary = false): string {
@@ -741,11 +779,13 @@ function drawPixel(x: number, y: number, isSecondary = false, pressure = 1.0) {
   const pb = projectStore.ensureTextureBuffer(projectStore.activeTexture)
   const color = resolveDrawColor(isSecondary)
   const size = toolStore.brushSize
-  const opacity = toolStore.brushOpacity * (pressure > 0 ? pressure : 1.0)
+  const usePressure = toolStore.currentPointerType === 'pen' && toolStore.stylusPressureEnabled
+  const opacity = toolStore.brushOpacity * (usePressure && pressure > 0 ? pressure : 1.0)
   const shape = toolStore.brushShape
 
   if (toolStore.paintTool === 'eraser') {
-    pb.erase(x, y, size, shape)
+    if (lastDrawCoords) pb.eraseLine(lastDrawCoords.x, lastDrawCoords.y, x, y, size, shape)
+    else pb.erase(x, y, size, shape)
   } else if (toolStore.paintTool === 'bucket') {
     pb.floodFill(x, y, color)
   } else if (toolStore.paintTool === 'picker') {
@@ -768,9 +808,11 @@ function drawPixel(x: number, y: number, isSecondary = false, pressure = 1.0) {
       shadePaletteConstraint.value ? activePalette.value : undefined
     )
   } else {
-    pb.drawBrush(x, y, color, size, opacity, shape)
+    if (lastDrawCoords) pb.drawLine(lastDrawCoords.x, lastDrawCoords.y, x, y, color, size, opacity, shape)
+    else pb.drawBrush(x, y, color, size, opacity, shape)
   }
 
+  lastDrawCoords = { x, y }
   strokeDirty = true
   projectStore.markTexturePreview()
   renderCanvas()
@@ -879,9 +921,12 @@ onMounted(() => {
   window.addEventListener('click', closeDropdowns)
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
+  window.addEventListener(EDITOR_EVENTS.toggleUvOverlay, onToggleUvOverlay)
   nextTick(() => {
     resetPanZoom()
     if (containerRef.value) {
+      const rect = containerRef.value.getBoundingClientRect()
+      layersPos.value = { x: rect.left + 10, y: rect.top + 10 }
       containerResizeObserver = new ResizeObserver(() => {
         if (isFitToView.value) resetPanZoom()
       })
@@ -894,6 +939,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('click', closeDropdowns)
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
+  window.removeEventListener(EDITOR_EVENTS.toggleUvOverlay, onToggleUvOverlay)
   containerResizeObserver?.disconnect()
 })
 
@@ -1392,60 +1438,150 @@ defineExpose({
         @pointerleave="onPointerUp"
         @pointercancel="onPointerUp"
       >
-        <!-- Layers (paint workspace — also in Texture inspector) -->
-        <div class="pixel-layers-dock" aria-label="Texture layers">
-          <div class="flex items-center justify-between px-1.5 py-1 border-b border-ui-borderSubtle">
-            <span class="text-[9px] font-bold uppercase text-ui-textMuted">Layers</span>
-            <button
-              type="button"
-              class="text-emerald-400 hover:text-emerald-300 cursor-pointer"
-              title="Add layer"
-              @click="handleAddLayer"
+        <!-- Layers popout (Teleport so drag uses viewport coords) -->
+        <Teleport to="body">
+          <div
+            v-if="layersPanelOpen"
+            data-floating-panel
+            class="fixed z-50 flex flex-col bg-ui-panel/95 border border-ui-borderStrong rounded-xs shadow-2xl font-sans select-none pointer-events-auto backdrop-blur-md overflow-hidden"
+            :class="layersDragging ? 'cursor-grabbing' : ''"
+            :style="{
+              left: layersPos.x + 'px',
+              top: layersPos.y + 'px',
+              width: '228px',
+              height: layersMinimized ? '32px' : 'auto'
+            }"
+            aria-label="Texture layers"
+          >
+            <div
+              class="h-8 px-2 flex items-center justify-between border-b border-ui-borderSubtle bg-ui-header cursor-move shrink-0"
+              @pointerdown="startLayersDrag"
+              @dblclick="layersMinimized = !layersMinimized"
             >
-              <Plus class="w-3 h-3" />
-            </button>
-          </div>
-          <div class="max-h-40 overflow-y-auto">
-            <button
-              v-for="layer in projectStore.pixelBuffer.layers"
-              :key="layer.id"
-              type="button"
-              class="w-full flex items-center gap-1 px-1.5 py-1 text-left text-[10px] cursor-pointer"
-              :class="projectStore.pixelBuffer.activeLayerId === layer.id ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textSecondary hover:bg-ui-hover'"
-              @click="setActiveLayer(layer.id)"
-            >
-              <input
-                type="checkbox"
-                class="accent-emerald-500 cursor-pointer w-3 h-3"
-                :checked="layer.visible"
-                title="Visibility"
-                @click.stop
-                @change="layer.visible = ($event.target as HTMLInputElement).checked; handleLayerMetaChange()"
-              />
-              <span class="truncate flex-1" :class="{ 'opacity-40': !layer.visible }">{{ layer.name }}</span>
-              <button
-                type="button"
-                class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary"
-                title="Duplicate layer"
-                @click.stop="handleDuplicateLayer(layer.id)"
+              <div class="flex items-center gap-1.5 min-w-0">
+                <GripHorizontal class="w-3.5 h-3.5 text-ui-textMuted opacity-60 shrink-0" />
+                <Layers class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span class="text-[10px] font-bold uppercase tracking-wider text-ui-textMuted">Layers</span>
+                <span class="text-[9px] px-1 py-px bg-ui-input border border-ui-borderSubtle rounded-xs text-emerald-400 font-mono">{{ paintLayerCount }}</span>
+              </div>
+              <div class="flex items-center gap-0.5" @pointerdown.stop>
+                <button
+                  type="button"
+                  class="p-1 text-emerald-400 hover:text-emerald-300 rounded-xs hover:bg-ui-hover cursor-pointer"
+                  title="Add layer"
+                  @click="handleAddLayer"
+                >
+                  <Plus class="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  class="p-1 text-ui-textMuted hover:text-ui-textPrimary rounded-xs hover:bg-ui-hover cursor-pointer"
+                  :title="layersMinimized ? 'Expand' : 'Minimize'"
+                  @click="layersMinimized = !layersMinimized"
+                >
+                  <Plus v-if="layersMinimized" class="w-3 h-3" />
+                  <Minus v-else class="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  class="p-1 text-ui-textMuted hover:text-rose-400 rounded-xs hover:bg-ui-hover cursor-pointer"
+                  title="Close layers"
+                  @click="closeLayersPanel"
+                >
+                  <X class="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+
+            <div v-show="!layersMinimized" class="max-h-56 overflow-y-auto custom-scrollbar p-1.5 space-y-1">
+              <div
+                v-for="layer in projectStore.pixelBuffer.layers"
+                :key="layer.id"
+                role="button"
+                tabindex="0"
+                class="rounded-xs border px-1.5 py-1.5 text-left cursor-pointer transition"
+                :class="projectStore.pixelBuffer.activeLayerId === layer.id
+                  ? 'bg-ui-active border-emerald-500/45 shadow-xs'
+                  : 'bg-ui-surface/50 border-ui-borderSubtle hover:bg-ui-hover'"
+                @click="setActiveLayer(layer.id)"
+                @keydown.enter="setActiveLayer(layer.id)"
+                @keydown.space.prevent="setActiveLayer(layer.id)"
               >
-                <Copy class="w-2.5 h-2.5" />
-              </button>
-              <button
-                v-if="projectStore.pixelBuffer.layers.length > 1"
-                type="button"
-                class="p-0.5 text-ui-textMuted hover:text-rose-400"
-                title="Delete layer"
-                @click.stop="handleDeleteLayer(layer.id)"
-              >
-                <Trash2 class="w-2.5 h-2.5" />
-              </button>
-            </button>
+                <div class="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    class="p-0.5 rounded-xs text-ui-textMuted hover:text-ui-textPrimary cursor-pointer"
+                    :title="layer.visible ? 'Hide layer' : 'Show layer'"
+                    @click.stop="toggleLayerVisible(layer)"
+                  >
+                    <Eye v-if="layer.visible" class="w-3 h-3 text-emerald-400" />
+                    <EyeOff v-else class="w-3 h-3 opacity-50" />
+                  </button>
+                  <span
+                    class="truncate flex-1 text-[11px] font-semibold"
+                    :class="projectStore.pixelBuffer.activeLayerId === layer.id ? 'text-ui-textAccent' : 'text-ui-textPrimary'"
+                    :style="layer.visible ? undefined : { opacity: 0.4 }"
+                  >{{ layer.name }}</span>
+                  <button
+                    type="button"
+                    class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary cursor-pointer"
+                    title="Duplicate layer"
+                    @click.stop="handleDuplicateLayer(layer.id)"
+                  >
+                    <Copy class="w-3 h-3" />
+                  </button>
+                  <button
+                    v-if="projectStore.pixelBuffer.layers.length > 1"
+                    type="button"
+                    class="p-0.5 text-ui-textMuted hover:text-rose-400 cursor-pointer"
+                    title="Delete layer"
+                    @click.stop="handleDeleteLayer(layer.id)"
+                  >
+                    <Trash2 class="w-3 h-3" />
+                  </button>
+                </div>
+                <div class="flex items-center gap-1.5 mt-1 pl-5" @click.stop>
+                  <select
+                    v-model="layer.blendMode"
+                    class="h-5 flex-1 min-w-0 bg-ui-input text-[9px] text-ui-textSecondary border border-ui-borderSubtle rounded-xs px-1 cursor-pointer"
+                    title="Blend mode"
+                    @change="handleLayerMetaChange"
+                  >
+                    <option value="normal">Normal</option>
+                    <option value="multiply">Multiply</option>
+                    <option value="screen">Screen</option>
+                    <option value="overlay">Overlay</option>
+                    <option value="additive">Add</option>
+                  </select>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    v-model.number="layer.opacity"
+                    class="w-14 accent-emerald-500 cursor-pointer h-1"
+                    :title="`Opacity ${Math.round(layer.opacity * 100)}%`"
+                    @input="handleLayerMetaChange"
+                  />
+                  <span class="w-7 text-right text-[9px] font-mono text-ui-textMuted">{{ Math.round(layer.opacity * 100) }}</span>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
+        </Teleport>
 
         <!-- Top Right Floating View Controls -->
         <div class="pixel-view-group" aria-label="Canvas View Controls">
+          <button
+            type="button"
+            @click="toggleLayersPanel"
+            class="pixel-view-toggle"
+            :class="{ 'is-active': layersPanelOpen }"
+            title="Layers panel"
+          >
+            <Layers class="w-3.5 h-3.5" />
+            <span>Layers</span>
+          </button>
           <button
             @click="showUvOverlay = !showUvOverlay"
             class="pixel-view-toggle"
@@ -1722,19 +1858,6 @@ defineExpose({
 .pixel-tool-rail {
   width: 36px;
   min-width: 36px;
-}
-
-.pixel-layers-dock {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  z-index: 10;
-  width: 168px;
-  background: color-mix(in srgb, var(--ui-bg-header) 94%, transparent);
-  border: 1px solid var(--ui-border-strong);
-  border-radius: 4px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(8px);
 }
 
 .pixel-view-group {

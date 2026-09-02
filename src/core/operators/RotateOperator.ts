@@ -37,7 +37,7 @@ export class RotateOperator extends ModalOperator {
       angleRad = THREE.MathUtils.degToRad(this.snapManager.snapAngle(deg, 5))
     }
 
-    const basis = PivotManager.getBasis(this.orientation, this.ctx.camera)
+    const basis = PivotManager.getBasis(this.orientation, this.ctx.camera, undefined, this.ctx.objectEuler)
     let rotAxis = basis.z.clone() // Default view plane normal
 
     if (this.constraint === 'X') rotAxis = basis.x.clone()
@@ -58,6 +58,7 @@ export class RotateOperator extends ModalOperator {
       }
     }
 
+    this.applyLiveSymmetry()
     this.ctx.mesh.recalculateNormals()
   }
 

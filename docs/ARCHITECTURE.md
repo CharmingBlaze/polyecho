@@ -54,16 +54,16 @@ Blockout uses the same mesh operators as Modeling and a **Front \| Side \| Persp
 | `history` | `stores/historyStore.ts` | Deep snapshots of project + armature; undo / redo |
 | `layout` | `stores/layoutStore.ts` | Panel visibility, floating chrome, last inspector tab per workspace |
 | `theme` | `stores/themeStore.ts` | Color presets and CSS variables |
-| `keymap` | `stores/keymapStore.ts` | Tracks custom shortcut remappings and syncs with `ActionRegistry` (`docs/SYSTEMS.md`) |
+| `keymap` | `stores/keymapStore.ts` | Live chord matching + remaps persisted in `localStorage` (`docs/SYSTEMS.md`) |
 
-**Shortcuts & Action Registry:** Commands and tools are centrally registered in `ActionRegistry` via `setupDefaultActions.ts`. `App.vue` dispatches global shortcuts and coordinates with `ActionRegistry`, `keymapStore`, and modal operators. `CommandPaletteModal.vue` dynamically queries `ActionRegistry` and displays user-customized shortcuts.
+**Shortcuts & Action Registry:** `App.vue` is the live dispatcher: it matches `keydown` against `keymapStore` and runs the same verbs as the palette. `ActionRegistry` / `setupDefaultActions.ts` still feed the command palette. `HotkeyModal.vue` lists current bindings; remaps are Preferences → Keyboard. Copy/paste and a few rig/timeline keys stay hardcoded.
 
 ## Commands and operators
 
 Entry paths:
 
 1. **`ActionRegistry` & `setupDefaultActions.ts`** — Centralized catalog of commands, tools, shortcuts, and handlers.
-2. **`App.vue` key handler** — Global key event interceptor matching keys against registered actions and modal tools.
+2. **`App.vue` key handler** — Matches `keymapStore.matchingActionIds`, then leftover copy/paste / timeline / rig keys.
 3. **Window events** — `src/core/commands/editorCommands.ts` (`requestModalTool`, `requestCameraView`, primitive placement) consumed by `Viewport3D.vue`.
 4. **Modal operators** — subclass `ModalOperator`, start via `operatorManager.start` from the viewport. Confirm writes through `onCommit`; Escape restores the `EditableMesh` snapshot. Undo is blocked while an operator is active.
 5. **Command palette / menus** — query `actionRegistry.getAll()` or call `projectStore.perform*` directly.
@@ -104,6 +104,10 @@ Interactive topology (extrude / inset / bevel / loop cut / knife) belongs in a k
 | New app mode panel | Component under the matching folder; gate with `toolStore.appMode` |
 
 Right sidebar (`RightSidebar.vue`): List / context (Object, UV, or Anim) / Mod / Mat / Tex. UV workspace orders Tex before Mat and Mod. Rig uses Skel / Bone / Bind / Wts. The last tab is remembered per workspace (`layoutStore.setInspectorTab` / `restoreInspectorTab`) and restore lands on a tab visible in that workspace. Object vs vertex `selectMode` does not change the tab.
+
+Left toolbar (`LeftToolbar.vue`) Modeling **Mesh** vs **Obj/Vert/Edge/Face** pages are user-toggled (`shelfTab`). Do not switch `shelfTab` when the user selects geometry or changes 1/2/3/4 — that swapped the “big” operator shelf for the shorter context shelf. Float / columns / minimize / position live on `layoutStore` so **Reset Layout** restores them.
+
+`ViewportNav.vue` is the viewport header above the 3D canvas: Object/Edit, space+pivot, snap, labeled mirror X/Y/Z, then view/overlays/shading. Workspace switching stays on the main header tabs. The floating LightWave cluster is pan / orbit / zoom / frame only — X-Ray, bones, and quad live on the header.
 
 ## Alias
 

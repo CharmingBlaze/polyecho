@@ -33,7 +33,7 @@ const contextualHints = computed(() => {
     }
     return 'LMB: Select Object | G: Move | R: Rotate | S: Scale | Shift+A: Add | Tab: Edit Mode'
   } else if (toolStore.appMode === 'blockout') {
-    return 'Drag the bars to resize panes · Drag ref to place · Alt-drag pane photo · F: Draw'
+    return 'Drag bars to resize · F: Poly Draw · V: Poly Build (new or old verts, close the loop)'
   } else if (toolStore.appMode === 'uvpaint') {
     return 'LMB: Paint Pixel | RMB: Sample/Secondary | Space+Drag: Pan UV | Wheel: Zoom UV'
   } else if (toolStore.appMode === 'rig') {
@@ -98,7 +98,7 @@ const contextualHints = computed(() => {
       <div class="flex items-center space-x-1 border-r border-ui-borderSubtle pr-2.5">
         <Grid class="w-3 h-3" :class="toolStore.snapping.grid ? 'text-ui-textAccent' : 'text-ui-textMuted'" />
         <span :class="toolStore.snapping.grid ? 'text-ui-textSecondary font-medium font-mono tabular-nums' : 'text-ui-textMuted font-mono'">
-          {{ toolStore.snapping.grid ? 'Snap: 0.1m' : 'Snap: Off' }}
+          {{ toolStore.snapping.grid ? `Snap: ${toolStore.snapping.gridSize}m` : 'Snap: Off' }}
         </span>
       </div>
 

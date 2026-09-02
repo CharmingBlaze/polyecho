@@ -68,7 +68,7 @@ function executeSelected() {
 
 function handleKeyDown(e: KeyboardEvent) {
   if (!isOpen.value) {
-    if ((e.key === 'F3' || (e.code === 'Space' && (e.ctrlKey || e.shiftKey))) && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
+    if (e.code === 'Space' && (e.ctrlKey || e.shiftKey) && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
       e.preventDefault()
       openPalette()
     }

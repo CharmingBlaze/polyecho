@@ -59,6 +59,7 @@ export class OperatorManager {
 
   handlePointerDown(e: MouseEvent): boolean {
     if (!this.activeOperator) return false
+    this.activeOperator.syncPointerFromEvent(e)
     const handled = this.activeOperator.handlePointerDown(e.button)
     this.state.value.statusText = this.activeOperator.statusText
     return handled

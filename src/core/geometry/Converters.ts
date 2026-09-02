@@ -14,6 +14,7 @@ export interface GeometryBundle {
   selectedEdgesGeometry: THREE.BufferGeometry
   edgeLinesGeometry: THREE.BufferGeometry
   faceIndexMap: number[]
+  paintFaceMap: Array<{ id: string; vertexIds: string[]; uvs: Array<{ u: number; v: number }> }>
   vertexIndexMap: string[]
 }
 
@@ -313,6 +314,7 @@ export function meshToThreeGeometry(
   const uvs: number[] = []
   const colors: number[] = []
   const faceIndexMap: number[] = []
+  const paintFaceMap: GeometryBundle['paintFaceMap'] = []
 
   const wireframePositions: number[] = []
   const selectedFacesPositions: number[] = []
@@ -407,6 +409,11 @@ export function meshToThreeGeometry(
       }
 
       faceIndexMap.push(fIdx)
+      paintFaceMap.push({
+        id: face.id,
+        vertexIds: [...face.vertexIds],
+        uvs: face.uvs.map(uv => ({ u: uv.u, v: uv.v }))
+      })
     }
   }
 
@@ -480,6 +487,7 @@ export function meshToThreeGeometry(
     selectedEdgesGeometry,
     edgeLinesGeometry,
     faceIndexMap,
+    paintFaceMap,
     vertexIndexMap
   }
 }

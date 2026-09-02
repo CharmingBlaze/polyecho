@@ -7,6 +7,7 @@ import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useLayoutStore } from '../../stores/layoutStore'
+import { useHistoryStore } from '../../stores/historyStore'
 import { useThemeStore, type ThemeColors } from '../../stores/themeStore'
 import { meshToThreeGeometry, computeBoneWorldMatrix, updateThreeGeometryAttributes, resolveMeshShadeMode } from '../../core/geometry/Converters'
 import { setIKTargetAndSolve, solveCCDIK } from '../../core/animation/IKSolver'
@@ -30,6 +31,7 @@ import { KnifeOperator } from '../../core/operators/knife/KnifeOperator'
 import { LoopCutOperator } from '../../core/operators/loopCut/LoopCutOperator'
 import { PrimitivePlacementOperator, PrimitivePlacementMode } from '../../core/operators/placement/PrimitivePlacementOperator'
 import { PolyDrawOperator } from '../../core/operators/PolyDrawOperator'
+import { PolyBuildOperator } from '../../core/operators/PolyBuildOperator'
 import { ScreenGeometry, type ViewQuadrant } from '../../core/geometry/ScreenGeometry'
 import { PrimitiveType } from '../../core/primitives/PrimitiveTypes'
 import { EditableMesh } from '../../core/mesh/MeshKernel'
@@ -37,6 +39,8 @@ import { MeshBridge } from '../../core/mesh/MeshBridge'
 import { EditorEnvironment } from '../../core/render/EditorEnvironment'
 import { ViewportLayerManager } from '../../core/render/ViewportLayers'
 import { SnapManager } from '../../core/transform/SnapManager'
+import type { PivotMode, TransformOrientation } from '../../core/transform/TransformTypes'
+import { applyLiveSymmetry } from '../../core/transform/LiveSymmetry'
 import { useFloatingDrag } from '../../composables/useFloatingDrag'
 import { 
   Move, 
@@ -47,16 +51,16 @@ import {
   Check,
   X,
   GripHorizontal,
-  GitCommitVertical,
-  EyeOff
 } from 'lucide-vue-next'
 import BlenderIcon from '../icons/BlenderIcon.vue'
+import ViewportNav from './ViewportNav.vue'
 import { EDITOR_EVENTS } from '../../core/commands/editorCommands'
 
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
 const layoutStore = useLayoutStore()
 const animationStore = useAnimationStore()
+const historyStore = useHistoryStore()
 const themeStore = useThemeStore()
 
 const containerRef = ref<HTMLDivElement | null>(null)
@@ -99,11 +103,20 @@ let editorEnv: EditorEnvironment
 const raycaster = new THREE.Raycaster()
 const mouse = new THREE.Vector2()
 let isPaintingOn3D = false
-let lastPaintUV: { u: number; v: number } | null = null
+type PaintFaceInfo = { id: string; vertexIds: string[]; uvs: Array<{ u: number; v: number }> }
+type PaintHit = {
+  hit: THREE.Intersection
+  meshId: string
+  face: PaintFaceInfo | null
+  uv: { u: number; v: number }
+}
+let lastPaintHit: Omit<PaintHit, 'hit'> | null = null
 let lastPaintTextureId: string | undefined
 let isGizmoDragging = false
+let skipGizmoCommit = false
 let pointerDownClientPos = { x: 0, y: 0 }
 let lastHoverClientPos = { x: 0, y: 0 }
+let lastPointerCtrl = false
 let pointerDownHitMesh = false
 let refDrag: {
   id: string
@@ -439,6 +452,7 @@ function initThree() {
   // Transform Controls
   transformControls = new TransformControls(cameraPersp, canvas)
   transformControls.size = 0.55
+  ;(transformControls as any)._getPointer = getGizmoPointer
   scene.add(transformControls.getHelper())
   scene.add(transformProxy)
 
@@ -447,7 +461,12 @@ function initThree() {
     orbitControls.enabled = !event.value
 
     if (event.value) {
+      skipGizmoCommit = false
       onGizmoDragStart()
+    } else if (skipGizmoCommit) {
+      skipGizmoCommit = false
+      historyStore.undo()
+      rebuildMeshes()
     } else {
       commitProxyTransform()
     }
@@ -1022,6 +1041,11 @@ function rebuildMeshes() {
     if (!meshObj.visible) continue
 
     const isSelectedMesh = projectStore.selectedMeshIds.includes(meshObj.id) || projectStore.activeMeshId === meshObj.id
+    if (isSelectedMesh && toolStore.selectMode === 'vertex') {
+      for (const v of meshObj.vertices) {
+        v.selected = projectStore.selectedVertexIds.includes(v.id)
+      }
+    }
     const selectedFaces = (isSelectedMesh && toolStore.selectMode === 'face') ? projectStore.selectedFaceIds : []
     const selectedEdges = (isSelectedMesh && toolStore.selectMode === 'edge') ? projectStore.selectedEdgeIds : []
 
@@ -1039,6 +1063,7 @@ function rebuildMeshes() {
       selectedEdgesGeometry, 
       edgeLinesGeometry, 
       faceIndexMap, 
+      paintFaceMap,
       vertexIndexMap 
     } = meshToThreeGeometry(meshObj, selectedFaces, selectedEdges, toolStore.viewport.shadeMode, skeletalContext, weightPaintContext)
 
@@ -1190,6 +1215,20 @@ function rebuildMeshes() {
         wireframe: true,
         color: 0x6366f1
       })
+    } else if (toolStore.viewport.shading === 'solid') {
+      mat = new THREE.MeshStandardMaterial({
+        color: baseColor,
+        roughness: roughness,
+        metalness: metalness,
+        emissive: emissiveColor,
+        emissiveIntensity: emissiveIntensity,
+        vertexColors: true,
+        side: sideSetting,
+        flatShading: !isSmooth,
+        transparent: isTransparent,
+        opacity: isXRay ? 0.55 : matOpacity,
+        depthWrite: !isTransparent
+      })
     } else if (toolStore.viewport.faceOrientation) {
       // Diagnostic Face Orientation: Cobalt Blue (Front-Facing Normals)
       mat = new THREE.MeshBasicMaterial({
@@ -1226,7 +1265,7 @@ function rebuildMeshes() {
     threeMesh.receiveShadow = true
 
     applyMeshWorldPose(meshObj, threeMesh)
-    threeMesh.userData = { meshId: meshObj.id, faceIndexMap }
+    threeMesh.userData = { meshId: meshObj.id, faceIndexMap, paintFaceMap }
     layers.modelGroup.add(threeMesh)
 
     // Inverted Backfaces Overlay (Crimson Red) for Face Orientation Diagnostic
@@ -1378,7 +1417,7 @@ function rebuildMeshes() {
         size: 9,
         vertexColors: true,
         sizeAttenuation: false,
-        depthTest: !toolStore.viewport.xray,
+        depthTest: !(toolStore.viewport.xray || toolStore.appMode === 'blockout'),
         depthWrite: false
       })
       const pts = new THREE.Points(vertexPointsGeometry, pMat)
@@ -1775,10 +1814,6 @@ function updateTransformGizmo() {
   }
 
   const activeMesh = projectStore.activeMesh
-  if (toolStore.appMode === 'blockout' && projectStore.selectedReferenceId) {
-    transformControls.detach()
-    return
-  }
   if (!activeMesh) {
     transformControls.detach()
     return
@@ -1814,12 +1849,18 @@ function updateTransformGizmo() {
         centroid = { x: activeMesh.position.x, y: activeMesh.position.y, z: activeMesh.position.z }
       }
     } else if (toolStore.selectMode === 'vertex' && projectStore.selectedVertexIds.length > 0) {
-      const selectedVerts = activeMesh.vertices.filter(v => projectStore.selectedVertexIds.includes(v.id))
+      const selectedVerts = activeMesh.vertices.filter(v =>
+        projectStore.selectedVertexIds.includes(v.id) || v.selected
+      )
       const mat = meshWorldMatrix(activeMesh)
       const worldPts = selectedVerts.map(v => localToWorld(activeMesh, v.position, mat))
+      if (worldPts.length === 0) {
+        transformControls.detach()
+        return
+      }
       if (toolStore.pivotPoint === 'active') {
         const lastVertId = projectStore.selectedVertexIds[projectStore.selectedVertexIds.length - 1]
-        const lastVert = activeMesh.vertices.find(v => v.id === lastVertId)
+        const lastVert = activeMesh.vertices.find(v => v.id === lastVertId) || selectedVerts[selectedVerts.length - 1]
         const lastW = lastVert ? localToWorld(activeMesh, lastVert.position, mat) : worldPts[worldPts.length - 1]
         centroid = { x: lastW.x, y: lastW.y, z: lastW.z }
       } else {
@@ -1992,6 +2033,80 @@ function applyTheme(colors: ThemeColors) {
   }
   if (hoverVertexMesh && hoverVertexMesh.material) {
     (hoverVertexMesh.material as THREE.PointsMaterial).color.set(colors.selectionColor)
+  }
+}
+
+function snapObjectGizmoIncrement() {
+  if (!lastPointerCtrl || transformControls.getMode() !== 'translate') return
+  const step = toolStore.snapping.gridSize || 0.5
+  transformProxy.position.x = Math.round(transformProxy.position.x / step) * step
+  transformProxy.position.y = Math.round(transformProxy.position.y / step) * step
+  transformProxy.position.z = Math.round(transformProxy.position.z / step) * step
+  transformProxy.updateMatrixWorld()
+}
+
+function applySelectedMeshesRigidSnap() {
+  if (!(toolStore.snapping.vertex || toolStore.snapping.edge || toolStore.snapping.face)) return
+  const step = toolStore.snapping.gridSize || 0.5
+  const selected = new Set(
+    projectStore.selectedMeshIds.length > 0
+      ? projectStore.selectedMeshIds
+      : (projectStore.activeMesh ? [projectStore.activeMesh.id] : [])
+  )
+  const moving: THREE.Vector3[] = []
+  const targets: THREE.Vector3[] = []
+  for (const m of projectStore.meshes) {
+    const mat = meshWorldMatrix(m)
+    const isSel = selected.has(m.id)
+    if (isSel) {
+      for (const v of m.vertices) {
+        moving.push(new THREE.Vector3(v.position.x, v.position.y, v.position.z).applyMatrix4(mat))
+      }
+      continue
+    }
+    if (toolStore.snapping.vertex) {
+      for (const v of m.vertices) {
+        targets.push(new THREE.Vector3(v.position.x, v.position.y, v.position.z).applyMatrix4(mat))
+      }
+    }
+    if (toolStore.snapping.edge) {
+      for (const e of getMeshEdges(m)) {
+        const a = m.vertices.find(vert => vert.id === e.v1)
+        const b = m.vertices.find(vert => vert.id === e.v2)
+        if (!a || !b) continue
+        targets.push(new THREE.Vector3(
+          (a.position.x + b.position.x) * 0.5,
+          (a.position.y + b.position.y) * 0.5,
+          (a.position.z + b.position.z) * 0.5
+        ).applyMatrix4(mat))
+      }
+    }
+    if (toolStore.snapping.face) {
+      for (const f of m.faces) {
+        const c = new THREE.Vector3()
+        let n = 0
+        for (const id of f.vertexIds) {
+          const v = m.vertices.find(vert => vert.id === id)
+          if (!v) continue
+          c.add(new THREE.Vector3(v.position.x, v.position.y, v.position.z))
+          n++
+        }
+        if (n > 0) targets.push(c.multiplyScalar(1 / n).applyMatrix4(mat))
+      }
+    }
+  }
+  const extra = SnapManager.findRigidSnapOffset(moving, targets, Math.max(0.06, step * 0.75))
+  if (!extra) return
+  transformProxy.position.add(extra)
+  for (const m of projectStore.meshes) {
+    if (!selected.has(m.id)) continue
+    m.position.x += extra.x
+    m.position.y += extra.y
+    m.position.z += extra.z
+    const threeMesh = layers.modelGroup.getObjectByName(m.id)
+    if (threeMesh) threeMesh.position.set(m.position.x, m.position.y, m.position.z)
+    const wire = layers.wireframeGroup.getObjectByName(`${m.id}_wire`)
+    if (wire) wire.position.copy(threeMesh?.position ?? new THREE.Vector3(m.position.x, m.position.y, m.position.z))
   }
 }
 
@@ -2290,6 +2405,7 @@ function onGizmoObjectChange() {
   }
 
   if (toolStore.selectMode === 'object') {
+    snapObjectGizmoIncrement()
     if (projectStore.selectedMeshIds.length > 1) {
       const deltaMatrix = new THREE.Matrix4().multiplyMatrices(
         transformProxy.matrixWorld,
@@ -2339,6 +2455,7 @@ function onGizmoObjectChange() {
           }
         }
       }
+      applySelectedMeshesRigidSnap()
       return
     }
 
@@ -2374,6 +2491,7 @@ function onGizmoObjectChange() {
         selFaces.scale.copy(transformProxy.scale)
       }
     }
+    applySelectedMeshesRigidSnap()
   } else if (toolStore.selectMode === 'vertex' || toolStore.selectMode === 'face' || toolStore.selectMode === 'edge') {
     const deltaMatrix = new THREE.Matrix4().multiplyMatrices(
       transformProxy.matrixWorld,
@@ -2432,7 +2550,7 @@ function onGizmoObjectChange() {
       }
     }
 
-    if (toolStore.snapping.vertex || toolStore.snapping.edge) {
+    if (toolStore.snapping.vertex || toolStore.snapping.edge || toolStore.snapping.face) {
       const moving: THREE.Vector3[] = []
       const movingVerts: Vertex[] = []
       for (const v of activeMesh.vertices) {
@@ -2460,6 +2578,20 @@ function onGizmoObjectChange() {
           ))
         }
       }
+      if (toolStore.snapping.face) {
+        for (const f of activeMesh.faces) {
+          if (f.vertexIds.every(id => targetVertIds.has(id))) continue
+          const c = new THREE.Vector3()
+          let n = 0
+          for (const id of f.vertexIds) {
+            const v = activeMesh.vertices.find(vert => vert.id === id)
+            if (!v) continue
+            c.add(new THREE.Vector3(v.position.x, v.position.y, v.position.z))
+            n++
+          }
+          if (n > 0) targets.push(c.multiplyScalar(1 / n))
+        }
+      }
       const thresh = Math.max(0.06, toolStore.snapping.gridSize * 0.75)
       const extra = SnapManager.findRigidSnapOffset(moving, targets, thresh)
       if (extra) {
@@ -2471,22 +2603,15 @@ function onGizmoObjectChange() {
       }
     }
 
-    // Live X-Symmetry Mirroring
-    if (toolStore.viewport.symmetryX) {
-      for (const v of activeMesh.vertices) {
-        if (!targetVertIds.has(v.id)) {
-          for (const selId of targetVertIds) {
-            const sel = activeMesh.vertices.find(vert => vert.id === selId)
-            if (!sel) continue
-            if (Math.abs(v.position.x + sel.position.x) < 0.05 && Math.abs(v.position.y - sel.position.y) < 0.05 && Math.abs(v.position.z - sel.position.z) < 0.05) {
-              v.position.x = -sel.position.x
-              v.position.y = sel.position.y
-              v.position.z = sel.position.z
-            }
-          }
-        }
+    applyLiveSymmetry(
+      activeMesh.vertices,
+      targetVertIds,
+      {
+        x: toolStore.viewport.symmetryX,
+        y: toolStore.viewport.symmetryY,
+        z: toolStore.viewport.symmetryZ,
       }
-    }
+    )
 
     const { 
       geometry, 
@@ -2592,16 +2717,17 @@ function findClosestVertexScreen(mesh: MeshObject, maxDistPx = 14): Vertex | nul
 
   for (const v of mesh.vertices) {
     const worldPos = localToWorld(mesh, v.position, mat)
-    const dist3 = camPos.distanceTo(worldPos)
-    if (dist3 > occludeAt + 0.06) continue
     const ndc = worldPos.project(activeCamera)
     if (ndc.z > 1 || ndc.z < -1) continue
 
     const d = Math.hypot(ndc.x - mouse.x, ndc.y - mouse.y)
-    if (d < minDist) {
-      minDist = d
-      closestV = v
-    }
+    if (d >= minDist) continue
+    // New Blockout verts often sit on the draw plane inside the volume.
+    // If the handle is under the cursor, pick it even when a face is closer.
+    const dist3 = camPos.distanceTo(worldPos)
+    if (dist3 > occludeAt + 0.06 && d > pickPixelNdc(10)) continue
+    minDist = d
+    closestV = v
   }
   return closestV
 }
@@ -2651,6 +2777,40 @@ function distanceToSegment2D(px: number, py: number, x1: number, y1: number, x2:
   return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)))
 }
 
+/** Pane-local NDC so TransformControls picks against the camera that drew that column. */
+function getGizmoPointer(this: { domElement?: HTMLElement }, event: PointerEvent) {
+  const el = this.domElement
+  if (!el) return { x: 0, y: 0, button: event.button }
+  if (el.ownerDocument.pointerLockElement) {
+    return { x: 0, y: 0, button: event.button }
+  }
+  const rect = el.getBoundingClientRect()
+  const px = event.clientX - rect.left
+  const py = event.clientY - rect.top
+  if (!isTripleView() || rect.width < 1 || rect.height < 1) {
+    return {
+      x: (px / rect.width) * 2 - 1,
+      y: -(py / rect.height) * 2 + 1,
+      button: event.button
+    }
+  }
+  const cols = tripleCols(rect.width)
+  const pane =
+    activeQuadrant.value === 'col_front' ? { x: 0, w: cols.front }
+    : activeQuadrant.value === 'col_side' ? { x: cols.xSide, w: cols.side }
+    : { x: cols.xPersp, w: cols.persp }
+  return {
+    x: ((px - pane.x) / pane.w) * 2 - 1,
+    y: -(py / rect.height) * 2 + 1,
+    button: event.button
+  }
+}
+
+function syncGizmoPickCamera() {
+  if (!transformControls || !activeCamera) return
+  transformControls.camera = activeCamera
+}
+
 function updateActiveCameraAndQuadrant(event: PointerEvent | MouseEvent) {
   if (!renderer || !renderer.domElement) return
   const rect = renderer.domElement.getBoundingClientRect()
@@ -2662,24 +2822,35 @@ function updateActiveCameraAndQuadrant(event: PointerEvent | MouseEvent) {
   const isGizmoActive = isGizmoDragging || transformControls.dragging || (transformControls as any).axis !== null
 
   if (isTripleView()) {
-    const hit = tripleHit(mousePxX, width)
-    if (hit.col === 0) {
-      activeCamera = cameraFront
-      activeQuadrant.value = 'col_front'
-      orbitControls.enabled = false
-    } else if (hit.col === 1) {
-      activeCamera = cameraRight
-      activeQuadrant.value = 'col_side'
-      orbitControls.enabled = false
-    } else {
-      activeCamera = cameraPersp
-      activeQuadrant.value = 'col_persp'
-      orbitControls.enabled = !isGizmoActive
+    if (!isGizmoActive) {
+      const hit = tripleHit(mousePxX, width)
+      if (hit.col === 0) {
+        activeCamera = cameraFront
+        activeQuadrant.value = 'col_front'
+        orbitControls.enabled = false
+      } else if (hit.col === 1) {
+        activeCamera = cameraRight
+        activeQuadrant.value = 'col_side'
+        orbitControls.enabled = false
+      } else {
+        activeCamera = cameraPersp
+        activeQuadrant.value = 'col_persp'
+        orbitControls.enabled = true
+      }
     }
-    mouse.x = (hit.localX / hit.localW) * 2 - 1
+    const cols = tripleCols(width)
+    const paneW =
+      activeQuadrant.value === 'col_front' ? cols.front
+      : activeQuadrant.value === 'col_side' ? cols.side
+      : cols.persp
+    const paneX =
+      activeQuadrant.value === 'col_front' ? 0
+      : activeQuadrant.value === 'col_side' ? cols.xSide
+      : cols.xPersp
+    mouse.x = ((mousePxX - paneX) / paneW) * 2 - 1
     mouse.y = -(mousePxY / height) * 2 + 1
-    transformControls.camera = activeCamera
-    transformControls.enabled = !isGizmoActive
+    transformControls.enabled = !operatorManager.state.value.active
+    syncGizmoPickCamera()
     return
   }
 
@@ -2959,6 +3130,7 @@ function onPointerDown(event: PointerEvent) {
   if (event.button !== 0) return
   if (transformControls.dragging || isGizmoDragging || (transformControls as any).axis !== null) {
     orbitControls.enabled = false
+    pointerDownHitMesh = true
     return
   }
 
@@ -2994,16 +3166,22 @@ function onPointerDown(event: PointerEvent) {
   }
 
   if (toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'paint') {
-    const hits = raycaster.intersectObjects(layers.modelGroup.children, true)
-    if (hits.length > 0) {
+    const paintHit = getPaintRaycastHit()
+    if (paintHit && is3DPaintToolSupported()) {
       pointerDownHitMesh = true
       orbitControls.enabled = false
       isPaintingOn3D = true
+      try { renderer.domElement.setPointerCapture(event.pointerId) } catch { /* optional */ }
       event.stopImmediatePropagation()
       event.preventDefault()
-      projectStore.recordState('3D Paint')
-      lastPaintUV = null
-      paintRaycastHit()
+      if (is3DPaintToolMutating()) projectStore.recordState('3D Paint')
+      lastPaintHit = null
+      const targetTex = getPaintTextureForHit(paintHit)
+      lastPaintTextureId = targetTex?.id
+      if (targetTex && projectStore.activeTextureId !== targetTex.id) {
+        projectStore.selectTexture(targetTex.id)
+      }
+      paintRaycastHit(paintHit)
       return
     }
     orbitControls.enabled = true
@@ -3203,6 +3381,7 @@ function onPointerMove(event: PointerEvent) {
     return
   }
   lastHoverClientPos = { x: event.clientX, y: event.clientY }
+  lastPointerCtrl = event.ctrlKey || event.metaKey
   if (refDrag) {
     updateActiveCameraAndQuadrant(event)
     raycaster.setFromCamera(mouse, activeCamera)
@@ -3212,6 +3391,7 @@ function onPointerMove(event: PointerEvent) {
   }
   if (isGizmoDragging || transformControls.dragging || (transformControls as any).axis !== null) {
     orbitControls.enabled = false
+    updateActiveCameraAndQuadrant(event)
     return
   }
 
@@ -3247,6 +3427,8 @@ function onPointerMove(event: PointerEvent) {
     orbitControls.enabled = false
     event.stopImmediatePropagation()
     event.preventDefault()
+    if (event.pointerType) toolStore.currentPointerType = event.pointerType as any
+    if (event.pressure > 0) toolStore.currentPressure = event.pressure
     paintRaycastHit()
     return
   }
@@ -3473,13 +3655,14 @@ function onPointerUp(event?: PointerEvent) {
 
   if (isPaintingOn3D) {
     isPaintingOn3D = false
-    lastPaintUV = null
-    if (lastPaintTextureId || projectStore.activeTextureId) {
+    lastPaintHit = null
+    if (lastPaintTextureId && is3DPaintToolMutating()) {
       projectStore.markTextureUpdated(lastPaintTextureId)
     }
     lastPaintTextureId = undefined
     orbitControls.enabled = true
     if (event) {
+      try { renderer.domElement.releasePointerCapture(event.pointerId) } catch { /* optional */ }
       event.stopImmediatePropagation()
     }
   }
@@ -3501,6 +3684,9 @@ function onPointerUp(event?: PointerEvent) {
 function startModalOperator(tool: string, options?: any) {
   if (!toolStore.isMeshWorkspace()) return
   const useEmptyKernel = tool === 'polydraw' || tool === 'primitive' || tool === 'add_primitive'
+  if (tool === 'polybuild' && !projectStore.activeMesh) {
+    projectStore.addEditableMesh(new EditableMesh(), `Mesh_${projectStore.meshes.length + 1}`)
+  }
   const activeMesh = useEmptyKernel && tool === 'polydraw' ? null : projectStore.activeMesh
 
   // Bridge active mesh to EditableMesh kernel (or empty mesh if placing new primitive)
@@ -3562,8 +3748,12 @@ function startModalOperator(tool: string, options?: any) {
     selectedMeshIds: [...projectStore.selectedMeshIds],
     isObjectMode: toolStore.selectMode === 'object',
     camera: activeCamera,
-    viewportElement: containerRef.value || document.body,
-    pivotMode: 'MEDIAN',
+    viewportElement: renderer?.domElement || containerRef.value || document.body,
+    pivotMode: (
+      toolStore.pivotPoint === 'cursor' ? 'CURSOR'
+      : toolStore.pivotPoint === 'active' ? 'ACTIVE_ELEMENT'
+      : 'MEDIAN'
+    ) as PivotMode,
     previewGroup: layers.previewGroup,
     sceneGroup: layers.modelGroup,
     allMeshes: projectStore.meshes,
@@ -3573,6 +3763,24 @@ function startModalOperator(tool: string, options?: any) {
     snapGrid: toolStore.snapping.grid,
     snapVertex: toolStore.snapping.vertex,
     snapEdge: toolStore.snapping.edge,
+    snapFace: toolStore.snapping.face,
+    startOrientation: (
+      toolStore.transformOrientation === 'local' ? 'LOCAL'
+      : toolStore.transformOrientation === 'normal' ? 'NORMAL'
+      : toolStore.transformOrientation === 'view' ? 'VIEW'
+      : 'GLOBAL'
+    ) as TransformOrientation,
+    cursorWorld: new THREE.Vector3(toolStore.cursor3D.x, toolStore.cursor3D.y, toolStore.cursor3D.z),
+    objectEuler: activeMesh
+      ? new THREE.Euler(
+          THREE.MathUtils.degToRad(activeMesh.rotation.x),
+          THREE.MathUtils.degToRad(activeMesh.rotation.y),
+          THREE.MathUtils.degToRad(activeMesh.rotation.z)
+        )
+      : undefined,
+    symmetryX: toolStore.viewport.symmetryX,
+    symmetryY: toolStore.viewport.symmetryY,
+    symmetryZ: toolStore.viewport.symmetryZ,
     objectMatrix: activeMesh ? meshWorldMatrix(activeMesh) : undefined,
     onUpdatePreview: () => {
       if (activeMesh && tool !== 'primitive' && tool !== 'add_primitive' && tool !== 'polydraw') {
@@ -3590,6 +3798,7 @@ function startModalOperator(tool: string, options?: any) {
       if (tool === 'polydraw' && editableMesh.faces.size > 0) {
         projectStore.addEditableMesh(editableMesh, `Block_${projectStore.meshes.length + 1}`)
       } else if (activeMesh && tool !== 'primitive' && tool !== 'add_primitive') {
+        const priorVertIds = new Set(activeMesh.vertices.map(v => v.id))
         const updatedMeshObj = MeshBridge.editableMeshToMeshObject(
           editableMesh,
           activeMesh,
@@ -3598,12 +3807,32 @@ function startModalOperator(tool: string, options?: any) {
         )
         projectStore.replaceMesh(updatedMeshObj)
         projectStore.recordState(actionName)
+        if (tool === 'polybuild') {
+          const born = updatedMeshObj.vertices.filter(v => !priorVertIds.has(v.id)).map(v => v.id)
+          if (born.length > 0) {
+            projectStore.selectedVertexIds = born
+            toolStore.selectMode = 'vertex'
+          }
+        }
       }
       orbitControls.enabled = true
+      if (transformControls) transformControls.enabled = true
+      if (tool === 'polydraw' || tool === 'polybuild') toolStore.setModelTool('move')
       rebuildMeshes()
     },
     onCancel: () => {
+      if (activeMesh && tool !== 'primitive' && tool !== 'add_primitive' && tool !== 'polydraw') {
+        const restored = MeshBridge.editableMeshToMeshObject(
+          editableMesh,
+          activeMesh,
+          bridgeData.numToStrVertId,
+          bridgeData.numToStrFaceId
+        )
+        projectStore.replaceMesh(restored)
+      }
       orbitControls.enabled = true
+      if (transformControls) transformControls.enabled = true
+      if (tool === 'polydraw' || tool === 'polybuild') toolStore.setModelTool('move')
       rebuildMeshes()
     }
   }
@@ -3614,6 +3843,15 @@ function startModalOperator(tool: string, options?: any) {
   }
 
   orbitControls.enabled = false
+  if (transformControls) transformControls.enabled = false
+
+  if (tool === 'grab' || tool === 'move') toolStore.setModelTool('move')
+  else if (tool === 'rotate') toolStore.setModelTool('rotate')
+  else if (tool === 'scale') toolStore.setModelTool('scale')
+  else if (tool === 'polybuild') {
+    toolStore.setModelTool('polybuild')
+    toolStore.selectMode = 'vertex'
+  }
 
   if (tool === 'grab' || tool === 'move') {
     operatorManager.start(new MoveOperator(), ctx, pointerPos)
@@ -3633,6 +3871,8 @@ function startModalOperator(tool: string, options?: any) {
     operatorManager.start(new LoopCutOperator(), ctx, pointerPos)
   } else if (tool === 'polydraw') {
     operatorManager.start(new PolyDrawOperator(), ctx, pointerPos)
+  } else if (tool === 'polybuild') {
+    operatorManager.start(new PolyBuildOperator(), ctx, pointerPos)
   } else if (tool === 'primitive' || tool === 'add_primitive') {
     const pType = (options?.primitiveType || 'BOX') as PrimitiveType
     const pMode = options?.mode || PrimitivePlacementMode.CAD_DRAW
@@ -3864,62 +4104,117 @@ function updateHoverState() {
   }
 }
 
-function paintRaycastHit() {
-  if (toolStore.appMode !== 'uvpaint') return
-  const intersects = raycaster.intersectObjects(layers.modelGroup.children, true)
-  if (intersects.length === 0) return
-  const hit = intersects[0]
+function is3DPaintToolSupported() {
+  return ['brush', 'eraser', 'bucket', 'dither', 'picker', 'shade'].includes(toolStore.paintTool)
+}
 
-  if (hit.uv) {
-    const uv = hit.uv
-    const targetTex = projectStore.activeTexture || projectStore.textures[0]
-    const pb = targetTex?.pixelBuffer || projectStore.pixelBuffer
-    if (!pb) return
+function is3DPaintToolMutating() {
+  return toolStore.paintTool !== 'picker' && is3DPaintToolSupported()
+}
 
-    if (targetTex && projectStore.activeTextureId !== targetTex.id) {
-      projectStore.selectTexture(targetTex.id)
+function getPaintRaycastHit(): PaintHit | null {
+  const hit = raycaster
+    .intersectObjects(layers.modelGroup.children, true)
+    .find(candidate => Boolean(candidate.uv && candidate.object.userData.meshId))
+  if (!hit?.uv) return null
+
+  const meshId = hit.object.userData.meshId as string
+  const faceIndex = typeof hit.faceIndex === 'number' ? hit.faceIndex : -1
+  const paintFaceMap = hit.object.userData.paintFaceMap as PaintFaceInfo[] | undefined
+  return {
+    hit,
+    meshId,
+    face: faceIndex >= 0 ? paintFaceMap?.[faceIndex] || null : null,
+    uv: { u: hit.uv.x, v: hit.uv.y }
+  }
+}
+
+function getPaintTextureForHit(paintHit: PaintHit) {
+  if (lastPaintTextureId) {
+    return projectStore.textures.find(texture => texture.id === lastPaintTextureId)
+  }
+  const mesh = projectStore.meshes.find(candidate => candidate.id === paintHit.meshId)
+  const material = mesh
+    ? projectStore.materials.find(candidate => candidate.id === mesh.materialId)
+    : undefined
+  return projectStore.textures.find(texture => texture.id === material?.textureId)
+    || projectStore.activeTexture
+    || projectStore.textures[0]
+}
+
+function paintFacesAreContinuous(previous: Omit<PaintHit, 'hit'>, current: PaintHit): boolean {
+  if (previous.meshId !== current.meshId || !previous.face || !current.face) return false
+  if (previous.face.id === current.face.id) return true
+
+  const sharedVertexIds = previous.face.vertexIds.filter(id => current.face!.vertexIds.includes(id))
+  if (sharedVertexIds.length < 2) return false
+  const epsilon = 1e-5
+  return sharedVertexIds.every(id => {
+    const previousIndex = previous.face!.vertexIds.indexOf(id)
+    const currentIndex = current.face!.vertexIds.indexOf(id)
+    const previousUv = previous.face!.uvs[previousIndex]
+    const currentUv = current.face!.uvs[currentIndex]
+    return Boolean(
+      previousUv &&
+      currentUv &&
+      Math.abs(previousUv.u - currentUv.u) <= epsilon &&
+      Math.abs(previousUv.v - currentUv.v) <= epsilon
+    )
+  })
+}
+
+function paintRaycastHit(paintHit = getPaintRaycastHit()) {
+  if (toolStore.appMode !== 'uvpaint' || !paintHit) {
+    lastPaintHit = null
+    return
+  }
+
+  const targetTex = getPaintTextureForHit(paintHit)
+  if (!targetTex || (lastPaintTextureId && targetTex.id !== lastPaintTextureId)) {
+    lastPaintHit = null
+    return
+  }
+  const pb = projectStore.ensureTextureBuffer(targetTex)
+  const uv = paintHit.uv
+  const px = Math.min(pb.width - 1, Math.max(0, Math.floor(Math.max(0, Math.min(1, uv.u)) * pb.width)))
+  const py = Math.min(pb.height - 1, Math.max(0, Math.floor((1 - Math.max(0, Math.min(1, uv.v))) * pb.height)))
+
+  const isPen = toolStore.currentPointerType === 'pen' && toolStore.stylusPressureEnabled
+  const effectiveSize = isPen
+    ? Math.max(1, Math.round(toolStore.brushSize * Math.max(0.01, toolStore.currentPressure) * 1.5))
+    : toolStore.brushSize
+  const activeDrawColor = toolStore.paletteSnapEnabled
+    ? snapColorToPalette(toolStore.primaryColor, projectStore.activePalette.colors)
+    : toolStore.primaryColor
+  const canConnect = Boolean(lastPaintHit && paintFacesAreContinuous(lastPaintHit, paintHit))
+
+  if (toolStore.paintTool === 'brush') {
+    if (canConnect && lastPaintHit) {
+      pb.paintLineAtUV(lastPaintHit.uv.u, lastPaintHit.uv.v, uv.u, uv.v, activeDrawColor, effectiveSize, 'brush', toolStore.brushOpacity, toolStore.brushShape)
+    } else {
+      pb.drawBrush(px, py, activeDrawColor, effectiveSize, toolStore.brushOpacity, toolStore.brushShape)
     }
-
-    const px = Math.floor(uv.x * pb.width)
-    const py = Math.floor((1 - uv.y) * pb.height)
-
-    const isPen = toolStore.currentPointerType === 'pen' && toolStore.stylusPressureEnabled
-    const effectiveSize = isPen ? Math.max(1, Math.round(toolStore.brushSize * toolStore.currentPressure * 1.5)) : toolStore.brushSize
-
-    const activeDrawColor = toolStore.paletteSnapEnabled
-      ? snapColorToPalette(toolStore.primaryColor, projectStore.activePalette.colors)
-      : toolStore.primaryColor
-
-    if (toolStore.paintTool === 'brush') {
-      if (lastPaintUV) {
-        pb.paintLineAtUV(lastPaintUV.u, lastPaintUV.v, uv.x, uv.y, activeDrawColor, effectiveSize, 'brush', toolStore.brushOpacity)
-      } else {
-        pb.drawBrush(px, py, activeDrawColor, effectiveSize, toolStore.brushOpacity)
-      }
-      lastPaintUV = { u: uv.x, v: uv.y }
-    } else if (toolStore.paintTool === 'eraser') {
-      if (lastPaintUV) {
-        pb.paintLineAtUV(lastPaintUV.u, lastPaintUV.v, uv.x, uv.y, activeDrawColor, effectiveSize, 'eraser')
-      } else {
-        pb.erase(px, py, effectiveSize)
-      }
-      lastPaintUV = { u: uv.x, v: uv.y }
-    } else if (toolStore.paintTool === 'bucket') {
-      pb.floodFill(px, py, activeDrawColor)
-    } else if (toolStore.paintTool === 'dither') {
-      pb.drawDither(px, py, activeDrawColor, effectiveSize)
-    } else if (toolStore.paintTool === 'picker') {
-      toolStore.primaryColor = pb.getPixelHex(px, py)
-    } else if (toolStore.paintTool === 'shade') {
-      pb.paintAtUV(uv.x, uv.y, activeDrawColor, effectiveSize, 'shade-light')
-      lastPaintUV = { u: uv.x, v: uv.y }
+  } else if (toolStore.paintTool === 'eraser') {
+    if (canConnect && lastPaintHit) {
+      pb.paintLineAtUV(lastPaintHit.uv.u, lastPaintHit.uv.v, uv.u, uv.v, activeDrawColor, effectiveSize, 'eraser', 1, toolStore.brushShape)
+    } else {
+      pb.erase(px, py, effectiveSize, toolStore.brushShape)
     }
+  } else if (toolStore.paintTool === 'bucket') {
+    pb.floodFill(px, py, activeDrawColor)
+  } else if (toolStore.paintTool === 'dither') {
+    pb.drawDither(px, py, activeDrawColor, effectiveSize)
+  } else if (toolStore.paintTool === 'picker') {
+    toolStore.primaryColor = pb.getPixelHex(px, py)
+  } else if (toolStore.paintTool === 'shade') {
+    pb.paintAtUV(uv.u, uv.v, activeDrawColor, effectiveSize, 'shade-light')
+  }
 
-    const hitTex = targetTex ? textureCache.get(targetTex.id) : threeTexture
-    if (hitTex) {
-      hitTex.needsUpdate = true
-    }
-    lastPaintTextureId = targetTex?.id
+  lastPaintHit = { meshId: paintHit.meshId, face: paintHit.face, uv: { ...paintHit.uv } }
+  if (!lastPaintTextureId) lastPaintTextureId = targetTex.id
+  if (is3DPaintToolMutating()) {
+    const hitTex = textureCache.get(targetTex.id)
+    if (hitTex) hitTex.needsUpdate = true
     projectStore.markTexturePreview()
   }
 }
@@ -4031,7 +4326,9 @@ function execSpecial(action: string) {
 
 function setCameraView(view: 'persp' | 'top' | 'front' | 'right' | 'iso') {
   const dist = 6
-  if (view === 'top') {
+  if (view === 'persp') {
+    cameraPersp.position.set(4.2, 3.2, 5.6)
+  } else if (view === 'top') {
     cameraPersp.position.set(0, dist, 0.001)
   } else if (view === 'front') {
     cameraPersp.position.set(0, 0.5, dist)
@@ -4042,6 +4339,7 @@ function setCameraView(view: 'persp' | 'top' | 'front' | 'right' | 'iso') {
   }
   cameraPersp.lookAt(0, 0.5, 0)
   orbitControls.target.set(0, 0.5, 0)
+  orbitControls.update()
 }
 
 async function startViewportRenderer() {
@@ -4152,6 +4450,10 @@ function onWindowResize() {
     updateOrtho(cameraFront, splitAspect)
     updateOrtho(cameraRight, splitAspect)
   }
+  if (transformControls) {
+    transformControls.enabled = !operatorManager.state.value.active
+    syncGizmoPickCamera()
+  }
 
   renderer.setSize(width, height)
 }
@@ -4191,26 +4493,29 @@ function animate() {
     renderer.setScissorTest(true)
     renderer.clear()
 
-    gizmoHelper.visible = false
+    const renderPane = (cam: THREE.Camera, x: number, w: number) => {
+      transformControls.camera = cam
+      gizmoHelper.visible = true
+      gizmoHelper.updateMatrixWorld(true)
+      renderer.setViewport(x, 0, w, height)
+      renderer.setScissor(x, 0, w, height)
+      renderer.render(scene, cam)
+    }
+
     setGridsForView('front')
-    renderer.setViewport(0, 0, cols.front, height)
-    renderer.setScissor(0, 0, cols.front, height)
-    gizmoHelper.visible = activeQuadrant.value === 'col_front'
-    renderer.render(scene, cameraFront)
+    renderPane(cameraFront, 0, cols.front)
 
     setGridsForView('side')
-    renderer.setViewport(cols.xSide, 0, cols.side, height)
-    renderer.setScissor(cols.xSide, 0, cols.side, height)
-    gizmoHelper.visible = activeQuadrant.value === 'col_side'
-    renderer.render(scene, cameraRight)
+    renderPane(cameraRight, cols.xSide, cols.side)
 
     setGridsForView('floor')
-    renderer.setViewport(cols.xPersp, 0, cols.persp, height)
-    renderer.setScissor(cols.xPersp, 0, cols.persp, height)
-    gizmoHelper.visible = activeQuadrant.value === 'col_persp'
-    renderer.render(scene, cameraPersp)
+    renderPane(cameraPersp, cols.xPersp, cols.persp)
 
     renderer.setScissorTest(false)
+    if (activeCamera) {
+      transformControls.camera = activeCamera
+      gizmoHelper.updateMatrixWorld(true)
+    }
   } else if (toolStore.viewport.quadView) {
     const halfW = Math.floor(width / 2)
     const halfH = Math.floor(height / 2)
@@ -4239,6 +4544,7 @@ function animate() {
     renderer.render(scene, cameraRight)
 
     renderer.setScissorTest(false)
+    if (transformControls) transformControls.getHelper().visible = true
   } else {
     setGridsForView('floor')
     renderer.setScissorTest(false)
@@ -4269,7 +4575,7 @@ watch(() => toolStore.appMode, async () => {
     toolStore.setModelTool('move')
     if (transformControls) {
       transformControls.enabled = true
-      transformControls.camera = cameraFront
+      syncGizmoPickCamera()
     }
   } else if (transformControls) {
     transformControls.enabled = true
@@ -4294,6 +4600,14 @@ watch(() => toolStore.selectMode, () => {
   rebuildMeshes()
   updateTransformGizmo()
 })
+watch(
+  () => [
+    projectStore.selectedVertexIds.join(','),
+    projectStore.selectedEdgeIds.join(','),
+    projectStore.selectedFaceIds.join(',')
+  ],
+  updateTransformGizmo
+)
 watch(() => toolStore.modelTool, updateTransformGizmo)
 watch(() => [toolStore.transformOrientation, toolStore.pivotPoint], updateTransformGizmo)
 watch(() => animationStore.selectedBoneId, () => {
@@ -4382,6 +4696,7 @@ function handleStartPrimitivePlacementEvent(e: any) {
 
 function handleGlobalPointerMove(e: PointerEvent) {
   lastHoverClientPos = { x: e.clientX, y: e.clientY }
+  lastPointerCtrl = e.ctrlKey || e.metaKey
   if (operatorManager.state.value.active) {
     updateActiveCameraAndQuadrant(e)
     if (operatorManager.activeOperator) {
@@ -4409,17 +4724,17 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
       operatorManager.cancel()
       return
     }
-  }
-
-  // Blender Box Select shortcut (B) or Add Bone in Rig Mode
-  if ((e.key === 'b' || e.key === 'B') && !e.ctrlKey && !e.metaKey && !e.altKey) {
-    if (toolStore.isMeshWorkspace()) {
-      toolStore.isBoxSelectActive = !toolStore.isBoxSelectActive
-      return
-    } else if (toolStore.appMode === 'rig') {
-      animationStore.clickToPlaceMode = !animationStore.clickToPlaceMode
+    if (isGizmoDragging) {
+      e.preventDefault()
+      skipGizmoCommit = true
+      transformControls.reset()
       return
     }
+  }
+
+  if ((e.key === 'b' || e.key === 'B') && !e.ctrlKey && !e.metaKey && !e.altKey && toolStore.appMode === 'rig') {
+    animationStore.clickToPlaceMode = !animationStore.clickToPlaceMode
+    return
   }
 
   if ((e.key === 'r' || e.key === 'R') && e.altKey) {
@@ -4649,11 +4964,6 @@ watch(() => operatorManager.state.value.active, (active) => {
   }
 })
 
-function toggleBoneVisibility() {
-  animationStore.toggleShowBones()
-  rebuildBones()
-}
-
 watch(() => [toolStore.viewport.showBones, animationStore.showBones], () => {
   rebuildBones()
 })
@@ -4756,6 +5066,7 @@ onUnmounted(() => {
 
 <template>
   <div data-viewport-root class="relative w-full h-full overflow-hidden bg-ui-root flex flex-col">
+    <ViewportNav />
     <!-- 3D Canvas Container -->
     <div 
       ref="containerRef" 
@@ -4826,42 +5137,6 @@ onUnmounted(() => {
 
       <!-- 1. SINGLE VIEWPORT LIGHTWAVE CONTROLS -->
       <template v-if="!isSplitView()">
-        <!-- Top-Left Transform Space & Pivot Cluster -->
-        <div 
-          v-if="toolStore.appMode === 'model' || toolStore.appMode === 'blockout'"
-          class="absolute top-2.5 left-2.5 z-20 flex items-center gap-1.5 bg-ui-panel/95 text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-md px-2 py-1 text-xs font-mono select-none"
-        >
-          <!-- Transform Orientation -->
-          <div class="flex items-center gap-1">
-            <span class="text-[10px] text-ui-textMuted uppercase font-bold">Space:</span>
-            <select 
-              v-model="toolStore.transformOrientation"
-              class="bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-[11px] text-ui-textPrimary focus:outline-none focus:border-amber-400"
-            >
-              <option value="global">Global</option>
-              <option value="local">Local</option>
-              <option value="normal">Normal</option>
-              <option value="view">View</option>
-              <option value="cursor">3D Cursor</option>
-            </select>
-          </div>
-
-          <div class="h-3 w-px bg-ui-borderSubtle"></div>
-
-          <!-- Pivot Point -->
-          <div class="flex items-center gap-1">
-            <span class="text-[10px] text-ui-textMuted uppercase font-bold">Pivot:</span>
-            <select 
-              v-model="toolStore.pivotPoint"
-              class="bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-[11px] text-ui-textPrimary focus:outline-none focus:border-amber-400"
-            >
-              <option value="median">Median Point</option>
-              <option value="active">Active Element</option>
-              <option value="cursor">3D Cursor</option>
-            </select>
-          </div>
-        </div>
-
         <!-- Top-Right LightWave Nav Cluster (Move, Rotate, Zoom, Center, Maximize) -->
         <div class="absolute top-2.5 right-2.5 z-20 flex items-center bg-ui-panel/95 text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-md divide-x divide-ui-borderSubtle">
           <button 
@@ -4891,32 +5166,6 @@ onUnmounted(() => {
             title="Center View on Model (Frame Contents)"
           >
             <Crosshair class="w-3.5 h-3.5" />
-          </button>
-          <!-- In-Viewport See-Through Glassmorphic X-Ray Button -->
-          <button 
-            @click="toolStore.viewport.xray = !toolStore.viewport.xray" 
-            class="p-1.5 transition flex items-center justify-center cursor-pointer"
-            :class="toolStore.viewport.xray ? 'bg-ui-active text-ui-textAccent font-bold shadow-inner' : 'hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent'"
-            title="Toggle X-Ray Mode (Alt+Z)"
-          >
-            <BlenderIcon name="xray" :size="14" :color="toolStore.viewport.xray ? 'var(--ui-accent)' : 'currentColor'" />
-          </button>
-          <!-- In-Viewport Bone Visibility Toggle Button -->
-          <button 
-            @click="toggleBoneVisibility()" 
-            class="p-1.5 transition flex items-center justify-center cursor-pointer"
-            :class="toolStore.viewport.showBones ? 'text-amber-400 hover:bg-ui-hover' : 'text-ui-textMuted/60 hover:text-ui-textSecondary hover:bg-ui-hover'"
-            :title="toolStore.viewport.showBones ? 'Hide Skeleton Bones' : 'Show Skeleton Bones'"
-          >
-            <GitCommitVertical v-if="toolStore.viewport.showBones" class="w-3.5 h-3.5 text-amber-400" />
-            <EyeOff v-else class="w-3.5 h-3.5 text-ui-textMuted" />
-          </button>
-          <button 
-            @click="toolStore.viewport.quadView = true" 
-            class="p-1.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition cursor-pointer"
-            title="Split to Quad View (Ctrl+Alt+Q)"
-          >
-            <Maximize2 class="w-3.5 h-3.5 text-ui-textAccent" />
           </button>
         </div>
 
@@ -5057,15 +5306,6 @@ onUnmounted(() => {
                 <button type="button" @click="centerViewOnContents('persp')" class="p-1 hover:bg-ui-hover text-ui-textSecondary" title="Frame">
                   <Crosshair class="w-3 h-3" />
                 </button>
-                <button
-                  type="button"
-                  @click="toolStore.viewport.xray = !toolStore.viewport.xray"
-                  class="p-1"
-                  :class="toolStore.viewport.xray ? 'bg-ui-active text-ui-textAccent' : 'hover:bg-ui-hover text-ui-textSecondary'"
-                  title="X-Ray"
-                >
-                  <BlenderIcon name="xray" :size="13" :color="toolStore.viewport.xray ? 'var(--ui-accent)' : 'currentColor'" />
-                </button>
               </div>
             </div>
           </div>
@@ -5156,15 +5396,6 @@ onUnmounted(() => {
             <button @click="centerViewOnContents('persp')" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Center View on Model">
               <Crosshair class="w-3 h-3" />
             </button>
-            <!-- In-Viewport See-Through Glassmorphic X-Ray Button -->
-            <button 
-              @click="toolStore.viewport.xray = !toolStore.viewport.xray" 
-              class="p-1 transition flex items-center justify-center"
-              :class="toolStore.viewport.xray ? 'bg-ui-active text-ui-textAccent font-bold shadow-inner' : 'hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent'"
-              title="Toggle X-Ray Mode (Alt+Z)"
-            >
-              <BlenderIcon name="xray" :size="13" :color="toolStore.viewport.xray ? 'var(--ui-accent)' : 'currentColor'" />
-            </button>
             <button @click="toolStore.viewport.quadView = false" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Maximize View">
               <Maximize2 class="w-3 h-3" />
             </button>
@@ -5233,7 +5464,7 @@ onUnmounted(() => {
 
     <!-- Knife & Loop Cut Interactive Screen Overlay Layer -->
     <svg 
-      v-if="operatorManager.state.value.active && (operatorManager.activeOperator instanceof KnifeOperator || operatorManager.activeOperator instanceof LoopCutOperator || operatorManager.activeOperator instanceof PolyDrawOperator)"
+      v-if="operatorManager.state.value.active && (operatorManager.activeOperator instanceof KnifeOperator || operatorManager.activeOperator instanceof LoopCutOperator || operatorManager.activeOperator instanceof PolyDrawOperator || operatorManager.activeOperator instanceof PolyBuildOperator)"
       class="absolute inset-0 w-full h-full pointer-events-none z-30"
     >
       <!-- Loop Cut Preview Lines -->
@@ -5248,6 +5479,17 @@ onUnmounted(() => {
           stroke="#f59e0b"
           stroke-width="2.5"
           stroke-linecap="round"
+        />
+      </template>
+
+      <template v-if="operatorManager.activeOperator instanceof PolyBuildOperator && (operatorManager.activeOperator as PolyBuildOperator).hoverWorld">
+        <circle
+          :cx="projectWorldToScreen((operatorManager.activeOperator as PolyBuildOperator).hoverWorld!).x"
+          :cy="projectWorldToScreen((operatorManager.activeOperator as PolyBuildOperator).hoverWorld!).y"
+          r="6"
+          :fill="(operatorManager.activeOperator as PolyBuildOperator).hoverKind === 'close' ? '#34d399' : (operatorManager.activeOperator as PolyBuildOperator).hoverKind === 'existing' ? '#38bdf8' : '#f59e0b'"
+          stroke="#0f172a"
+          stroke-width="1.25"
         />
       </template>
 
@@ -5341,7 +5583,8 @@ onUnmounted(() => {
     <div 
       v-if="operatorManager.state.value.active"
       data-floating-panel
-      class="fixed z-50 flex flex-col bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl font-sans select-none pointer-events-auto max-w-[95vw] min-w-[360px] hud-panel"
+      class="fixed z-50 flex flex-col bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl font-sans select-none pointer-events-auto max-w-[95vw] hud-panel"
+      :class="operatorManager.activeOperator instanceof PolyBuildOperator ? 'min-w-[300px]' : 'min-w-[360px]'"
       :style="{ left: `${hudPos.x}px`, top: `${hudPos.y}px` }"
     >
       <!-- Panel Header Bar (Draggable) -->
@@ -5372,8 +5615,16 @@ onUnmounted(() => {
 
         <!-- Interactive Controls Row -->
         <div class="flex items-center justify-between gap-2 pt-0.5">
+          <template v-if="operatorManager.activeOperator instanceof PolyBuildOperator">
+            <div class="text-[10px] text-ui-textMuted leading-snug pr-1">
+              Empty = new · old vert = reuse · first vert = close
+            </div>
+          </template>
           <!-- Axis Constraint Group -->
-          <div class="flex items-center bg-ui-input rounded-xs p-0.5 border border-ui-borderSubtle">
+          <div
+            v-else
+            class="flex items-center bg-ui-input rounded-xs p-0.5 border border-ui-borderSubtle"
+          >
             <button 
               @click="triggerAxisConstraint('x')"
               class="px-1.5 py-0.5 rounded-xs text-[10px] font-bold text-rose-400 hover:bg-rose-500/20 active:scale-95 transition"
@@ -5399,7 +5650,21 @@ onUnmounted(() => {
 
           <!-- Modifiers & Snapping Controls -->
           <div class="flex items-center gap-1">
+            <button
+              v-if="operatorManager.activeOperator instanceof PolyBuildOperator"
+              type="button"
+              class="px-2 py-1 border rounded-xs text-[11px] font-medium active:scale-95 transition"
+              :class="(operatorManager.activeOperator as PolyBuildOperator).canFill
+                ? 'bg-sky-500/20 text-sky-200 border-sky-400/40 hover:bg-sky-500/30'
+                : 'bg-ui-surface text-ui-textMuted border-ui-borderSubtle opacity-50'"
+              :disabled="!(operatorManager.activeOperator as PolyBuildOperator).canFill"
+              title="Fill the current loop (Enter / F)"
+              @click="(operatorManager.activeOperator as PolyBuildOperator).fillFromHud()"
+            >
+              Fill face
+            </button>
             <button 
+              v-if="!(operatorManager.activeOperator instanceof PolyBuildOperator)"
               @click="triggerToggleSnap"
               class="px-2 py-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[11px] text-ui-textSecondary font-medium active:scale-95 transition"
               title="Toggle Grid / Angle Snapping (Ctrl)"
@@ -5408,6 +5673,7 @@ onUnmounted(() => {
             </button>
 
             <button 
+              v-if="!(operatorManager.activeOperator instanceof PolyBuildOperator)"
               @click="triggerTogglePrecision"
               class="px-2 py-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[11px] text-ui-textSecondary font-medium active:scale-95 transition"
               title="Precision Mode (Shift)"
@@ -5462,10 +5728,10 @@ onUnmounted(() => {
             <button 
               @click="operatorManager.confirm()" 
               class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs rounded-xs shadow-xs flex items-center gap-1 active:scale-95 transition border border-emerald-500/80"
-              title="Confirm Operation (LMB / Enter)"
+              :title="operatorManager.activeOperator instanceof PolyBuildOperator ? 'Keep the mesh and exit (Enter when the loop is empty)' : 'Confirm Operation (LMB / Enter)'"
             >
               <Check class="w-3.5 h-3.5" />
-              <span>Confirm</span>
+              <span>{{ operatorManager.activeOperator instanceof PolyBuildOperator ? 'Done' : 'Confirm' }}</span>
             </button>
 
             <button 

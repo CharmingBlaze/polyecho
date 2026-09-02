@@ -12,8 +12,9 @@ Front and Side show **XY / ZY grids** (the floor grid is edge-on in those camera
 
 1. Drop a tracing photo on Front or Side (inspector **Refs**), or skip refs and sketch freehand.
 2. **F** or the amber outline button: Poly Draw. Click verts on the grid, close on the first point (or Enter), then drag to pull thickness.
-3. **Shift+A** for a box/cylinder when you need a stock volume.
-4. **G / R / S** to place the block. Repeat for the next volume.
+3. **V** or the cyan vertex button: Poly Build. Click empty space to draw a new vert, or click an existing mesh vert (cyan) to reuse it. Click the first vert of the loop (green) or press Enter / F to fill a face. A fourth unique vert fills a quad. The last edge stays so you can keep stripping. Esc cancels; Done keeps new verts (even before a face) and selects them so you can gizmo them. Preview rubber-bands are dashed.
+4. **Shift+A** for a box/cylinder when you need a stock volume.
+5. **G / R / S** to place the block. Repeat for the next volume.
 
 | Pane | Poly Draw plane |
 | :--- | :--- |
@@ -25,7 +26,7 @@ Until the first vertex is placed, moving into another column switches the plane.
 
 Vertices snap to the viewport grid size (Ctrl = half step). RMB or Ctrl+Z pops the last point. Esc cancels.
 
-The 3D gizmo draws in the **active** column (Front, Side, or Persp). Drag a reference photo to place it; **Alt-drag** in a pane moves that pane’s ref; **Shift-drag** or **Alt-wheel** scales. Lock a ref in the inspector to keep it still.
+The 3D gizmo is rebuilt per column (that pane’s camera and zoom) so a selected vertex keeps a handle on the vert in Front, Side, and Persp. Hover a pane, then drag. Selecting a reference photo does not hide the mesh gizmo (use **Alt-drag** for the photo). **Shift-drag** or **Alt-wheel** scales a ref. Lock a ref in the inspector to keep it still.
 
 Poly Draw commits a new mesh (`Block_N`) through `MeshBridge`. Cancel restores the empty kernel snapshot (no undo step). Drop on Persp still applies a **mesh texture**, not a lightbox.
 

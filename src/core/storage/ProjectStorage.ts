@@ -67,13 +67,16 @@ export class ProjectStorage {
   static async saveProject(data: Omit<ProjectStorageData, 'id' | 'updatedAt'>, id = AUTOSAVE_KEY): Promise<void> {
     try {
       const db = await getDB()
-      const record: ProjectStorageData = {
+      // IndexedDB rejects Vue proxies and other non-structured-clone values.
+      // ProjectStorageData is intentionally JSON-only, so normalize it at the
+      // persistence boundary instead of relying on every caller to unwrap state.
+      const record = JSON.parse(JSON.stringify({
         ...data,
         id,
         updatedAt: Date.now()
-      }
+      })) as ProjectStorageData
 
-      return new Promise((resolve, reject) => {
+      return await new Promise((resolve, reject) => {
         const tx = db.transaction(STORE_NAME, 'readwrite')
         const store = tx.objectStore(STORE_NAME)
         const request = store.put(record)

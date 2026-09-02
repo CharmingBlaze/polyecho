@@ -18,9 +18,10 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { id: 'bevel', label: 'Bevel Edges / Vertices', category: 'Modeling', defaultKey: 'Ctrl+b', currentKey: 'Ctrl+b' },
   { id: 'loopcut', label: 'Loop Cut and Slide', category: 'Modeling', defaultKey: 'Ctrl+r', currentKey: 'Ctrl+r' },
   { id: 'knife', label: 'Knife Topology', category: 'Modeling', defaultKey: 'k', currentKey: 'k' },
-  { id: 'polydraw', label: 'Poly Draw', category: 'Modeling', defaultKey: 'f', currentKey: 'f' },
+  { id: 'polydraw', label: 'Poly Draw (Blockout F)', category: 'Modeling', defaultKey: 'f', currentKey: 'f', description: 'Blockout workspace only. Model F is Fill.' },
+  { id: 'polybuild', label: 'Poly Build (Blockout V)', category: 'Modeling', defaultKey: 'v', currentKey: 'v', description: 'Click empty space for a new vert, click an old vert to reuse it, close the loop to fill.' },
   { id: 'subdivide', label: 'Subdivide Mesh', category: 'Modeling', defaultKey: 'w', currentKey: 'w' },
-  { id: 'fill_face', label: 'Fill Face from Boundary', category: 'Modeling', defaultKey: 'f', currentKey: 'f' },
+  { id: 'fill_face', label: 'Fill Face from Boundary (Model F)', category: 'Modeling', defaultKey: 'f', currentKey: 'f', description: 'Model workspace. Blockout F is Poly Draw.' },
   { id: 'connect_verts', label: 'Connect Vertex Path', category: 'Modeling', defaultKey: 'j', currentKey: 'j' },
   { id: 'merge_verts', label: 'Merge Vertices (Center)', category: 'Modeling', defaultKey: 'm', currentKey: 'm' },
   { id: 'flip_normals', label: 'Flip Normals', category: 'Modeling', defaultKey: 'Shift+n', currentKey: 'Shift+n' },
@@ -139,6 +140,47 @@ export const useKeymapStore = defineStore('keymap', () => {
     return item ? item.currentKey : ''
   }
 
+  function parseChord(chord: string): { ctrl: boolean; alt: boolean; shift: boolean; key: string; code: string } {
+    const parts = chord.split('+').map(p => p.trim()).filter(Boolean)
+    let ctrl = false
+    let alt = false
+    let shift = false
+    let key = ''
+    let code = ''
+    for (const p of parts) {
+      const l = p.toLowerCase()
+      if (l === 'ctrl' || l === 'control' || l === 'cmd' || l === 'meta') ctrl = true
+      else if (l === 'alt') alt = true
+      else if (l === 'shift') shift = true
+      else if (l.startsWith('numpad')) code = p
+      else key = l
+    }
+    return { ctrl, alt, shift, key, code }
+  }
+
+  function eventMatchesBinding(e: KeyboardEvent, chord: string): boolean {
+    if (!chord) return false
+    const want = parseChord(chord)
+    if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return false
+    const ctrl = e.ctrlKey || e.metaKey
+    const alt = e.altKey
+    const shift = e.shiftKey
+    if (want.ctrl !== ctrl || want.alt !== alt || want.shift !== shift) return false
+    if (want.code) return e.code.toLowerCase() === want.code.toLowerCase()
+    let key = e.key
+    if (key === ' ') key = 'space'
+    key = key.length === 1 ? key.toLowerCase() : key.toLowerCase()
+    return want.key === key
+  }
+
+  function eventMatches(actionId: string, e: KeyboardEvent): boolean {
+    return eventMatchesBinding(e, getKeyFor(actionId))
+  }
+
+  function matchingActionIds(e: KeyboardEvent): string[] {
+    return bindings.value.filter(b => eventMatchesBinding(e, b.currentKey)).map(b => b.id)
+  }
+
   return {
     bindings,
     recordingBindingId,
@@ -146,6 +188,8 @@ export const useKeymapStore = defineStore('keymap', () => {
     rebind,
     resetToDefault,
     resetAllDefaults,
-    getKeyFor
+    getKeyFor,
+    eventMatches,
+    matchingActionIds
   }
 })
