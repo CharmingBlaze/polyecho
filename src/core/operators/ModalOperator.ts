@@ -36,6 +36,8 @@ export interface OperatorContext {
   /** Initial G/R/S space from the viewport header (X still cycles). */
   startOrientation?: TransformOrientation
   cursorWorld?: THREE.Vector3
+  /** Orbit pivot — used as the 3D work-plane depth in perspective. */
+  orbitTarget?: THREE.Vector3
   objectEuler?: THREE.Euler
   onUpdatePreview: () => void
   onCommit: (actionName: string) => void

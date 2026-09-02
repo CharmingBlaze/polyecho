@@ -29,12 +29,13 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/stores/projectStore.ts` | Document, modeling, texture + material verbs (`docs/TEXTURES.md`, `docs/MATERIALS.md`) |
 | `src/composables/useTextureApply.ts` | Apply-to-object + shared-material prompt |
 | `src/composables/useFloatingDrag.ts` | Pointer-capture drag for floating chrome |
+| `src/composables/useFastTitleTips.ts` | Fast icon hover labels (replaces slow OS `title`) |
 | `src/components/modals/TextureSharePrompt.vue` | This object vs all objects on material |
 | `src/stores/toolStore.ts` | Modes, tools, snap, viewport flags |
 | `src/stores/animationStore.ts` | Rig, clips, playback, weights |
 | `src/stores/historyStore.ts` | Undo / redo |
 | `src/stores/layoutStore.ts` | Panel chrome, inspector tab per workspace, Blockout pane split fractions |
-| `src/stores/themeStore.ts` | Themes |
+| `src/stores/themeStore.ts` | Themes. `applyCurrentTheme` remaps selected wells away from the accent if contrast would hide text/icons, and sets `--ui-on-accent` for buttons. |
 | `src/stores/keymapStore.ts` | Live shortcut chords + Preferences remaps (`App.vue` matches events here) |
 
 ## Mesh and modeling
@@ -109,7 +110,7 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | Folder | Role |
 | :--- | :--- |
 | `src/components/layout/` | Header, toolbars, status (`DockviewLayout.vue` exists but is not mounted) |
-| `src/components/viewport/` | 3D view (`Viewport3D`: picking, gizmo, fill camera, modal start). `ViewportNav.vue` is the Space/pivot/snap/shade/overlay bar. |
+| `src/components/viewport/` | 3D view (`Viewport3D`: picking, gizmo, fill camera, modal start). Space/pivot/snap/shade/overlays/x-ray live in `HeaderMenu.vue`. |
 | `src/components/inspector/` | Transform, material, texture, modifiers, references (`ReferenceProps`), animation (`AnimationInspector` = Animate workspace) |
 | `src/components/outliner/` | Object tree |
 | `src/components/uvpaint/` | UV editor, pixel editor (`PixelCanvas.vue` is the UV/Paint tab router), palettes |

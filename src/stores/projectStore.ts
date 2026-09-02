@@ -633,25 +633,26 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   function deleteMesh(id: string) {
-    if (meshes.value.length <= 1) return
     recordState('Delete Mesh')
     meshes.value = meshes.value.filter(m => m.id !== id)
     if (activeMeshId.value === id) {
       activeMeshId.value = meshes.value[0]?.id || ''
     }
     selectedMeshIds.value = selectedMeshIds.value.filter(mId => mId !== id)
+    if (selectedMeshIds.value.length === 0 && activeMeshId.value) {
+      selectedMeshIds.value = [activeMeshId.value]
+    }
+    clearSubSelections()
     markGeometryUpdated()
   }
 
   function deleteSelectedMeshes() {
-    if (meshes.value.length <= 1) return
+    const toDelete = selectedMeshIds.value.length > 0 ? selectedMeshIds.value : (activeMeshId.value ? [activeMeshId.value] : [])
+    if (toDelete.length === 0) return
     recordState('Delete Selected Meshes')
-    meshes.value = meshes.value.filter(m => !selectedMeshIds.value.includes(m.id))
-    if (meshes.value.length === 0) {
-      meshes.value = [createCube('Cube_1', 2)]
-    }
+    meshes.value = meshes.value.filter(m => !toDelete.includes(m.id))
     activeMeshId.value = meshes.value[0]?.id || ''
-    selectedMeshIds.value = [activeMeshId.value]
+    selectedMeshIds.value = activeMeshId.value ? [activeMeshId.value] : []
     clearSubSelections()
     markGeometryUpdated()
   }

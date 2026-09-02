@@ -13,7 +13,7 @@ withDefaults(defineProps<{
   delayDuration?: number
 }>(), {
   side: 'top',
-  delayDuration: 300
+  delayDuration: 140
 })
 </script>
 

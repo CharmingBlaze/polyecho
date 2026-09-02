@@ -43,9 +43,9 @@ Viewport Key/Click  →  ModalOperator Session  →  EditableMesh Kernel  →  M
 - Restores initial snapshot onto `EditableMesh` and store.
 - Re-enables `OrbitControls` with zero changes recorded in history.
 
-### Snapping (`ViewportNav.vue`)
+### Snapping (`HeaderMenu.vue`)
 
-Live controls sit next to Space / Pivot in the viewport bar. Magnet + chevron: grid size, vertex, edge midpoint, face center.
+Live controls sit next to Space / Pivot in the app header. Magnet + chevron: grid size, vertex, edge midpoint, face center.
 
 - **Grid / magnet**: status bar shows `gridSize`. **G** increment-snaps only with **Ctrl**. Magnet-on-by-default must not round grab delta (that froze small moves).
 - **Vertex / edge / face**: closest moving point to a non-moving target; **one** rigid offset (`SnapManager.findRigidSnapOffset`) on grab, component gizmo drag, and object-mode gizmo (other meshes).
@@ -67,8 +67,8 @@ Live controls sit next to Space / Pivot in the viewport bar. Magnet + chevron: g
 | **`Ctrl+R`**| Loop Cut | `LoopCutOperator` | Detects quad edge rings and splits with interactive slide + scroll wheel count. |
 | **Drag** | Primitive Placement | `PrimitivePlacementOperator` | Interactive click-and-drag grid spawner for boxes, cylinders, and spheres. |
 | **F** (Model) | Fill | one-shot `Operations.fillFaceFromVertices` | See **Fill (F)** below. Not a modal operator. |
-| **F** (Blockout) | Poly Draw | `PolyDrawOperator` | Front/Side silhouette or Persp ground/face, close, then extrude. New mesh on commit. |
-| **V** (Blockout) | Poly Build | `PolyBuildOperator` | First click locks a plane (mesh face under the cursor, or the view plane through the mesh). Later clicks stay on that plane so Front/Side/Persp agree. Empty = new vert, old vert = reuse, first vert / Enter / F = fill. |
+| **F** (Blockout) | Poly Draw | `PolyDrawOperator` | Front/Side silhouette; Persp view-plane or mesh face (N = ground). Close, then extrude toward the camera (F flips). MMB orbit. New mesh on commit. |
+| **V** (Blockout) | Poly Build | `PolyBuildOperator` | Reuse front-most verts, or place on a hit face / view plane. After a fill the last edge + that face plane stay; Tab walks around. MMB orbit. |
 
 ---
 
@@ -111,7 +111,7 @@ Gizmo vertex/edge/face drag writes `MeshObject` verts in `onGizmoObjectChange`. 
 
 ## Snapping (`toolStore.snapping` + `SnapManager`)
 
-UI: viewport magnet chevron (`ViewportNav.vue`). Flags were historically unused except the checkboxes.
+UI: header magnet chevron (`HeaderMenu.vue`). Flags were historically unused except the checkboxes.
 
 | Flag | Default | What it does |
 | :--- | :--- | :--- |

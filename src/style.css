@@ -22,6 +22,7 @@
   --ui-accent: #6366f1;
   --ui-accent-hover: #4f46e5;
   --ui-accent-subtle: rgba(99, 102, 241, 0.12);
+  --ui-on-accent: #ffffff;
 
   /* 4 Semantic Text Contrast Levels */
   --ui-text-primary: #d8dbe0;
@@ -126,7 +127,14 @@
    1. WINDOWS 95 CLASSIC (Authentic Silver, Navy & Teal Palette)
    -------------------------------------------------------------------------- */
 [data-theme="win95_classic"] {
-  font-family: "MS Sans Serif", Tahoma, "Segoe UI", Arial, sans-serif;
+  font-family: Tahoma, "MS Sans Serif", "Segoe UI", Arial, sans-serif;
+}
+
+/* Keep chrome silver — Tailwind /95 overlays were picking up the teal viewport */
+[data-theme="win95_classic"] .bg-ui-panel\/95,
+[data-theme="win95_classic"] .bg-ui-header\/95,
+[data-theme="win95_classic"] .bg-ui-surface\/60 {
+  background-color: var(--ui-bg-panel) !important;
 }
 
 /* --------------------------------------------------------------------------
@@ -146,18 +154,22 @@
 }
 
 /* --------------------------------------------------------------------------
-   3. AMIGA WORKBENCH 2.0 (Topaz Sapphire & Steel Bevels)
+   3. AMIGA WORKBENCH 2.0 (Sapphire screen, grey windows, orange gadgets)
    -------------------------------------------------------------------------- */
-[data-theme="amiga_workbench"] aside > div:first-child,
-[data-theme="amiga_workbench"] .modal-header {
-  background: #0055aa !important;
-  color: #ffffff !important;
-  border-bottom: 2px solid #000000 !important;
+[data-theme="amiga_workbench"] {
+  font-family: Tahoma, Geneva, "Segoe UI", Arial, sans-serif;
 }
 
-[data-theme="amiga_workbench"] aside > div:first-child *,
-[data-theme="amiga_workbench"] .modal-header * {
-  color: #ffffff !important;
+[data-theme="amiga_workbench"] .bg-ui-panel\/95,
+[data-theme="amiga_workbench"] .bg-ui-header\/95,
+[data-theme="amiga_workbench"] .bg-ui-surface\/60 {
+  background-color: var(--ui-bg-panel) !important;
+}
+
+[data-theme="dreamcast_pearl"] .bg-ui-panel\/95,
+[data-theme="dreamcast_pearl"] .bg-ui-header\/95,
+[data-theme="dreamcast_pearl"] .bg-ui-surface\/60 {
+  background-color: var(--ui-bg-panel) !important;
 }
 
 /* --------------------------------------------------------------------------
@@ -255,6 +267,7 @@
 /* LightWave Viewport Navigation Dock Buttons (Top-Right Icons) */
 [data-theme="lightwave_3d"] [title*="Pan View"],
 [data-theme="lightwave_3d"] [title*="Orbit 3D View"],
+[data-theme="lightwave_3d"] [title*="Orbit View"],
 [data-theme="lightwave_3d"] [title*="Zoom View"],
 [data-theme="lightwave_3d"] [title*="Center View"] {
   background: #252a34 !important;
@@ -263,6 +276,7 @@
 
 [data-theme="lightwave_3d"] [title*="Pan View"]:hover,
 [data-theme="lightwave_3d"] [title*="Orbit 3D View"]:hover,
+[data-theme="lightwave_3d"] [title*="Orbit View"]:hover,
 [data-theme="lightwave_3d"] [title*="Zoom View"]:hover,
 [data-theme="lightwave_3d"] [title*="Center View"]:hover {
   background: #373e4d !important;
@@ -314,5 +328,11 @@
   background: #1e2127 !important;
   border-top: 1px solid #363d4a !important;
   color: #9aa5b6 !important;
+}
+
+/* Primary accent buttons: black or white, whichever reads on the accent */
+.bg-ui-accent,
+.bg-ui-accent.text-white {
+  color: var(--ui-on-accent, #ffffff) !important;
 }
 

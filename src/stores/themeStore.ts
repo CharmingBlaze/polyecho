@@ -34,6 +34,69 @@ export interface ThemePreset {
   colors: ThemeColors
 }
 
+function parseHex(hex: string): [number, number, number] | null {
+  const h = hex.replace('#', '').trim()
+  if (h.length === 3 && /^[0-9a-f]{3}$/i.test(h)) {
+    return [parseInt(h[0] + h[0], 16), parseInt(h[1] + h[1], 16), parseInt(h[2] + h[2], 16)]
+  }
+  if (h.length !== 6 || /[^0-9a-f]/i.test(h)) return null
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]
+}
+
+function toHex(r: number, g: number, b: number): string {
+  const c = (n: number) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0')
+  return `#${c(r)}${c(g)}${c(b)}`
+}
+
+function srgbLin(c: number): number {
+  const s = c / 255
+  return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+}
+
+function luminance(hex: string): number {
+  const rgb = parseHex(hex)
+  if (!rgb) return 0
+  return 0.2126 * srgbLin(rgb[0]) + 0.7152 * srgbLin(rgb[1]) + 0.0722 * srgbLin(rgb[2])
+}
+
+function contrastRatio(a: string, b: string): number {
+  const hi = Math.max(luminance(a), luminance(b))
+  const lo = Math.min(luminance(a), luminance(b))
+  return (hi + 0.05) / (lo + 0.05)
+}
+
+function mixHex(a: string, b: string, t: number): string {
+  const A = parseHex(a)
+  const B = parseHex(b)
+  if (!A || !B) return a
+  return toHex(A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t, A[2] + (B[2] - A[2]) * t)
+}
+
+function rgbDist(a: string, b: string): number {
+  const A = parseHex(a)
+  const B = parseHex(b)
+  if (!A || !B) return 999
+  return Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2])
+}
+
+function onColor(bg: string): string {
+  return contrastRatio(bg, '#f8f8f8') >= contrastRatio(bg, '#161616') ? '#f8f8f8' : '#161616'
+}
+
+function bestOnSurfaces(preferred: string, surfaces: string[], fallbacks: string[]): string {
+  const pool = [preferred, ...fallbacks]
+  let best = pool[0]
+  let score = -1
+  for (const c of pool) {
+    const s = Math.min(...surfaces.map((bg) => contrastRatio(c, bg)))
+    if (s > score) {
+      score = s
+      best = c
+    }
+  }
+  return best
+}
+
 export const THEME_PRESETS: ThemePreset[] = [
   // --------------------------------------------------------------------------
   // 1. DCC & PRO 3D STUDIOS
@@ -346,17 +409,17 @@ export const THEME_PRESETS: ThemePreset[] = [
     id: 'win95_classic',
     name: 'Windows 95 Classic',
     category: 'Operating Systems',
-    description: 'Authentic 1995 desktop with battleship grey panels, navy blue selections, crisp white inputs, and classic 3D teal workspace.',
+    description: 'Authentic 1995 desktop with battleship grey panels, navy accents, crisp white inputs, and classic teal workspace.',
     colors: {
       bgBase: '#008080',
       bgPanel: '#c0c0c0',
       bgHeader: '#c0c0c0',
       bgInput: '#ffffff',
       bgHover: '#d4d4d4',
-      bgActive: '#000080',
+      bgActive: '#b8b8b8',
       borderSubtle: '#dfdfdf',
       borderDefault: '#808080',
-      borderStrong: '#000000',
+      borderStrong: '#404040',
       textPrimary: '#000000',
       textSecondary: '#222222',
       textMuted: '#555555',
@@ -364,8 +427,8 @@ export const THEME_PRESETS: ThemePreset[] = [
       accentColor: '#000080',
       selectionColor: '#ffff00',
       viewportBg: '#008080',
-      gridMajor: '#ffffff',
-      gridMinor: '#005e5e',
+      gridMajor: '#c0c0c0',
+      gridMinor: '#006666',
       gizmoX: '#e00000',
       gizmoY: '#00aa00',
       gizmoZ: '#0000e0',
@@ -376,30 +439,90 @@ export const THEME_PRESETS: ThemePreset[] = [
     id: 'win_xp_luna',
     name: 'Windows XP Luna',
     category: 'Operating Systems',
-    description: 'Nostalgic 2001 Luna Blue titlebars with olive-silver panels and Bliss green accents.',
+    description: 'Authentic 2001 Luna Blue titlebars with classic warm silver-cream panels, crisp dark text, and 3D studio slate workspace.',
     colors: {
-      bgBase: '#245edb',
+      bgBase: '#1e3b70',
       bgPanel: '#ece9d8',
-      bgHeader: '#0055ea',
+      bgHeader: '#ece9d8',
       bgInput: '#ffffff',
-      bgHover: '#d8e5fa',
+      bgHover: '#c1d2ee',
       bgActive: '#316ac5',
-      borderSubtle: '#dcd7c8',
-      borderDefault: '#b0a890',
-      borderStrong: '#003c74',
-      textPrimary: '#1a1a1a',
-      textSecondary: '#333333',
-      textMuted: '#666666',
-      textAccent: '#388e3c',
-      accentColor: '#0055ea',
-      selectionColor: '#ff7700',
-      viewportBg: '#1e3f8a',
-      gridMajor: '#4b92db',
-      gridMinor: '#26509e',
+      borderSubtle: '#d4cfbe',
+      borderDefault: '#7f9db9',
+      borderStrong: '#0055ea',
+      textPrimary: '#0f172a',
+      textSecondary: '#334155',
+      textMuted: '#64748b',
+      textAccent: '#0055ea',
+      accentColor: '#245edb',
+      selectionColor: '#ff8c00',
+      viewportBg: '#363d4a',
+      gridMajor: '#5c6e88',
+      gridMinor: '#282d36',
       gizmoX: '#e52521',
-      gizmoY: '#388e3c',
-      gizmoZ: '#0055ea',
-      gizmoAccent: '#ff7700'
+      gizmoY: '#2e7d32',
+      gizmoZ: '#245edb',
+      gizmoAccent: '#ff8c00'
+    }
+  },
+  {
+    id: 'win_xp_royale',
+    name: 'Windows XP Royale (Energy Blue)',
+    category: 'Operating Systems',
+    description: 'Iconic Windows XP Media Center Edition Royale theme with sleek cobalt styling, clean silver inputs, and emerald accents.',
+    colors: {
+      bgBase: '#1a3258',
+      bgPanel: '#e8ecf4',
+      bgHeader: '#e8ecf4',
+      bgInput: '#ffffff',
+      bgHover: '#c0d4f0',
+      bgActive: '#2054a8',
+      borderSubtle: '#c6d4ea',
+      borderDefault: '#7c9cc8',
+      borderStrong: '#1a4b9c',
+      textPrimary: '#0c1938',
+      textSecondary: '#253a66',
+      textMuted: '#5a729e',
+      textAccent: '#0066ff',
+      accentColor: '#0066ff',
+      selectionColor: '#ff9900',
+      viewportBg: '#2c3442',
+      gridMajor: '#4d6282',
+      gridMinor: '#202630',
+      gizmoX: '#e52521',
+      gizmoY: '#00aa44',
+      gizmoZ: '#0066ff',
+      gizmoAccent: '#ff9900'
+    }
+  },
+  {
+    id: 'win_xp_silver',
+    name: 'Windows XP Luna Silver',
+    category: 'Operating Systems',
+    description: 'Polished 2001 Windows XP Metallic Silver style with neutral brushed aluminum panels and Ruby accents.',
+    colors: {
+      bgBase: '#707279',
+      bgPanel: '#e5e5e2',
+      bgHeader: '#e5e5e2',
+      bgInput: '#ffffff',
+      bgHover: '#d0d2d8',
+      bgActive: '#b0b3ba',
+      borderSubtle: '#c8c8c5',
+      borderDefault: '#8f9199',
+      borderStrong: '#54565c',
+      textPrimary: '#111827',
+      textSecondary: '#374151',
+      textMuted: '#6b7280',
+      textAccent: '#d32f2f',
+      accentColor: '#54565c',
+      selectionColor: '#e65100',
+      viewportBg: '#383b42',
+      gridMajor: '#626670',
+      gridMinor: '#27292e',
+      gizmoX: '#e52521',
+      gizmoY: '#2e7d32',
+      gizmoZ: '#3f51b5',
+      gizmoAccent: '#e65100'
     }
   },
   {
@@ -436,59 +559,59 @@ export const THEME_PRESETS: ThemePreset[] = [
     id: 'amiga_workbench',
     name: 'Amiga Workbench 2.0',
     category: 'Operating Systems',
-    description: 'Commodore Amiga iconic topazes, deep sapphire blue, steel grey, and warm amber.',
+    description: 'Workbench grey windows on a sapphire screen, with orange gadgets and the classic four-color Amiga palette.',
     colors: {
       bgBase: '#0055aa',
-      bgPanel: '#a0a0a0',
-      bgHeader: '#0055aa',
+      bgPanel: '#aaaaaa',
+      bgHeader: '#aaaaaa',
       bgInput: '#ffffff',
-      bgHover: '#b8b8b8',
-      bgActive: '#ff8800',
-      borderSubtle: '#c0c0c0',
-      borderDefault: '#555555',
+      bgHover: '#bbbbbb',
+      bgActive: '#8e8e8e',
+      borderSubtle: '#cccccc',
+      borderDefault: '#666666',
       borderStrong: '#000000',
       textPrimary: '#000000',
       textSecondary: '#111111',
       textMuted: '#444444',
-      textAccent: '#ff8800',
-      accentColor: '#0055aa',
-      selectionColor: '#ffaa00',
-      viewportBg: '#004488',
-      gridMajor: '#ff8800',
-      gridMinor: '#003366',
-      gizmoX: '#ff3333',
-      gizmoY: '#33ff33',
+      textAccent: '#aa4400',
+      accentColor: '#ee7700',
+      selectionColor: '#ffcc66',
+      viewportBg: '#0055aa',
+      gridMajor: '#88aacc',
+      gridMinor: '#003d7a',
+      gizmoX: '#ee2200',
+      gizmoY: '#22aa22',
       gizmoZ: '#ffffff',
-      gizmoAccent: '#ffaa00'
+      gizmoAccent: '#ee7700'
     }
   },
   {
     id: 'beos_haiku',
     name: 'BeOS / Haiku',
     category: 'Operating Systems',
-    description: 'Signature BeOS golden-yellow window tabs and clean slate grey multi-tasking workspace.',
+    description: 'Iconic 1998 BeOS R5 desktop with signature golden-yellow window tabs, clean slate-grey panels, and sapphire studio workspace.',
     colors: {
       bgBase: '#336698',
       bgPanel: '#e4e4e4',
-      bgHeader: '#ffc600',
+      bgHeader: '#e4e4e4',
       bgInput: '#ffffff',
-      bgHover: '#f0f0f0',
+      bgHover: '#ffe885',
       bgActive: '#ffc600',
-      borderSubtle: '#d0d0d0',
-      borderDefault: '#a0a0a0',
-      borderStrong: '#444444',
-      textPrimary: '#111111',
-      textSecondary: '#222222',
-      textMuted: '#666666',
-      textAccent: '#2a5885',
-      accentColor: '#ffc600',
-      selectionColor: '#2a5885',
-      viewportBg: '#254b73',
-      gridMajor: '#ffc600',
-      gridMinor: '#1b3653',
-      gizmoX: '#e74c3c',
+      borderSubtle: '#d2d2d2',
+      borderDefault: '#a4a4a4',
+      borderStrong: '#686868',
+      textPrimary: '#0f172a',
+      textSecondary: '#334155',
+      textMuted: '#64748b',
+      textAccent: '#255888',
+      accentColor: '#f5b800',
+      selectionColor: '#ffc600',
+      viewportBg: '#2c394b',
+      gridMajor: '#4f6888',
+      gridMinor: '#202936',
+      gizmoX: '#d9383a',
       gizmoY: '#2ecc71',
-      gizmoZ: '#3498db',
+      gizmoZ: '#336698',
       gizmoAccent: '#ffc600'
     }
   },
@@ -680,30 +803,30 @@ export const THEME_PRESETS: ThemePreset[] = [
     id: 'dreamcast_pearl',
     name: 'Sega Dreamcast',
     category: 'Game Systems',
-    description: 'Sleek frosted off-white 128-bit hardware with vibrant Dreamcast orange spiral.',
+    description: '1998 NA Dreamcast pearl shell, swirl-orange gadgets, Emerald Coast dusk viewport. Selected wells are seafoam — never a solid orange slab.',
     colors: {
-      bgBase: '#1e2128',
-      bgPanel: '#eef0f4',
-      bgHeader: '#dfe3ea',
-      bgInput: '#ffffff',
-      bgHover: '#d2d8e4',
-      bgActive: '#ff5900',
-      borderSubtle: '#d8dee8',
-      borderDefault: '#b0b8c6',
-      borderStrong: '#ff5900',
-      textPrimary: '#1a202c',
-      textSecondary: '#2d3748',
-      textMuted: '#718096',
-      textAccent: '#ff5900',
-      accentColor: '#ff5900',
-      selectionColor: '#0088ff',
-      viewportBg: '#181b22',
-      gridMajor: '#ff5900',
-      gridMinor: '#262d3a',
-      gizmoX: '#ff5900',
-      gizmoY: '#00cc88',
-      gizmoZ: '#0088ff',
-      gizmoAccent: '#ffcc00'
+      bgBase: '#d8cfc0',
+      bgPanel: '#efe8dc',
+      bgHeader: '#e6ddd0',
+      bgInput: '#fffdf8',
+      bgHover: '#e4dcc8',
+      bgActive: '#c5ddd4',
+      borderSubtle: '#ddd2c0',
+      borderDefault: '#c2b49c',
+      borderStrong: '#7a7060',
+      textPrimary: '#1a1c1b',
+      textSecondary: '#3a3e3c',
+      textMuted: '#5c5a54',
+      textAccent: '#8f3200',
+      accentColor: '#d35400',
+      selectionColor: '#2a9d8f',
+      viewportBg: '#2a3840',
+      gridMajor: '#5a7880',
+      gridMinor: '#334850',
+      gizmoX: '#d94a3d',
+      gizmoY: '#3daf5c',
+      gizmoZ: '#3d8fd0',
+      gizmoAccent: '#e8b84a'
     }
   },
   {
@@ -891,19 +1014,43 @@ export const useThemeStore = defineStore('theme', () => {
     root.style.setProperty('--ui-bg-surface', active.bgPanel)
     root.style.setProperty('--ui-bg-input', active.bgInput)
     root.style.setProperty('--ui-bg-hover', active.bgHover)
-    root.style.setProperty('--ui-bg-active', active.bgActive)
+
+    let well = active.bgActive
+    const wellReads =
+      Math.max(contrastRatio(well, active.textPrimary), contrastRatio(well, active.textAccent)) >= 3.2
+    if (rgbDist(well, active.accentColor) < 90 || !wellReads) {
+      well = mixHex(active.bgPanel, active.accentColor, luminance(active.bgPanel) > 0.4 ? 0.14 : 0.26)
+    }
+    root.style.setProperty('--ui-bg-active', well)
 
     root.style.setProperty('--ui-border-subtle', active.borderSubtle)
     root.style.setProperty('--ui-border-default', active.borderDefault)
     root.style.setProperty('--ui-border-strong', active.borderStrong)
     root.style.setProperty('--ui-border-focus', active.accentColor)
 
+    const muted = contrastRatio(active.textMuted, active.bgPanel) >= 4.5
+      ? active.textMuted
+      : mixHex(active.textPrimary, active.bgPanel, 0.38)
+    const accentLabel = bestOnSurfaces(
+      active.textAccent,
+      [active.bgPanel, active.bgHeader, well],
+      ['#8f3200', '#0d4f4c', '#1a1c1b', '#fff6ea']
+    )
     root.style.setProperty('--ui-text-primary', active.textPrimary)
     root.style.setProperty('--ui-text-secondary', active.textSecondary)
-    root.style.setProperty('--ui-text-muted', active.textMuted)
-    root.style.setProperty('--ui-text-accent', active.textAccent)
+    root.style.setProperty('--ui-text-muted', muted)
+    root.style.setProperty('--ui-text-accent', accentLabel)
 
     root.style.setProperty('--ui-accent', active.accentColor)
+    const onAccent = onColor(active.accentColor)
+    root.style.setProperty('--ui-on-accent', onAccent)
+    const accentRgb = parseHex(active.accentColor)
+    if (accentRgb) {
+      const [r, g, b] = accentRgb
+      const dark = (n: number) => Math.max(0, Math.round(n * 0.72)).toString(16).padStart(2, '0')
+      root.style.setProperty('--ui-accent-hover', `#${dark(r)}${dark(g)}${dark(b)}`)
+      root.style.setProperty('--ui-accent-subtle', `rgba(${r}, ${g}, ${b}, 0.18)`)
+    }
     root.style.setProperty('--ui-selection', active.selectionColor)
     root.style.setProperty('--ui-viewport-bg', active.viewportBg)
 
@@ -913,14 +1060,14 @@ export const useThemeStore = defineStore('theme', () => {
     root.style.setProperty('--color-ui-header', active.bgHeader)
     root.style.setProperty('--color-ui-input', active.bgInput)
     root.style.setProperty('--color-ui-hover', active.bgHover)
-    root.style.setProperty('--color-ui-active', active.bgActive)
+    root.style.setProperty('--color-ui-active', well)
     root.style.setProperty('--color-ui-border-subtle', active.borderSubtle)
     root.style.setProperty('--color-ui-border-default', active.borderDefault)
     root.style.setProperty('--color-ui-border-strong', active.borderStrong)
     root.style.setProperty('--color-ui-text-primary', active.textPrimary)
     root.style.setProperty('--color-ui-text-secondary', active.textSecondary)
-    root.style.setProperty('--color-ui-text-muted', active.textMuted)
-    root.style.setProperty('--color-ui-text-accent', active.textAccent)
+    root.style.setProperty('--color-ui-text-muted', muted)
+    root.style.setProperty('--color-ui-text-accent', accentLabel)
     root.style.setProperty('--color-ui-accent', active.accentColor)
     root.style.setProperty('--color-ui-selection', active.selectionColor)
     root.style.setProperty('--color-viewport-bg', active.viewportBg)

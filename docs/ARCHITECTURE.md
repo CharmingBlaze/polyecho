@@ -105,9 +105,9 @@ Interactive topology (extrude / inset / bevel / loop cut / knife) belongs in a k
 
 Right sidebar (`RightSidebar.vue`): List / context (Object, UV, or Anim) / Mod / Mat / Tex. UV workspace orders Tex before Mat and Mod. Rig uses Skel / Bone / Bind / Wts. The last tab is remembered per workspace (`layoutStore.setInspectorTab` / `restoreInspectorTab`) and restore lands on a tab visible in that workspace. Object vs vertex `selectMode` does not change the tab.
 
-Left toolbar (`LeftToolbar.vue`) Modeling **Mesh** vs **Obj/Vert/Edge/Face** pages are user-toggled (`shelfTab`). Do not switch `shelfTab` when the user selects geometry or changes 1/2/3/4 — that swapped the “big” operator shelf for the shorter context shelf. Float / columns / minimize / position live on `layoutStore` so **Reset Layout** restores them.
+Left toolbar (`LeftToolbar.vue`) is a docked icon shelf: Object/Vertex/Edge/Face plus the workspace tools. T to toggle. Hover labels use `useFastTitleTips` (not OS `title` delay).
 
-`ViewportNav.vue` is the viewport header above the 3D canvas: Object/Edit, space+pivot, snap, labeled mirror X/Y/Z, then view/overlays/shading. Workspace switching stays on the main header tabs. The floating LightWave cluster is pan / orbit / zoom / frame only — X-Ray, bones, and quad live on the header.
+`HeaderMenu.vue` is the app chrome: File/Edit/Add, space+pivot, snap, live mirror X/Y/Z, workspace tabs, then view/overlays/shading/object shade/x-ray/command search. The floating LightWave cluster is pan / orbit / zoom / frame only.
 
 ## Alias
 

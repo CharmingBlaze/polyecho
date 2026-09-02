@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
-import { useFloatingDrag } from '../../composables/useFloatingDrag'
+import { ref, computed, watch } from 'vue'
 import { useToolStore } from '../../stores/toolStore'
 import { useLayoutStore } from '../../stores/layoutStore'
 import OutlinerTree from '../outliner/OutlinerTree.vue'
@@ -18,115 +17,35 @@ import UVPaintProps from '../uvpaint/UVPaintProps.vue'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import { 
   Layers, 
-  Sliders, 
-  Wrench,
-  Link,
-  Paintbrush,
-  FolderTree,
-  Box,
-  Scan,
-  Film,
-  GripHorizontal, 
-  Pin, 
-  PinOff, 
-  Minus, 
-  Plus,
-  X,
-  ChevronRight,
-  Image
+  Wrench, 
+  Box, 
+  Scan, 
+  Film, 
+  FolderTree, 
+  Link, 
+  Paintbrush, 
+  Image,
+  Sliders,
+  PanelRightClose,
+  Columns
 } from 'lucide-vue-next'
 
 const toolStore = useToolStore()
 const layoutStore = useLayoutStore()
+
+// View Layout Mode: 'split' (stacked Outliner + Properties) | 'outliner' (Full Outliner) | 'props' (Full Properties)
+const panelViewMode = ref<'split' | 'outliner' | 'props'>('split')
+
 const activeTab = computed({
-  get: () => layoutStore.inspectorTab,
+  get: () => layoutStore.inspectorTab === 'outliner' ? 'props' : layoutStore.inspectorTab,
   set: (tab) => layoutStore.setInspectorTab(tab, toolStore.appMode)
 })
 
-type SidebarTab = {
-  id: 'outliner' | 'props' | 'modifiers' | 'material' | 'texture' | 'refs' | 'skeleton' | 'bindings' | 'weights'
-  label: string
-  title: string
-  icon: any
-  accent?: string
-}
-
-const standardTabs = computed<SidebarTab[]>(() => {
-  const mode = toolStore.appMode
-  const propsTab: SidebarTab =
-    mode === 'animate'
-      ? { id: 'props', label: 'Anim', title: 'Animation — bones, keys, clips', icon: Film }
-      : mode === 'uvpaint'
-        ? { id: 'props', label: 'UV', title: 'UV / Paint — unwrap, seams, paint target', icon: Scan }
-        : { id: 'props', label: 'Object', title: 'Object — location, rotation, scale, origin', icon: Box }
-
-  const list: SidebarTab = { id: 'outliner', label: 'List', title: 'Outliner — hierarchy, visibility, parenting', icon: Layers }
-  const mod: SidebarTab = { id: 'modifiers', label: 'Mod', title: 'Modifiers', icon: Wrench, accent: 'sky' }
-  const mat: SidebarTab = { id: 'material', label: 'Mat', title: 'Material — shading and assign', icon: 'material', accent: 'amber' }
-  const tex: SidebarTab = { id: 'texture', label: 'Tex', title: 'Texture — select, create, apply', icon: 'texture', accent: 'emerald' }
-
-  const refs: SidebarTab = { id: 'refs', label: 'Refs', title: 'Reference images for blockout', icon: Image, accent: 'sky' }
-  if (mode === 'uvpaint') return [list, propsTab, tex, mat, mod]
-  if (mode === 'blockout') return [list, propsTab, refs, mod]
-  return [list, propsTab, mod, mat, tex]
-})
-
-const rigTabs = computed<SidebarTab[]>(() => [
-  { id: 'skeleton', label: 'Skel', title: 'Skeleton hierarchy', icon: FolderTree },
-  { id: 'props', label: 'Bone', title: 'Bone properties', icon: Sliders },
-  { id: 'bindings', label: 'Bind', title: 'Geometry bindings (Ctrl+B)', icon: Link, accent: 'amber' },
-  { id: 'weights', label: 'Wts', title: 'Weight paint', icon: Paintbrush, accent: 'sky' }
-])
-
-function tabClass(id: string, accent?: string) {
-  const on = activeTab.value === id
-  if (!on) return 'border-transparent text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'
-  if (accent === 'sky') return 'bg-ui-panel text-sky-400 font-semibold border-sky-500'
-  if (accent === 'amber') return 'bg-ui-panel text-amber-400 font-semibold border-amber-500'
-  if (accent === 'emerald') return 'bg-ui-panel text-emerald-400 font-semibold border-emerald-500'
-  return 'bg-ui-panel text-ui-textPrimary font-semibold border-ui-accent'
-}
-
-// Photoshop / DCC Floating & Resizable Panel States
-const isFloating = ref(false)
-const isMinimized = ref(false)
+// Sidebar Width Resizing
 const width = ref(320)
-const height = ref(560)
-const pos = ref({ 
-  x: typeof window !== 'undefined' ? Math.max(20, window.innerWidth - 332) : 950, 
-  y: 90 
-})
-
-const { isDragging, startDrag } = useFloatingDrag(pos, {
-  enabled: () => isFloating.value,
-  maxPadX: 100,
-  maxPadY: 50
-})
-
 const isResizingWidth = ref(false)
-const isResizingHeight = ref(false)
 let resizeStartX = 0
-let resizeStartY = 0
 let startW = 320
-let startH = 560
-
-watch(
-  () => toolStore.appMode,
-  (mode) => {
-    layoutStore.restoreInspectorTab(mode)
-  },
-  { immediate: true }
-)
-
-function toggleFloating() {
-  isFloating.value = !isFloating.value
-  if (isFloating.value) {
-    pos.value = {
-      x: Math.max(20, window.innerWidth - width.value - 12),
-      y: 90
-    }
-  }
-}
 
 function startResizeLeft(e: MouseEvent) {
   e.preventDefault()
@@ -137,7 +56,7 @@ function startResizeLeft(e: MouseEvent) {
   const onMouseMove = (moveEvent: MouseEvent) => {
     if (!isResizingWidth.value) return
     const delta = resizeStartX - moveEvent.clientX
-    width.value = Math.max(240, Math.min(560, startW + delta))
+    width.value = Math.max(260, Math.min(600, startW + delta))
   }
 
   const onMouseUp = () => {
@@ -150,20 +69,31 @@ function startResizeLeft(e: MouseEvent) {
   window.addEventListener('mouseup', onMouseUp)
 }
 
-function startResizeCorner(e: MouseEvent) {
+// Vertical Splitter between Outliner and Properties
+const outlinerPercent = ref(38) // 38% height for outliner by default
+const isSplittingVertical = ref(false)
+let splitStartY = 0
+let startPercent = 38
+
+function startVerticalSplit(e: MouseEvent) {
   e.preventDefault()
-  isResizingHeight.value = true
-  resizeStartY = e.clientY
-  startH = height.value
+  const sidebarEl = (e.target as HTMLElement).closest('aside')
+  if (!sidebarEl) return
+
+  isSplittingVertical.value = true
+  splitStartY = e.clientY
+  startPercent = outlinerPercent.value
+  const totalH = sidebarEl.clientHeight
 
   const onMouseMove = (moveEvent: MouseEvent) => {
-    if (!isResizingHeight.value) return
-    const deltaY = moveEvent.clientY - resizeStartY
-    height.value = Math.max(200, Math.min(window.innerHeight - 100, startH + deltaY))
+    if (!isSplittingVertical.value) return
+    const deltaY = moveEvent.clientY - splitStartY
+    const deltaPercent = (deltaY / totalH) * 100
+    outlinerPercent.value = Math.max(15, Math.min(80, startPercent + deltaPercent))
   }
 
   const onMouseUp = () => {
-    isResizingHeight.value = false
+    isSplittingVertical.value = false
     window.removeEventListener('mousemove', onMouseMove)
     window.removeEventListener('mouseup', onMouseUp)
   }
@@ -171,178 +101,256 @@ function startResizeCorner(e: MouseEvent) {
   window.addEventListener('mousemove', onMouseMove)
   window.addEventListener('mouseup', onMouseUp)
 }
+
+type PropertyTabItem = {
+  id: 'props' | 'modifiers' | 'material' | 'texture' | 'refs' | 'skeleton' | 'bindings' | 'weights'
+  label: string
+  title: string
+  icon?: any
+  blenderIcon?: any
+  accent?: string
+}
+
+const standardPropTabs = computed<PropertyTabItem[]>(() => {
+  const mode = toolStore.appMode
+  const objectTab: PropertyTabItem =
+    mode === 'animate'
+      ? { id: 'props', label: 'Animation', title: 'Animation & Keyframes', icon: Film, accent: 'amber' }
+      : mode === 'uvpaint'
+        ? { id: 'props', label: 'UV / Paint', title: 'UV & Seams Properties', icon: Scan, accent: 'sky' }
+        : { id: 'props', label: 'Transform', title: 'Object Transform & Coordinates', icon: Box, accent: 'amber' }
+
+  const mod: PropertyTabItem = { id: 'modifiers', label: 'Modifiers', title: 'Modifiers (Mirror, Subdiv, Solidify)', icon: Wrench, accent: 'sky' }
+  const mat: PropertyTabItem = { id: 'material', label: 'Material', title: 'Material & Shading Properties', blenderIcon: 'material', accent: 'amber' }
+  const tex: PropertyTabItem = { id: 'texture', label: 'Texture', title: 'Texture Atlas & Pixel Maps', blenderIcon: 'texture', accent: 'emerald' }
+  const refs: PropertyTabItem = { id: 'refs', label: 'References', title: 'Reference Images for Blockout', icon: Image, accent: 'sky' }
+
+  if (mode === 'blockout') return [objectTab, refs, mod]
+  if (mode === 'uvpaint') return [objectTab, tex, mat, mod]
+  return [objectTab, mod, mat, tex]
+})
+
+const rigPropTabs = computed<PropertyTabItem[]>(() => [
+  { id: 'skeleton', label: 'Skeleton', title: 'Skeleton & Joint Hierarchy', icon: FolderTree, accent: 'amber' },
+  { id: 'props', label: 'Bone', title: 'Bone Joint Transforms & IK', icon: Sliders, accent: 'sky' },
+  { id: 'bindings', label: 'Bindings', title: 'Mesh Bindings & Parents', icon: Link, accent: 'emerald' },
+  { id: 'weights', label: 'Weights', title: 'Vertex Weight Painting', icon: Paintbrush, accent: 'rose' }
+])
+
+const activePropTabs = computed(() => {
+  return toolStore.appMode === 'rig' ? rigPropTabs.value : standardPropTabs.value
+})
+
+watch(
+  () => toolStore.appMode,
+  (mode) => {
+    layoutStore.restoreInspectorTab(mode)
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
   <aside 
-    data-floating-panel
-    class="bg-ui-panel border border-ui-borderSubtle flex flex-col select-none z-30 font-mono text-xs overflow-hidden"
-    :class="[
-      isFloating ? 'fixed rounded-xs shadow-2xl border-ui-borderStrong' : 'relative border-l border-t-0 border-b-0 border-r-0 h-full',
-      isDragging ? 'transition-none cursor-grabbing' : '',
-      isMinimized ? 'h-auto' : ''
-    ]"
-    :style="isFloating ? { 
-      left: `${pos.x}px`, 
-      top: `${pos.y}px`, 
-      width: `${width}px`, 
-      height: isMinimized ? 'auto' : `${height}px` 
-    } : { 
-      width: `${width}px` 
-    }"
+    class="relative h-full bg-ui-panel border-l border-ui-borderSubtle flex flex-col select-none z-30 font-sans text-xs overflow-hidden shrink-0"
+    :style="{ width: `${width}px` }"
   >
-    <!-- Left Border Resize Handle (When docked) -->
+    <!-- Left Resize Handle -->
     <div 
-      v-if="!isFloating"
       @mousedown="startResizeLeft"
       class="absolute left-0 top-0 w-1.5 h-full cursor-ew-resize hover:bg-ui-accent/40 transition z-50 group"
-      title="Drag to resize inspector width"
+      title="Drag to resize sidebar width"
     ></div>
 
-    <!-- Collapse / Hide Panel Edge Button (When docked) -->
-    <button 
-      v-if="!isFloating"
-      @click="layoutStore.showRightSidebar = false"
-      class="absolute -left-3 top-10 w-3 h-8 bg-ui-header/90 hover:bg-ui-panel border-l border-t border-b border-ui-borderStrong rounded-l-xs flex items-center justify-center text-ui-textMuted hover:text-white shadow-md transition z-50 cursor-pointer group"
-      title="Hide Properties Panel (Hotkey: N)"
-    >
-      <ChevronRight class="w-2.5 h-2.5 group-hover:translate-x-0.5 transition-transform" />
-    </button>
-
-    <!-- Movable Header & Panel Controls -->
-    <div 
-      class="h-6 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between text-ui-textMuted select-none shrink-0"
-      :class="{ 'cursor-move': isFloating, 'cursor-pointer': !isFloating }"
-      @pointerdown="startDrag"
-      @dblclick="isMinimized = !isMinimized"
-      :title="isFloating ? 'Drag header to move inspector. Double-click to fold.' : 'Double-click to fold.'"
-    >
-      <div class="flex items-center space-x-1 text-ui-textSecondary font-bold text-[10px] uppercase">
-        <GripHorizontal class="w-3 h-3 text-ui-textMuted" />
-        <span>Properties</span>
-      </div>
-
-      <div class="flex items-center space-x-1" @mousedown.stop @pointerdown.stop>
-        <!-- Toggle Dock / Float -->
-        <button 
-          @click="toggleFloating"
-          class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary rounded-xs hover:bg-ui-hover transition"
-          :class="{ 'text-ui-accent': isFloating }"
-          :title="isFloating ? 'Dock to Right Edge' : 'Undock / Float Panel'"
+    <!-- 1. TOP HEADER & VIEW MODE SWITCHER TABS -->
+    <div class="h-7 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between text-ui-textMuted select-none shrink-0">
+      <!-- Layout View Mode Pills -->
+      <div class="flex items-center space-x-0.5 bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle text-[10px] font-sans">
+        <button
+          @click="panelViewMode = 'split'"
+          class="px-2 py-0.5 rounded-xs flex items-center gap-1 transition cursor-pointer"
+          :class="panelViewMode === 'split' 
+            ? 'bg-ui-active text-ui-textAccent font-bold shadow-xs' 
+            : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          title="Split View: Outliner + Properties"
         >
-          <PinOff v-if="isFloating" class="w-3 h-3" />
-          <Pin v-else class="w-3 h-3" />
+          <Columns class="w-3 h-3" />
+          <span>Both</span>
         </button>
 
-        <!-- Minimize / Fold -->
-        <button 
-          @click="isMinimized = !isMinimized"
-          class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary rounded-xs hover:bg-ui-hover transition"
-          :title="isMinimized ? 'Expand Panel' : 'Minimize Panel'"
+        <button
+          @click="panelViewMode = 'outliner'"
+          class="px-2 py-0.5 rounded-xs flex items-center gap-1 transition cursor-pointer"
+          :class="panelViewMode === 'outliner' 
+            ? 'bg-ui-active text-ui-textAccent font-bold shadow-xs' 
+            : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          title="Full Outliner Tree (Scene Objects & Bones)"
         >
-          <Plus v-if="isMinimized" class="w-3 h-3" />
-          <Minus v-else class="w-3 h-3" />
+          <Layers class="w-3 h-3 text-amber-400" />
+          <span>Outliner</span>
         </button>
 
-        <!-- Close / Hide Panel -->
-        <button 
-          @click="layoutStore.showRightSidebar = false"
-          class="p-0.5 text-ui-textMuted hover:text-rose-400 rounded-xs hover:bg-ui-hover transition"
-          title="Hide Properties Panel (Hotkey: N)"
+        <button
+          @click="panelViewMode = 'props'"
+          class="px-2 py-0.5 rounded-xs flex items-center gap-1 transition cursor-pointer"
+          :class="panelViewMode === 'props' 
+            ? 'bg-ui-active text-ui-textAccent font-bold shadow-xs' 
+            : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          title="Full Properties Inspector"
         >
-          <X class="w-3 h-3" />
+          <Sliders class="w-3 h-3 text-sky-400" />
+          <span>Properties</span>
         </button>
       </div>
+
+      <!-- Quick Hide Panel Button -->
+      <button 
+        @click="layoutStore.showRightSidebar = false"
+        class="p-1 text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover rounded-xs transition cursor-pointer"
+        title="Hide Panel (Hotkey: N)"
+      >
+        <PanelRightClose class="w-3.5 h-3.5" />
+      </button>
     </div>
 
-    <!-- Body Content (Hidden when minimized) -->
-    <div v-show="!isMinimized" class="flex-1 flex flex-col min-h-0 overflow-hidden">
-      <div
-        v-if="toolStore.appMode === 'rig'"
-        class="h-7 bg-ui-header border-b border-ui-borderSubtle grid shrink-0 font-sans"
-        :style="{ gridTemplateColumns: `repeat(${rigTabs.length}, minmax(0, 1fr))` }"
-      >
-        <button
-          v-for="tab in rigTabs"
-          :key="tab.id"
-          type="button"
-          @click="activeTab = tab.id"
-          class="flex flex-col items-center justify-center gap-0 leading-none transition border-b-2 px-0.5 text-[9px]"
-          :class="tabClass(tab.id, tab.accent)"
-          :title="tab.title"
+    <!-- 2. BODY CONTENT: BASED ON VIEW MODE -->
+    <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
+      <!-- OPTION A: FULL OUTLINER MODE -->
+      <div v-if="panelViewMode === 'outliner'" class="flex-1 min-h-0 flex flex-col overflow-hidden bg-ui-panel">
+        <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+          <OutlinerTree />
+        </div>
+      </div>
+
+      <!-- OPTION B: FULL PROPERTIES MODE -->
+      <div v-else-if="panelViewMode === 'props'" class="flex-1 min-h-0 flex overflow-hidden bg-ui-panel">
+        <!-- Vertical Tab Column (Blender Style) -->
+        <div class="w-8 bg-ui-header/80 border-r border-ui-borderSubtle flex flex-col items-center py-2 gap-1 shrink-0 select-none">
+          <button
+            v-for="tab in activePropTabs"
+            :key="tab.id"
+            @click="activeTab = tab.id"
+            class="w-6 h-6 rounded-xs flex items-center justify-center transition cursor-pointer relative"
+            :class="activeTab === tab.id 
+              ? 'bg-ui-active text-ui-textAccent shadow-xs font-bold' 
+              : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+            :title="tab.title"
+          >
+            <BlenderIcon v-if="tab.blenderIcon" :name="tab.blenderIcon" :size="13" />
+            <component v-else-if="tab.icon" :is="tab.icon" class="w-3.5 h-3.5" />
+            <span 
+              v-if="activeTab === tab.id" 
+              class="absolute -left-1 top-1.5 bottom-1.5 w-0.5 rounded-r bg-ui-accent"
+            ></span>
+          </button>
+        </div>
+
+        <!-- Full Height Active Property Sheet -->
+        <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-1.5">
+          <SkeletonPanel v-if="toolStore.appMode === 'rig' && activeTab === 'skeleton'" />
+          <BindingsPanel v-else-if="toolStore.appMode === 'rig' && activeTab === 'bindings'" />
+          <WeightsPanel v-else-if="toolStore.appMode === 'rig' && activeTab === 'weights'" />
+
+          <div v-else-if="activeTab === 'props'" class="h-full flex flex-col">
+            <RiggingPanel v-if="toolStore.appMode === 'rig'" />
+            <AnimationInspector v-else-if="toolStore.appMode === 'animate'" />
+            <UVPaintProps v-else-if="toolStore.appMode === 'uvpaint'" />
+            <TransformProps v-else />
+          </div>
+
+          <div v-else-if="activeTab === 'modifiers'" class="h-full flex flex-col">
+            <ModifiersProps />
+          </div>
+
+          <div v-else-if="activeTab === 'material'" class="h-full flex flex-col">
+            <MaterialProps />
+          </div>
+
+          <div v-else-if="activeTab === 'texture'" class="h-full flex flex-col">
+            <TextureProps />
+          </div>
+
+          <div v-else-if="activeTab === 'refs'" class="h-full flex flex-col">
+            <ReferenceProps />
+          </div>
+        </div>
+      </div>
+
+      <!-- OPTION C: DUAL SPLIT MODE (Outliner on Top + Properties on Bottom) -->
+      <template v-else>
+        <!-- Outliner Pane -->
+        <div 
+          class="flex flex-col min-h-0 overflow-hidden bg-ui-panel"
+          :style="{ height: `${outlinerPercent}%` }"
         >
-          <component :is="tab.icon" class="w-3.5 h-3.5" />
-          <span>{{ tab.label }}</span>
-        </button>
-      </div>
+          <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+            <OutlinerTree />
+          </div>
+        </div>
 
-      <div
-        v-else
-        class="h-7 bg-ui-header border-b border-ui-borderSubtle grid shrink-0 font-sans"
-        :style="{ gridTemplateColumns: `repeat(${standardTabs.length}, minmax(0, 1fr))` }"
-      >
-        <button
-          v-for="tab in standardTabs"
-          :key="tab.id"
-          type="button"
-          @click="activeTab = tab.id"
-          class="flex flex-col items-center justify-center gap-0 leading-none transition border-b-2 px-0.5 text-[9px]"
-          :class="tabClass(tab.id, tab.accent)"
-          :title="tab.title"
+        <!-- Resizable Splitter Bar -->
+        <div 
+          @mousedown="startVerticalSplit"
+          class="h-2 w-full bg-ui-header hover:bg-ui-hover border-y border-ui-borderSubtle cursor-row-resize flex items-center justify-center transition group select-none shrink-0 z-20"
+          title="Drag to resize Outliner vs Properties"
         >
-          <BlenderIcon v-if="tab.icon === 'material' || tab.icon === 'texture'" :name="tab.icon" :size="12" />
-          <component v-else :is="tab.icon" class="w-3.5 h-3.5" />
-          <span>{{ tab.label }}</span>
-        </button>
-      </div>
-
-      <!-- Content panels -->
-      <div class="flex-1 min-h-0 relative flex flex-col overflow-y-auto custom-scrollbar">
-        <!-- Rigging Panels -->
-        <SkeletonPanel v-if="toolStore.appMode === 'rig' && activeTab === 'skeleton'" />
-        <BindingsPanel v-else-if="toolStore.appMode === 'rig' && activeTab === 'bindings'" />
-        <WeightsPanel v-else-if="toolStore.appMode === 'rig' && activeTab === 'weights'" />
-
-        <!-- Outliner Tab -->
-        <OutlinerTree v-else-if="activeTab === 'outliner'" />
-
-        <!-- Props Tab -->
-        <div v-else-if="activeTab === 'props'" class="h-full overflow-y-auto flex flex-col">
-          <RiggingPanel v-if="toolStore.appMode === 'rig'" />
-          <AnimationInspector v-else-if="toolStore.appMode === 'animate'" />
-          <UVPaintProps v-else-if="toolStore.appMode === 'uvpaint'" />
-          <TransformProps v-else />
+          <div class="w-8 h-0.5 rounded-full bg-ui-borderDefault group-hover:bg-ui-accent transition"></div>
         </div>
 
-        <!-- Modifiers Tab -->
-        <div v-else-if="activeTab === 'modifiers'" class="h-full overflow-y-auto flex flex-col">
-          <ModifiersProps />
-        </div>
+        <!-- Properties Pane with Left Icon Bar -->
+        <div class="flex-1 min-h-0 flex overflow-hidden bg-ui-panel">
+          <!-- Vertical Icon Strip -->
+          <div class="w-8 bg-ui-header/80 border-r border-ui-borderSubtle flex flex-col items-center py-1.5 gap-1 shrink-0 select-none">
+            <button
+              v-for="tab in activePropTabs"
+              :key="tab.id"
+              @click="activeTab = tab.id"
+              class="w-6 h-6 rounded-xs flex items-center justify-center transition cursor-pointer relative"
+              :class="activeTab === tab.id 
+                ? 'bg-ui-active text-ui-textAccent shadow-xs font-bold' 
+                : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+              :title="tab.title"
+            >
+              <BlenderIcon v-if="tab.blenderIcon" :name="tab.blenderIcon" :size="13" />
+              <component v-else-if="tab.icon" :is="tab.icon" class="w-3.5 h-3.5" />
+              <span 
+                v-if="activeTab === tab.id" 
+                class="absolute -left-1 top-1.5 bottom-1.5 w-0.5 rounded-r bg-ui-accent"
+              ></span>
+            </button>
+          </div>
 
-        <!-- Material Properties Tab -->
-        <div v-else-if="activeTab === 'material'" class="h-full overflow-y-auto flex flex-col">
-          <MaterialProps />
-        </div>
+          <!-- Active Property Sheet -->
+          <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-1">
+            <SkeletonPanel v-if="toolStore.appMode === 'rig' && activeTab === 'skeleton'" />
+            <BindingsPanel v-else-if="toolStore.appMode === 'rig' && activeTab === 'bindings'" />
+            <WeightsPanel v-else-if="toolStore.appMode === 'rig' && activeTab === 'weights'" />
 
-        <!-- Texture Assets Tab -->
-        <div v-else-if="activeTab === 'texture'" class="h-full overflow-y-auto flex flex-col">
-          <TextureProps />
-        </div>
+            <div v-else-if="activeTab === 'props'" class="h-full flex flex-col">
+              <RiggingPanel v-if="toolStore.appMode === 'rig'" />
+              <AnimationInspector v-else-if="toolStore.appMode === 'animate'" />
+              <UVPaintProps v-else-if="toolStore.appMode === 'uvpaint'" />
+              <TransformProps v-else />
+            </div>
 
-        <div v-else-if="activeTab === 'refs'" class="h-full overflow-y-auto flex flex-col">
-          <ReferenceProps />
-        </div>
-      </div>
+            <div v-else-if="activeTab === 'modifiers'" class="h-full flex flex-col">
+              <ModifiersProps />
+            </div>
 
-      <!-- Bottom Corner Resize Handle (When floating) -->
-      <div 
-        v-if="isFloating"
-        @mousedown="startResizeCorner"
-        class="h-2 w-full bg-ui-header border-t border-ui-borderSubtle cursor-ns-resize hover:bg-ui-accent/30 transition shrink-0 flex items-center justify-center"
-        title="Drag to resize inspector height"
-      >
-        <div class="w-8 h-0.5 bg-ui-textMuted/40 rounded-full"></div>
-      </div>
+            <div v-else-if="activeTab === 'material'" class="h-full flex flex-col">
+              <MaterialProps />
+            </div>
+
+            <div v-else-if="activeTab === 'texture'" class="h-full flex flex-col">
+              <TextureProps />
+            </div>
+
+            <div v-else-if="activeTab === 'refs'" class="h-full flex flex-col">
+              <ReferenceProps />
+            </div>
+          </div>
+        </div>
+      </template>
     </div>
   </aside>
 </template>

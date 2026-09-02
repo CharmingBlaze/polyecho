@@ -1054,7 +1054,7 @@ defineExpose({
         </div>
 
         <!-- Canvas Resolution Selector -->
-        <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px]">
+        <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px] shrink-0">
           <span class="text-ui-textMuted font-bold text-[8.5px]">RES:</span>
           <select 
             @change="(e) => {
@@ -1079,6 +1079,20 @@ defineExpose({
             <option value="custom" class="bg-ui-panel text-ui-textAccent font-bold">Custom Size...</option>
           </select>
         </div>
+      </div>
+
+      <!-- Right: Primary & Secondary Color Swatch + Hex Input in Row 1 -->
+      <div class="editor-color-strip flex items-center gap-1.5 shrink-0 bg-ui-input px-2 py-0.5 rounded-xs border border-ui-borderSubtle">
+        <span class="text-[9px] text-ui-textMuted font-bold uppercase">Color:</span>
+        <label class="w-5 h-5 rounded-xs border border-ui-borderStrong cursor-pointer shadow-xs relative overflow-hidden block" :style="{ backgroundColor: toolStore.primaryColor }">
+          <input type="color" v-model="toolStore.primaryColor" class="opacity-0 absolute inset-0 w-full h-full cursor-pointer" />
+        </label>
+        <input 
+          type="text" 
+          v-model="toolStore.primaryColor" 
+          class="w-16 px-1.5 py-0.5 bg-ui-panel text-ui-textPrimary font-mono text-[10px] font-bold border border-ui-borderSubtle rounded-xs focus:outline-none focus:border-ui-accent uppercase text-center" 
+          aria-label="Color hex" 
+        />
       </div>
     </div>
 
@@ -1367,25 +1381,22 @@ defineExpose({
         </div>
       </div>
 
-      <!-- Right: Color Preview Chip & Hex Code -->
-      <div class="editor-color-strip flex items-center gap-1.5 shrink-0">
-        <span class="text-[9px] text-ui-textMuted font-bold uppercase">Color:</span>
-        <label class="w-5 h-5 rounded-xs border border-ui-borderStrong cursor-pointer shadow-xs relative overflow-hidden block" :style="{ backgroundColor: toolStore.primaryColor }">
-          <input type="color" v-model="toolStore.primaryColor" class="opacity-0 absolute inset-0 w-full h-full cursor-pointer" />
-        </label>
-        <input 
-          type="text" 
-          v-model="toolStore.primaryColor" 
-          class="w-16 px-1.5 py-0.5 bg-ui-input text-ui-textPrimary font-mono text-[10px] font-bold border border-ui-borderSubtle rounded-xs focus:outline-none focus:border-ui-accent uppercase" 
-          aria-label="Color hex" 
-        />
+      <!-- Right: Quick Zoom Fit Action -->
+      <div class="flex items-center gap-1 shrink-0">
+        <button 
+          @click="resetPanZoom" 
+          class="px-2 py-0.5 bg-ui-input hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary border border-ui-borderSubtle rounded-xs text-[9.5px] font-bold font-mono transition cursor-pointer"
+          title="Fit Canvas to Viewport (Home)"
+        >
+          Fit Canvas
+        </button>
       </div>
     </div>
 
     <!-- 3. MAIN WORKSPACE WITH TOOL RAIL, CANVAS & FLOATING OVERLAYS -->
     <div class="pixel-workspace relative flex-1 min-h-0 flex overflow-hidden">
       <!-- Left Dedicated Paint Tool Rail -->
-      <aside class="pixel-tool-rail flex flex-col justify-between items-center py-2 px-1 bg-ui-header border-r border-ui-borderSubtle z-10 select-none" aria-label="Pixel paint tools">
+      <aside class="pixel-tool-rail flex flex-col justify-between items-center py-2 px-1 bg-ui-panel border-r border-ui-borderSubtle z-10 select-none" aria-label="Pixel paint tools">
         <!-- Tools Stack -->
         <div class="flex flex-col gap-1">
           <button

@@ -1,11 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import { useHistoryStore } from '../../stores/historyStore'
 import { useAnimationStore } from '../../stores/animationStore'
-import { useLayoutStore } from '../../stores/layoutStore'
-import { useThemeStore } from '../../stores/themeStore'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import PolyEchoLogo from '../icons/PolyEchoLogo.vue'
 import ImportTextureModal from '../modals/ImportTextureModal.vue'
@@ -18,74 +16,54 @@ import {
   FolderOpen,
   Save,
   Plus,
-  Copy,
-  ClipboardPaste,
-  CopyPlus,
   Image as ImageIcon,
-  LogOut,
-  Sparkles,
-  FileCode,
-  PanelLeft,
-  PanelRight,
   Tv,
-  Eye,
-  RotateCcw,
-  LayoutGrid,
   Palette,
+  Compass,
+  Crosshair,
+  Magnet,
+  FlipHorizontal,
+  ChevronDown,
+  Check,
   Sliders,
-  GitCommitVertical
+  Layers,
+  Search
 } from 'lucide-vue-next'
 
-import { PrimitiveType } from '../../core/primitives/PrimitiveTypes'
-import { PrimitivePlacementMode } from '../../core/operators/placement/PrimitivePlacementOperator'
-import { PlacementOrientation } from '../../core/placement/SurfacePlacementSolver'
+import type { PivotPoint } from '../../types/tools'
 import { ProjectSerializer } from '../../core/project/ProjectSerializer'
 import { ObjImport } from '../../core/import/ObjImport'
 import { GltfImport } from '../../core/import/GltfImport'
-import { exportToBlockbench, importFromBlockbench } from '../../core/export/BlockbenchExport'
-import { exportToGLTF, buildExportTextureMap } from '../../core/export/GltfExport'
-import { requestCameraView, requestModalTool, requestPrimitiveMenu, requestPrimitivePlacement, requestFillFace } from '../../core/commands/editorCommands'
+import { EDITOR_EVENTS, requestCameraView, requestPrimitiveMenu } from '../../core/commands/editorCommands'
+
+type NavMenu = 'file' | 'edit' | 'add' | 'workspace' | 'space' | 'view' | 'snap' | 'overlays' | 'shade' | null
+type CameraView = 'persp' | 'top' | 'front' | 'right' | 'iso'
 
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
 const historyStore = useHistoryStore()
 const animationStore = useAnimationStore()
-const layoutStore = useLayoutStore()
-const themeStore = useThemeStore()
 
 const isImporting = ref(false)
-const isExporting = ref(false)
+const activeDropdown = ref<NavMenu>(null)
+const cameraView = ref<CameraView>('persp')
 
-function safeUndo() {
-  historyStore.undo()
-}
-
-function safeRedo() {
-  historyStore.redo()
-}
-
-const currentPlacementMode = ref<PrimitivePlacementMode>(PrimitivePlacementMode.CAD_DRAW)
-const currentOrientation = ref<PlacementOrientation>('WORLD')
-
-const emit = defineEmits<{
+defineEmits<{
   (e: 'open-export'): void
   (e: 'open-hotkeys'): void
   (e: 'open-preferences'): void
   (e: 'new-project'): void
 }>()
 
-const activeDropdown = ref<string | null>(null)
-
 // Hidden file input refs
 const loadProjectInput = ref<HTMLInputElement | null>(null)
 const importObjInput = ref<HTMLInputElement | null>(null)
 const importGltfInput = ref<HTMLInputElement | null>(null)
-const importBbmodelInput = ref<HTMLInputElement | null>(null)
 const importTextureInput = ref<HTMLInputElement | null>(null)
 const showImportModal = ref(false)
 const pendingImportFile = ref<File | null>(null)
 
-function toggleDropdown(name: string) {
+function toggleDropdown(name: NavMenu) {
   activeDropdown.value = activeDropdown.value === name ? null : name
 }
 
@@ -93,71 +71,79 @@ function closeDropdowns() {
   activeDropdown.value = null
 }
 
-function setCameraView(view: 'persp' | 'top' | 'front' | 'right' | 'iso') {
+function setCameraView(view: CameraView) {
+  cameraView.value = view
+  toolStore.viewport.quadView = false
   requestCameraView(view)
-}
-
-function handleStartPrimitivePlacement(type: PrimitiveType) {
-  requestPrimitivePlacement({
-    type,
-    mode: currentPlacementMode.value,
-    orientation: currentOrientation.value
-  })
   closeDropdowns()
 }
 
-function handleOpenAddDialog() {
-  requestPrimitiveMenu()
+function onCameraViewEvent(e: Event) {
+  const view = (e as CustomEvent).detail as CameraView | undefined
+  if (view) cameraView.value = view
+}
+
+const pivotLabel: Record<PivotPoint, string> = {
+  median: 'Median',
+  active: 'Active',
+  individual: 'Indiv',
+  cursor: 'Cursor',
+}
+
+const viewLabel: Record<CameraView, string> = {
+  persp: 'Persp',
+  top: 'Top',
+  front: 'Front',
+  right: 'Right',
+  iso: 'Iso',
+}
+
+const objectShade = computed(() => projectStore.activeMesh?.shadeMode || toolStore.viewport.shadeMode)
+const snapTargetOn = computed(() => toolStore.snapping.vertex || toolStore.snapping.edge || toolStore.snapping.face)
+const overlayOn = computed(() =>
+  toolStore.viewport.faceOrientation || !toolStore.viewport.showGrid || !toolStore.viewport.showAxes
+)
+
+function applyObjectShade(mode: 'flat' | 'smooth' | 'auto') {
+  projectStore.setShadeMode(mode)
+  if (mode !== 'auto') toolStore.viewport.shadeMode = mode
   closeDropdowns()
 }
 
-function handleStartLoopCut() {
-  requestModalTool('loop_cut')
+function triggerCommandPalette() {
+  closeDropdowns()
+  window.dispatchEvent(new CustomEvent('open-command-palette'))
 }
 
-function handleStartKnife() {
-  requestModalTool('knife')
+const shadingModes = [
+  { id: 'textured' as const, icon: 'shading-textured' as const, title: 'Textured' },
+  { id: 'solid' as const, icon: 'shading-solid' as const, title: 'Solid' },
+  { id: 'wireframe' as const, icon: 'shading-wire' as const, title: 'Wireframe' },
+  { id: 'psx' as const, icon: 'shading-rendered' as const, title: 'PSX Retro' },
+]
+
+const workspaces = [
+  { id: 'model' as const, label: 'Modeling', icon: 'mesh-cube' as const, desc: '3D Mesh Polygon Editing' },
+  { id: 'blockout' as const, label: 'Blockout', icon: 'tool-draw' as const, desc: 'Multi-View Reference Tracing' },
+  { id: 'uvpaint' as const, label: 'UV / Paint', icon: 'brush' as const, desc: 'UV Unwrap & Pixel Texture Painting' },
+  { id: 'rig' as const, label: 'Rigging', icon: 'bone' as const, desc: 'Skeletal Armature & Weight Painting' },
+  { id: 'animate' as const, label: 'Animation', icon: 'pose' as const, desc: 'Keyframe Timeline & Posing' }
+]
+
+function toggleSymmetry(axis: 'X' | 'Y' | 'Z') {
+  if (axis === 'X') toolStore.viewport.symmetryX = !toolStore.viewport.symmetryX
+  if (axis === 'Y') toolStore.viewport.symmetryY = !toolStore.viewport.symmetryY
+  if (axis === 'Z') toolStore.viewport.symmetryZ = !toolStore.viewport.symmetryZ
 }
 
-function handleStartExtrude() {
-  if (toolStore.selectMode === 'object' || toolStore.selectMode === 'origin') {
-    toolStore.setSelectMode('face')
-  }
-  requestModalTool('extrude')
+function onDocPointerDown(e: PointerEvent) {
+  const root = (e.target as HTMLElement | null)?.closest?.('.master-header-container')
+  if (!root) closeDropdowns()
 }
 
-function handleStartInset() {
-  if (toolStore.selectMode === 'object' || toolStore.selectMode === 'origin') {
-    toolStore.setSelectMode('face')
-  }
-  requestModalTool('inset')
-}
-
-function handleStartBevel() {
-  if (toolStore.selectMode === 'object' || toolStore.selectMode === 'origin') {
-    toolStore.setSelectMode('face')
-  }
-  requestModalTool('bevel')
-}
-
-function onDocumentClick(e: MouseEvent) {
-  const target = e.target as HTMLElement
-  if (!target.closest('.header-menu-container')) {
-    closeDropdowns()
-  }
-}
-
-onMounted(() => {
-  window.addEventListener('pointerdown', onDocumentClick)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('pointerdown', onDocumentClick)
-})
-
-// File operations
+// File / Project handlers
 function saveProject() {
-  const json = ProjectSerializer.serialize(
+  const jsonStr = ProjectSerializer.serialize(
     projectStore.projectName,
     projectStore.meshes,
     projectStore.pixelBuffer.canvas,
@@ -171,81 +157,34 @@ function saveProject() {
     projectStore.textures,
     projectStore.referenceImages
   )
-  ProjectSerializer.downloadProject(json, projectStore.projectName)
+  ProjectSerializer.downloadProject(jsonStr, projectStore.projectName || 'PSX_Model')
   closeDropdowns()
-}
-
-async function handleRestoreLastSession() {
-  closeDropdowns()
-  const ok = await projectStore.restoreAutosaveSession()
-  if (!ok) {
-    alert('No previous autosaved session was found.')
-  }
-}
-
-function saveProjectAs() {
-  const newName = prompt('Enter project name:', projectStore.projectName)
-  if (newName) {
-    projectStore.projectName = newName
-    saveProject()
-  }
 }
 
 async function handleLoadProject(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
   if (!file) return
-  if (isImporting.value) return
-  isImporting.value = true
-
   try {
     const text = await file.text()
-    const data = ProjectSerializer.deserialize(text)
-
-    projectStore.projectName = data.projectName
-    projectStore.meshes = data.meshes
-    if (data.meshes && data.meshes.length > 0) {
-      projectStore.activeMeshId = data.meshes[0].id
-      projectStore.selectedMeshIds = [data.meshes[0].id]
-    }
-    projectStore.clearSubSelections()
-
-    if (data.materials) projectStore.materials = data.materials
-    if (data.activePalette) projectStore.activePalette = data.activePalette
-
-    if (data.textures && data.textures.length > 0) {
+    const proj = ProjectSerializer.deserialize(text)
+    projectStore.projectName = proj.projectName || 'Project'
+    projectStore.meshes = proj.meshes || []
+    if (proj.materials) projectStore.materials = proj.materials
+    if (proj.activePalette) projectStore.activePalette = proj.activePalette
+    if (proj.referenceImages) projectStore.referenceImages = proj.referenceImages
+    if (proj.armature) animationStore.armature = proj.armature
+    if (proj.animations) animationStore.armature.clips = proj.animations
+    if (proj.textures && proj.textures.length > 0) {
       projectStore.textures = []
-      for (const t of data.textures) {
-        projectStore.createTexture(t.name, t.width, t.height, t.dataUrl, undefined, { record: false, select: false })
+      for (const t of proj.textures) {
+        projectStore.createTexture(t.name, t.width, t.height, t.dataUrl, undefined, { record: false, select: false, atlas: t.atlas })
       }
-      projectStore.selectTexture(projectStore.textures[0]?.id || 'tex_default')
-    } else if (data.textureDataUrl) {
-      await projectStore.pixelBuffer.loadFromDataURL(data.textureDataUrl, true)
-      projectStore.markTextureUpdated()
     }
-
-    if (data.armature) {
-      animationStore.armature = data.armature
-    }
-    if (data.animations && data.animations.length > 0) {
-      animationStore.armature.clips = data.animations
-    }
-    if (data.activeAnimationId) {
-      animationStore.armature.activeClipId = data.activeAnimationId
-    }
-    if (typeof data.currentFrame === 'number') {
-      animationStore.currentFrame = data.currentFrame
-    }
-    projectStore.referenceImages = data.referenceImages ? JSON.parse(JSON.stringify(data.referenceImages)) : []
-    projectStore.referenceRevision++
-
     projectStore.markGeometryUpdated()
-    projectStore.markTextureUpdated()
     projectStore.recordState('Load Project')
   } catch (err) {
-    console.error('Failed to load project:', err)
-    alert('Failed to load project file')
+    alert('Failed to load project: ' + err)
   } finally {
-    isImporting.value = false
     if (loadProjectInput.value) loadProjectInput.value.value = ''
     closeDropdowns()
   }
@@ -269,7 +208,6 @@ async function handleImportObj(e: Event) {
       projectStore.recordState(`Import OBJ (${file.name})`)
     }
   } catch (err) {
-    console.error('Failed to import OBJ:', err)
     alert('Failed to import OBJ')
   } finally {
     isImporting.value = false
@@ -299,7 +237,6 @@ async function handleImportGltf(e: Event) {
     projectStore.markGeometryUpdated()
     projectStore.recordState(`Import GLTF (${file.name})`)
   } catch (err) {
-    console.error('Failed to import GLTF:', err)
     alert('Failed to import GLTF')
   } finally {
     isImporting.value = false
@@ -318,125 +255,43 @@ function handleImportTexture(e: Event) {
   closeDropdowns()
 }
 
-async function exportBlockbench() {
-  if (isExporting.value) return
-  isExporting.value = true
-  try {
-    const jsonStr = exportToBlockbench(
-      projectStore.meshes,
-      projectStore.textures,
-      animationStore.armature,
-      { projectName: projectStore.projectName }
-    )
-    const blob = new Blob([jsonStr], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${projectStore.projectName || 'model'}.bbmodel`
-    a.click()
-    URL.revokeObjectURL(url)
-    closeDropdowns()
-  } finally {
-    isExporting.value = false
-  }
-}
+onMounted(() => {
+  window.addEventListener(EDITOR_EVENTS.cameraView, onCameraViewEvent)
+  window.addEventListener('pointerdown', onDocPointerDown)
+})
 
-async function exportGltfDirect(binary = true) {
-  if (isExporting.value) return
-  isExporting.value = true
-  const texMap = buildExportTextureMap(projectStore.textures)
-  try {
-    const blob = await exportToGLTF(
-      projectStore.meshes,
-      texMap,
-      animationStore.armature.clips,
-      binary,
-      animationStore.armature,
-      projectStore.materials
-    )
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${projectStore.projectName || 'model'}.${binary ? 'glb' : 'gltf'}`
-    a.click()
-    URL.revokeObjectURL(url)
-    closeDropdowns()
-  } finally {
-    for (const tex of texMap.values()) {
-      tex.dispose()
-    }
-    texMap.clear()
-    isExporting.value = false
-  }
-}
-
-async function handleImportBbmodel(e: Event) {
-  const file = (e.target as HTMLInputElement).files?.[0]
-  if (!file) return
-  if (isImporting.value) return
-  isImporting.value = true
-  try {
-    const text = await file.text()
-    const result = importFromBlockbench(text)
-    if (result.textures.length > 0) {
-      for (const t of result.textures) {
-        projectStore.createTexture(t.name, t.width, t.height, t.dataUrl, undefined, { record: false, select: false })
-      }
-    }
-    projectStore.recordState(`Import Blockbench (${file.name})`)
-  } catch (err) {
-    console.error('Failed to parse .bbmodel file:', err)
-  } finally {
-    isImporting.value = false
-    if (importBbmodelInput.value) importBbmodelInput.value.value = ''
-    closeDropdowns()
-  }
-}
-
-function handleExitProject() {
-  if (confirm('Exit without saving? Any unsaved progress will be lost.')) {
-    emit('new-project')
-  }
-  closeDropdowns()
-}
+onUnmounted(() => {
+  window.removeEventListener(EDITOR_EVENTS.cameraView, onCameraViewEvent)
+  window.removeEventListener('pointerdown', onDocPointerDown)
+})
 </script>
 
 <template>
-  <header class="h-ui-header bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between text-xs select-none z-30 font-sans">
+  <header class="master-header-container relative h-8 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between text-xs select-none z-40 font-sans shrink-0">
     <!-- Hidden Inputs for File Import -->
     <input ref="loadProjectInput" type="file" accept=".psxproj" class="hidden" @change="handleLoadProject" />
     <input ref="importObjInput" type="file" accept=".obj" class="hidden" @change="handleImportObj" />
     <input ref="importGltfInput" type="file" accept=".gltf,.glb" class="hidden" @change="handleImportGltf" />
-    <input ref="importBbmodelInput" type="file" accept=".bbmodel" class="hidden" @change="handleImportBbmodel" />
     <input ref="importTextureInput" type="file" accept="image/*" class="hidden" @change="handleImportTexture" />
 
-    <!-- 1. LEFT: Brand & Application Dropdown Menus -->
-    <div class="header-menu-container flex items-center space-x-1 shrink-0">
-      <!-- Brand Logo (Clean, Transparent, Universal Across All Themes) -->
-      <PolyEchoLogo class="mr-3 ml-0.5" />
+    <!-- 1. LEFT: Logo + File, Edit, Add Menus + Space/Snap/Symmetry -->
+    <div class="flex items-center space-x-1 shrink-0 z-20">
+      <PolyEchoLogo class="mr-2 ml-0.5" />
 
       <!-- File Menu -->
-      <div class="relative" @click.stop>
+      <div class="relative">
         <button 
-          class="header-menu-btn px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
-          :class="{ 'bg-ui-hover text-ui-textPrimary is-active': activeDropdown === 'file' }"
+          class="px-1.5 py-0.5 text-[11.5px] font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
+          :class="{ 'bg-ui-hover text-ui-textPrimary font-bold': activeDropdown === 'file' }"
           @click="toggleDropdown('file')"
-          @mouseenter="activeDropdown && (activeDropdown = 'file')"
         >
           File
         </button>
 
-        <div v-if="activeDropdown === 'file'" class="header-dropdown-menu absolute left-0 top-full mt-0.5 w-60 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
-          <button @click="projectStore.resetToDefaultProject(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between font-medium">
-            <span class="flex items-center gap-2"><Plus class="w-3.5 h-3.5 text-ui-accent" /> New Project (Blank)</span>
+        <div v-if="activeDropdown === 'file'" class="absolute left-0 top-full mt-0.5 w-56 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+          <button @click="$emit('new-project'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between font-medium">
+            <span class="flex items-center gap-2"><Plus class="w-3.5 h-3.5 text-ui-accent" /> New Project</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+N</span>
-          </button>
-          <button @click="$emit('new-project'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-ui-textSecondary">
-            <span class="flex items-center gap-2"><LayoutGrid class="w-3.5 h-3.5 text-indigo-400" /> New from Template...</span>
-          </button>
-          <button @click="handleRestoreLastSession" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-sky-300">
-            <span class="flex items-center gap-2"><RotateCcw class="w-3.5 h-3.5 text-sky-400" /> Recover Autosaved Session</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+Shift+T</span>
           </button>
           <button @click="loadProjectInput?.click()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2"><FolderOpen class="w-3.5 h-3.5 text-amber-400" /> Open (.psxproj)</span>
@@ -446,467 +301,407 @@ function handleExitProject() {
             <span class="flex items-center gap-2"><Save class="w-3.5 h-3.5 text-emerald-400" /> Save Project</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+S</span>
           </button>
-          <button @click="saveProjectAs" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-ui-textSecondary">
-            <span class="flex items-center gap-2"><FileCode class="w-3.5 h-3.5" /> Save Project As...</span>
-          </button>
 
           <div class="h-px bg-ui-borderSubtle my-1"></div>
 
-          <div class="px-3 py-1 text-[10px] font-bold text-ui-textMuted uppercase tracking-wider">Import</div>
-          <button @click="importObjInput?.click()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
+          <div class="px-3 py-1 text-[9.5px] font-bold text-ui-textMuted uppercase tracking-wider">Import</div>
+          <button @click="importObjInput?.click()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
             <Upload class="w-3.5 h-3.5 text-ui-textMuted" /> Wavefront (.obj)
           </button>
-          <button @click="importGltfInput?.click()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
+          <button @click="importGltfInput?.click()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
             <Upload class="w-3.5 h-3.5 text-ui-textMuted" /> GLTF / GLB (.glb)
           </button>
-          <button @click="importBbmodelInput?.click()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2 text-amber-400">
-            <Upload class="w-3.5 h-3.5 text-amber-400" /> Blockbench Model (.bbmodel)
-          </button>
-          <button @click="importTextureInput?.click()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
+          <button @click="importTextureInput?.click()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
             <ImageIcon class="w-3.5 h-3.5 text-ui-textMuted" /> Texture (PNG, JPG)
           </button>
-          <button @click="projectStore.restoreDefaultTexture(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-amber-400 font-medium">
-            <span class="flex items-center gap-2"><Sparkles class="w-3.5 h-3.5 text-amber-400" /> Restore Default Texture</span>
-            <span class="text-ui-textMuted font-mono text-[9px]">64x64 Atlas</span>
-          </button>
 
           <div class="h-px bg-ui-borderSubtle my-1"></div>
 
-          <div class="px-3 py-1 text-[10px] font-bold text-ui-textMuted uppercase tracking-wider">Direct Export</div>
-          <button @click="exportGltfDirect(true)" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2 text-sky-300 font-medium">
-            <Download class="w-3.5 h-3.5 text-sky-400" /> Animated GLTF (.glb)
-          </button>
-          <button @click="exportBlockbench" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2 text-amber-300 font-medium">
-            <Download class="w-3.5 h-3.5 text-amber-400" /> Blockbench Model (.bbmodel)
-          </button>
-          <button @click="$emit('open-export'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-amber-400 font-medium">
-            <span class="flex items-center gap-2"><Sparkles class="w-3.5 h-3.5" /> All Export Formats...</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+E</span>
-          </button>
-
-          <div class="h-px bg-ui-borderSubtle my-1"></div>
-
-          <button @click="$emit('open-preferences'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-ui-textPrimary font-medium">
-            <span class="flex items-center gap-2"><Sliders class="w-3.5 h-3.5 text-amber-400" /> Preferences & Properties...</span>
+          <button @click="$emit('open-preferences'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span class="flex items-center gap-2"><Sliders class="w-3.5 h-3.5 text-sky-400" /> Properties & Preferences</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+,</span>
-          </button>
-
-          <div class="h-px bg-ui-borderSubtle my-1"></div>
-          <button @click="handleExitProject" class="w-full text-left px-3 py-1.5 hover:bg-rose-950/60 hover:text-rose-300 flex items-center gap-2 text-ui-textMuted">
-            <LogOut class="w-3.5 h-3.5" /> Exit / Reset Scene
           </button>
         </div>
       </div>
 
       <!-- Edit Menu -->
-      <div class="relative" @click.stop>
+      <div class="relative">
         <button 
-          class="header-menu-btn px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
-          :class="{ 'bg-ui-hover text-ui-textPrimary is-active': activeDropdown === 'edit' }"
+          class="px-1.5 py-0.5 text-[11.5px] font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
+          :class="{ 'bg-ui-hover text-ui-textPrimary font-bold': activeDropdown === 'edit' }"
           @click="toggleDropdown('edit')"
-          @mouseenter="activeDropdown && (activeDropdown = 'edit')"
         >
           Edit
         </button>
-        <div v-if="activeDropdown === 'edit'" class="header-dropdown-menu absolute left-0 top-full mt-0.5 w-52 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
-          <button @click="safeUndo(); closeDropdowns()" :disabled="historyStore.undoStack.length === 0" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between disabled:opacity-40">
-            <span class="flex items-center gap-2"><Undo2 class="w-3.5 h-3.5 text-ui-textMuted" /> Undo</span>
+
+        <div v-if="activeDropdown === 'edit'" class="absolute left-0 top-full mt-0.5 w-52 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+          <button @click="historyStore.undo(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span class="flex items-center gap-2"><Undo2 class="w-3.5 h-3.5" /> Undo</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+Z</span>
           </button>
-          <button @click="safeRedo(); closeDropdowns()" :disabled="historyStore.redoStack.length === 0" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between disabled:opacity-40">
-            <span class="flex items-center gap-2"><Redo2 class="w-3.5 h-3.5 text-ui-textMuted" /> Redo</span>
+          <button @click="historyStore.redo(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span class="flex items-center gap-2"><Redo2 class="w-3.5 h-3.5" /> Redo</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+Y</span>
           </button>
           <div class="h-px bg-ui-borderSubtle my-1"></div>
-          <button @click="projectStore.duplicateSelection(toolStore.selectMode); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between text-amber-400">
-            <span class="flex items-center gap-2"><CopyPlus class="w-3.5 h-3.5 text-ui-textMuted" /> Duplicate</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">Shift+D</span>
+          <button @click="$emit('open-preferences'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
+            <Palette class="w-3.5 h-3.5 text-amber-400" /> Preferences & Themes
           </button>
-          <button @click="projectStore.copySelection(toolStore.selectMode); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
-            <span class="flex items-center gap-2"><Copy class="w-3.5 h-3.5 text-ui-textMuted" /> Copy</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+C</span>
-          </button>
-          <button @click="projectStore.pasteClipboard(); closeDropdowns()" :disabled="!projectStore.clipboard" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between disabled:opacity-40">
-            <span class="flex items-center gap-2"><ClipboardPaste class="w-3.5 h-3.5 text-ui-textMuted" /> Paste</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+V</span>
+          <button @click="$emit('open-hotkeys'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
+            <Keyboard class="w-3.5 h-3.5 text-sky-400" /> Hotkey Map
           </button>
         </div>
       </div>
 
-      <!-- Add Primitive & CAD Menu -->
-      <div class="relative" @click.stop>
+      <!-- Add Menu -->
+      <div class="relative">
         <button 
-          class="header-menu-btn px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
-          :class="{ 'bg-ui-hover text-ui-textPrimary is-active': activeDropdown === 'add' }"
+          class="px-1.5 py-0.5 text-[11.5px] font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
+          :class="{ 'bg-ui-hover text-ui-textPrimary font-bold': activeDropdown === 'add' }"
           @click="toggleDropdown('add')"
-          @mouseenter="activeDropdown && (activeDropdown = 'add')"
         >
           Add
         </button>
-        <div v-if="activeDropdown === 'add'" class="header-dropdown-menu absolute left-0 top-full mt-0.5 w-64 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1.5 z-50 text-xs max-h-[85vh] overflow-y-auto">
-          <!-- Placement Mode Selector -->
-          <div class="px-2.5 py-1 border-b border-ui-borderSubtle mb-1 bg-ui-input/60">
-            <div class="text-[10px] font-semibold text-ui-textMuted uppercase mb-1">Placement Mode</div>
-            <div class="grid grid-cols-2 gap-1 text-[10px]">
-              <button 
-                @click="currentPlacementMode = PrimitivePlacementMode.CAD_DRAW"
-                class="px-1.5 py-0.5 rounded-xs border text-left"
-                :class="currentPlacementMode === PrimitivePlacementMode.CAD_DRAW ? 'bg-ui-active text-ui-textAccent border-ui-accent/40 font-medium' : 'bg-ui-surface text-ui-textSecondary border-ui-borderSubtle hover:bg-ui-hover'"
-              >
-                CAD Draw
-              </button>
-              <button 
-                @click="currentPlacementMode = PrimitivePlacementMode.PLACE"
-                class="px-1.5 py-0.5 rounded-xs border text-left"
-                :class="currentPlacementMode === PrimitivePlacementMode.PLACE ? 'bg-ui-active text-ui-textAccent border-ui-accent/40 font-medium' : 'bg-ui-surface text-ui-textSecondary border-ui-borderSubtle hover:bg-ui-hover'"
-              >
-                Direct Place
-              </button>
-            </div>
-          </div>
 
-          <!-- Basic 3D -->
-          <div class="px-2.5 py-0.5 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">Basic 3D</div>
-          <button @click="handleStartPrimitivePlacement('BOX')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
-            <BlenderIcon name="mesh-cube" :size="14" color="#8d939d" /> Box / Cube
-          </button>
-          <button @click="handleStartPrimitivePlacement('PLANE')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
-            <BlenderIcon name="mesh-plane" :size="14" color="#8d939d" /> Plane / Grid
-          </button>
-          <button @click="handleStartPrimitivePlacement('SPHERE')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
-            <BlenderIcon name="mesh-sphere" :size="14" color="#8d939d" /> UV Sphere
-          </button>
-          <button @click="handleStartPrimitivePlacement('ICOSPHERE')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
-            <BlenderIcon name="mesh-icosphere" :size="14" color="#8d939d" /> Icosphere
-          </button>
-          <button @click="handleStartPrimitivePlacement('CYLINDER')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
-            <BlenderIcon name="mesh-cylinder" :size="14" color="#8d939d" /> Cylinder
-          </button>
-          <button @click="handleStartPrimitivePlacement('CONE')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
-            <BlenderIcon name="mesh-cone" :size="14" color="#8d939d" /> Cone
-          </button>
-          <button @click="handleStartPrimitivePlacement('PYRAMID')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
-            <BlenderIcon name="mesh-cone" :size="14" color="#8d939d" /> Pyramid
-          </button>
-
-          <div class="h-px bg-ui-borderSubtle my-1"></div>
-
-          <!-- Extended Shapes -->
-          <div class="px-2.5 py-0.5 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">Shapes</div>
-          <button @click="handleStartPrimitivePlacement('CIRCLE')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
-            <BlenderIcon name="mesh-circle" :size="14" color="#8d939d" /> Circle / Disc
-          </button>
-          <button @click="handleStartPrimitivePlacement('PRISM')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
-            <BlenderIcon name="mesh-cylinder" :size="14" color="#8d939d" /> Prism
-          </button>
-          <button @click="handleStartPrimitivePlacement('TORUS')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
-            <BlenderIcon name="mesh-torus" :size="14" color="#8d939d" /> Torus / Donut
-          </button>
-          <button @click="handleStartPrimitivePlacement('CAPSULE')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
-            <BlenderIcon name="mesh-cylinder" :size="14" color="#8d939d" /> Capsule
-          </button>
-          <button @click="handleStartPrimitivePlacement('WEDGE')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
-            <BlenderIcon name="mesh-cube" :size="14" color="#8d939d" /> Wedge / Ramp
-          </button>
-          <button @click="handleStartPrimitivePlacement('TUBE')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
-            <BlenderIcon name="mesh-torus" :size="14" color="#8d939d" /> Tube / Pipe
-          </button>
-
-          <div class="h-px bg-ui-borderSubtle my-1"></div>
-
-          <!-- CAD & Architectural -->
-          <div class="px-2.5 py-0.5 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">CAD & Architectural</div>
-          <button @click="handleStartPrimitivePlacement('WALL')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
-            <BlenderIcon name="mesh-plane" :size="14" color="#8d939d" /> Wall Segment
-          </button>
-          <button @click="handleStartPrimitivePlacement('STAIRS')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
-            <BlenderIcon name="mesh-cube" :size="14" color="#8d939d" /> Stairs
-          </button>
-          <button @click="handleStartPrimitivePlacement('ARCH')" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center gap-2 text-ui-textPrimary">
-            <BlenderIcon name="mesh-torus" :size="14" color="#8d939d" /> Arch
-          </button>
-
-          <div class="h-px bg-ui-borderSubtle my-1"></div>
-          <button @click="handleOpenAddDialog" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-amber-400 font-medium">
-            <span>Browse All Primitives...</span>
+        <div v-if="activeDropdown === 'add'" class="absolute left-0 top-full mt-0.5 w-48 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+          <button @click="requestPrimitiveMenu(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between font-semibold text-amber-400">
+            <span>3D Mesh Primitives...</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Shift+A</span>
           </button>
         </div>
       </div>
 
-      <!-- Mesh Topology & Modeling Menu -->
-      <div class="relative" @click.stop>
+      <div class="w-px h-3.5 bg-ui-borderSubtle mx-0.5 shrink-0"></div>
+
+      <!-- Space & Pivot Combo Dropdown -->
+      <div class="relative">
         <button 
-          class="header-menu-btn px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
-          :class="{ 'bg-ui-hover text-ui-textPrimary is-active': activeDropdown === 'mesh' }"
-          @click="toggleDropdown('mesh')"
-          @mouseenter="activeDropdown && (activeDropdown = 'mesh')"
+          @click="toggleDropdown('space')"
+          class="h-6 px-1.5 rounded-xs bg-ui-input border border-ui-borderDefault text-ui-textPrimary hover:bg-ui-hover flex items-center gap-1 text-[10.5px]"
+          title="Transform Space & Pivot Point"
         >
-          Mesh
+          <Compass class="w-3 h-3 text-sky-400 shrink-0" />
+          <span class="capitalize">{{ toolStore.transformOrientation }}</span>
+          <span class="text-ui-textMuted">·</span>
+          <Crosshair class="w-3 h-3 text-ui-textAccent shrink-0" />
+          <span>{{ pivotLabel[toolStore.pivotPoint] }}</span>
+          <ChevronDown class="w-3 h-3 text-ui-textMuted" />
         </button>
-        <div v-if="activeDropdown === 'mesh'" class="header-dropdown-menu absolute left-0 top-full mt-0.5 w-60 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
-          <div class="px-3 py-1 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">Transform & Extrude</div>
-          <button @click="handleStartExtrude(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
-            <span>Extrude Region</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">E</span>
-          </button>
-          <button @click="handleStartInset(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
-            <span>Inset Faces</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">I</span>
-          </button>
-          <button @click="handleStartBevel(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
-            <span>Bevel / Chamfer</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+B</span>
-          </button>
 
-          <div class="h-px bg-ui-borderSubtle my-1"></div>
-
-          <div class="px-3 py-1 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">Topology & Cut</div>
-          <button @click="handleStartLoopCut(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
-            <span>Loop Cut and Slide</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+R</span>
-          </button>
-          <button @click="handleStartKnife(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
-            <span>Knife Tool</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">K</span>
-          </button>
-          <button @click="projectStore.performSubdivide(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
-            <span>Subdivide / Divide</span>
-          </button>
-          <button @click="projectStore.performBridgeEdges(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
-            <span>Bridge Edge Loops</span>
-          </button>
-          <button @click="projectStore.performGridFill(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
-            <span>Grid Fill</span>
-          </button>
-
-          <div class="h-px bg-ui-borderSubtle my-1"></div>
-
-          <div class="px-3 py-1 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">Vertices</div>
-          <button @click="projectStore.performMerge('center'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
-            <span>Merge at Center</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">M</span>
-          </button>
-          <button @click="projectStore.performConnectVertices(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
-            <span>Connect Vertices</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">J</span>
-          </button>
-          <button @click="requestFillFace(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
-            <span>Fill Face</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">F</span>
-          </button>
-          <button @click="projectStore.performDissolve('vertex'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
-            <span>Dissolve Vertices</span>
-          </button>
-          <button @click="projectStore.performDissolve('edge'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
-            <span>Dissolve Edges</span>
-          </button>
-
-          <div class="h-px bg-ui-borderSubtle my-1"></div>
-
-          <div class="px-3 py-1 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">Normals & Cleanup</div>
-          <button @click="projectStore.performFlipNormals(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
-            <span>Recalculate Outside Normals</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">Shift+N</span>
-          </button>
-          <button @click="projectStore.performCleanupMesh(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover hover:text-white flex items-center justify-between">
-            <span>Clean Degenerate Geometry</span>
-          </button>
+        <div v-if="activeDropdown === 'space'" class="absolute left-0 top-full mt-0.5 w-60 bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-2 grid grid-cols-2 gap-2 z-50 text-[11px] font-mono">
+          <div>
+            <div class="px-1 pb-1 text-[9px] font-bold uppercase tracking-wider text-ui-textMuted">Space</div>
+            <button
+              v-for="ori in (['global', 'local', 'normal', 'view'] as const)"
+              :key="ori"
+              @click="toolStore.transformOrientation = ori; closeDropdowns()"
+              class="w-full text-left px-1.5 py-1 rounded-xs capitalize hover:bg-ui-hover flex items-center justify-between"
+              :class="{ 'text-sky-400 font-semibold': toolStore.transformOrientation === ori }"
+            >
+              <span>{{ ori }}</span>
+              <Check v-if="toolStore.transformOrientation === ori" class="w-3 h-3" />
+            </button>
+          </div>
+          <div>
+            <div class="px-1 pb-1 text-[9px] font-bold uppercase tracking-wider text-ui-textMuted">Pivot</div>
+            <button
+              v-for="piv in ([
+                { id: 'median' as const, label: 'Median' },
+                { id: 'active' as const, label: 'Active' },
+                { id: 'cursor' as const, label: '3D Cursor' }
+              ])"
+              :key="piv.id"
+              @click="toolStore.pivotPoint = piv.id; closeDropdowns()"
+              class="w-full text-left px-1.5 py-1 rounded-xs hover:bg-ui-hover flex items-center justify-between"
+              :class="{ 'text-ui-textAccent font-semibold': toolStore.pivotPoint === piv.id }"
+            >
+              <span>{{ piv.label }}</span>
+              <Check v-if="toolStore.pivotPoint === piv.id" class="w-3 h-3" />
+            </button>
+          </div>
         </div>
       </div>
 
-      <!-- View & Window Menu (Panels, Layout, Cameras) -->
-      <div class="relative" @click.stop>
-        <button 
-          class="header-menu-btn px-2 py-1 text-xs font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
-          :class="{ 'bg-ui-hover text-ui-textPrimary is-active': activeDropdown === 'view' }"
-          @click="toggleDropdown('view')"
-          @mouseenter="activeDropdown && (activeDropdown = 'view')"
+      <!-- Snapping Toggle + Targets -->
+      <div class="relative flex items-center h-6 rounded-xs bg-ui-input border border-ui-borderDefault">
+        <button
+          type="button"
+          class="h-full px-1.5 flex items-center gap-1 rounded-l-xs text-[10.5px] transition cursor-pointer"
+          :class="toolStore.snapping.grid ? 'text-ui-textAccent font-bold' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          title="Toggle Grid Snap"
+          @click="toolStore.snapping.grid = !toolStore.snapping.grid"
         >
-          View
+          <Magnet class="w-3 h-3" />
+          <span class="tabular-nums">{{ toolStore.snapping.gridSize }}</span>
         </button>
-        <div v-if="activeDropdown === 'view'" class="header-dropdown-menu absolute left-0 top-full mt-0.5 w-64 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
-          <!-- Panels Toggle -->
-          <div class="px-3 py-1 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">Panels & Windows</div>
-          <button @click="layoutStore.toggleLeftToolbar(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
-            <span class="flex items-center gap-2">
-              <PanelLeft class="w-3.5 h-3.5 text-ui-textMuted" />
-              <span>Left Toolbar</span>
-            </span>
-            <span class="text-ui-textAccent font-medium text-[10px]">{{ layoutStore.showLeftToolbar ? 'VISIBLE' : 'HIDDEN' }}</span>
-          </button>
-
-          <button @click="layoutStore.toggleRightSidebar(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
-            <span class="flex items-center gap-2">
-              <PanelRight class="w-3.5 h-3.5 text-ui-textMuted" />
-              <span>Right Inspector</span>
-            </span>
-            <span class="text-ui-textAccent font-medium text-[10px]">{{ layoutStore.showRightSidebar ? 'VISIBLE' : 'HIDDEN' }}</span>
-          </button>
-
-          <button @click="layoutStore.toggleStatusBar(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
-            <span class="flex items-center gap-2">
-              <Tv class="w-3.5 h-3.5 text-ui-textMuted" />
-              <span>Status Bar Footer</span>
-            </span>
-            <span class="text-ui-textAccent font-medium text-[10px]">{{ layoutStore.showStatusBar ? 'VISIBLE' : 'HIDDEN' }}</span>
-          </button>
-
-          <div class="h-px bg-ui-borderSubtle my-1"></div>
-
-          <!-- Viewport Layout -->
-          <button @click="toolStore.viewport.quadView = !toolStore.viewport.quadView; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
-            <span class="flex items-center gap-2"><LayoutGrid class="w-3.5 h-3.5 text-ui-textMuted" /> Quad View Layout</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+Alt+Q</span>
-          </button>
-
-          <button @click="toolStore.viewport.xray = !toolStore.viewport.xray; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
-            <span class="flex items-center gap-2"><Eye class="w-3.5 h-3.5 text-ui-textMuted" /> X-Ray Transparent</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">Alt+Z</span>
-          </button>
-
-          <button @click="animationStore.toggleShowBones(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
-            <span class="flex items-center gap-2"><GitCommitVertical class="w-3.5 h-3.5 text-amber-400" /> Skeleton Bones</span>
-            <span class="text-ui-textAccent font-medium text-[10px]">{{ toolStore.viewport.showBones ? 'VISIBLE' : 'HIDDEN' }}</span>
-          </button>
-
-          <button @click="toolStore.viewport.crtFilter = !toolStore.viewport.crtFilter; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
-            <span class="flex items-center gap-2"><Tv class="w-3.5 h-3.5 text-amber-400" /> CRT / TV Scanline Filter</span>
-            <span class="text-ui-textAccent font-medium text-[10px]">{{ toolStore.viewport.crtFilter ? 'ON' : 'OFF' }}</span>
-          </button>
-
-          <div class="h-px bg-ui-borderSubtle my-1"></div>
-
-          <!-- Camera Viewpoints -->
-          <div class="px-3 py-1 text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider">Camera Viewpoint</div>
-          <button @click="setCameraView('top'); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center justify-between">
-            <span>Top Ortho</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">Num 7</span>
-          </button>
-          <button @click="setCameraView('front'); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center justify-between">
-            <span>Front Ortho</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">Num 1</span>
-          </button>
-          <button @click="setCameraView('right'); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center justify-between">
-            <span>Right Ortho</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">Num 3</span>
-          </button>
-          <button @click="setCameraView('iso'); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center justify-between">
-            <span>Isometric</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">Num 0</span>
-          </button>
-          <button @click="setCameraView('persp'); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover flex items-center justify-between">
-            <span>Perspective</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">Home</span>
-          </button>
-
-          <div class="h-px bg-ui-borderSubtle my-1"></div>
-
-          <!-- Color Themes -->
-          <button @click="$emit('open-preferences'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-ui-textPrimary">
-            <span class="flex items-center gap-2"><Palette class="w-3.5 h-3.5 text-amber-400" /> Themes (26 Presets)...</span>
-            <span class="text-ui-textAccent font-medium text-[10px]">{{ themeStore.presets.find(t => t.id === themeStore.currentThemeId)?.name }}</span>
-          </button>
-
-          <div class="h-px bg-ui-borderSubtle my-1"></div>
-
-          <!-- Reset Layout -->
-          <button @click="layoutStore.resetLayout(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2 text-amber-400 font-medium">
-            <RotateCcw class="w-3.5 h-3.5" /> Reset Default Panel Layout
-          </button>
+        <button
+          type="button"
+          class="h-full px-1 border-l border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary relative cursor-pointer"
+          :class="{ 'bg-ui-hover text-ui-textPrimary': activeDropdown === 'snap' }"
+          title="Snap increment and targets"
+          @click="toggleDropdown('snap')"
+        >
+          <ChevronDown class="w-3 h-3" />
+          <span
+            v-if="snapTargetOn"
+            class="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-ui-accent"
+          />
+        </button>
+        <div v-if="activeDropdown === 'snap'" class="absolute left-0 top-full mt-0.5 w-48 bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-2 z-50 text-[11px] font-mono space-y-2">
+          <div class="text-[9px] font-bold uppercase tracking-wider text-ui-textMuted">Increment</div>
+          <div class="grid grid-cols-4 gap-1">
+            <button
+              v-for="sz in [0.1, 0.25, 0.5, 1.0]"
+              :key="sz"
+              type="button"
+              class="py-1 rounded-xs border text-[10px] cursor-pointer"
+              :class="toolStore.snapping.gridSize === sz
+                ? 'bg-ui-accentSubtle text-ui-textAccent border-ui-accent/40 font-semibold'
+                : 'border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary'"
+              @click="toolStore.snapping.gridSize = sz"
+            >{{ sz }}</button>
+          </div>
+          <div class="border-t border-ui-borderSubtle pt-1.5 space-y-1">
+            <div class="text-[9px] font-bold uppercase tracking-wider text-ui-textMuted">Snap to</div>
+            <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5">
+              <span>Vertex</span>
+              <input type="checkbox" v-model="toolStore.snapping.vertex" class="rounded-xs accent-ui-accent" />
+            </label>
+            <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5">
+              <span>Edge midpoint</span>
+              <input type="checkbox" v-model="toolStore.snapping.edge" class="rounded-xs accent-ui-accent" />
+            </label>
+            <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5">
+              <span>Face center</span>
+              <input type="checkbox" v-model="toolStore.snapping.face" class="rounded-xs accent-ui-accent" />
+            </label>
+          </div>
         </div>
+      </div>
+
+      <!-- Symmetry Toggles (X Y Z) -->
+      <div class="flex items-center h-6 px-1 gap-0.5 rounded-xs bg-ui-input border border-ui-borderDefault text-[10px] font-mono">
+        <FlipHorizontal class="w-3 h-3 text-ui-textMuted mr-0.5" />
+        <button
+          v-for="axis in (['X', 'Y', 'Z'] as const)"
+          :key="axis"
+          type="button"
+          class="w-4 h-4 rounded-xs text-[9.5px] font-bold transition"
+          :class="(axis === 'X' ? toolStore.viewport.symmetryX : axis === 'Y' ? toolStore.viewport.symmetryY : toolStore.viewport.symmetryZ)
+            ? 'bg-ui-accentSubtle text-ui-textAccent'
+            : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          :title="'Live ' + axis + ' symmetry'"
+          @click="toggleSymmetry(axis)"
+        >
+          {{ axis }}
+        </button>
       </div>
     </div>
 
-    <!-- 2. CENTER: Workspace tabs (Modeling, UV/Paint, Rigging, Animation) -->
-    <div class="flex items-center space-x-0.5 bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle shrink-0 font-sans">
-      <button 
-        @click="toolStore.setAppMode('model')"
-        class="flex items-center gap-1.5 px-2.5 h-6 rounded-xs text-xs font-semibold transition"
-        :class="toolStore.appMode === 'model' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
+    <!-- 2. CENTER: Workspace Segmented Menu Strip -->
+    <div class="flex items-center justify-center shrink-0 z-10 px-2">
+      <div class="flex items-center gap-0.5 bg-ui-input/90 p-0.5 rounded-xs border border-ui-borderSubtle font-sans text-xs shrink-0 shadow-inner">
+        <button
+          v-for="w in workspaces"
+          :key="w.id"
+          @click="toolStore.setAppMode(w.id)"
+          class="h-5.5 px-2.5 rounded-xs text-[11px] font-semibold transition cursor-pointer flex items-center gap-1.5 whitespace-nowrap select-none"
+          :class="toolStore.appMode === w.id 
+            ? 'bg-ui-active text-ui-textAccent font-bold shadow-xs border border-ui-borderDefault/80' 
+            : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover/60 border border-transparent'"
+          :title="w.desc"
+        >
+          <BlenderIcon :name="w.icon" :size="12" />
+          <span>{{ w.label }}</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 3. RIGHT: Camera View + Shading + TV + Export -->
+    <div class="flex items-center space-x-1 shrink-0 z-20">
+      <!-- Camera View Dropdown -->
+      <div class="relative">
+        <button
+          @click="toggleDropdown('view')"
+          class="h-6 px-1.5 rounded-xs bg-ui-input border border-ui-borderDefault text-ui-textPrimary hover:bg-ui-hover flex items-center gap-1 text-[10.5px]"
+          title="Camera View"
+        >
+          <span class="text-ui-textAccent font-semibold">{{ toolStore.viewport.quadView ? 'Quad' : viewLabel[cameraView] }}</span>
+          <ChevronDown class="w-3 h-3 text-ui-textMuted" />
+        </button>
+
+        <div v-if="activeDropdown === 'view'" class="absolute right-0 top-full mt-0.5 w-44 bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-1 z-50 text-[11px] font-mono">
+          <button @click="setCameraView('persp')" class="w-full text-left px-2 py-1 hover:bg-ui-hover flex justify-between">
+            <span>Perspective</span><span class="text-ui-textMuted">Home</span>
+          </button>
+          <button @click="setCameraView('front')" class="w-full text-left px-2 py-1 hover:bg-ui-hover flex justify-between">
+            <span>Front Ortho</span><span class="text-ui-textMuted">Num 1</span>
+          </button>
+          <button @click="setCameraView('right')" class="w-full text-left px-2 py-1 hover:bg-ui-hover flex justify-between">
+            <span>Right Ortho</span><span class="text-ui-textMuted">Num 3</span>
+          </button>
+          <button @click="setCameraView('top')" class="w-full text-left px-2 py-1 hover:bg-ui-hover flex justify-between">
+            <span>Top Ortho</span><span class="text-ui-textMuted">Num 7</span>
+          </button>
+          <button @click="setCameraView('iso')" class="w-full text-left px-2 py-1 hover:bg-ui-hover flex justify-between">
+            <span>Isometric</span><span class="text-ui-textMuted">Num 0</span>
+          </button>
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+          <button @click="toolStore.viewport.quadView = !toolStore.viewport.quadView; closeDropdowns()" class="w-full text-left px-2 py-1 hover:bg-ui-hover flex justify-between text-amber-400">
+            <span>Quad View</span><span class="text-ui-textMuted">Ctrl+Alt+Q</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Shading Mode Group (Wire, Solid, Textured, PSX) -->
+      <div class="flex items-center h-6 px-0.5 rounded-xs bg-ui-input border border-ui-borderDefault">
+        <button
+          v-for="s in shadingModes"
+          :key="s.id"
+          type="button"
+          class="w-5 h-5 rounded-xs flex items-center justify-center transition"
+          :class="toolStore.viewport.shading === s.id ? 'bg-ui-active text-ui-textPrimary' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          :title="s.title"
+          @click="toolStore.viewport.shading = s.id"
+        >
+          <BlenderIcon :name="s.icon" :size="11" />
+        </button>
+      </div>
+
+      <!-- Overlays -->
+      <div class="relative">
+        <button
+          type="button"
+          class="h-6 w-6 rounded-xs border flex items-center justify-center relative cursor-pointer"
+          :class="overlayOn
+            ? 'bg-ui-accentSubtle text-ui-textAccent border-ui-accent/40'
+            : 'bg-ui-input text-ui-textMuted border-ui-borderDefault hover:text-ui-textPrimary'"
+          title="Overlays"
+          @click="toggleDropdown('overlays')"
+        >
+          <Layers class="w-3 h-3" />
+        </button>
+        <div v-if="activeDropdown === 'overlays'" class="absolute right-0 top-full mt-0.5 w-52 bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-2 z-50 text-[11px] font-mono space-y-1.5">
+          <div class="text-[9px] font-bold uppercase tracking-wider text-ui-textMuted">Overlays</div>
+          <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5 hover:bg-ui-hover rounded-xs">
+            <span>Face orientation</span>
+            <input type="checkbox" v-model="toolStore.viewport.faceOrientation" class="rounded-xs accent-ui-accent" />
+          </label>
+          <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5 hover:bg-ui-hover rounded-xs">
+            <span>Grid</span>
+            <input type="checkbox" v-model="toolStore.viewport.showGrid" class="rounded-xs accent-ui-accent" />
+          </label>
+          <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5 hover:bg-ui-hover rounded-xs">
+            <span>World axes</span>
+            <input type="checkbox" v-model="toolStore.viewport.showAxes" class="rounded-xs accent-ui-accent" />
+          </label>
+          <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5 hover:bg-ui-hover rounded-xs">
+            <span>Bones</span>
+            <input
+              type="checkbox"
+              :checked="animationStore.showBones"
+              class="rounded-xs accent-ui-accent"
+              @change="animationStore.setShowBones(!animationStore.showBones)"
+            />
+          </label>
+          <div class="border-t border-ui-borderSubtle pt-1.5 space-y-1">
+            <div class="flex items-center justify-between text-[10px] text-ui-textMuted">
+              <span>Wire opacity</span>
+              <span class="tabular-nums">{{ Math.round(toolStore.viewport.wireframeOpacity * 100) }}%</span>
+            </div>
+            <input
+              type="range"
+              min="0.1"
+              max="1.0"
+              step="0.05"
+              v-model.number="toolStore.viewport.wireframeOpacity"
+              class="w-full h-1 bg-ui-borderStrong rounded-lg appearance-none cursor-pointer accent-ui-accent"
+            />
+          </div>
+        </div>
+      </div>
+
+      <!-- Object Shade -->
+      <div class="relative">
+        <button
+          type="button"
+          class="h-6 px-1.5 rounded-xs bg-ui-input border border-ui-borderDefault text-ui-textPrimary hover:bg-ui-hover flex items-center gap-1 cursor-pointer"
+          title="Object shade"
+          @click="toggleDropdown('shade')"
+        >
+          <span class="capitalize">{{ objectShade }}</span>
+          <ChevronDown class="w-3 h-3 text-ui-textMuted" />
+        </button>
+        <div v-if="activeDropdown === 'shade'" class="absolute right-0 top-full mt-0.5 w-40 bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-1 z-50 text-[11px] font-mono">
+          <button
+            type="button"
+            class="w-full text-left px-2 py-1.5 rounded-xs hover:bg-ui-hover cursor-pointer"
+            :class="{ 'text-ui-textAccent font-semibold': objectShade === 'flat' }"
+            title="One normal per face"
+            @click="applyObjectShade('flat')"
+          >Flat</button>
+          <button
+            type="button"
+            class="w-full text-left px-2 py-1.5 rounded-xs hover:bg-ui-hover cursor-pointer"
+            :class="{ 'text-ui-textAccent font-semibold': objectShade === 'smooth' }"
+            title="Interpolated vertex normals"
+            @click="applyObjectShade('smooth')"
+          >Smooth</button>
+          <button
+            type="button"
+            class="w-full text-left px-2 py-1.5 rounded-xs hover:bg-ui-hover cursor-pointer"
+            :class="{ 'text-ui-textAccent font-semibold': objectShade === 'auto' }"
+            title="Smooth, keep sharp edges by angle"
+            @click="applyObjectShade('auto')"
+          >Auto smooth</button>
+        </div>
+      </div>
+
+      <!-- X-Ray Mode (Alt+Z) -->
+      <button
+        type="button"
+        class="h-6 w-6 rounded-xs border flex items-center justify-center transition cursor-pointer"
+        :class="toolStore.viewport.xray
+          ? 'bg-ui-accentSubtle text-ui-textAccent border-ui-accent/40 font-bold shadow-xs'
+          : 'bg-ui-input text-ui-textMuted border-ui-borderDefault hover:text-ui-textPrimary'"
+        title="X-Ray Transparent (Alt+Z)"
+        @click="toolStore.viewport.xray = !toolStore.viewport.xray"
       >
-        <span>Modeling</span>
+        <BlenderIcon name="xray" :size="11" :color="toolStore.viewport.xray ? 'var(--ui-accent)' : 'currentColor'" />
       </button>
 
       <button
-        @click="toolStore.setAppMode('blockout')"
-        class="flex items-center gap-1.5 px-2.5 h-6 rounded-xs text-xs font-semibold transition"
-        :class="toolStore.appMode === 'blockout' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
-        title="Blockout — Front / Side / Persp, Poly Draw, references"
+        type="button"
+        class="h-6 w-6 rounded-xs bg-ui-input border border-ui-borderDefault text-ui-textMuted hover:text-ui-textPrimary flex items-center justify-center cursor-pointer"
+        title="Command search (F3)"
+        @click="triggerCommandPalette"
       >
-        <span>Blockout</span>
+        <Search class="w-3 h-3" />
       </button>
 
-      <button 
-        @click="toolStore.setAppMode('uvpaint')"
-        class="flex items-center gap-1.5 px-2.5 h-6 rounded-xs text-xs font-semibold transition"
-        :class="toolStore.appMode === 'uvpaint' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
-      >
-        <span>UV / Paint</span>
-      </button>
-
-      <button 
-        @click="toolStore.setAppMode('rig')"
-        class="flex items-center gap-1.5 px-2.5 h-6 rounded-xs text-xs font-semibold transition"
-        :class="toolStore.appMode === 'rig' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
-        title="Skeletal Armature Rigging"
-      >
-        <span>Rigging</span>
-      </button>
-
-      <button 
-        @click="toolStore.setAppMode('animate')"
-        class="flex items-center gap-1.5 px-2.5 h-6 rounded-xs text-xs font-semibold transition"
-        :class="toolStore.appMode === 'animate' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
-      >
-        <span>Animation</span>
-      </button>
-    </div>
-
-    <!-- 3. RIGHT: Scene Stats + Export -->
-    <div class="flex items-center space-x-2 shrink-0">
-      <!-- Blender Scene Statistics -->
-      <div class="flex items-center space-x-2 px-2 py-0.5 bg-ui-input rounded-xs border border-ui-borderSubtle text-[10px] text-ui-textMuted font-mono">
-        <span>Verts: <strong class="text-ui-textPrimary">{{ projectStore.stats.verts }}</strong></span>
-        <span class="text-ui-borderStrong">|</span>
-        <span>Faces: <strong class="text-ui-textPrimary">{{ projectStore.stats.faces }}</strong></span>
-        <span class="text-ui-borderStrong">|</span>
-        <span>Tris: <strong class="text-ui-textPrimary">{{ projectStore.stats.tris }}</strong></span>
-      </div>
-
-      <!-- CRT / Retro TV Filter Toggle Button -->
+      <!-- CRT / TV Scanline Filter -->
       <button 
         @click="toolStore.viewport.crtFilter = !toolStore.viewport.crtFilter"
-        :title="toolStore.viewport.crtFilter ? 'Disable CRT Scanlines (TV Filter)' : 'Enable CRT Scanlines (TV Filter)'"
-        class="flex items-center gap-1 px-1.5 h-6 rounded-xs text-[11px] font-mono transition border cursor-pointer select-none"
+        class="h-6 px-1.5 rounded-xs flex items-center gap-1 text-[10px] font-mono transition border cursor-pointer select-none"
         :class="toolStore.viewport.crtFilter 
           ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-xs font-bold' 
-          : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover border-ui-borderSubtle bg-ui-input/40'"
+          : 'text-ui-textMuted hover:text-ui-textPrimary border-ui-borderDefault bg-ui-input'"
+        title="Toggle CRT Retro Scanlines"
       >
-        <Tv class="w-3.5 h-3.5" :class="toolStore.viewport.crtFilter ? 'text-amber-400 animate-pulse' : 'text-ui-textMuted'" />
-        <span class="font-semibold text-[10px]">TV</span>
-      </button>
-
-      <!-- Hotkeys Button -->
-      <button 
-        @click="$emit('open-hotkeys')"
-        title="Keyboard Shortcuts"
-        class="p-1 text-ui-textSecondary hover:text-ui-textPrimary rounded-xs hover:bg-ui-hover transition"
-      >
-        <Keyboard class="w-3.5 h-3.5" />
+        <Tv class="w-3 h-3" :class="toolStore.viewport.crtFilter ? 'text-amber-400' : 'text-ui-textMuted'" />
       </button>
 
       <!-- Main Export Button -->
       <button 
         @click="$emit('open-export')"
-        class="flex items-center gap-1.5 px-2.5 h-6 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs text-xs font-mono font-bold shadow-xs transition active:scale-95 border border-ui-accent/80"
+        class="flex items-center gap-1 px-2.5 h-6 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs text-[11px] font-semibold shadow-xs transition active:scale-95 cursor-pointer ml-1"
       >
         <Download class="w-3 h-3" />
         <span>Export</span>
       </button>
     </div>
 
-    <!-- Import Image Texture Modal -->
+    <!-- Import Texture Modal -->
     <ImportTextureModal 
       v-if="showImportModal && pendingImportFile" 
       :file="pendingImportFile" 

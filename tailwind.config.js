@@ -29,6 +29,8 @@ export default {
           accentSubtle: 'var(--ui-accent-subtle)',
           'accent-hover': 'var(--ui-accent-hover)',
           'accent-subtle': 'var(--ui-accent-subtle)',
+          onAccent: 'var(--ui-on-accent)',
+          'on-accent': 'var(--ui-on-accent)',
           textPrimary: 'var(--ui-text-primary)',
           textSecondary: 'var(--ui-text-secondary)',
           textMuted: 'var(--ui-text-muted)',

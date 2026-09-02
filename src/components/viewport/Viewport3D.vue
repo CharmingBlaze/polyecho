@@ -53,7 +53,6 @@ import {
   GripHorizontal,
 } from 'lucide-vue-next'
 import BlenderIcon from '../icons/BlenderIcon.vue'
-import ViewportNav from './ViewportNav.vue'
 import { EDITOR_EVENTS } from '../../core/commands/editorCommands'
 
 const projectStore = useProjectStore()
@@ -115,6 +114,9 @@ let lastPaintTextureId: string | undefined
 let isGizmoDragging = false
 let skipGizmoCommit = false
 let pointerDownClientPos = { x: 0, y: 0 }
+let isViewNavigating = false
+let viewNavPane: ViewQuadrant | null = null
+let orbitButtonsBackup: { LEFT: THREE.MOUSE; MIDDLE: THREE.MOUSE; RIGHT: THREE.MOUSE } | null = null
 let lastHoverClientPos = { x: 0, y: 0 }
 let lastPointerCtrl = false
 let pointerDownHitMesh = false
@@ -550,6 +552,7 @@ function initThree() {
   canvas.addEventListener('pointerup', onPointerUp, { capture: true })
   canvas.addEventListener('pointerleave', onPointerUp, { capture: true })
   canvas.addEventListener('wheel', onWheel, { passive: false })
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault())
   window.addEventListener('resize', onWindowResize)
 
   animate()
@@ -1298,16 +1301,9 @@ function rebuildMeshes() {
         transparent: true,
         opacity: Math.max(0.72, toolStore.viewport.wireframeOpacity ?? 0.88),
         polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1
       })
-      wireMat.onBeforeCompile = (shader) => {
-        shader.vertexShader = shader.vertexShader.replace(
-          '#include <project_vertex>',
-          `#include <project_vertex>
-           gl_Position.z -= 0.0012 * gl_Position.w;`
-        )
-      }
       const wire = new THREE.LineSegments(wireframeGeometry, wireMat)
       wire.name = `${meshObj.id}_wire`
       wire.renderOrder = 0
@@ -1341,9 +1337,13 @@ function rebuildMeshes() {
         const seamMat = new THREE.LineBasicMaterial({
           color: 0xef4444,
           linewidth: 3,
-          depthTest: false,
+          depthTest: !isXRay,
+          depthWrite: false,
           transparent: true,
-          opacity: 0.95
+          opacity: 0.95,
+          polygonOffset: true,
+          polygonOffsetFactor: -1,
+          polygonOffsetUnits: -1
         })
         const seamLines = new THREE.LineSegments(seamGeom, seamMat)
         seamLines.position.copy(threeMesh.position)
@@ -1379,9 +1379,12 @@ function rebuildMeshes() {
         const selEdgeMat = new THREE.LineBasicMaterial({
           color: 0xf59e0b,
           linewidth: 4,
-          depthTest: false,
+          depthTest: !isXRay,
           depthWrite: false,
-          transparent: true
+          transparent: true,
+          polygonOffset: true,
+          polygonOffsetFactor: -2,
+          polygonOffsetUnits: -2
         })
         const selEdgeMesh = new THREE.LineSegments(selectedEdgesGeometry, selEdgeMat)
         selEdgeMesh.name = `${meshObj.id}_seledges`
@@ -1396,9 +1399,12 @@ function rebuildMeshes() {
       const edgeMat = new THREE.LineBasicMaterial({
         color: 0x06b6d4,
         linewidth: 2,
-        depthTest: false,
+        depthTest: !isXRay,
         depthWrite: false,
-        transparent: true
+        transparent: true,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1
       })
       const edges = new THREE.LineSegments(edgeLinesGeometry, edgeMat)
       edges.name = `${meshObj.id}_edges`
@@ -1417,7 +1423,7 @@ function rebuildMeshes() {
         size: 9,
         vertexColors: true,
         sizeAttenuation: false,
-        depthTest: !(toolStore.viewport.xray || toolStore.appMode === 'blockout'),
+        depthTest: !isXRay,
         depthWrite: false
       })
       const pts = new THREE.Points(vertexPointsGeometry, pMat)
@@ -2811,6 +2817,38 @@ function syncGizmoPickCamera() {
   transformControls.camera = activeCamera
 }
 
+function endViewNavigation() {
+  isViewNavigating = false
+  viewNavPane = null
+}
+
+function isPolySketchOperator() {
+  const op = operatorManager.activeOperator
+  return op instanceof PolyDrawOperator || op instanceof PolyBuildOperator
+}
+
+function beginPolySketchNav() {
+  if (!orbitControls) return
+  if (!orbitButtonsBackup) {
+    orbitButtonsBackup = {
+      LEFT: orbitControls.mouseButtons.LEFT ?? THREE.MOUSE.ROTATE,
+      MIDDLE: orbitControls.mouseButtons.MIDDLE ?? THREE.MOUSE.DOLLY,
+      RIGHT: orbitControls.mouseButtons.RIGHT ?? THREE.MOUSE.PAN
+    }
+  }
+  ;(orbitControls.mouseButtons as { LEFT: number }).LEFT = -1
+  orbitControls.mouseButtons.MIDDLE = THREE.MOUSE.ROTATE
+  orbitControls.enabled = true
+}
+
+function endPolySketchNav() {
+  if (!orbitControls || !orbitButtonsBackup) return
+  orbitControls.mouseButtons.LEFT = orbitButtonsBackup.LEFT
+  orbitControls.mouseButtons.MIDDLE = orbitButtonsBackup.MIDDLE
+  orbitControls.mouseButtons.RIGHT = orbitButtonsBackup.RIGHT
+  orbitButtonsBackup = null
+}
+
 function updateActiveCameraAndQuadrant(event: PointerEvent | MouseEvent) {
   if (!renderer || !renderer.domElement) return
   const rect = renderer.domElement.getBoundingClientRect()
@@ -2819,10 +2857,23 @@ function updateActiveCameraAndQuadrant(event: PointerEvent | MouseEvent) {
   const width = rect.width
   const height = rect.height
 
-  const isGizmoActive = isGizmoDragging || transformControls.dragging || (transformControls as any).axis !== null
+  const navigating = isViewNavigating || (('buttons' in event) && ((event.buttons & 2) === 2))
+  const isGizmoActive = !navigating && (isGizmoDragging || transformControls.dragging || (transformControls as any).axis !== null)
 
   if (isTripleView()) {
-    if (!isGizmoActive) {
+    if (navigating && viewNavPane) {
+      activeQuadrant.value = viewNavPane
+      if (viewNavPane === 'col_front') {
+        activeCamera = cameraFront
+        orbitControls.enabled = false
+      } else if (viewNavPane === 'col_side') {
+        activeCamera = cameraRight
+        orbitControls.enabled = false
+      } else {
+        activeCamera = cameraPersp
+        orbitControls.enabled = true
+      }
+    } else if (!isGizmoActive) {
       const hit = tripleHit(mousePxX, width)
       if (hit.col === 0) {
         activeCamera = cameraFront
@@ -2938,6 +2989,7 @@ function startLightWavePan(camType: 'persp' | 'top' | 'front' | 'right', e: Mous
   const onUp = () => {
     window.removeEventListener('mousemove', onMove)
     window.removeEventListener('mouseup', onUp)
+    endViewNavigation()
   }
 
   window.addEventListener('mousemove', onMove)
@@ -3108,6 +3160,10 @@ function onWheel(event: WheelEvent) {
 // Raycasting for Selection & Hover Highlighting
 function onPointerDown(event: PointerEvent) {
   if (operatorManager.state.value.active) {
+    if (isPolySketchOperator() && event.button === 1) {
+      if (orbitControls) orbitControls.enabled = true
+      return
+    }
     if (orbitControls) orbitControls.enabled = false
     event.stopImmediatePropagation()
     event.preventDefault()
@@ -3119,6 +3175,21 @@ function onPointerDown(event: PointerEvent) {
     event.preventDefault()
     specialsMenuPos.value = { x: event.clientX, y: event.clientY }
     showSpecialsMenu.value = true
+    return
+  }
+
+  if (event.button === 2) {
+    event.preventDefault()
+    isViewNavigating = true
+    updateActiveCameraAndQuadrant(event)
+    viewNavPane = isSplitView() ? activeQuadrant.value : 'main'
+    const camType = viewportKindFromQuadrant()
+    if (camType !== 'persp') {
+      event.stopImmediatePropagation()
+      startLightWavePan(camType, event)
+      return
+    }
+    if (orbitControls) orbitControls.enabled = true
     return
   }
 
@@ -3382,6 +3453,10 @@ function onPointerMove(event: PointerEvent) {
   }
   lastHoverClientPos = { x: event.clientX, y: event.clientY }
   lastPointerCtrl = event.ctrlKey || event.metaKey
+  if (isViewNavigating || (event.buttons & 2) === 2) {
+    updateActiveCameraAndQuadrant(event)
+    return
+  }
   if (refDrag) {
     updateActiveCameraAndQuadrant(event)
     raycaster.setFromCamera(mouse, activeCamera)
@@ -3607,6 +3682,9 @@ function applyMarqueeSelection(isShift = false, isAlt = false) {
 }
 
 function onPointerUp(event?: PointerEvent) {
+  if (event?.button === 2 || isViewNavigating) {
+    endViewNavigation()
+  }
   if (refDrag) {
     refDrag = null
     orbitControls.enabled = true
@@ -3771,6 +3849,7 @@ function startModalOperator(tool: string, options?: any) {
       : 'GLOBAL'
     ) as TransformOrientation,
     cursorWorld: new THREE.Vector3(toolStore.cursor3D.x, toolStore.cursor3D.y, toolStore.cursor3D.z),
+    orbitTarget: orbitControls?.target.clone(),
     objectEuler: activeMesh
       ? new THREE.Euler(
           THREE.MathUtils.degToRad(activeMesh.rotation.x),
@@ -3815,6 +3894,7 @@ function startModalOperator(tool: string, options?: any) {
           }
         }
       }
+      endPolySketchNav()
       orbitControls.enabled = true
       if (transformControls) transformControls.enabled = true
       if (tool === 'polydraw' || tool === 'polybuild') toolStore.setModelTool('move')
@@ -3830,6 +3910,7 @@ function startModalOperator(tool: string, options?: any) {
         )
         projectStore.replaceMesh(restored)
       }
+      endPolySketchNav()
       orbitControls.enabled = true
       if (transformControls) transformControls.enabled = true
       if (tool === 'polydraw' || tool === 'polybuild') toolStore.setModelTool('move')
@@ -3871,8 +3952,10 @@ function startModalOperator(tool: string, options?: any) {
     operatorManager.start(new LoopCutOperator(), ctx, pointerPos)
   } else if (tool === 'polydraw') {
     operatorManager.start(new PolyDrawOperator(), ctx, pointerPos)
+    beginPolySketchNav()
   } else if (tool === 'polybuild') {
     operatorManager.start(new PolyBuildOperator(), ctx, pointerPos)
+    beginPolySketchNav()
   } else if (tool === 'primitive' || tool === 'add_primitive') {
     const pType = (options?.primitiveType || 'BOX') as PrimitiveType
     const pMode = options?.mode || PrimitivePlacementMode.CAD_DRAW
@@ -4704,6 +4787,9 @@ function handleGlobalPointerMove(e: PointerEvent) {
       const vpKind = viewportKindFromQuadrant()
       ;(operatorManager.activeOperator as any).ctx.viewportKind = vpKind
       ;(operatorManager.activeOperator as any).ctx.quadrant = activeQuadrant.value
+      if (orbitControls) {
+        ;(operatorManager.activeOperator as any).ctx.orbitTarget = orbitControls.target.clone()
+      }
     }
     operatorManager.handlePointerMove(e)
   }
@@ -4746,13 +4832,6 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
     return
   }
 
-  // Blender Specials Context Menu shortcut (W)
-  if ((e.key === 'w' || e.key === 'W') && !e.ctrlKey && !e.metaKey && !e.altKey && toolStore.isMeshWorkspace()) {
-    specialsMenuPos.value = { x: pointerDownClientPos.x || 200, y: pointerDownClientPos.y || 200 }
-    showSpecialsMenu.value = !showSpecialsMenu.value
-    return
-  }
-
   if (operatorManager.state.value.active) {
     if (operatorManager.handleKeyDown(e)) {
       e.preventDefault()
@@ -4773,6 +4852,8 @@ function handleGlobalWheel(e: WheelEvent) {
 function handleGlobalPointerDown(e: MouseEvent) {
   if (!operatorManager.state.value.active) return
 
+  if (isPolySketchOperator() && e.button === 1) return
+
   // Prevent drawing in 3D scene when clicking on UI buttons, inputs, dropdowns, floating modals, or inspector panels
   const target = e.target as HTMLElement | null
   if (target) {
@@ -4792,7 +4873,7 @@ function handleGlobalPointerDown(e: MouseEvent) {
     }
   }
 
-  if (orbitControls) orbitControls.enabled = false
+  if (orbitControls && !isPolySketchOperator()) orbitControls.enabled = false
 
   updateActiveCameraAndQuadrant(e)
   if (operatorManager.activeOperator) {
@@ -4888,6 +4969,33 @@ function triggerInsetOutset() {
 function triggerStepBack() {
   operatorManager.handlePointerDown({ button: 2 } as any)
 }
+
+function hudConfirm() {
+  const op = operatorManager.activeOperator
+  if (op instanceof PolyDrawOperator && op.phase === 'draw') {
+    op.closeFromHud()
+    operatorManager.state.value.statusText = op.statusText
+    return
+  }
+  operatorManager.confirm()
+}
+
+const hudConfirmLabel = computed(() => {
+  void operatorManager.state.value.statusText
+  const op = operatorManager.activeOperator
+  if (op instanceof PolyBuildOperator) return 'Done'
+  if (op instanceof PolyDrawOperator && op.phase === 'draw') return 'Close'
+  return 'Confirm'
+})
+
+const hudConfirmTitle = computed(() => {
+  void operatorManager.state.value.statusText
+  const op = operatorManager.activeOperator
+  if (op instanceof PolyBuildOperator) return 'Keep the mesh and exit (Enter when the loop is empty)'
+  if (op instanceof PolyDrawOperator && op.phase === 'draw') return 'Close the loop and start thickness (C / Enter)'
+  if (op instanceof PolyDrawOperator) return 'Keep this thickness (LMB / Enter)'
+  return 'Confirm Operation (LMB / Enter)'
+})
 
 // Floating & Movable Operator HUD
 const hudPos = ref({ x: typeof window !== 'undefined' ? Math.max(20, Math.round(window.innerWidth / 2 - 220)) : 220, y: 52 })
@@ -5066,7 +5174,6 @@ onUnmounted(() => {
 
 <template>
   <div data-viewport-root class="relative w-full h-full overflow-hidden bg-ui-root flex flex-col">
-    <ViewportNav />
     <!-- 3D Canvas Container -->
     <div 
       ref="containerRef" 
@@ -5135,34 +5242,34 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- 1. SINGLE VIEWPORT LIGHTWAVE CONTROLS -->
+      <!-- 1. SINGLE VIEWPORT LIGHTWAVE CONTROLS & GUIDANCE BANNERS -->
       <template v-if="!isSplitView()">
-        <!-- Top-Right LightWave Nav Cluster (Move, Rotate, Zoom, Center, Maximize) -->
-        <div class="absolute top-2.5 right-2.5 z-20 flex items-center bg-ui-panel/95 text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-md divide-x divide-ui-borderSubtle">
+        <!-- Top-Right LightWave Nav Cluster (Move, Rotate, Zoom, Center) -->
+        <div class="absolute top-2.5 right-2.5 z-20 flex items-center bg-ui-panel/95 backdrop-blur-xs text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-lg divide-x divide-ui-borderSubtle select-none">
           <button 
             @mousedown="startLightWavePan('persp', $event)" 
             class="p-1.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-move transition"
-            title="LightWave Pan (Drag to pan view)"
+            title="Pan View (Drag to pan)"
           >
             <Move class="w-3.5 h-3.5" />
           </button>
           <button 
             @mousedown="startLightWaveRotate($event)" 
             class="p-1.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-grab transition"
-            title="LightWave Orbit (Drag to rotate 3D view)"
+            title="Orbit View (Drag to rotate)"
           >
             <RotateCw class="w-3.5 h-3.5" />
           </button>
           <button 
             @mousedown="startLightWaveZoom('persp', $event)" 
             class="p-1.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-ns-resize transition"
-            title="LightWave Zoom (Drag up/down to zoom)"
+            title="Zoom View (Drag up/down to zoom)"
           >
             <Search class="w-3.5 h-3.5" />
           </button>
           <button 
             @click="centerViewOnContents('persp')" 
-            class="p-1.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition"
+            class="p-1.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition cursor-pointer"
             title="Center View on Model (Frame Contents)"
           >
             <Crosshair class="w-3.5 h-3.5" />
@@ -5482,8 +5589,30 @@ onUnmounted(() => {
         />
       </template>
 
-      <template v-if="operatorManager.activeOperator instanceof PolyBuildOperator && (operatorManager.activeOperator as PolyBuildOperator).hoverWorld">
+      <template v-if="operatorManager.activeOperator instanceof PolyBuildOperator">
         <circle
+          v-for="(pt, idx) in (operatorManager.activeOperator as PolyBuildOperator).chainWorld"
+          :key="'pbw_' + idx"
+          :cx="projectWorldToScreen(pt).x"
+          :cy="projectWorldToScreen(pt).y"
+          :r="idx === 0 ? 6 : 4"
+          :fill="idx === 0 && (operatorManager.activeOperator as PolyBuildOperator).hoverKind === 'close' ? '#34d399' : '#38bdf8'"
+          stroke="#0f172a"
+          stroke-width="1.25"
+        />
+        <circle
+          v-if="(operatorManager.activeOperator as PolyBuildOperator).chainWorld.length > 0"
+          :cx="projectWorldToScreen((operatorManager.activeOperator as PolyBuildOperator).chainWorld[0]).x"
+          :cy="projectWorldToScreen((operatorManager.activeOperator as PolyBuildOperator).chainWorld[0]).y"
+          r="13"
+          fill="none"
+          :stroke="(operatorManager.activeOperator as PolyBuildOperator).hoverKind === 'close' ? '#34d399' : '#38bdf8'"
+          stroke-width="1.25"
+          stroke-dasharray="3 3"
+          opacity="0.8"
+        />
+        <circle
+          v-if="(operatorManager.activeOperator as PolyBuildOperator).hoverWorld"
           :cx="projectWorldToScreen((operatorManager.activeOperator as PolyBuildOperator).hoverWorld!).x"
           :cy="projectWorldToScreen((operatorManager.activeOperator as PolyBuildOperator).hoverWorld!).y"
           r="6"
@@ -5493,24 +5622,37 @@ onUnmounted(() => {
         />
       </template>
 
-      <template v-if="operatorManager.activeOperator instanceof PolyDrawOperator">
-        <line
-          v-for="(pt, idx) in (operatorManager.activeOperator as PolyDrawOperator).screenPoints.slice(1)"
-          :key="'pd_' + idx"
-          :x1="(operatorManager.activeOperator as PolyDrawOperator).screenPoints[idx].x - (containerRef?.getBoundingClientRect().left || 0)"
-          :y1="(operatorManager.activeOperator as PolyDrawOperator).screenPoints[idx].y - (containerRef?.getBoundingClientRect().top || 0)"
-          :x2="pt.x - (containerRef?.getBoundingClientRect().left || 0)"
-          :y2="pt.y - (containerRef?.getBoundingClientRect().top || 0)"
-          stroke="#f59e0b"
-          stroke-width="2"
+      <template v-if="operatorManager.activeOperator instanceof PolyDrawOperator && (operatorManager.activeOperator as PolyDrawOperator).phase === 'draw'">
+        <circle
+          v-for="(pt, idx) in (operatorManager.activeOperator as PolyDrawOperator).points"
+          :key="'pdw_' + idx"
+          :cx="projectWorldToScreen(pt).x"
+          :cy="projectWorldToScreen(pt).y"
+          :r="idx === 0 ? 7 : 4"
+          :fill="idx === 0 && (operatorManager.activeOperator as PolyDrawOperator).isClosing ? '#34d399' : '#f59e0b'"
+          stroke="#0f172a"
+          stroke-width="1.25"
         />
         <circle
-          v-for="(pt, idx) in (operatorManager.activeOperator as PolyDrawOperator).screenPoints"
-          :key="'pdc_' + idx"
-          :cx="pt.x - (containerRef?.getBoundingClientRect().left || 0)"
-          :cy="pt.y - (containerRef?.getBoundingClientRect().top || 0)"
-          r="4"
-          fill="#f59e0b"
+          v-if="(operatorManager.activeOperator as PolyDrawOperator).points.length > 0"
+          :cx="projectWorldToScreen((operatorManager.activeOperator as PolyDrawOperator).points[0]).x"
+          :cy="projectWorldToScreen((operatorManager.activeOperator as PolyDrawOperator).points[0]).y"
+          r="14"
+          fill="none"
+          :stroke="(operatorManager.activeOperator as PolyDrawOperator).isClosing ? '#34d399' : '#f59e0b'"
+          stroke-width="1.5"
+          stroke-dasharray="3 3"
+          opacity="0.85"
+        />
+        <circle
+          v-if="(operatorManager.activeOperator as PolyDrawOperator).hoverPoint && !(operatorManager.activeOperator as PolyDrawOperator).isClosing"
+          :cx="projectWorldToScreen((operatorManager.activeOperator as PolyDrawOperator).hoverPoint!).x"
+          :cy="projectWorldToScreen((operatorManager.activeOperator as PolyDrawOperator).hoverPoint!).y"
+          r="5"
+          fill="#fbbf24"
+          stroke="#0f172a"
+          stroke-width="1"
+          opacity="0.9"
         />
       </template>
 
@@ -5617,29 +5759,35 @@ onUnmounted(() => {
         <div class="flex items-center justify-between gap-2 pt-0.5">
           <template v-if="operatorManager.activeOperator instanceof PolyBuildOperator">
             <div class="text-[10px] text-ui-textMuted leading-snug pr-1">
-              Empty = new · old vert = reuse · first vert = close
+              Empty = new · old vert = reuse · first = close · Tab = other way
             </div>
           </template>
-          <!-- Axis Constraint Group -->
+          <template v-else-if="operatorManager.activeOperator instanceof PolyDrawOperator">
+            <div class="text-[10px] text-ui-textMuted leading-snug pr-1">
+              {{ (operatorManager.activeOperator as PolyDrawOperator).phase === 'extrude'
+                ? 'Drag toward or away · F flips thickness'
+                : 'Trace silhouette · close the ring · then pull thickness' }}
+            </div>
+          </template>
           <div
             v-else
             class="flex items-center bg-ui-input rounded-xs p-0.5 border border-ui-borderSubtle"
           >
-            <button 
+            <button
               @click="triggerAxisConstraint('x')"
               class="px-1.5 py-0.5 rounded-xs text-[10px] font-bold text-rose-400 hover:bg-rose-500/20 active:scale-95 transition"
               title="Lock to X Axis (X)"
             >
               X
             </button>
-            <button 
+            <button
               @click="triggerAxisConstraint('y')"
               class="px-1.5 py-0.5 rounded-xs text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/20 active:scale-95 transition"
               title="Lock to Y Axis (Y)"
             >
               Y
             </button>
-            <button 
+            <button
               @click="triggerAxisConstraint('z')"
               class="px-1.5 py-0.5 rounded-xs text-[10px] font-bold text-sky-400 hover:bg-sky-500/20 active:scale-95 transition"
               title="Lock to Z Axis (Z)"
@@ -5658,13 +5806,48 @@ onUnmounted(() => {
                 ? 'bg-sky-500/20 text-sky-200 border-sky-400/40 hover:bg-sky-500/30'
                 : 'bg-ui-surface text-ui-textMuted border-ui-borderSubtle opacity-50'"
               :disabled="!(operatorManager.activeOperator as PolyBuildOperator).canFill"
-              title="Fill the current loop (Enter / F)"
+              title="Fill the current loop (Enter / C / F)"
               @click="(operatorManager.activeOperator as PolyBuildOperator).fillFromHud()"
             >
               Fill face
             </button>
+            <button
+              v-if="operatorManager.activeOperator instanceof PolyBuildOperator"
+              type="button"
+              class="px-2 py-1 border rounded-xs text-[11px] font-medium active:scale-95 transition"
+              :class="(operatorManager.activeOperator as PolyBuildOperator).canReverse
+                ? 'bg-amber-500/20 text-amber-200 border-amber-400/40 hover:bg-amber-500/30'
+                : 'bg-ui-surface text-ui-textMuted border-ui-borderSubtle opacity-50'"
+              :disabled="!(operatorManager.activeOperator as PolyBuildOperator).canReverse"
+              title="Grow the strip the other way (Tab / R)"
+              @click="(operatorManager.activeOperator as PolyBuildOperator).reverseFromHud()"
+            >
+              Reverse
+            </button>
+            <button
+              v-if="operatorManager.activeOperator instanceof PolyDrawOperator && (operatorManager.activeOperator as PolyDrawOperator).phase === 'draw'"
+              type="button"
+              class="px-2 py-1 border rounded-xs text-[11px] font-medium active:scale-95 transition"
+              :class="(operatorManager.activeOperator as PolyDrawOperator).canClose
+                ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/40 hover:bg-emerald-500/30'
+                : 'bg-ui-surface text-ui-textMuted border-ui-borderSubtle opacity-50'"
+              :disabled="!(operatorManager.activeOperator as PolyDrawOperator).canClose"
+              title="Close the loop and start thickness (C / Enter / double-click)"
+              @click="(operatorManager.activeOperator as PolyDrawOperator).closeFromHud()"
+            >
+              Close loop
+            </button>
+            <button
+              v-if="operatorManager.activeOperator instanceof PolyDrawOperator && (operatorManager.activeOperator as PolyDrawOperator).phase === 'extrude'"
+              type="button"
+              class="px-2 py-1 bg-amber-500/20 text-amber-200 border border-amber-400/40 hover:bg-amber-500/30 rounded-xs text-[11px] font-medium active:scale-95 transition"
+              title="Flip thickness toward / away from the camera (F)"
+              @click="(operatorManager.activeOperator as PolyDrawOperator).flipFromHud()"
+            >
+              Flip
+            </button>
             <button 
-              v-if="!(operatorManager.activeOperator instanceof PolyBuildOperator)"
+              v-if="!(operatorManager.activeOperator instanceof PolyBuildOperator) && !(operatorManager.activeOperator instanceof PolyDrawOperator)"
               @click="triggerToggleSnap"
               class="px-2 py-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[11px] text-ui-textSecondary font-medium active:scale-95 transition"
               title="Toggle Grid / Angle Snapping (Ctrl)"
@@ -5673,7 +5856,7 @@ onUnmounted(() => {
             </button>
 
             <button 
-              v-if="!(operatorManager.activeOperator instanceof PolyBuildOperator)"
+              v-if="!(operatorManager.activeOperator instanceof PolyBuildOperator) && !(operatorManager.activeOperator instanceof PolyDrawOperator)"
               @click="triggerTogglePrecision"
               class="px-2 py-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[11px] text-ui-textSecondary font-medium active:scale-95 transition"
               title="Precision Mode (Shift)"
@@ -5726,12 +5909,12 @@ onUnmounted(() => {
           <!-- Action Buttons -->
           <div class="flex items-center gap-1.5 pl-1.5 border-l border-ui-borderSubtle">
             <button 
-              @click="operatorManager.confirm()" 
+              @click="hudConfirm()" 
               class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs rounded-xs shadow-xs flex items-center gap-1 active:scale-95 transition border border-emerald-500/80"
-              :title="operatorManager.activeOperator instanceof PolyBuildOperator ? 'Keep the mesh and exit (Enter when the loop is empty)' : 'Confirm Operation (LMB / Enter)'"
+              :title="hudConfirmTitle"
             >
               <Check class="w-3.5 h-3.5" />
-              <span>{{ operatorManager.activeOperator instanceof PolyBuildOperator ? 'Done' : 'Confirm' }}</span>
+              <span>{{ hudConfirmLabel }}</span>
             </button>
 
             <button 

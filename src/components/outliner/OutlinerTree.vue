@@ -4,8 +4,9 @@ import { useProjectStore } from '../../stores/projectStore'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useToolStore } from '../../stores/toolStore'
 import BlenderIcon from '../icons/BlenderIcon.vue'
-import { GitBranch, Search } from 'lucide-vue-next'
+import { GitBranch, Search, Plus } from 'lucide-vue-next'
 import { resolveMeshBoneParentId } from '../../core/animation/Armature'
+import { requestPrimitiveMenu } from '../../core/commands/editorCommands'
 import type { MeshObject } from '../../types/mesh'
 
 const projectStore = useProjectStore()
@@ -16,7 +17,11 @@ const activeTab = ref<'meshes' | 'armature'>('meshes')
 const searchQuery = ref<string>('')
 const editingItemId = ref<string | null>(null)
 const editingName = ref<string>('')
-const showAddMeshMenu = ref<boolean>(false)
+
+function handleAddMeshClick(e: MouseEvent) {
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  requestPrimitiveMenu({ x: Math.max(20, rect.left - 370), y: Math.max(40, rect.top) })
+}
 
 const filteredMeshes = computed(() => {
   if (!searchQuery.value.trim()) return projectStore.meshes
@@ -190,49 +195,26 @@ function handleAddBone() {
       </div>
 
       <!-- Add Actions -->
-      <div class="relative">
+      <div class="flex items-center gap-1">
         <button 
           v-if="activeTab === 'meshes'"
-          @click="showAddMeshMenu = !showAddMeshMenu" 
-          class="flex items-center gap-1 px-2 h-6 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white text-[11px] font-bold shadow-xs transition"
-          title="Add 3D Primitive"
+          @click="handleAddMeshClick($event)" 
+          class="flex items-center gap-1 px-2.5 h-6 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white text-[11px] font-bold shadow-xs transition cursor-pointer"
+          title="Add 3D Primitive (Opens Primitives Panel / Shift+A)"
         >
-          <BlenderIcon name="plus" :size="11" />
+          <Plus class="w-3.5 h-3.5" />
           <span>Add</span>
         </button>
 
         <button 
           v-else
           @click="handleAddBone" 
-          class="flex items-center gap-1 px-2 h-6 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white text-[11px] font-bold shadow-xs transition"
+          class="flex items-center gap-1 px-2.5 h-6 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white text-[11px] font-bold shadow-xs transition cursor-pointer"
           title="Add Bone"
         >
-          <BlenderIcon name="plus" :size="11" />
+          <Plus class="w-3.5 h-3.5" />
           <span>{{ animationStore.selectedBoneId ? 'Child' : 'Root' }}</span>
         </button>
-
-        <!-- Primitive Dropdown with Blender Icons -->
-        <div 
-          v-if="showAddMeshMenu" 
-          @mouseleave="showAddMeshMenu = false"
-          class="absolute right-0 top-7 z-50 bg-ui-header border border-ui-borderStrong shadow-2xl rounded-xs py-1 w-36 text-ui-textPrimary text-[11px] flex flex-col divide-y divide-ui-borderSubtle"
-        >
-          <button @click="projectStore.addPrimitive('cube'); showAddMeshMenu = false" class="px-2.5 py-1 text-left hover:bg-ui-hover flex items-center gap-2">
-            <BlenderIcon name="mesh-cube" :size="13" color="#f59e0b" /> Cube
-          </button>
-          <button @click="projectStore.addPrimitive('plane'); showAddMeshMenu = false" class="px-2.5 py-1 text-left hover:bg-ui-hover flex items-center gap-2">
-            <BlenderIcon name="mesh-plane" :size="13" color="#38bdf8" /> Plane
-          </button>
-          <button @click="projectStore.addPrimitive('cylinder'); showAddMeshMenu = false" class="px-2.5 py-1 text-left hover:bg-ui-hover flex items-center gap-2">
-            <BlenderIcon name="mesh-cylinder" :size="13" color="#10b981" /> Cylinder
-          </button>
-          <button @click="projectStore.addPrimitive('cone'); showAddMeshMenu = false" class="px-2.5 py-1 text-left hover:bg-ui-hover flex items-center gap-2">
-            <BlenderIcon name="mesh-cone" :size="13" color="#f43f5e" /> Cone
-          </button>
-          <button @click="projectStore.addPrimitive('sphere'); showAddMeshMenu = false" class="px-2.5 py-1 text-left hover:bg-ui-hover flex items-center gap-2">
-            <BlenderIcon name="mesh-sphere" :size="13" color="#a855f7" /> Sphere
-          </button>
-        </div>
       </div>
     </div>
 

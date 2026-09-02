@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import HeaderMenu from './components/layout/HeaderMenu.vue'
 import LeftToolbar from './components/layout/LeftToolbar.vue'
 import RightSidebar from './components/layout/RightSidebar.vue'
@@ -15,7 +15,8 @@ import BlenderPieMenu from './components/viewport/BlenderPieMenu.vue'
 import CommandPaletteModal from './components/modals/CommandPaletteModal.vue'
 import PreferencesModal from './components/modals/PreferencesModal.vue'
 import BoneHierarchyPopout from './components/rigging/BoneHierarchyPopout.vue'
-import { ChevronLeft, RotateCcw } from 'lucide-vue-next'
+import BlenderIcon from './components/icons/BlenderIcon.vue'
+import { RotateCcw, PanelRightOpen, Box, Wrench, Image as ImageIcon, FolderTree, Link, Paintbrush } from 'lucide-vue-next'
 
 import { useToolStore } from './stores/toolStore'
 import { useProjectStore } from './stores/projectStore'
@@ -25,9 +26,10 @@ import { useLayoutStore } from './stores/layoutStore'
 import { useThemeStore } from './stores/themeStore'
 import { useKeymapStore } from './stores/keymapStore'
 import { ProjectSerializer } from './core/project/ProjectSerializer'
-import { EDITOR_EVENTS, requestCameraView, requestModalTool, requestFillFace, requestPrimitivePlacement, requestOpenPie, requestToggleUvOverlay } from './core/commands/editorCommands'
+import { EDITOR_EVENTS, requestCameraView, requestModalTool, requestFillFace, requestPrimitiveMenu, requestOpenPie, requestToggleUvOverlay } from './core/commands/editorCommands'
 import { setupDefaultActions } from './core/commands/setupDefaultActions'
 import { operatorManager } from './core/operators/OperatorManager'
+import { useFastTitleTips } from './composables/useFastTitleTips'
 
 const toolStore = useToolStore()
 const projectStore = useProjectStore()
@@ -36,6 +38,47 @@ const historyStore = useHistoryStore()
 const layoutStore = useLayoutStore()
 const themeStore = useThemeStore()
 const keymapStore = useKeymapStore()
+const fastTip = useFastTitleTips()
+
+type DockTab = {
+  id: 'props' | 'modifiers' | 'material' | 'texture' | 'refs' | 'skeleton' | 'bindings' | 'weights'
+  title: string
+  blender?: 'material' | 'texture'
+  icon?: typeof Box
+}
+
+const collapsedPropTabs = computed<DockTab[]>(() => {
+  const mode = toolStore.appMode
+  if (mode === 'rig') {
+    return [
+      { id: 'skeleton', title: 'Skeleton & Joint Hierarchy', icon: FolderTree },
+      { id: 'props', title: 'Bone Joint Transforms & IK', icon: Box },
+      { id: 'bindings', title: 'Mesh Bindings & Parents', icon: Link },
+      { id: 'weights', title: 'Vertex Weight Painting', icon: Paintbrush },
+    ]
+  }
+  if (mode === 'blockout') {
+    return [
+      { id: 'props', title: 'Transform & Object Properties', icon: Box },
+      { id: 'refs', title: 'Reference Images for Blockout', icon: ImageIcon },
+      { id: 'modifiers', title: 'Modifiers', icon: Wrench },
+    ]
+  }
+  if (mode === 'uvpaint') {
+    return [
+      { id: 'props', title: 'UV & Seams Properties', icon: Box },
+      { id: 'texture', title: 'Textures & Pixel Maps', blender: 'texture' },
+      { id: 'material', title: 'Material & Shading', blender: 'material' },
+      { id: 'modifiers', title: 'Modifiers', icon: Wrench },
+    ]
+  }
+  return [
+    { id: 'props', title: mode === 'animate' ? 'Animation & Keyframes' : 'Transform & Object Properties', icon: Box },
+    { id: 'modifiers', title: 'Modifiers', icon: Wrench },
+    { id: 'material', title: 'Material & Shading', blender: 'material' },
+    { id: 'texture', title: 'Textures & Pixel Maps', blender: 'texture' },
+  ]
+})
 
 setupDefaultActions(projectStore, toolStore, animationStore, historyStore)
 
@@ -124,7 +167,7 @@ function resolveKeymapAction(ids: string[]): string | null {
     if (mode === 'blockout' && ids.includes('polydraw')) return 'polydraw'
     if (mode === 'model' && ids.includes('fill_face')) return 'fill_face'
   }
-  if (ids.includes('box_select') && mode !== 'uvpaint') return 'box_select'
+  if (ids.includes('box_select') && isMeshWorkspace()) return 'box_select'
   for (const id of ids) {
     if (id.startsWith('paint_') && mode !== 'uvpaint') continue
     if (id === 'fill_face' || id === 'polydraw' || id === 'polybuild') continue
@@ -213,7 +256,7 @@ function runKeymapAction(id: string) {
       projectStore.performJoinMeshes()
       return
     case 'add_primitive':
-      requestPrimitivePlacement({ type: 'BOX' })
+      requestPrimitiveMenu()
       return
     case 'mode_vertex':
       ensureMeshContext()
@@ -303,12 +346,33 @@ function runKeymapAction(id: string) {
       return
     case 'delete_element':
       if (isMeshWorkspace()) {
-        if (toolStore.selectMode === 'object') projectStore.performDelete('object')
-        else if (toolStore.selectMode === 'face') projectStore.performDelete('face')
-        else if (toolStore.selectMode === 'edge') projectStore.performDelete('edge')
-        else projectStore.performDelete('vertex')
+        if (toolStore.selectMode === 'object') {
+          projectStore.performDelete('object')
+        } else if (toolStore.selectMode === 'face') {
+          if (projectStore.selectedFaceIds.length > 0) {
+            projectStore.performDelete('face')
+          } else {
+            projectStore.performDelete('object')
+          }
+        } else if (toolStore.selectMode === 'edge') {
+          if (projectStore.selectedEdgeIds.length > 0) {
+            projectStore.performDelete('edge')
+          } else {
+            projectStore.performDelete('object')
+          }
+        } else if (toolStore.selectMode === 'vertex') {
+          if (projectStore.selectedVertexIds.length > 0) {
+            projectStore.performDelete('vertex')
+          } else {
+            projectStore.performDelete('object')
+          }
+        } else {
+          projectStore.performDelete('object')
+        }
       } else if (toolStore.appMode === 'rig' && animationStore.selectedBoneId) {
         animationStore.deleteBone(animationStore.selectedBoneId)
+      } else if (toolStore.appMode === 'animate' && animationStore.selectedBoneId) {
+        animationStore.deleteKeyframeAt(animationStore.selectedBoneId, animationStore.currentFrame)
       }
       return
     case 'separate_mesh':
@@ -350,6 +414,43 @@ function runKeymapAction(id: string) {
     case 'paint_uv_overlay':
       if (toolStore.appMode === 'uvpaint') requestToggleUvOverlay()
       return
+    case 'toggle_quad_view':
+      toolStore.viewport.quadView = !toolStore.viewport.quadView
+      return
+    case 'new_project':
+      showNewProjectModal.value = true
+      return
+    case 'toggle_left_toolbar':
+      layoutStore.toggleLeftToolbar()
+      return
+    case 'toggle_right_sidebar':
+      layoutStore.toggleRightSidebar()
+      return
+    case 'restore_autosave':
+      void projectStore.restoreAutosaveSession()
+      return
+    case 'play_pause':
+      if (toolStore.appMode === 'animate') animationStore.togglePlay()
+      return
+    case 'frame_prev':
+      if (toolStore.appMode === 'animate') animationStore.setFrame(animationStore.currentFrame - 1)
+      return
+    case 'frame_next':
+      if (toolStore.appMode === 'animate') animationStore.setFrame(animationStore.currentFrame + 1)
+      return
+    case 'toggle_bone_hierarchy':
+      animationStore.toggleBoneHierarchyPopout()
+      return
+    case 'bind_geometry':
+      if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
+        animationStore.bindSelectedGeometry(bindGeometryMode())
+      }
+      return
+    case 'unbind_geometry':
+      if ((toolStore.appMode === 'rig' || toolStore.appMode === 'animate') && projectStore.activeMesh) {
+        animationStore.unbindGeometry(projectStore.activeMesh.id)
+      }
+      return
   }
 }
 
@@ -359,13 +460,20 @@ function tryKeymapDispatch(e: KeyboardEvent): boolean {
   const id = resolveKeymapAction(ids)
   if (!id) return false
   if (operatorManager.state.value.active && id !== 'command_palette') return false
+  if (e.repeat && id !== 'frame_prev' && id !== 'frame_next') return false
   e.preventDefault()
   runKeymapAction(id)
   return true
 }
 
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  if (target.isContentEditable) return true
+  return Boolean(target.closest('input, select, textarea, [contenteditable="true"]'))
+}
+
 function handleKeyDown(e: KeyboardEvent) {
-  if (['INPUT', 'SELECT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
+  if (isTypingTarget(e.target)) {
     return
   }
 
@@ -380,93 +488,9 @@ function handleKeyDown(e: KeyboardEvent) {
       projectStore.pasteClipboard()
       return
     }
-    if (e.key === 'y' || e.key === 'Y') {
-      e.preventDefault()
-      if (!operatorManager.state.value.active) historyStore.redo()
-      return
-    }
-    if (e.key === 'n' || e.key === 'N') {
-      e.preventDefault()
-      showNewProjectModal.value = true
-      return
-    }
-    if ((e.key === 't' || e.key === 'T') && e.shiftKey) {
-      e.preventDefault()
-      projectStore.restoreAutosaveSession()
-      return
-    }
-    if ((e.key === 'q' || e.key === 'Q') && e.altKey) {
-      e.preventDefault()
-      toolStore.viewport.quadView = !toolStore.viewport.quadView
-      return
-    }
-    if (e.key === 'p' || e.key === 'P') {
-      e.preventDefault()
-      if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
-        animationStore.bindSelectedGeometry(bindGeometryMode())
-      }
-      return
-    }
   }
 
-  if (e.altKey && (e.key === 'p' || e.key === 'P') && !e.ctrlKey && !e.metaKey) {
-    e.preventDefault()
-    if ((toolStore.appMode === 'rig' || toolStore.appMode === 'animate') && projectStore.activeMesh) {
-      animationStore.unbindGeometry(projectStore.activeMesh.id)
-    }
-    return
-  }
-
-  if (tryKeymapDispatch(e)) return
-
-  if (e.ctrlKey || e.metaKey || e.altKey) return
-  if (operatorManager.state.value.active) return
-
-  if (e.code === 'Numpad5') {
-    e.preventDefault()
-    toolStore.viewport.quadView = !toolStore.viewport.quadView
-    return
-  }
-
-  switch (e.key.toLowerCase()) {
-    case 'w':
-      if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
-        toolStore.setModelTool('move')
-      }
-      break
-    case 'arrowleft':
-    case ',':
-      if (toolStore.appMode === 'animate') animationStore.setFrame(animationStore.currentFrame - 1)
-      break
-    case 'arrowright':
-    case '.':
-      if (toolStore.appMode === 'animate') animationStore.setFrame(animationStore.currentFrame + 1)
-      break
-    case 'h':
-      if (e.shiftKey || toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
-        e.preventDefault()
-        animationStore.toggleBoneHierarchyPopout()
-      }
-      break
-    case ' ':
-      e.preventDefault()
-      if (toolStore.appMode === 'animate') animationStore.togglePlay()
-      break
-    case 'delete':
-      if (isMeshWorkspace()) {
-        if (toolStore.selectMode === 'object') projectStore.performDelete('object')
-        else if (toolStore.selectMode === 'face') projectStore.performDelete('face')
-        else if (toolStore.selectMode === 'edge') projectStore.performDelete('edge')
-        else projectStore.performDelete('vertex')
-      } else if (toolStore.appMode === 'rig' && animationStore.selectedBoneId) {
-        animationStore.deleteBone(animationStore.selectedBoneId)
-      }
-      break
-    case 'n':
-      e.preventDefault()
-      layoutStore.toggleRightSidebar()
-      break
-  }
+  tryKeymapDispatch(e)
 }
 
 function handleOpenExportCommand() {
@@ -593,16 +617,32 @@ onUnmounted(() => {
       <!-- Right Sidebar (Outliner + Inspector + Material & Palette) -->
       <RightSidebar v-if="layoutStore.showRightSidebar" />
 
-      <!-- Expand Right Sidebar Tab (When hidden) -->
-      <button 
+      <!-- Collapsed Right Sidebar Dock Strip (When hidden) -->
+      <aside 
         v-else
-        @click="layoutStore.showRightSidebar = true"
-        class="absolute right-0 top-1/2 -translate-y-1/2 z-40 bg-ui-header/90 hover:bg-ui-panel text-ui-textMuted hover:text-ui-textPrimary border-l border-t border-b border-ui-borderStrong rounded-l-xs py-2 px-1 shadow-xl transition flex flex-col items-center gap-1 group cursor-pointer"
-        title="Show Properties Panel (Hotkey: N)"
+        class="w-7 bg-ui-panel border-l border-ui-borderSubtle flex flex-col items-center py-2 gap-1 select-none z-30 shrink-0 font-sans shadow-sm"
       >
-        <ChevronLeft class="w-3 h-3 text-amber-400 group-hover:-translate-x-0.5 transition-transform" />
-        <span class="text-[8.5px] font-mono [writing-mode:vertical-lr] tracking-widest uppercase opacity-75 group-hover:opacity-100">Properties</span>
-      </button>
+        <button 
+          @click="layoutStore.showRightSidebar = true"
+          class="w-6 h-6 flex items-center justify-center rounded-xs text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer mb-1"
+          title="Expand Properties & Outliner (Hotkey: N)"
+        >
+          <PanelRightOpen class="w-3.5 h-3.5 text-amber-400" />
+        </button>
+
+        <div class="w-4 h-px bg-ui-borderSubtle my-0.5"></div>
+
+        <button
+          v-for="tab in collapsedPropTabs"
+          :key="tab.id"
+          @click="layoutStore.showRightSidebar = true; layoutStore.setInspectorTab(tab.id, toolStore.appMode)"
+          class="w-6 h-6 flex items-center justify-center rounded-xs text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer"
+          :title="tab.title"
+        >
+          <BlenderIcon v-if="tab.blender" :name="tab.blender" :size="13" />
+          <component v-else-if="tab.icon" :is="tab.icon" class="w-3.5 h-3.5" />
+        </button>
+      </aside>
     </div>
 
     <!-- Desktop Bottom Status Bar Footer -->
@@ -617,5 +657,14 @@ onUnmounted(() => {
     <BlenderPieMenu />
     <CommandPaletteModal />
     <BoneHierarchyPopout />
+    <div
+      v-show="fastTip.visible"
+      class="fixed z-[80] max-w-xs px-2 py-1 bg-ui-header border border-ui-borderStrong rounded-xs text-[10px] font-mono text-ui-textPrimary shadow-xl pointer-events-none select-none whitespace-pre-wrap"
+      :style="{
+        left: fastTip.x + 'px',
+        top: fastTip.y + 'px',
+        transform: fastTip.side === 'right' ? 'translateY(-50%)' : 'translateX(-50%)'
+      }"
+    >{{ fastTip.text }}</div>
   </div>
 </template>

@@ -8,6 +8,8 @@ import { PivotManager } from '../transform/PivotManager'
 
 export type PolyDrawPhase = 'draw' | 'extrude'
 
+const CLOSE_PX = 22
+
 export class PolyDrawOperator extends ModalOperator {
   readonly name = 'Poly Draw'
 
@@ -16,16 +18,21 @@ export class PolyDrawOperator extends ModalOperator {
   public hoverPoint: THREE.Vector3 | null = null
   public screenPoints: THREE.Vector2[] = []
   public hoverScreen: THREE.Vector2 | null = null
+  public isClosing = false
 
   private plane!: DrawPlane
   private planeLock: DrawViewKind | null = null
   private lastViewportKind: DrawViewKind | undefined
+  private perspMode: 'view' | 'ground' = 'view'
+  private planeLocked = false
   private extrudeResult: ExtrudeResult | null = null
   private startRay = new THREE.Ray()
   private currentRay = new THREE.Ray()
   private extrudeNormal = new THREE.Vector3(0, 0, 1)
   private previewLine: THREE.Line | null = null
   private previewSolid: THREE.Mesh | null = null
+  private lastClickAt = 0
+  private isAltHeld = false
 
   begin(ctx: OperatorContext, startPointer: { x: number; y: number }) {
     super.begin(ctx, startPointer)
@@ -34,6 +41,8 @@ export class PolyDrawOperator extends ModalOperator {
     this.hoverPoint = null
     this.extrudeResult = null
     this.planeLock = null
+    this.planeLocked = false
+    this.perspMode = 'view'
     this.lastViewportKind = ctx.viewportKind
     this.resolvePlane()
     this.updateHover(startPointer)
@@ -45,14 +54,15 @@ export class PolyDrawOperator extends ModalOperator {
     this.currentMouse = { x: event.clientX, y: event.clientY }
     this.isShiftHeld = event.shiftKey
     this.isCtrlHeld = event.ctrlKey
+    this.isAltHeld = event.altKey
 
     if (this.phase === 'draw') {
       const kind = this.ctx.viewportKind
-      if (this.points.length === 0 && kind && kind !== this.lastViewportKind) {
+      if (!this.planeLocked && this.points.length === 0 && kind && kind !== this.lastViewportKind) {
         this.planeLock = null
         this.lastViewportKind = kind
       }
-      if (this.points.length === 0) this.resolvePlane()
+      if (!this.planeLocked) this.resolvePlane()
       this.updateHover(this.currentMouse)
       this.updateDrawPreview()
       this.updateStatus()
@@ -108,12 +118,12 @@ export class PolyDrawOperator extends ModalOperator {
     if (button === 2) {
       if (this.phase === 'draw' && this.points.length > 0) {
         this.points.pop()
+        if (this.points.length === 0) this.planeLocked = false
         this.updateDrawPreview()
         this.updateStatus()
         return true
       }
-      this.cancel()
-      return true
+      return false
     }
 
     if (button !== 0) return false
@@ -122,14 +132,26 @@ export class PolyDrawOperator extends ModalOperator {
       return false
     }
 
+    const now = performance.now()
+    const dbl = now - this.lastClickAt < 320
+    this.lastClickAt = now
+
     if (!this.hoverPoint) return true
 
-    if (this.points.length >= 3 && this.isNearFirst()) {
+    if (this.points.length >= 3 && (this.isNearFirst() || dbl)) {
       this.beginExtrude()
       return true
     }
 
+    const last = this.points[this.points.length - 1]
+    if (last && last.distanceToSquared(this.hoverPoint) < 1e-8) return true
+
+    if (this.points.length === 0) this.resolvePlane()
     this.points.push(this.hoverPoint.clone())
+    if (!this.planeLocked) {
+      this.plane = PolyDrawKernel.rebaseOrigin(this.plane, this.points[0])
+      this.planeLocked = true
+    }
     this.updateDrawPreview()
     this.updateStatus()
     return true
@@ -140,18 +162,37 @@ export class PolyDrawOperator extends ModalOperator {
     if (event.ctrlKey && key === 'z' && this.phase === 'draw') {
       event.preventDefault()
       this.points.pop()
+      if (this.points.length === 0) this.planeLocked = false
       this.updateDrawPreview()
       this.updateStatus()
       return true
     }
-    if ((key === 'enter' || key === ' ') && this.phase === 'draw') {
+    if ((key === 'enter' || key === ' ' || key === 'c' || key === 'f') && this.phase === 'draw') {
       event.preventDefault()
       if (this.points.length >= 3) this.beginExtrude()
+      return true
+    }
+    if ((key === 'f' || key === 'tab' || key === 'c') && this.phase === 'extrude') {
+      event.preventDefault()
+      this.flipExtrude()
+      return true
+    }
+    if (key === 'n' && this.phase === 'draw' && this.points.length === 0) {
+      event.preventDefault()
+      if (this.ctx.viewportKind === 'persp' && !this.planeLock) {
+        this.perspMode = this.perspMode === 'view' ? 'ground' : 'view'
+      } else {
+        this.plane = PolyDrawKernel.flipPlane(this.plane)
+      }
+      this.resolvePlane()
+      this.updateHover(this.currentMouse)
+      this.updateStatus()
       return true
     }
     if (key === 'backspace' && this.phase === 'draw') {
       event.preventDefault()
       this.points.pop()
+      if (this.points.length === 0) this.planeLocked = false
       this.updateDrawPreview()
       this.updateStatus()
       return true
@@ -202,21 +243,47 @@ export class PolyDrawOperator extends ModalOperator {
 
   updateStatus() {
     if (this.phase === 'draw') {
-      this.statusText = `Poly Draw · ${this.planeLabel()} · verts ${this.points.length} · close on first / Enter · RMB undo · 1/3/7 lock plane`
+      this.statusText = this.points.length === 0
+        ? `Poly Draw · ${this.planeLabel()} · click to drop verts · N view/ground · 1/3/7 lock Front/Side/Ground · MMB orbit`
+        : `Poly Draw · ${this.planeLabel()} · ${this.points.length} verts · close on first / double-click / C / Enter · Shift = 45° · RMB undo · MMB orbit`
       return
     }
     const num = this.numericInput.text ? `: ${this.numericInput.text}m` : ''
-    this.statusText = `Poly Draw Extrude${num} · LMB/Enter confirm`
+    this.statusText = `Thickness${num} · drag either way · F/C flips · LMB/Enter confirm`
+  }
+
+  flipExtrude() {
+    if (this.phase !== 'extrude') return
+    this.extrudeNormal.negate()
+    this.evaluate()
+    this.ctx.onUpdatePreview()
+    this.updateStatus()
+  }
+
+  get canClose(): boolean {
+    return this.phase === 'draw' && this.points.length >= 3
+  }
+
+  closeFromHud() {
+    if (this.phase === 'draw' && this.points.length >= 3) this.beginExtrude()
+  }
+
+  flipFromHud() {
+    this.flipExtrude()
   }
 
   private beginExtrude() {
-    const faceId = PolyDrawKernel.createPlanarFace(this.ctx.mesh, this.points)
+    const view = new THREE.Vector3()
+    this.ctx.camera.getWorldDirection(view)
+    const loop = PolyDrawKernel.orientLoopTowardViewer(this.points, view)
+    const faceId = PolyDrawKernel.createPlanarFace(this.ctx.mesh, loop)
     if (faceId == null) return
     const baseVerts = [...(this.ctx.mesh.faces.get(faceId)?.vertexIds ?? [])]
 
     this.extrudeResult = ExtrudeKernel.extrudeFaces(this.ctx.mesh, [faceId])
     PolyDrawKernel.capDrawBase(this.ctx.mesh, baseVerts)
     this.extrudeNormal.copy(this.extrudeResult.regionNormal)
+    if (this.extrudeNormal.dot(view) > 0) this.extrudeNormal.negate()
     this.phase = 'extrude'
     this.disposePreview()
 
@@ -237,25 +304,47 @@ export class PolyDrawOperator extends ModalOperator {
     this.startRay.copy(this.pointerRay(this.currentMouse))
     this.ctx.selectedFaceIds = [...this.extrudeResult.extrudedFaceIds]
     this.updateSolidPreview()
+    this.ctx.onUpdatePreview()
     this.updateStatus()
   }
 
+  private workOrigin(): THREE.Vector3 {
+    if (this.points.length > 0) return this.points[0].clone()
+    if (this.ctx.orbitTarget) return this.ctx.orbitTarget.clone()
+    if (this.ctx.cursorWorld) return this.ctx.cursorWorld.clone()
+    return new THREE.Vector3(0, 0.5, 0)
+  }
+
   private resolvePlane() {
+    if (this.planeLocked) return
+    const origin = this.workOrigin()
     if (this.planeLock) {
-      this.plane = PolyDrawKernel.planeForView(this.planeLock)
+      this.plane = PolyDrawKernel.planeForView(this.planeLock, origin)
       return
     }
     const kind = this.ctx.viewportKind || 'front'
     if (kind === 'persp') {
-      const hit = this.pickSceneFace()
-      if (hit) {
-        this.plane = PolyDrawKernel.planeFromHit(hit.point, hit.normal)
-        return
+      if (this.isAltHeld) {
+        const hit = this.pickSceneFace()
+        if (hit) {
+          const view = new THREE.Vector3()
+          this.ctx.camera.getWorldDirection(view)
+          this.plane = PolyDrawKernel.planeFromHit(hit.point, PolyDrawKernel.normalTowardViewer(hit.normal, view))
+          return
+        }
       }
-      this.plane = PolyDrawKernel.planeForView('top')
+      if (this.perspMode === 'ground') {
+        const ground = PolyDrawKernel.planeForView('top', origin)
+        const ray = this.pointerRay(this.currentMouse)
+        if (!PolyDrawKernel.isUnreliableHit(ray, ground, this.ctx.camera)) {
+          this.plane = ground
+          return
+        }
+      }
+      this.plane = PolyDrawKernel.viewPlane(this.ctx.camera, origin)
       return
     }
-    this.plane = PolyDrawKernel.planeForView(kind)
+    this.plane = PolyDrawKernel.planeForView(kind, origin)
   }
 
   private planeLabel(): string {
@@ -265,9 +354,14 @@ export class PolyDrawOperator extends ModalOperator {
     const kind = this.ctx.viewportKind || 'front'
     if (kind === 'persp') {
       const n = this.plane?.normal
-      if (n && Math.abs(n.y) > 0.85) return 'Persp ground'
-      if (n && n.lengthSq() > 0) return 'Persp on face'
-      return 'Persp ground'
+      if (n && Math.abs(n.y) > 0.85 && this.perspMode === 'ground') return 'Persp ground'
+      if (n && n.lengthSq() > 0) {
+        const view = new THREE.Vector3()
+        this.ctx.camera.getWorldDirection(view)
+        if (Math.abs(n.dot(view)) > 0.65) return 'Persp view'
+        return 'Persp view'
+      }
+      return 'Persp view'
     }
     if (kind === 'right') return 'Side (ZY)'
     if (kind === 'top') return 'Top (XZ)'
@@ -282,7 +376,16 @@ export class PolyDrawOperator extends ModalOperator {
     const hits = rc.intersectObject(this.ctx.sceneGroup, true)
     for (const h of hits) {
       if (!h.face) continue
-      if (h.object.userData?.ignorePick) continue
+      let obj: THREE.Object3D | null = h.object
+      let skip = false
+      while (obj) {
+        if (obj.userData?.ignorePick || obj === this.ctx.previewGroup) {
+          skip = true
+          break
+        }
+        obj = obj.parent
+      }
+      if (skip) continue
       const n = h.face.normal.clone().transformDirection(h.object.matrixWorld).normalize()
       return { point: h.point.clone(), normal: n }
     }
@@ -305,14 +408,18 @@ export class PolyDrawOperator extends ModalOperator {
       return
     }
     this.hoverPoint = PolyDrawKernel.snapOnPlane(hit, this.plane, this.snapSize())
+    if (this.isShiftHeld && this.points.length > 0) {
+      this.hoverPoint = PolyDrawKernel.constrainFromLast(this.points[this.points.length - 1], this.hoverPoint, this.plane, this.snapSize())
+    }
     const rect = this.ctx.viewportElement.getBoundingClientRect()
     this.hoverScreen = ScreenGeometry.worldToScreen(this.hoverPoint, this.ctx.camera, rect, this.ctx.quadrant)
     this.screenPoints = this.points.map(p => ScreenGeometry.worldToScreen(p, this.ctx.camera, rect, this.ctx.quadrant))
+    this.isClosing = this.points.length >= 3 && this.isNearFirst()
   }
 
   private isNearFirst(): boolean {
     if (!this.hoverScreen || this.screenPoints.length === 0) return false
-    return this.hoverScreen.distanceTo(this.screenPoints[0]) <= 14
+    return this.hoverScreen.distanceTo(this.screenPoints[0]) <= CLOSE_PX
   }
 
   private pointerRay(pointer: { x: number; y: number }): THREE.Ray {
@@ -324,7 +431,7 @@ export class PolyDrawOperator extends ModalOperator {
     if (!this.ctx.previewGroup) return
     this.disposePreview()
     const pts = [...this.points]
-    const closing = this.points.length >= 3 && this.isNearFirst()
+    const closing = this.isClosing
     if (this.hoverPoint && !closing) pts.push(this.hoverPoint)
     if (pts.length < 2) return
 

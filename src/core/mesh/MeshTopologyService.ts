@@ -457,11 +457,18 @@ export class MeshTopologyService {
   /**
    * Creates a new polygon face from a closed boundary loop of vertices.
    */
-  static fillBoundary(mesh: EditableMesh, vertexIds: number[]): number | null {
+  static fillBoundary(mesh: EditableMesh, vertexIds: number[], uvs?: THREE.Vector2[]): number | null {
     if (vertexIds.length < 3) return null
 
     const positions = vertexIds.map(id => mesh.vertices.get(id)?.position).filter(Boolean) as THREE.Vector3[]
     if (positions.length < 3) return null
+
+    const sorted = [...vertexIds].sort((a, b) => a - b).join(',')
+    for (const face of mesh.faces.values()) {
+      if (face.vertexIds.length === vertexIds.length && [...face.vertexIds].sort((a, b) => a - b).join(',') === sorted) {
+        return null
+      }
+    }
 
     const normal = new THREE.Vector3()
     for (let i = 0; i < positions.length; i++) {
@@ -473,7 +480,7 @@ export class MeshTopologyService {
     }
     normal.normalize()
 
-    const newFace = mesh.addFace(vertexIds)
+    const newFace = mesh.addFace(vertexIds, uvs)
     if (newFace) {
       newFace.normal.copy(normal)
       return newFace.id

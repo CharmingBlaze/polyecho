@@ -25,7 +25,7 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { id: 'connect_verts', label: 'Connect Vertex Path', category: 'Modeling', defaultKey: 'j', currentKey: 'j' },
   { id: 'merge_verts', label: 'Merge Vertices (Center)', category: 'Modeling', defaultKey: 'm', currentKey: 'm' },
   { id: 'flip_normals', label: 'Flip Normals', category: 'Modeling', defaultKey: 'Shift+n', currentKey: 'Shift+n' },
-  { id: 'delete_element', label: 'Delete Selected', category: 'Modeling', defaultKey: 'x', currentKey: 'x' },
+  { id: 'delete_element', label: 'Delete Selected', category: 'Modeling', defaultKey: 'Delete / X', currentKey: 'Delete / X' },
   { id: 'separate_mesh', label: 'Separate Selection', category: 'Modeling', defaultKey: 'p', currentKey: 'p' },
   { id: 'join_meshes', label: 'Join Meshes', category: 'Modeling', defaultKey: 'Ctrl+j', currentKey: 'Ctrl+j' },
   { id: 'duplicate', label: 'Duplicate Selection', category: 'Modeling', defaultKey: 'Shift+d', currentKey: 'Shift+d' },
@@ -58,13 +58,26 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { id: 'view_front', label: 'Front Orthographic View', category: 'Viewport', defaultKey: 'Numpad1', currentKey: 'Numpad1' },
   { id: 'view_right', label: 'Right Orthographic View', category: 'Viewport', defaultKey: 'Numpad3', currentKey: 'Numpad3' },
   { id: 'view_camera', label: 'Toggle Perspective / Camera', category: 'Viewport', defaultKey: 'Numpad0', currentKey: 'Numpad0' },
+  { id: 'toggle_quad_view', label: 'Toggle Quad View', category: 'Viewport', defaultKey: 'Numpad5 / Ctrl+Alt+q', currentKey: 'Numpad5 / Ctrl+Alt+q' },
 
   // SYSTEM
   { id: 'open_preferences', label: 'Open Preferences / Properties', category: 'System', defaultKey: 'Ctrl+,', currentKey: 'Ctrl+,' },
   { id: 'save_project', label: 'Save Project JSON', category: 'System', defaultKey: 'Ctrl+s', currentKey: 'Ctrl+s' },
   { id: 'undo', label: 'Undo', category: 'System', defaultKey: 'Ctrl+z', currentKey: 'Ctrl+z' },
-  { id: 'redo', label: 'Redo', category: 'System', defaultKey: 'Ctrl+Shift+z', currentKey: 'Ctrl+Shift+z' },
+  { id: 'redo', label: 'Redo', category: 'System', defaultKey: 'Ctrl+Shift+z / Ctrl+y', currentKey: 'Ctrl+Shift+z / Ctrl+y' },
   { id: 'export_model', label: 'Export 3D Model', category: 'System', defaultKey: 'Ctrl+e', currentKey: 'Ctrl+e' },
+  { id: 'new_project', label: 'New Project', category: 'System', defaultKey: 'Ctrl+n', currentKey: 'Ctrl+n' },
+  { id: 'toggle_left_toolbar', label: 'Toggle Left Toolbar', category: 'System', defaultKey: 't', currentKey: 't' },
+  { id: 'toggle_right_sidebar', label: 'Toggle Right Sidebar', category: 'System', defaultKey: 'n', currentKey: 'n' },
+  { id: 'restore_autosave', label: 'Restore Autosave Session', category: 'System', defaultKey: 'Ctrl+Shift+t', currentKey: 'Ctrl+Shift+t' },
+
+  // ANIMATION
+  { id: 'play_pause', label: 'Play / Pause Timeline', category: 'Animation', defaultKey: 'space', currentKey: 'space' },
+  { id: 'frame_prev', label: 'Previous Frame', category: 'Animation', defaultKey: 'ArrowLeft / ,', currentKey: 'ArrowLeft / ,' },
+  { id: 'frame_next', label: 'Next Frame', category: 'Animation', defaultKey: 'ArrowRight / .', currentKey: 'ArrowRight / .' },
+  { id: 'toggle_bone_hierarchy', label: 'Bone Hierarchy Popout', category: 'Animation', defaultKey: 'h / Shift+h', currentKey: 'h / Shift+h' },
+  { id: 'bind_geometry', label: 'Bind Selected Geometry', category: 'Animation', defaultKey: 'Ctrl+p', currentKey: 'Ctrl+p' },
+  { id: 'unbind_geometry', label: 'Unbind Geometry', category: 'Animation', defaultKey: 'Alt+p', currentKey: 'Alt+p' },
 
   // UV & PAINTING
   { id: 'paint_brush', label: 'Paint Brush', category: 'UV & Painting', defaultKey: 'b', currentKey: 'b' },
@@ -84,6 +97,10 @@ export const useKeymapStore = defineStore('keymap', () => {
   const recordingBindingId = ref<string | null>(null)
 
   function initKeymaps() {
+    const have = new Set(bindings.value.map(b => b.id))
+    for (const def of DEFAULT_KEYBINDINGS) {
+      if (!have.has(def.id)) bindings.value.push({ ...def })
+    }
     try {
       const saved = localStorage.getItem('polyecho_keymaps')
       if (saved) {
@@ -153,13 +170,49 @@ export const useKeymapStore = defineStore('keymap', () => {
       else if (l === 'alt') alt = true
       else if (l === 'shift') shift = true
       else if (l.startsWith('numpad')) code = p
+      else if (l.startsWith('arrow')) key = l
       else key = l
     }
     return { ctrl, alt, shift, key, code }
   }
 
+  function eventKeyToken(e: KeyboardEvent): string {
+    const code = e.code
+    if (/^Key[A-Z]$/.test(code)) return code.slice(3).toLowerCase()
+    if (/^Digit[0-9]$/.test(code)) return code.slice(5)
+    const fromCode: Record<string, string> = {
+      Space: 'space',
+      Tab: 'tab',
+      Enter: 'enter',
+      Escape: 'escape',
+      Backspace: 'backspace',
+      Delete: 'delete',
+      Comma: ',',
+      Period: '.',
+      Slash: '/',
+      Minus: '-',
+      Equal: '=',
+      ArrowLeft: 'arrowleft',
+      ArrowRight: 'arrowright',
+      ArrowUp: 'arrowup',
+      ArrowDown: 'arrowdown',
+      F1: 'f1', F2: 'f2', F3: 'f3', F4: 'f4', F5: 'f5', F6: 'f6',
+      F7: 'f7', F8: 'f8', F9: 'f9', F10: 'f10', F11: 'f11', F12: 'f12'
+    }
+    if (fromCode[code]) return fromCode[code]
+    let key = e.key
+    if (key === ' ') key = 'space'
+    return key.toLowerCase()
+  }
+
   function eventMatchesBinding(e: KeyboardEvent, chord: string): boolean {
     if (!chord) return false
+    
+    // Support composite bindings like "Delete / X" or "Tab / 4"
+    if (chord.includes('/')) {
+      return chord.split('/').some(c => eventMatchesBinding(e, c.trim()))
+    }
+
     const want = parseChord(chord)
     if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return false
     const ctrl = e.ctrlKey || e.metaKey
@@ -167,9 +220,16 @@ export const useKeymapStore = defineStore('keymap', () => {
     const shift = e.shiftKey
     if (want.ctrl !== ctrl || want.alt !== alt || want.shift !== shift) return false
     if (want.code) return e.code.toLowerCase() === want.code.toLowerCase()
-    let key = e.key
-    if (key === ' ') key = 'space'
-    key = key.length === 1 ? key.toLowerCase() : key.toLowerCase()
+
+    // Digit-row "1" must not steal Numpad1 (camera views)
+    if (e.code.startsWith('Numpad')) return false
+
+    const key = eventKeyToken(e)
+
+    if (want.key === 'delete' || want.key === 'backspace') {
+      return key === 'delete' || key === 'backspace'
+    }
+
     return want.key === key
   }
 
@@ -178,7 +238,15 @@ export const useKeymapStore = defineStore('keymap', () => {
   }
 
   function matchingActionIds(e: KeyboardEvent): string[] {
-    return bindings.value.filter(b => eventMatchesBinding(e, b.currentKey)).map(b => b.id)
+    const list = bindings.value.filter(b => eventMatchesBinding(e, b.currentKey)).map(b => b.id)
+    // Fallback: Delete and Backspace always delete elements if no other key overrides
+    if ((e.key === 'Delete' || e.key === 'Backspace') && !e.ctrlKey && !e.altKey && !e.metaKey && !list.includes('delete_element')) {
+      list.push('delete_element')
+    }
+    if ((e.key === 'y' || e.key === 'Y') && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && !list.includes('redo')) {
+      list.push('redo')
+    }
+    return list
   }
 
   return {

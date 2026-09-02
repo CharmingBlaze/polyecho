@@ -41,11 +41,11 @@ Breaking any of these usually looks like “selection vanished”, “undo corru
 - Confirm goes through `onCommit`; cancel restores the kernel snapshot then `onCancel`. Viewport `onCancel` writes that restored kernel back with `replaceMesh` for mutating tools (not primitive / Poly Draw).
 - Esc while the transform gizmo is dragging must not commit (`skipGizmoCommit` + history undo).
 - Pointer / key events while a modal tool is active go to `OperatorManager` first (viewport + `App.vue` both check this). Global undo is disabled until the operator finishes.
-- Live shortcuts come from `keymapStore` (`matchingActionIds` → `App.vue`). Workspace gates: **F** Fill in Model, Poly Draw in Blockout; **V** Poly Build in Blockout; paint_* only in UV/Paint. Rebind in Preferences → Keyboard.
+- Live shortcuts come from `keymapStore` (`matchingActionIds` → `App.vue`). Digit-row **1–6** are selection modes; **Numpad 1/3/7/0/5** are camera views / quad. Workspace gates: **F** Fill in Model, Poly Draw in Blockout; **V** Poly Build in Blockout; paint_* only in UV/Paint. Rebind in Preferences → Keyboard.
 - Menu/`perform*` and modal kernel for the same verb must stay aligned. Inset / extrude / bevel one-shots go through `InsetKernel` / `ExtrudeKernel` / `BevelKernel` in `Operations.ts`. **I** in object mode must not inset the whole mesh.
 - **F** is Fill in Model (`requestFillFace` → camera-local dir → `performFillFace`) and Poly Draw in Blockout. Do not bind both in the same workspace.
 - Grab increment-snap is **Ctrl**, not `snapping.grid`. Magnet defaults **on**; rounding G delta to `gridSize` makes small moves disappear.
-- Vertex/edge/face snap is a **rigid** offset for the whole selection (`SnapManager.findRigidSnapOffset`), on grab, component gizmo drag, and object gizmo (other meshes). Toggle UI is `ViewportNav.vue` (mounted above the canvas). Header menus (mode / space / snap / view / overlays / shade) teleport to `body` so the `h-8` bar does not clip them.
+- Vertex/edge/face snap is a **rigid** offset for the whole selection (`SnapManager.findRigidSnapOffset`), on grab, component gizmo drag, and object gizmo (other meshes). Toggle UI is the magnet chevron on `HeaderMenu.vue` (increment sizes + vertex/edge/face targets).
 - Live Mirror X/Y/Z (`LiveSymmetry.ts`) follows **existing** opposite verts (≈5 cm). It does not clone topology. Wire both gizmo drag and G/R/S. Object-mode grab skips it (whole mesh).
 
 ## Transform gizmo
