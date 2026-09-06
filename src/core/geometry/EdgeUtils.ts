@@ -1,6 +1,45 @@
 import * as THREE from 'three'
 import { MeshObject, Edge, Vertex } from '../../types/mesh'
 
+/** Sorted undirected edge key. Vertex ids may contain `_`, so never split this string blindly. */
+export function undirectedEdgeId(idA: string, idB: string): string {
+  return idA < idB ? `${idA}_${idB}` : `${idB}_${idA}`
+}
+
+/**
+ * Recover the two vertex ids from an `undirectedEdgeId` key.
+ * Longest-prefix match so `v_ab` is not confused with `v_a`.
+ */
+export function parseUndirectedEdgeId(
+  edgeId: string,
+  vertexIds: Iterable<string>
+): { v1: string; v2: string } | null {
+  const known = vertexIds instanceof Set ? vertexIds : new Set(vertexIds)
+  const candidates = [...known].sort((a, b) => b.length - a.length)
+  for (const v1 of candidates) {
+    const prefix = `${v1}_`
+    if (!edgeId.startsWith(prefix)) continue
+    const v2 = edgeId.slice(prefix.length)
+    if (known.has(v2)) return { v1, v2 }
+  }
+  return null
+}
+
+/** Edges that belong to exactly one face in `faceIds` (island / selection border). */
+export function boundaryEdgeIdsForFaces(mesh: MeshObject, faceIds: Iterable<string>): string[] {
+  const want = faceIds instanceof Set ? faceIds : new Set(faceIds)
+  const counts = new Map<string, number>()
+  for (const face of mesh.faces) {
+    if (!want.has(face.id)) continue
+    const n = face.vertexIds.length
+    for (let i = 0; i < n; i++) {
+      const key = undirectedEdgeId(face.vertexIds[i], face.vertexIds[(i + 1) % n])
+      counts.set(key, (counts.get(key) || 0) + 1)
+    }
+  }
+  return [...counts.entries()].filter(([, count]) => count === 1).map(([key]) => key)
+}
+
 /**
  * Extracts unique undirected edges from all faces of a MeshObject.
  */
@@ -18,8 +57,7 @@ export function getMeshEdges(mesh: MeshObject): Edge[] {
       const idA = face.vertexIds[i]
       const idB = face.vertexIds[next]
 
-      // Sort vertex IDs so edge key is order-independent
-      const key = idA < idB ? `${idA}_${idB}` : `${idB}_${idA}`
+      const key = undirectedEdgeId(idA, idB)
 
       if (!edgeMap.has(key)) {
         edgeMap.set(key, {

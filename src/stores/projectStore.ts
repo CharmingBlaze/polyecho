@@ -20,7 +20,7 @@ import {
   flipNormals, 
   deleteElements 
 } from '../core/geometry/Operations'
-import { getMeshEdges, getEdgeLoop, getEdgeRing } from '../core/geometry/EdgeUtils'
+import { getMeshEdges, getEdgeLoop, getEdgeRing, boundaryEdgeIdsForFaces } from '../core/geometry/EdgeUtils'
 import { DEFAULT_PALETTES, loadCustomPalettes, saveCustomPalettes } from '../utils/color'
 import { PixelBuffer } from '../core/painting/PixelCanvas'
 import { generateRetroAtlas } from '../core/painting/DefaultTextures'
@@ -29,21 +29,34 @@ import { PrimitiveBuilder } from '../core/primitives/PrimitiveBuilder'
 import { MeshBridge } from '../core/mesh/MeshBridge'
 import { EditableMesh } from '../core/mesh/MeshKernel'
 import { SeamUnwrapper } from '../core/uv/SeamUnwrapper'
-import { UVIslandPacker } from '../core/uv/UVIslandPacker'
 import { AtlasBaker } from '../core/uv/AtlasBaker'
 import { clampAtlasGrid, mapFacesToAtlasCell, sliceBufferIntoTiles } from '../core/uv/AtlasCells'
-import { applyTargetTexelDensity, equalizeTexelDensity } from '../core/geometry/UVUnwrap'
+import {
+  applyTargetTexelDensity,
+  boxUnwrap,
+  coneUnwrap,
+  cubemapCrossUnwrap,
+  cylinderUnwrap,
+  equalizeTexelDensity,
+  gridifyQuadIslands,
+  packUVIslands,
+  planarUnwrap,
+  smartUvProject,
+  sphereUnwrap,
+  type SmartUvProjectOptions
+} from '../core/geometry/UVUnwrap'
 import {
   applyModifier,
   defaultMirrorModifier,
   defaultSolidifyModifier,
   defaultSubdivisionModifier
 } from '../core/geometry/Modifiers'
-import { computeFaceNormal, computeCentroid } from '../utils/math'
+import { computeCentroid } from '../utils/math'
 import { Vector3D, PrimitiveTransform } from '../types/mesh'
 import { ReferenceImage, ReferencePlane } from '../types/reference'
 import { useHistoryStore } from './historyStore'
 import { useAnimationStore } from './animationStore'
+import { useToolStore } from './toolStore'
 import { ProjectStorage, type ProjectStorageData } from '../core/storage/ProjectStorage'
 
 export const useProjectStore = defineStore('project', () => {
@@ -1878,41 +1891,99 @@ export const useProjectStore = defineStore('project', () => {
     setShadeMode(current === 'flat' ? 'smooth' : 'flat')
   }
 
+  function seamTargetEdgeIds(): string[] {
+    if (!activeMesh.value) return []
+    if (selectedEdgeIds.value.length > 0) return selectedEdgeIds.value
+    if (selectedFaceIds.value.length > 0) {
+      return boundaryEdgeIdsForFaces(activeMesh.value, selectedFaceIds.value)
+    }
+    return []
+  }
+
   function markSelectedEdgesAsSeam() {
     if (!activeMesh.value) return
+    const targets = seamTargetEdgeIds()
+    if (targets.length === 0) return
+    const existing = new Set(activeMesh.value.seamEdgeIds || [])
+    const toAdd = targets.filter(id => !existing.has(id))
+    if (toAdd.length === 0) return
     recordState('Mark Seam')
-    if (!activeMesh.value.seamEdgeIds) {
-      activeMesh.value.seamEdgeIds = []
-    }
-    for (const eId of selectedEdgeIds.value) {
-      if (!activeMesh.value.seamEdgeIds.includes(eId)) {
-        activeMesh.value.seamEdgeIds.push(eId)
-      }
-    }
+    activeMesh.value.seamEdgeIds = [...existing, ...toAdd]
+    markGeometryUpdated()
   }
 
   function clearSelectedEdgesSeam() {
     if (!activeMesh.value || !activeMesh.value.seamEdgeIds) return
+    const targets = seamTargetEdgeIds()
+    if (targets.length === 0) return
+    const remove = new Set(targets)
+    const next = activeMesh.value.seamEdgeIds.filter(id => !remove.has(id))
+    if (next.length === activeMesh.value.seamEdgeIds.length) return
     recordState('Clear Seam')
-    activeMesh.value.seamEdgeIds = activeMesh.value.seamEdgeIds.filter(id => !selectedEdgeIds.value.includes(id))
+    activeMesh.value.seamEdgeIds = next
+    markGeometryUpdated()
   }
 
   function clearAllSeams() {
-    if (!activeMesh.value) return
+    if (!activeMesh.value || !activeMesh.value.seamEdgeIds?.length) return
     recordState('Clear All Seams')
     activeMesh.value.seamEdgeIds = []
+    markGeometryUpdated()
   }
 
-  function performSeamUnwrap() {
-    if (!activeMesh.value) return
-    recordState('Unwrap Along Seams')
-    SeamUnwrapper.unwrapMesh(activeMesh.value)
+  function selectedFaceIndices(): number[] | undefined {
+    if (!activeMesh.value || selectedFaceIds.value.length === 0) return undefined
+    const indices = selectedFaceIds.value
+      .map(id => activeMesh.value!.faces.findIndex(face => face.id === id))
+      .filter(index => index >= 0)
+    return indices.length > 0 ? indices : undefined
   }
 
-  function performPackUVIslands(padding = 0.02) {
+  function performSmartUvProject(options: SmartUvProjectOptions = {}) {
     if (!activeMesh.value) return
-    recordState('Pack UV Islands')
-    UVIslandPacker.packIslands(activeMesh.value, padding)
+    const faces = options.onlyFaceIndices && options.onlyFaceIndices.length > 0
+      ? options.onlyFaceIndices
+      : selectedFaceIndices()
+    const tools = useToolStore()
+    const angle = Number.isFinite(Number(options.angleLimitDegrees))
+      ? Number(options.angleLimitDegrees)
+      : tools.smartUvAngle
+    const margin = Number.isFinite(Number(options.marginPixels))
+      ? Number(options.marginPixels)
+      : tools.smartUvMargin
+    recordState(`Smart UV Project (${faces && faces.length > 0 ? 'Selection' : 'Mesh'}, ${angle}°)`)
+    replaceMesh(smartUvProject(activeMesh.value, {
+      angleLimitDegrees: angle,
+      marginPixels: margin,
+      textureSize: options.textureSize ?? pixelBuffer.value.width,
+      onlyFaceIndices: faces
+    }))
+  }
+
+  function performSeamUnwrap(onlyFaceIndices?: number[]) {
+    if (!activeMesh.value) return
+    const faces = onlyFaceIndices && onlyFaceIndices.length > 0
+      ? onlyFaceIndices
+      : selectedFaceIndices()
+    recordState(`Unwrap Along Seams (${faces && faces.length > 0 ? 'Selection' : 'Mesh'})`)
+    const next: MeshObject = JSON.parse(JSON.stringify(activeMesh.value))
+    SeamUnwrapper.unwrapMesh(next, faces, pixelBuffer.value.width || 64, 2)
+    replaceMesh(next)
+  }
+
+  function performPackUVIslands(padding = 0.02, onlyFaceIndices?: number[]) {
+    if (!activeMesh.value) return
+    const faces = onlyFaceIndices && onlyFaceIndices.length > 0
+      ? onlyFaceIndices
+      : selectedFaceIndices()
+    recordState(faces && faces.length > 0 ? 'Pack Selected UV Islands' : 'Pack UV Islands')
+    const texSize = pixelBuffer.value.width || 64
+    replaceMesh(packUVIslands(
+      activeMesh.value,
+      Number.isFinite(padding) && padding >= 1 ? padding : Math.round(padding * texSize),
+      texSize,
+      faces
+    ))
   }
 
   function performApplyTexelDensity(targetDensity: number, faceIndices?: number[]) {
@@ -1935,26 +2006,62 @@ export const useProjectStore = defineStore('project', () => {
     replaceMesh(updated)
   }
 
-  function generateBoxUVs() {
+  function unwrapFaceScope(onlyFaceIndices?: number[]): number[] | undefined {
+    if (onlyFaceIndices && onlyFaceIndices.length > 0) return onlyFaceIndices
+    return selectedFaceIndices()
+  }
+
+  function performBoxUnwrap(onlyFaceIndices?: number[]) {
     if (!activeMesh.value) return
-    recordState('Box UV Projection')
-    for (const f of activeMesh.value.faces) {
-      const verts = f.vertexIds.map(id => activeMesh.value!.vertices.find(v => v.id === id)?.position).filter(Boolean)
-      if (verts.length < 3) continue
-      const fn = f.normal || computeFaceNormal(verts as Vector3D[])
-      const ax = Math.abs(fn.x), ay = Math.abs(fn.y), az = Math.abs(fn.z)
-      
-      f.uvs = f.vertexIds.map(vId => {
-        const v = activeMesh.value!.vertices.find(vert => vert.id === vId)?.position || { x: 0, y: 0, z: 0 }
-        if (ax >= ay && ax >= az) {
-          return { u: Number(((v.z + 2) / 4).toFixed(4)), v: Number(((v.y + 2) / 4).toFixed(4)) }
-        } else if (ay >= ax && ay >= az) {
-          return { u: Number(((v.x + 2) / 4).toFixed(4)), v: Number(((v.z + 2) / 4).toFixed(4)) }
-        } else {
-          return { u: Number(((v.x + 2) / 4).toFixed(4)), v: Number(((v.y + 2) / 4).toFixed(4)) }
-        }
-      })
-    }
+    const faces = unwrapFaceScope(onlyFaceIndices)
+    recordState(faces && faces.length > 0 ? 'Box Unwrap (Selection)' : 'Box UV Projection')
+    replaceMesh(boxUnwrap(activeMesh.value, faces))
+  }
+
+  function generateBoxUVs() {
+    performBoxUnwrap()
+  }
+
+  function performPlanarUnwrap(axis: 'x' | 'y' | 'z' = 'z', onlyFaceIndices?: number[]) {
+    if (!activeMesh.value) return
+    const faces = unwrapFaceScope(onlyFaceIndices)
+    recordState(`Planar Unwrap (${axis.toUpperCase()})`)
+    replaceMesh(planarUnwrap(activeMesh.value, axis, faces))
+  }
+
+  function performCylinderUnwrap(onlyFaceIndices?: number[]) {
+    if (!activeMesh.value) return
+    const faces = unwrapFaceScope(onlyFaceIndices)
+    recordState('Cylindrical Unwrap')
+    replaceMesh(cylinderUnwrap(activeMesh.value, faces))
+  }
+
+  function performSphereUnwrap(onlyFaceIndices?: number[]) {
+    if (!activeMesh.value) return
+    const faces = unwrapFaceScope(onlyFaceIndices)
+    recordState('Spherical Unwrap')
+    replaceMesh(sphereUnwrap(activeMesh.value, faces))
+  }
+
+  function performConeUnwrap(onlyFaceIndices?: number[]) {
+    if (!activeMesh.value) return
+    const faces = unwrapFaceScope(onlyFaceIndices)
+    recordState('Conical Fan Unwrap')
+    replaceMesh(coneUnwrap(activeMesh.value, faces))
+  }
+
+  function performCubemapCrossUnwrap(onlyFaceIndices?: number[]) {
+    if (!activeMesh.value) return
+    const faces = unwrapFaceScope(onlyFaceIndices)
+    recordState('Cubemap Cross Unwrap')
+    replaceMesh(cubemapCrossUnwrap(activeMesh.value, faces))
+  }
+
+  function performGridifyUvQuads(onlyFaceIndices?: number[]) {
+    if (!activeMesh.value) return
+    const faces = unwrapFaceScope(onlyFaceIndices)
+    recordState('Gridify Quad Loops')
+    replaceMesh(gridifyQuadIslands(activeMesh.value, faces))
   }
 
   function bakeSceneAtlas(padding = 2) {
@@ -1973,6 +2080,7 @@ export const useProjectStore = defineStore('project', () => {
       activeTextureId.value = result.atlasTexture.id
       meshes.value = result.remappedMeshes
       markTextureUpdated()
+      markGeometryUpdated()
     } catch (e: any) {
       console.error('Atlas Bake Error:', e)
     }
@@ -2237,11 +2345,19 @@ export const useProjectStore = defineStore('project', () => {
     markSelectedEdgesAsSeam,
     clearSelectedEdgesSeam,
     clearAllSeams,
+    performSmartUvProject,
     performSeamUnwrap,
     performPackUVIslands,
     performApplyTexelDensity,
     performEqualizeTexelDensity,
     generateBoxUVs,
+    performBoxUnwrap,
+    performPlanarUnwrap,
+    performCylinderUnwrap,
+    performSphereUnwrap,
+    performConeUnwrap,
+    performCubemapCrossUnwrap,
+    performGridifyUvQuads,
     bakeSceneAtlas,
     offsetMeshOrigin,
     setOriginToPreset,

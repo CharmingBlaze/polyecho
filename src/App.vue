@@ -16,7 +16,6 @@ import CommandPaletteModal from './components/modals/CommandPaletteModal.vue'
 import PreferencesModal from './components/modals/PreferencesModal.vue'
 import BoneHierarchyPopout from './components/rigging/BoneHierarchyPopout.vue'
 import BlenderIcon from './components/icons/BlenderIcon.vue'
-import { RotateCcw, PanelRightOpen, Box, Wrench, Image as ImageIcon, FolderTree, Link, Paintbrush } from 'lucide-vue-next'
 
 import { useToolStore } from './stores/toolStore'
 import { useProjectStore } from './stores/projectStore'
@@ -25,8 +24,9 @@ import { useHistoryStore } from './stores/historyStore'
 import { useLayoutStore } from './stores/layoutStore'
 import { useThemeStore } from './stores/themeStore'
 import { useKeymapStore } from './stores/keymapStore'
-import { ProjectSerializer } from './core/project/ProjectSerializer'
-import { EDITOR_EVENTS, requestCameraView, requestModalTool, requestFillFace, requestPrimitiveMenu, requestOpenPie, requestToggleUvOverlay } from './core/commands/editorCommands'
+import { loadOpenProject, refreshDesktopTitle, saveOpenProject } from './core/project/projectIo'
+import { allowDesktopClose, cancelDesktopClose, confirmUnsavedClose, getLaunchProjectPath, isDesktopApp, onDesktopCloseRequest, onOpenExternalProject, openProjectPath } from './core/desktop/desktopApi'
+import { EDITOR_EVENTS, requestCameraView, requestModalTool, requestFillFace, requestPrimitiveMenu, requestOpenPie, requestToggleUvOverlay, requestSmartUvProject } from './core/commands/editorCommands'
 import { setupDefaultActions } from './core/commands/setupDefaultActions'
 import { operatorManager } from './core/operators/OperatorManager'
 import { useFastTitleTips } from './composables/useFastTitleTips'
@@ -43,38 +43,37 @@ const fastTip = useFastTitleTips()
 type DockTab = {
   id: 'props' | 'modifiers' | 'material' | 'texture' | 'refs' | 'skeleton' | 'bindings' | 'weights'
   title: string
-  blender?: 'material' | 'texture'
-  icon?: typeof Box
+  blender: 'material' | 'texture' | 'uv' | 'empty-axis' | 'modifier' | 'image' | 'armature' | 'bone' | 'link' | 'vertex-group' | 'keyframe'
 }
 
 const collapsedPropTabs = computed<DockTab[]>(() => {
   const mode = toolStore.appMode
   if (mode === 'rig') {
     return [
-      { id: 'skeleton', title: 'Skeleton & Joint Hierarchy', icon: FolderTree },
-      { id: 'props', title: 'Bone Joint Transforms & IK', icon: Box },
-      { id: 'bindings', title: 'Mesh Bindings & Parents', icon: Link },
-      { id: 'weights', title: 'Vertex Weight Painting', icon: Paintbrush },
+      { id: 'skeleton', title: 'Skeleton & Joint Hierarchy', blender: 'armature' },
+      { id: 'props', title: 'Bone Joint Transforms & IK', blender: 'bone' },
+      { id: 'bindings', title: 'Mesh Bindings & Parents', blender: 'link' },
+      { id: 'weights', title: 'Vertex Weight Painting', blender: 'vertex-group' },
     ]
   }
   if (mode === 'blockout') {
     return [
-      { id: 'props', title: 'Transform & Object Properties', icon: Box },
-      { id: 'refs', title: 'Reference Images for Blockout', icon: ImageIcon },
-      { id: 'modifiers', title: 'Modifiers', icon: Wrench },
+      { id: 'props', title: 'Transform & Object Properties', blender: 'empty-axis' },
+      { id: 'refs', title: 'Reference Images for Blockout', blender: 'image' },
+      { id: 'modifiers', title: 'Modifiers', blender: 'modifier' },
     ]
   }
   if (mode === 'uvpaint') {
     return [
-      { id: 'props', title: 'UV & Seams Properties', icon: Box },
+      { id: 'props', title: 'UV & Seams Properties', blender: 'uv' },
       { id: 'texture', title: 'Textures & Pixel Maps', blender: 'texture' },
       { id: 'material', title: 'Material & Shading', blender: 'material' },
-      { id: 'modifiers', title: 'Modifiers', icon: Wrench },
+      { id: 'modifiers', title: 'Modifiers', blender: 'modifier' },
     ]
   }
   return [
-    { id: 'props', title: mode === 'animate' ? 'Animation & Keyframes' : 'Transform & Object Properties', icon: Box },
-    { id: 'modifiers', title: 'Modifiers', icon: Wrench },
+    { id: 'props', title: mode === 'animate' ? 'Animation & Keyframes' : 'Transform & Object Properties', blender: mode === 'animate' ? 'keyframe' : 'empty-axis' },
+    { id: 'modifiers', title: 'Modifiers', blender: 'modifier' },
     { id: 'material', title: 'Material & Shading', blender: 'material' },
     { id: 'texture', title: 'Textures & Pixel Maps', blender: 'texture' },
   ]
@@ -150,18 +149,38 @@ function bindGeometryMode() {
 }
 
 function ensureMeshContext() {
-  if (!isMeshWorkspace()) toolStore.setAppMode('model')
+  if (!isMeshWorkspace() && toolStore.appMode !== 'uvpaint') toolStore.setAppMode('model')
   if (!projectStore.activeMesh && projectStore.meshes.length > 0) {
     projectStore.activeMeshId = projectStore.meshes[0].id
     projectStore.selectedMeshIds = [projectStore.meshes[0].id]
   }
 }
 
+const UV_SAFE_ACTIONS = new Set([
+  'undo', 'redo', 'save_project', 'export_model', 'open_preferences',
+  'command_palette', 'toggle_left_toolbar', 'toggle_right_sidebar',
+  'restore_autosave', 'toggle_xray', 'toggle_snap', 'toggle_quad_view',
+  'view_top', 'view_front', 'view_right', 'view_camera',
+  'mode_vertex', 'mode_edge', 'mode_face', 'mode_object',
+  'mark_seam', 'clear_seam'
+])
+
 function resolveKeymapAction(ids: string[]): string | null {
   const mode = toolStore.appMode
   if (mode === 'uvpaint') {
-    const paint = ids.find(id => id.startsWith('paint_'))
-    if (paint) return paint
+    if (toolStore.uvWorkspaceTab === 'paint') {
+      const paint = ids.find(id => id.startsWith('paint_'))
+      if (paint) return paint
+    } else if (ids.includes('smart_uv_project')) {
+      return 'smart_uv_project'
+    } else if (ids.includes('mark_seam')) {
+      return 'mark_seam'
+    } else if (ids.includes('clear_seam')) {
+      return 'clear_seam'
+    }
+    // UV and Paint tabs keep F/P/V/U and must not also fire Separate, Poly Build,
+    // or other modeling verbs. 1–4 stay in this workspace (island/vert/edge/face).
+    return ids.find(id => UV_SAFE_ACTIONS.has(id)) || null
   }
   if (ids.includes('fill_face') || ids.includes('polydraw')) {
     if (mode === 'blockout' && ids.includes('polydraw')) return 'polydraw'
@@ -169,7 +188,7 @@ function resolveKeymapAction(ids: string[]): string | null {
   }
   if (ids.includes('box_select') && isMeshWorkspace()) return 'box_select'
   for (const id of ids) {
-    if (id.startsWith('paint_') && mode !== 'uvpaint') continue
+    if (id.startsWith('paint_')) continue
     if (id === 'fill_face' || id === 'polydraw' || id === 'polybuild') continue
     return id
   }
@@ -186,21 +205,7 @@ function runKeymapAction(id: string) {
       if (!operatorManager.state.value.active) historyStore.redo()
       return
     case 'save_project': {
-      const jsonStr = ProjectSerializer.serialize(
-        projectStore.projectName,
-        projectStore.meshes,
-        projectStore.pixelBuffer.canvas,
-        projectStore.activePalette,
-        projectStore.materials,
-        animationStore.armature,
-        animationStore.armature.clips,
-        animationStore.armature.activeClipId,
-        animationStore.currentFrame,
-        toolStore.viewport,
-        projectStore.textures,
-        projectStore.referenceImages
-      )
-      ProjectSerializer.downloadProject(jsonStr, projectStore.projectName || 'PSX_Model')
+      void saveOpenProject()
       return
     }
     case 'export_model':
@@ -250,7 +255,8 @@ function runKeymapAction(id: string) {
       if (isMeshWorkspace()) toolStore.isBoxSelectActive = !toolStore.isBoxSelectActive
       return
     case 'duplicate':
-      projectStore.duplicateSelection(toolStore.selectMode)
+      if (toolStore.appMode === 'animate') animationStore.duplicateKeysAtCurrentFrame()
+      else projectStore.duplicateSelection(toolStore.selectMode)
       return
     case 'join_meshes':
       projectStore.performJoinMeshes()
@@ -311,7 +317,7 @@ function runKeymapAction(id: string) {
       return
     case 'bevel':
       if (isMeshWorkspace()) requestModalTool('bevel')
-      else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
+      else if (toolStore.appMode === 'rig') {
         animationStore.bindSelectedGeometry(bindGeometryMode())
       }
       return
@@ -414,6 +420,22 @@ function runKeymapAction(id: string) {
     case 'paint_uv_overlay':
       if (toolStore.appMode === 'uvpaint') requestToggleUvOverlay()
       return
+    case 'paint_swap_colors':
+      if (toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'paint') {
+        const temp = toolStore.primaryColor
+        toolStore.primaryColor = toolStore.secondaryColor
+        toolStore.secondaryColor = temp
+      }
+      return
+    case 'smart_uv_project':
+      if (toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'uv') requestSmartUvProject()
+      return
+    case 'mark_seam':
+      projectStore.markSelectedEdgesAsSeam()
+      return
+    case 'clear_seam':
+      projectStore.clearSelectedEdgesSeam()
+      return
     case 'toggle_quad_view':
       toolStore.viewport.quadView = !toolStore.viewport.quadView
       return
@@ -429,6 +451,19 @@ function runKeymapAction(id: string) {
     case 'restore_autosave':
       void projectStore.restoreAutosaveSession()
       return
+    case 'copy_selection':
+      if (toolStore.appMode === 'uvpaint') return
+      if (toolStore.appMode === 'animate') animationStore.copyPose()
+      else projectStore.copySelection(toolStore.selectMode)
+      return
+    case 'paste_clipboard':
+      if (toolStore.appMode === 'uvpaint') return
+      if (toolStore.appMode === 'animate') animationStore.pastePose()
+      else projectStore.pasteClipboard()
+      return
+    case 'paste_flipped_pose':
+      if (toolStore.appMode === 'animate') animationStore.pasteFlippedPose()
+      return
     case 'play_pause':
       if (toolStore.appMode === 'animate') animationStore.togglePlay()
       return
@@ -442,12 +477,12 @@ function runKeymapAction(id: string) {
       animationStore.toggleBoneHierarchyPopout()
       return
     case 'bind_geometry':
-      if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
+      if (toolStore.appMode === 'rig') {
         animationStore.bindSelectedGeometry(bindGeometryMode())
       }
       return
     case 'unbind_geometry':
-      if ((toolStore.appMode === 'rig' || toolStore.appMode === 'animate') && projectStore.activeMesh) {
+      if (toolStore.appMode === 'rig' && projectStore.activeMesh) {
         animationStore.unbindGeometry(projectStore.activeMesh.id)
       }
       return
@@ -477,19 +512,6 @@ function handleKeyDown(e: KeyboardEvent) {
     return
   }
 
-  if (e.ctrlKey || e.metaKey) {
-    if (e.key === 'c' || e.key === 'C') {
-      e.preventDefault()
-      projectStore.copySelection(toolStore.selectMode)
-      return
-    }
-    if (e.key === 'v' || e.key === 'V') {
-      e.preventDefault()
-      projectStore.pasteClipboard()
-      return
-    }
-  }
-
   tryKeymapDispatch(e)
 }
 
@@ -512,20 +534,73 @@ async function handleRestoreAutosave() {
   await projectStore.restoreAutosaveSession()
 }
 
+function onBrowserUnload(e: BeforeUnloadEvent) {
+  if (!historyStore.isDirty()) return
+  e.preventDefault()
+  e.returnValue = ''
+}
+
+async function handleDesktopCloseRequest() {
+  if (historyStore.isDirty()) {
+    const choice = await confirmUnsavedClose()
+    if (choice === 2) {
+      await cancelDesktopClose()
+      return
+    }
+    if (choice === 0) {
+      const saved = await saveOpenProject()
+      if (!saved) {
+        await cancelDesktopClose()
+        return
+      }
+    }
+  }
+  await allowDesktopClose()
+}
+
+async function openExternalProject(filePath: string) {
+  const file = await openProjectPath(filePath)
+  if (!file) return
+  try {
+    await loadOpenProject(file.text, file.path)
+  } catch (err) {
+    console.warn('Failed to open project:', err)
+  }
+}
+
+let stopCloseListen: (() => void) | undefined
+let stopOpenExternal: (() => void) | undefined
+
 onMounted(async () => {
   themeStore.initTheme()
   keymapStore.initKeymaps()
   layoutStore.showRightSidebar = true
   window.addEventListener('keydown', handleKeyDown)
   window.addEventListener(EDITOR_EVENTS.openExport, handleOpenExportCommand)
+  window.addEventListener('beforeunload', onBrowserUnload)
+  if (isDesktopApp()) {
+    stopCloseListen = onDesktopCloseRequest(() => { void handleDesktopCloseRequest() })
+    stopOpenExternal = onOpenExternalProject((filePath) => { void openExternalProject(filePath) })
+  }
+  void refreshDesktopTitle()
 
   // Check if an unsaved recovery session is available, but start with a clean fresh scene
   await projectStore.checkAutosaveSession()
+  const launchPath = await getLaunchProjectPath()
+  if (launchPath) await openExternalProject(launchPath)
 })
+
+watch(
+  () => [historyStore.documentEpoch, projectStore.projectName],
+  () => { void refreshDesktopTitle() }
+)
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown)
   window.removeEventListener(EDITOR_EVENTS.openExport, handleOpenExportCommand)
+  window.removeEventListener('beforeunload', onBrowserUnload)
+  stopCloseListen?.()
+  stopOpenExternal?.()
 })
 </script>
 
@@ -545,7 +620,7 @@ onUnmounted(() => {
       class="bg-amber-950/80 border-b border-amber-500/40 px-4 py-1.5 flex items-center justify-between text-xs text-amber-200 z-40 backdrop-blur-md shrink-0 shadow-md"
     >
       <div class="flex items-center gap-2 min-w-0">
-        <RotateCcw class="w-4 h-4 text-amber-400 shrink-0" />
+        <BlenderIcon name="undo" :size="16" color="#fbbf24" />
         <span class="truncate">
           <strong class="font-bold text-amber-300">Document Recovery:</strong> Unsaved session found from <span class="font-mono text-amber-100">{{ formatTimeAgo(projectStore.autosaveRecord.updatedAt) }}</span> ({{ projectStore.autosaveRecord.name || 'Project' }} • {{ projectStore.autosaveRecord.meshes?.length || 1 }} mesh{{ (projectStore.autosaveRecord.meshes?.length || 1) === 1 ? '' : 'es' }}).
         </span>
@@ -555,7 +630,7 @@ onUnmounted(() => {
           @click="handleRestoreAutosave" 
           class="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded-xs transition text-[11px] cursor-pointer shadow-xs flex items-center gap-1"
         >
-          <RotateCcw class="w-3 h-3" /> Recover Session
+          <BlenderIcon name="undo" :size="12" /> Recover Session
         </button>
         <button 
           @click="projectStore.dismissRecoverySession()" 
@@ -627,7 +702,7 @@ onUnmounted(() => {
           class="w-6 h-6 flex items-center justify-center rounded-xs text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer mb-1"
           title="Expand Properties & Outliner (Hotkey: N)"
         >
-          <PanelRightOpen class="w-3.5 h-3.5 text-amber-400" />
+          <BlenderIcon name="sidebar" :size="14" color="#f59e0b" />
         </button>
 
         <div class="w-4 h-px bg-ui-borderSubtle my-0.5"></div>
@@ -639,8 +714,7 @@ onUnmounted(() => {
           class="w-6 h-6 flex items-center justify-center rounded-xs text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer"
           :title="tab.title"
         >
-          <BlenderIcon v-if="tab.blender" :name="tab.blender" :size="13" />
-          <component v-else-if="tab.icon" :is="tab.icon" class="w-3.5 h-3.5" />
+          <BlenderIcon :name="tab.blender" :size="13" />
         </button>
       </aside>
     </div>

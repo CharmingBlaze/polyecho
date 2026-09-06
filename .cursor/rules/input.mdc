@@ -1,0 +1,14 @@
+---
+description: Right-click pans views by default
+globs: src/components/**/*.vue,src/core/operators/**/*.ts
+alwaysApply: false
+---
+
+# Pointer input
+
+- On editor canvases (3D, UV, paint, timeline), **RMB drag pans** (or scrolls) the view. Suppress the browser context menu.
+- In a 3D perspective pane, **LMB drag orbits**. A short LMB click still selects or paints.
+- Do not bind canvas RMB to paint, select, or a Windows-style menu.
+- Paint secondary color: Ctrl+LMB or swatch RMB — not canvas RMB.
+- Modal operators may use RMB for cancel / step back. That exception stays documented on the operator HUD.
+- Details: `docs/INPUT.md`.

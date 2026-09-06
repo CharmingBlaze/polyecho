@@ -6,6 +6,20 @@ import { meshToThreeGeometry } from '../geometry/Converters'
 import { resolveMeshBoneParentId } from '../animation/Armature'
 
 import { Material, TextureMap } from '../../types/texture'
+import { embedPngImages, injectClipExtras } from './gltfBinary'
+import { pngFromCanvas } from '../painting/encodePng'
+
+function uniqueNamer() {
+  const used = new Set<string>()
+  return (raw: string) => {
+    const base = raw.trim() || 'Node'
+    let name = base
+    let n = 2
+    while (used.has(name)) name = `${base}_${n++}`
+    used.add(name)
+    return name
+  }
+}
 
 /** CanvasTexture per library texture id. Caller must dispose values. */
 export function buildExportTextureMap(textures: TextureMap[]): Map<string, THREE.Texture> {
@@ -39,11 +53,16 @@ export async function exportToGLTF(
   const skeletonBones: THREE.Bone[] = []
   let skeleton: THREE.Skeleton | null = null
 
+  const nameOf = uniqueNamer()
+  const boneExportNames = new Map<string, string>()
+  const meshExportNames = new Map<string, string>()
+
   if (hasArmature) {
     for (let i = 0; i < armature.bones.length; i++) {
       const b = armature.bones[i]
       const tb = new THREE.Bone()
-      tb.name = b.name || b.id
+      tb.name = nameOf(b.name || b.id)
+      boneExportNames.set(b.id, tb.name)
       threeBoneMap.set(b.id, tb)
       boneIndexMap.set(b.id, i)
       skeletonBones.push(tb)
@@ -186,7 +205,8 @@ export async function exportToGLTF(
       geometry.setAttribute('skinWeight', new THREE.Float32BufferAttribute(skinWeights, 4))
 
       const skinnedMesh = new THREE.SkinnedMesh(geometry, material)
-      skinnedMesh.name = meshObj.name
+      skinnedMesh.name = nameOf(meshObj.name || meshObj.id)
+      meshExportNames.set(meshObj.id, skinnedMesh.name)
       skinnedMesh.position.set(meshObj.position.x, meshObj.position.y, meshObj.position.z)
       skinnedMesh.rotation.set(
         THREE.MathUtils.degToRad(meshObj.rotation.x),
@@ -199,7 +219,8 @@ export async function exportToGLTF(
       scene.add(skinnedMesh)
     } else {
       const threeMesh = new THREE.Mesh(geometry, material)
-      threeMesh.name = meshObj.name
+      threeMesh.name = nameOf(meshObj.name || meshObj.id)
+      meshExportNames.set(meshObj.id, threeMesh.name)
       threeMesh.position.set(meshObj.position.x, meshObj.position.y, meshObj.position.z)
       threeMesh.rotation.set(
         THREE.MathUtils.degToRad(meshObj.rotation.x),
@@ -214,6 +235,7 @@ export async function exportToGLTF(
 
   // 3. Convert AnimationClips to Three.js AnimationClips targeting bones and meshes
   const threeClips: THREE.AnimationClip[] = []
+  const extrasByClipName: Record<string, Record<string, unknown>> = {}
 
   for (const clip of clips) {
     const tracks: THREE.KeyframeTrack[] = []
@@ -224,12 +246,14 @@ export async function exportToGLTF(
       for (const track of clip.tracks) {
         let targetNodeName = ''
         if (track.targetType === 'mesh') {
-          const mesh = meshes.find(m => m.id === track.targetId)
-          if (mesh) targetNodeName = mesh.name
+          targetNodeName = meshExportNames.get(track.targetId)
+            || meshes.find(m => m.id === track.targetId)?.name
+            || ''
         } else {
-          // Bone target
-          const bone = armature?.bones.find(b => b.id === track.targetId)
-          targetNodeName = bone ? (bone.name || bone.id) : (track.targetName || track.targetId)
+          targetNodeName = boneExportNames.get(track.targetId)
+            || (armature?.bones.find(b => b.id === track.targetId)?.name)
+            || track.targetName
+            || track.targetId
         }
         if (!targetNodeName) continue
 
@@ -275,15 +299,17 @@ export async function exportToGLTF(
     }
 
     if (tracks.length > 0) {
-      const threeClip = new THREE.AnimationClip(clip.name, duration, tracks)
+      const clipName = nameOf(clip.name || clip.id || 'Clip')
+      const threeClip = new THREE.AnimationClip(clipName, duration, tracks)
       if (clip.markers && clip.markers.length > 0) {
-        ;(threeClip as any).userData = {
+        extrasByClipName[clipName] = {
           events: clip.markers.map(m => ({
             name: m.name,
             frame: m.frame,
             time: Number((m.frame / fps).toFixed(3))
           }))
         }
+        ;(threeClip as any).userData = extrasByClipName[clipName]
       }
       threeClips.push(threeClip)
     }
@@ -307,14 +333,32 @@ export async function exportToGLTF(
     exporter.parse(
       scene,
       (gltf) => {
+        const pngs: Uint8Array[] = []
+        for (const tex of textureMap.values()) {
+          if (tex.image instanceof HTMLCanvasElement) {
+            const png = pngFromCanvas(tex.image)
+            if (png) pngs.push(png)
+          }
+        }
         disposeScene()
         if (binary) {
-          const blob = new Blob([gltf as ArrayBuffer], { type: 'model/gltf-binary' })
-          resolve(blob)
+          let buffer = gltf as ArrayBuffer
+          if (Object.keys(extrasByClipName).length > 0) {
+            buffer = injectClipExtras(buffer, extrasByClipName)
+          }
+          if (pngs.length > 0) {
+            buffer = embedPngImages(buffer, pngs)
+          }
+          resolve(new Blob([buffer], { type: 'model/gltf-binary' }))
         } else {
-          const output = JSON.stringify(gltf, null, 2)
-          const blob = new Blob([output], { type: 'model/gltf+json' })
-          resolve(blob)
+          const doc = gltf as { animations?: Array<Record<string, unknown>> }
+          if (Array.isArray(doc.animations)) {
+            for (const anim of doc.animations) {
+              const extra = typeof anim.name === 'string' ? extrasByClipName[anim.name] : undefined
+              if (extra) anim.extras = { ...(anim.extras as object || {}), ...extra }
+            }
+          }
+          resolve(new Blob([JSON.stringify(gltf, null, 2)], { type: 'model/gltf+json' }))
         }
       },
       (error) => {

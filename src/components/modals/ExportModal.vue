@@ -4,6 +4,7 @@ import { useProjectStore } from '../../stores/projectStore'
 import { exportToOBJ, exportToMTL } from '../../core/export/ObjExport'
 import { exportToGLTF, buildExportTextureMap } from '../../core/export/GltfExport'
 import { renderSpriteSheet } from '../../core/export/SpriteSheet'
+import { saveBlobDocument, type DesktopFileFilter } from '../../core/desktop/desktopApi'
 import { useAnimationStore } from '../../stores/animationStore'
 import { Download, X, Box, Sparkles, Image, Film } from 'lucide-vue-next'
 
@@ -53,13 +54,13 @@ const spriteIsoAngle = ref<number>(30)
 const selectedClipId = ref<string>(animationStore.activeClip?.id || '')
 const frameStep = ref<number>(1)
 
-function downloadFile(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
+function filtersFor(filename: string): DesktopFileFilter[] {
+  const ext = filename.split('.').pop()?.toLowerCase() || 'bin'
+  return [{ name: ext.toUpperCase(), extensions: [ext] }]
+}
+
+async function downloadFile(blob: Blob, filename: string) {
+  await saveBlobDocument(blob, filename, filtersFor(filename))
 }
 
 const isExportingGltf = ref(false)
@@ -77,7 +78,7 @@ async function handleExportGLTF(binary: boolean) {
       animationStore.armature,
       projectStore.materials
     )
-    downloadFile(blob, `${projectStore.projectName}.${binary ? 'glb' : 'gltf'}`)
+    await downloadFile(blob, `${projectStore.projectName}.${binary ? 'glb' : 'gltf'}`)
     emit('close')
   } finally {
     for (const tex of textureMap.values()) {

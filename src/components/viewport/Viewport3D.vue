@@ -17,7 +17,7 @@ import { SpringPhysicsSolver } from '../../core/animation/SpringPhysics'
 import { createPSXMaterial } from '../../core/shaders/PSXShader'
 import { computeCentroid, computeFaceNormal } from '../../utils/math'
 import { snapColorToPalette } from '../../utils/color'
-import { getMeshEdges, getLinkedVertexIds, getLinkedFaceIds } from '../../core/geometry/EdgeUtils'
+import { getMeshEdges, getLinkedVertexIds, getLinkedFaceIds, parseUndirectedEdgeId } from '../../core/geometry/EdgeUtils'
 import { Vector3D, Edge, Vertex, MeshObject } from '../../types/mesh'
 import { operatorManager } from '../../core/operators/OperatorManager'
 import { OperatorContext } from '../../core/operators/ModalOperator'
@@ -42,16 +42,7 @@ import { SnapManager } from '../../core/transform/SnapManager'
 import type { PivotMode, TransformOrientation } from '../../core/transform/TransformTypes'
 import { applyLiveSymmetry } from '../../core/transform/LiveSymmetry'
 import { useFloatingDrag } from '../../composables/useFloatingDrag'
-import { 
-  Move, 
-  RotateCw, 
-  Search, 
-  Maximize2,
-  Crosshair,
-  Check,
-  X,
-  GripHorizontal,
-} from 'lucide-vue-next'
+import { GripHorizontal } from 'lucide-vue-next'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import { EDITOR_EVENTS } from '../../core/commands/editorCommands'
 
@@ -120,6 +111,7 @@ let orbitButtonsBackup: { LEFT: THREE.MOUSE; MIDDLE: THREE.MOUSE; RIGHT: THREE.M
 let lastHoverClientPos = { x: 0, y: 0 }
 let lastPointerCtrl = false
 let pointerDownHitMesh = false
+let lmbClickPending = false
 let refDrag: {
   id: string
   plane: 'front' | 'side' | 'top'
@@ -450,6 +442,10 @@ function initThree() {
   orbitControls.dampingFactor = 0.08
   orbitControls.zoomSpeed = toolStore.viewport.invertZoom ? -1.0 : 1.0
   orbitControls.target.set(0, 0.5, 0)
+  // Idle LMB click selects; LMB drag orbits in persp (startLightWaveRotate). RMB pans. MMB opens Specials.
+  orbitControls.mouseButtons.LEFT = -1 as unknown as THREE.MOUSE
+  orbitControls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY
+  orbitControls.mouseButtons.RIGHT = THREE.MOUSE.PAN
 
   // Transform Controls
   transformControls = new TransformControls(cameraPersp, canvas)
@@ -1321,13 +1317,12 @@ function rebuildMeshes() {
       meshObj.vertices.forEach(v => vertMap.set(v.id, v.position))
 
       for (const eId of meshObj.seamEdgeIds) {
-        const parts = eId.split('_')
-        if (parts.length >= 2) {
-          const p1 = vertMap.get(parts[0])
-          const p2 = vertMap.get(parts[1])
-          if (p1 && p2) {
-            seamPositions.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z)
-          }
+        const parsed = parseUndirectedEdgeId(eId, vertMap.keys())
+        if (!parsed) continue
+        const p1 = vertMap.get(parsed.v1)
+        const p2 = vertMap.get(parsed.v2)
+        if (p1 && p2) {
+          seamPositions.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z)
         }
       }
 
@@ -1498,8 +1493,8 @@ function rebuildMeshes() {
   if (animationStore.onionSkin && toolStore.appMode === 'animate' && animationStore.activeClip) {
     const curF = animationStore.currentFrame
     const maxF = animationStore.activeClip.durationFrames || 24
-    const count = animationStore.onionFramesCount || 2
-    const baseOpacity = animationStore.onionOpacity || 0.35
+    const count = Math.max(1, Math.min(4, animationStore.onionFramesCount || 2))
+    const baseOpacity = Math.max(0.08, Math.min(0.8, animationStore.onionOpacity || 0.35))
 
     const offsets: { frame: number; color: number; factor: number }[] = []
     for (let k = 1; k <= count; k++) {
@@ -2820,6 +2815,10 @@ function syncGizmoPickCamera() {
 function endViewNavigation() {
   isViewNavigating = false
   viewNavPane = null
+  lmbClickPending = false
+  if (orbitControls && (!isSplitView() || isPerspQuadrant()) && !isGizmoDragging && !transformControls?.dragging) {
+    orbitControls.enabled = true
+  }
 }
 
 function isPolySketchOperator() {
@@ -2987,18 +2986,21 @@ function startLightWavePan(camType: 'persp' | 'top' | 'front' | 'right', e: Mous
   }
 
   const onUp = () => {
-    window.removeEventListener('mousemove', onMove)
-    window.removeEventListener('mouseup', onUp)
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
     endViewNavigation()
   }
 
-  window.addEventListener('mousemove', onMove)
-  window.addEventListener('mouseup', onUp)
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp)
 }
 
 function startLightWaveRotate(e: MouseEvent) {
   e.preventDefault()
   e.stopPropagation()
+  isViewNavigating = true
+  if (!viewNavPane) viewNavPane = isSplitView() ? activeQuadrant.value : 'main'
+  if (orbitControls) orbitControls.enabled = false
   let prevX = e.clientX
   let prevY = e.clientY
 
@@ -3019,12 +3021,13 @@ function startLightWaveRotate(e: MouseEvent) {
   }
 
   const onUp = () => {
-    window.removeEventListener('mousemove', onMove)
-    window.removeEventListener('mouseup', onUp)
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    endViewNavigation()
   }
 
-  window.addEventListener('mousemove', onMove)
-  window.addEventListener('mouseup', onUp)
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp)
 }
 
 function startLightWaveZoom(camType: 'persp' | 'top' | 'front' | 'right', e: MouseEvent) {
@@ -3058,12 +3061,13 @@ function startLightWaveZoom(camType: 'persp' | 'top' | 'front' | 'right', e: Mou
   }
 
   const onUp = () => {
-    window.removeEventListener('mousemove', onMove)
-    window.removeEventListener('mouseup', onUp)
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    endViewNavigation()
   }
 
-  window.addEventListener('mousemove', onMove)
-  window.addEventListener('mouseup', onUp)
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp)
 }
 
 function centerViewOnContents(camType: 'persp' | 'top' | 'front' | 'right' = 'persp') {
@@ -3180,16 +3184,11 @@ function onPointerDown(event: PointerEvent) {
 
   if (event.button === 2) {
     event.preventDefault()
+    event.stopImmediatePropagation()
     isViewNavigating = true
     updateActiveCameraAndQuadrant(event)
     viewNavPane = isSplitView() ? activeQuadrant.value : 'main'
-    const camType = viewportKindFromQuadrant()
-    if (camType !== 'persp') {
-      event.stopImmediatePropagation()
-      startLightWavePan(camType, event)
-      return
-    }
-    if (orbitControls) orbitControls.enabled = true
+    startLightWavePan(viewportKindFromQuadrant(), event)
     return
   }
 
@@ -3253,6 +3252,10 @@ function onPointerDown(event: PointerEvent) {
         projectStore.selectTexture(targetTex.id)
       }
       paintRaycastHit(paintHit)
+      return
+    }
+    if (isPerspQuadrant()) {
+      armLmbClickOrOrbit(event)
       return
     }
     orbitControls.enabled = true
@@ -3337,7 +3340,31 @@ function onPointerDown(event: PointerEvent) {
       }
     }
   }
-    const isSelectionAllowed = isMeshSelectionAllowed()
+  if (isPerspQuadrant()) {
+    armLmbClickOrOrbit(event)
+    return
+  }
+
+  applyIdleLmbSelection(event)
+}
+
+function armLmbClickOrOrbit(event: PointerEvent) {
+  lmbClickPending = true
+  event.stopImmediatePropagation()
+  const finish = (up: PointerEvent) => {
+    window.removeEventListener('pointerup', finish)
+    if (!lmbClickPending) return
+    lmbClickPending = false
+    if (up.button === 0) applyIdleLmbSelection(up)
+  }
+  window.addEventListener('pointerup', finish)
+}
+
+function applyIdleLmbSelection(event: PointerEvent) {
+  updateActiveCameraAndQuadrant(event)
+  raycaster.setFromCamera(mouse, activeCamera)
+
+  const isSelectionAllowed = isMeshSelectionAllowed()
   const activeMesh = projectStore.activeMesh
 
   // 1. Edge Mode Selection
@@ -3450,6 +3477,17 @@ function onPointerMove(event: PointerEvent) {
   if (operatorManager.state.value.active) {
     if (orbitControls) orbitControls.enabled = false
     return
+  }
+  if (lmbClickPending && (event.buttons & 1) === 1 && isPerspQuadrant()) {
+    const dist = Math.hypot(event.clientX - pointerDownClientPos.x, event.clientY - pointerDownClientPos.y)
+    if (dist >= 4) {
+      lmbClickPending = false
+      pointerDownHitMesh = true
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      startLightWaveRotate(event)
+      return
+    }
   }
   lastHoverClientPos = { x: event.clientX, y: event.clientY }
   lastPointerCtrl = event.ctrlKey || event.metaKey
@@ -3682,7 +3720,8 @@ function applyMarqueeSelection(isShift = false, isAlt = false) {
 }
 
 function onPointerUp(event?: PointerEvent) {
-  if (event?.button === 2 || isViewNavigating) {
+  if (event?.type === 'pointerleave' && lmbClickPending) return
+  if (event?.button === 2) {
     endViewNavigation()
   }
   if (refDrag) {
@@ -4556,7 +4595,7 @@ function animate() {
     refreshLiveDeform()
   }
 
-  if (orbitControls && orbitControls.enabled && !isGizmoDragging && !transformControls.dragging) {
+  if (orbitControls && orbitControls.enabled && !isGizmoDragging && !transformControls.dragging && !isViewNavigating) {
     orbitControls.update()
   }
 
@@ -4715,6 +4754,12 @@ watch(() => animationStore.currentFrame, () => {
     rebuildMeshes()
   }
 })
+watch(
+  () => [animationStore.onionSkin, animationStore.onionFramesCount, animationStore.onionOpacity],
+  () => {
+    if (toolStore.appMode === 'animate') rebuildMeshes()
+  }
+)
 watch(
   () =>
     animationStore.armature.bones.map(
@@ -5247,32 +5292,32 @@ onUnmounted(() => {
         <!-- Top-Right LightWave Nav Cluster (Move, Rotate, Zoom, Center) -->
         <div class="absolute top-2.5 right-2.5 z-20 flex items-center bg-ui-panel/95 backdrop-blur-xs text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-lg divide-x divide-ui-borderSubtle select-none">
           <button 
-            @mousedown="startLightWavePan('persp', $event)" 
+            @pointerdown="startLightWavePan('persp', $event)" 
             class="p-1.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-move transition"
             title="Pan View (Drag to pan)"
           >
-            <Move class="w-3.5 h-3.5" />
+            <BlenderIcon name="tool-move" :size="14" />
           </button>
           <button 
-            @mousedown="startLightWaveRotate($event)" 
+            @pointerdown="startLightWaveRotate($event)" 
             class="p-1.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-grab transition"
             title="Orbit View (Drag to rotate)"
           >
-            <RotateCw class="w-3.5 h-3.5" />
+            <BlenderIcon name="tool-rotate" :size="14" />
           </button>
           <button 
-            @mousedown="startLightWaveZoom('persp', $event)" 
+            @pointerdown="startLightWaveZoom('persp', $event)" 
             class="p-1.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-ns-resize transition"
             title="Zoom View (Drag up/down to zoom)"
           >
-            <Search class="w-3.5 h-3.5" />
+            <BlenderIcon name="zoom-in" :size="14" />
           </button>
           <button 
             @click="centerViewOnContents('persp')" 
             class="p-1.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition cursor-pointer"
             title="Center View on Model (Frame Contents)"
           >
-            <Crosshair class="w-3.5 h-3.5" />
+            <BlenderIcon name="view-fit" :size="14" />
           </button>
         </div>
 
@@ -5356,14 +5401,14 @@ onUnmounted(() => {
                 <span class="text-ui-textMuted">Z</span>
               </div>
               <div class="pointer-events-auto flex items-center bg-ui-panel/95 border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle shrink-0">
-                <button type="button" @mousedown="startLightWavePan('front', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-move" title="Pan Front">
-                  <Move class="w-3 h-3" />
+                <button type="button" @pointerdown="startLightWavePan('front', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-move" title="Pan Front">
+                  <BlenderIcon name="tool-move" :size="12" />
                 </button>
-                <button type="button" @mousedown="startLightWaveZoom('front', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-ns-resize" title="Zoom Front">
-                  <Search class="w-3 h-3" />
+                <button type="button" @pointerdown="startLightWaveZoom('front', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-ns-resize" title="Zoom Front">
+                  <BlenderIcon name="zoom-in" :size="12" />
                 </button>
                 <button type="button" @click="centerViewOnContents('front')" class="p-1 hover:bg-ui-hover text-ui-textSecondary" title="Frame Front">
-                  <Crosshair class="w-3 h-3" />
+                  <BlenderIcon name="view-fit" :size="12" />
                 </button>
               </div>
             </div>
@@ -5379,14 +5424,14 @@ onUnmounted(() => {
                 <span class="text-ui-textMuted">X</span>
               </div>
               <div class="pointer-events-auto flex items-center bg-ui-panel/95 border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle shrink-0">
-                <button type="button" @mousedown="startLightWavePan('right', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-move" title="Pan Side">
-                  <Move class="w-3 h-3" />
+                <button type="button" @pointerdown="startLightWavePan('right', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-move" title="Pan Side">
+                  <BlenderIcon name="tool-move" :size="12" />
                 </button>
-                <button type="button" @mousedown="startLightWaveZoom('right', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-ns-resize" title="Zoom Side">
-                  <Search class="w-3 h-3" />
+                <button type="button" @pointerdown="startLightWaveZoom('right', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-ns-resize" title="Zoom Side">
+                  <BlenderIcon name="zoom-in" :size="12" />
                 </button>
                 <button type="button" @click="centerViewOnContents('right')" class="p-1 hover:bg-ui-hover text-ui-textSecondary" title="Frame Side">
-                  <Crosshair class="w-3 h-3" />
+                  <BlenderIcon name="view-fit" :size="12" />
                 </button>
               </div>
             </div>
@@ -5401,17 +5446,17 @@ onUnmounted(() => {
                 <span class="font-bold">Persp</span>
               </div>
               <div class="pointer-events-auto flex items-center bg-ui-panel/95 border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle shrink-0">
-                <button type="button" @mousedown="startLightWavePan('persp', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-move" title="Pan">
-                  <Move class="w-3 h-3" />
+                <button type="button" @pointerdown="startLightWavePan('persp', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-move" title="Pan">
+                  <BlenderIcon name="tool-move" :size="12" />
                 </button>
-                <button type="button" @mousedown="startLightWaveRotate($event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-grab" title="Orbit">
-                  <RotateCw class="w-3 h-3" />
+                <button type="button" @pointerdown="startLightWaveRotate($event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-grab" title="Orbit">
+                  <BlenderIcon name="tool-rotate" :size="12" />
                 </button>
-                <button type="button" @mousedown="startLightWaveZoom('persp', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-ns-resize" title="Zoom">
-                  <Search class="w-3 h-3" />
+                <button type="button" @pointerdown="startLightWaveZoom('persp', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-ns-resize" title="Zoom">
+                  <BlenderIcon name="zoom-in" :size="12" />
                 </button>
                 <button type="button" @click="centerViewOnContents('persp')" class="p-1 hover:bg-ui-hover text-ui-textSecondary" title="Frame">
-                  <Crosshair class="w-3 h-3" />
+                  <BlenderIcon name="view-fit" :size="12" />
                 </button>
               </div>
             </div>
@@ -5466,17 +5511,17 @@ onUnmounted(() => {
 
           <!-- LightWave Nav Buttons (Pan, Zoom, Center, Maximize for 2D Ortho) -->
           <div class="flex items-center bg-ui-panel/95 text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle">
-            <button @mousedown="startLightWavePan('top', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-move transition" title="Pan Top View (Drag to pan)">
-              <Move class="w-3 h-3" />
+            <button @pointerdown="startLightWavePan('top', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-move transition" title="Pan Top View (Drag to pan)">
+              <BlenderIcon name="tool-move" :size="12" />
             </button>
-            <button @mousedown="startLightWaveZoom('top', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-ns-resize transition" title="Zoom Top View (Drag up/down to zoom)">
-              <Search class="w-3 h-3" />
+            <button @pointerdown="startLightWaveZoom('top', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-ns-resize transition" title="Zoom Top View (Drag up/down to zoom)">
+              <BlenderIcon name="zoom-in" :size="12" />
             </button>
             <button @click="centerViewOnContents('top')" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Center Top View on Model">
-              <Crosshair class="w-3 h-3" />
+              <BlenderIcon name="view-fit" :size="12" />
             </button>
             <button @click="toolStore.viewport.quadView = false" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Maximize View">
-              <Maximize2 class="w-3 h-3" />
+              <BlenderIcon name="view-fit" :size="12" />
             </button>
           </div>
         </div>
@@ -5491,20 +5536,20 @@ onUnmounted(() => {
 
           <!-- Full 3D Nav Buttons (Pan, Rotate, Zoom, Center, X-Ray, Maximize) -->
           <div class="flex items-center bg-ui-panel/95 text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle">
-            <button @mousedown="startLightWavePan('persp', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-move transition" title="Pan View">
-              <Move class="w-3 h-3" />
+            <button @pointerdown="startLightWavePan('persp', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-move transition" title="Pan View">
+              <BlenderIcon name="tool-move" :size="12" />
             </button>
-            <button @mousedown="startLightWaveRotate($event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-grab transition" title="Orbit 3D View">
-              <RotateCw class="w-3 h-3" />
+            <button @pointerdown="startLightWaveRotate($event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-grab transition" title="Orbit 3D View">
+              <BlenderIcon name="tool-rotate" :size="12" />
             </button>
-            <button @mousedown="startLightWaveZoom('persp', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-ns-resize transition" title="Zoom View">
-              <Search class="w-3 h-3" />
+            <button @pointerdown="startLightWaveZoom('persp', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-ns-resize transition" title="Zoom View">
+              <BlenderIcon name="zoom-in" :size="12" />
             </button>
             <button @click="centerViewOnContents('persp')" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Center View on Model">
-              <Crosshair class="w-3 h-3" />
+              <BlenderIcon name="view-fit" :size="12" />
             </button>
             <button @click="toolStore.viewport.quadView = false" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Maximize View">
-              <Maximize2 class="w-3 h-3" />
+              <BlenderIcon name="view-fit" :size="12" />
             </button>
           </div>
         </div>
@@ -5519,17 +5564,17 @@ onUnmounted(() => {
 
           <!-- LightWave Nav Buttons (Pan, Zoom, Center, Maximize for 2D Ortho) -->
           <div class="flex items-center bg-ui-panel/95 text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle">
-            <button @mousedown="startLightWavePan('front', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-move transition" title="Pan Front View (Drag to pan)">
-              <Move class="w-3 h-3" />
+            <button @pointerdown="startLightWavePan('front', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-move transition" title="Pan Front View (Drag to pan)">
+              <BlenderIcon name="tool-move" :size="12" />
             </button>
-            <button @mousedown="startLightWaveZoom('front', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-ns-resize transition" title="Zoom Front View (Drag up/down to zoom)">
-              <Search class="w-3 h-3" />
+            <button @pointerdown="startLightWaveZoom('front', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-ns-resize transition" title="Zoom Front View (Drag up/down to zoom)">
+              <BlenderIcon name="zoom-in" :size="12" />
             </button>
             <button @click="centerViewOnContents('front')" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Center Front View on Model">
-              <Crosshair class="w-3 h-3" />
+              <BlenderIcon name="view-fit" :size="12" />
             </button>
             <button @click="toolStore.viewport.quadView = false" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Maximize View">
-              <Maximize2 class="w-3 h-3" />
+              <BlenderIcon name="view-fit" :size="12" />
             </button>
           </div>
         </div>
@@ -5544,17 +5589,17 @@ onUnmounted(() => {
 
           <!-- LightWave Nav Buttons (Pan, Zoom, Center, Maximize for 2D Ortho) -->
           <div class="flex items-center bg-ui-panel/95 text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle">
-            <button @mousedown="startLightWavePan('right', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-move transition" title="Pan Right View (Drag to pan)">
-              <Move class="w-3 h-3" />
+            <button @pointerdown="startLightWavePan('right', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-move transition" title="Pan Right View (Drag to pan)">
+              <BlenderIcon name="tool-move" :size="12" />
             </button>
-            <button @mousedown="startLightWaveZoom('right', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-ns-resize transition" title="Zoom Right View (Drag up/down to zoom)">
-              <Search class="w-3 h-3" />
+            <button @pointerdown="startLightWaveZoom('right', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-ns-resize transition" title="Zoom Right View (Drag up/down to zoom)">
+              <BlenderIcon name="zoom-in" :size="12" />
             </button>
             <button @click="centerViewOnContents('right')" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Center Right View on Model">
-              <Crosshair class="w-3 h-3" />
+              <BlenderIcon name="view-fit" :size="12" />
             </button>
             <button @click="toolStore.viewport.quadView = false" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Maximize View">
-              <Maximize2 class="w-3 h-3" />
+              <BlenderIcon name="view-fit" :size="12" />
             </button>
           </div>
         </div>
@@ -5744,7 +5789,7 @@ onUnmounted(() => {
           class="p-0.5 text-ui-textMuted hover:text-rose-400 hover:bg-rose-950/40 rounded-xs transition"
           title="Cancel Operation (Esc)"
         >
-          <X class="w-3.5 h-3.5" />
+          <BlenderIcon name="close" :size="14" />
         </button>
       </div>
 
@@ -5913,7 +5958,7 @@ onUnmounted(() => {
               class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs rounded-xs shadow-xs flex items-center gap-1 active:scale-95 transition border border-emerald-500/80"
               :title="hudConfirmTitle"
             >
-              <Check class="w-3.5 h-3.5" />
+              <BlenderIcon name="check" :size="14" />
               <span>{{ hudConfirmLabel }}</span>
             </button>
 
@@ -5922,7 +5967,7 @@ onUnmounted(() => {
               class="px-2 py-1 bg-ui-surface hover:bg-rose-950/60 hover:text-rose-300 text-ui-textMuted border border-ui-borderSubtle text-xs rounded-xs active:scale-95 transition"
               title="Cancel Operation (Esc)"
             >
-              <X class="w-3.5 h-3.5" />
+              <BlenderIcon name="close" :size="14" />
             </button>
           </div>
         </div>

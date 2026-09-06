@@ -7,6 +7,8 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | Path | Role |
 | :--- | :--- |
 | `index.html` | Vite HTML shell |
+| `electron/main.mjs` | Desktop window, native file IPC |
+| `electron/preload.cjs` | `window.polyechoDesktop` bridge |
 | `src/main.ts` | Vue + Pinia bootstrap |
 | `src/App.vue` | App chrome, **authoritative global key handler**, workspace layout |
 | `src/style.css` | Global / Tailwind layers |
@@ -31,12 +33,14 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/composables/useFloatingDrag.ts` | Pointer-capture drag for floating chrome |
 | `src/composables/useFastTitleTips.ts` | Fast icon hover labels (replaces slow OS `title`) |
 | `src/components/modals/TextureSharePrompt.vue` | This object vs all objects on material |
-| `src/stores/toolStore.ts` | Modes, tools, snap, viewport flags |
+| `src/stores/toolStore.ts` | Modes, tools, snap, viewport flags; UV/Paint tab + last modeling select mode |
+| `src/test/setup.ts` | Vitest canvas 2D stub (`canvas2dStub.ts`) |
 | `src/stores/animationStore.ts` | Rig, clips, playback, weights |
-| `src/stores/historyStore.ts` | Undo / redo |
+| `src/stores/historyStore.ts` | Undo / redo + dirty epoch (`isDirty` / `markClean`) |
 | `src/stores/layoutStore.ts` | Panel chrome, inspector tab per workspace, Blockout pane split fractions |
 | `src/stores/themeStore.ts` | Themes. `applyCurrentTheme` remaps selected wells away from the accent if contrast would hide text/icons, and sets `--ui-on-accent` for buttons. |
 | `src/stores/keymapStore.ts` | Live shortcut chords + Preferences remaps (`App.vue` matches events here) |
+| `src/stores/runtimeStore.ts` | Last uncaught error for the status bar |
 
 ## Mesh and modeling
 
@@ -45,15 +49,15 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/core/mesh/MeshKernel.ts` | `EditableMesh` + snapshots |
 | `src/core/mesh/MeshBridge.ts` | `MeshObject` ↔ `EditableMesh` |
 | `src/core/mesh/HalfEdgeTopology.ts` | Half-edge helpers |
-| `src/core/mesh/MeshTopologyService.ts` | Topology queries |
+| `src/core/mesh/MeshTopologyService.ts` | Topology queries + one-shot bridge / grid-fill / cleanup / subdivide |
 | `src/core/mesh/MeshValidator.ts` | Sanity checks |
-| `src/core/mesh/operations/*Kernel.ts` | Interactive op kernels |
+| `src/core/mesh/operations/*Kernel.ts` | Interactive + one-shot kernels (extrude/inset/bevel/merge/dissolve/…) |
 | `src/core/geometry/Operations.ts` | One-shot `MeshObject` ops (fill loop/winding, 2-vert connect, merge, dissolve, …) |
 | `src/core/geometry/Primitives.ts` | Legacy cube / plane helpers |
 | `src/core/geometry/Converters.ts` | Three.js `BufferGeometry`, including object shade flat/smooth/auto-smooth normals |
 | `src/core/geometry/ScreenGeometry.ts` | Screen rays, pane rects, Blockout column splits, dashed Poly Draw / Poly Build preview |
-| `src/core/geometry/EdgeUtils.ts` | Loops / rings |
-| `src/core/geometry/UVUnwrap.ts` | Planar / box / cylindrical |
+| `src/core/geometry/EdgeUtils.ts` | Loops / rings; `undirectedEdgeId` / `parseUndirectedEdgeId` (ids may contain `_`) |
+| `src/core/geometry/UVUnwrap.ts` | Planar / box / cylindrical / Smart UV + pack |
 | `src/core/geometry/Modifiers.ts` | Stack (`Mirror` → `Subdiv` → `Solidify`) + defaults + apply |
 | `src/core/geometry/MirrorModifier.ts` | Bisect / merge / UV flip |
 | `src/core/geometry/SubdivisionModifier.ts` | Catmull–Clark + Simple |
@@ -83,7 +87,6 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/core/commands/ActionRegistry.ts` | Centralized command registry with scope, category & shortcuts (`docs/SYSTEMS.md`) |
 | `src/core/commands/setupDefaultActions.ts` | Registers default operators, tools, and shortcuts into `ActionRegistry` |
 | `src/core/profiles/ModelProfiles.ts` | Target engine profiles (PSX, Godot 4, Unity, Blockbench) & budget validation |
-| `src/core/input/InputRouter.ts` | Key routing utilities |
 | `src/core/transform/SnapManager.ts` | Linear/angle/scale snap; `findRigidSnapOffset` (vertex/edge, whole selection) |
 | `src/core/transform/LiveSymmetry.ts` | Live X/Y/Z counterpart follow (gizmo + G/R/S) |
 | `src/core/transform/` | Pivot, numeric input, coordinate spaces |
@@ -92,24 +95,30 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 
 | Path | Role |
 | :--- | :--- |
-| `src/core/painting/PixelCanvas.ts` | `PixelBuffer` (layers, composite, fill, dither) |
+| `src/core/painting/PixelCanvas.ts` | `PixelBuffer` (layers, composite, fill, dither). `toPngBytes()` writes a real PNG. |
+| `src/core/painting/encodePng.ts` | 8-bit RGBA PNG from pixel bytes (no canvas `toDataURL`) |
 | `src/core/painting/DefaultTextures.ts` | Default atlas |
-| `src/core/uv/` | Seams, pack, atlas bake, island find/stitch (`UVIslands.ts`), cell math (`AtlasCells.ts`) |
+| `src/core/uv/` | Seams, pack, atlas bake, island find/stitch (`UVIslands.ts`: shared 3D edge + welded UVs), cell math (`AtlasCells.ts`) |
 | `src/core/shaders/PSXShader.ts` | Retro viewport shader |
 | `src/core/animation/Armature.ts` | Track sampling; `resolveMeshBoneParentId` / `setMeshBoneParent` |
 | `src/core/animation/AutoSkinning.ts` | Weight assignment |
 | `src/core/animation/IKSolver.ts` | Two-bone + CCD; `applyIKConstraints` |
 | `src/core/animation/SpringPhysics.ts` | Spring bones |
-| `src/core/export/` | GLB, OBJ, Blockbench, sprites, turntable. Texture maps keyed by **texture id** (`buildExportTextureMap`). |
-| `src/core/import/` | GLB, OBJ, images |
-| `src/core/project/ProjectSerializer.ts` | `.psxproj` JSON (optional `referenceImages`) |
-| `src/core/storage/ProjectStorage.ts` | Autosave |
+| `src/core/export/` | GLB, OBJ, Blockbench, sprites, turntable. Texture maps keyed by **texture id** (`buildExportTextureMap`). `gltfBinary.ts` reads/writes GLB chunks, injects clip marker `extras`, and embeds painted PNGs. `engineHandoffScene.ts` is the character fixture; `npm run handoff:glb` writes `samples/engine-handoff.glb`. The handoff test also runs the Khronos `gltf-validator`. |
+| `src/core/import/` | GLB (meshes, armature, clips, materials/textures when present), OBJ, images |
+| `src/core/project/ProjectSerializer.ts` | `.psxproj` JSON (optional `referenceImages`); deserialize validates version and face UVs |
+| `src/core/history/applyMeshDocument.ts` | Clone/apply mesh + selection slices for undo |
+| `src/core/desktop/desktopApi.ts` | Native save/open when hosted in Electron; browser download fallback |
+| `src/core/desktop/appIconRaster.ts` | Raster of `public/favicon.svg`; `encodeIco.ts` writes `build/icon.ico` |
+| `src/core/project/projectIo.ts` | Serialize, save, and load the open editor project |
+| `src/core/storage/ProjectStorage.ts` | Autosave (`isValidProjectData` rejects empty meshes / UV mismatch) |
+| `src/**/*.test.ts` | Vitest unit tests (`npm test`, `docs/PRODUCTION.md`). PixelBuffer uses a 2D canvas stub. |
 
 ## Vue UI
 
 | Folder | Role |
 | :--- | :--- |
-| `src/components/layout/` | Header, toolbars, status (`DockviewLayout.vue` exists but is not mounted) |
+| `src/components/layout/` | Header, toolbars, status |
 | `src/components/viewport/` | 3D view (`Viewport3D`: picking, gizmo, fill camera, modal start). Space/pivot/snap/shade/overlays/x-ray live in `HeaderMenu.vue`. |
 | `src/components/inspector/` | Transform, material, texture, modifiers, references (`ReferenceProps`), animation (`AnimationInspector` = Animate workspace) |
 | `src/components/outliner/` | Object tree |
@@ -118,4 +127,7 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/components/rigging/` | Rig inspector: Skel (`SkeletonPanel`), Bone (`RiggingPanel`), Bind, Weights |
 | `src/components/modals/` | Export, import, prefs, palette, command search |
 | `src/components/ui/` | Shared buttons, menus, fields |
+| `src/components/icons/BlenderIcon.vue` | Editor glyphs — add names here (`docs/ICONS.md`) |
 | `src/utils/` | Vectors, color, dither, gradients |
+
+Pointer: `docs/INPUT.md` (RMB pans views). Icons: `docs/ICONS.md`.

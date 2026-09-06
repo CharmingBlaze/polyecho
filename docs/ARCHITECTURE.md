@@ -1,6 +1,6 @@
 # PolyEcho architecture
 
-PolyEcho is a browser DCC: Vue 3 + TypeScript + Pinia + Three.js + Vite. The product name is PolyEcho; some project-file and default-name strings still say `PSXModeller` / `PSX_LowPoly_Model`. Keep those identifiers stable unless you are intentionally changing the `.psxproj` format.
+PolyEcho is a desktop DCC (Electron + Chromium) whose editor is a Vue 3 + TypeScript + Pinia + Three.js + Vite SPA. The product name is PolyEcho; some project-file and default-name strings still say `PSXModeller` / `PSX_LowPoly_Model`. Keep those identifiers stable unless you are intentionally changing the `.psxproj` format. File dialogs go through `src/core/desktop/desktopApi.ts` when `window.polyechoDesktop` is present. See `docs/DESKTOP.md`.
 
 This document is the source of truth for layout and data flow. `README.md` is the product overview.
 
@@ -55,15 +55,16 @@ Blockout uses the same mesh operators as Modeling and a **Front \| Side \| Persp
 | `layout` | `stores/layoutStore.ts` | Panel visibility, floating chrome, last inspector tab per workspace |
 | `theme` | `stores/themeStore.ts` | Color presets and CSS variables |
 | `keymap` | `stores/keymapStore.ts` | Live chord matching + remaps persisted in `localStorage` (`docs/SYSTEMS.md`) |
+| `runtime` | `stores/runtimeStore.ts` | Last uncaught error (status bar) |
 
-**Shortcuts & Action Registry:** `App.vue` is the live dispatcher: it matches `keydown` against `keymapStore` and runs the same verbs as the palette. `ActionRegistry` / `setupDefaultActions.ts` still feed the command palette. `HotkeyModal.vue` lists current bindings; remaps are Preferences → Keyboard. Copy/paste and a few rig/timeline keys stay hardcoded.
+**Shortcuts & Action Registry:** `App.vue` is the live dispatcher: it matches `keydown` against `keymapStore` and runs the same verbs as the palette. `ActionRegistry` / `setupDefaultActions.ts` still feed the command palette. `HotkeyModal.vue` lists current bindings; remaps are Preferences → Keyboard. Copy / paste / paste-mirrored pose are keymap actions (`copy_selection`, `paste_clipboard`, `paste_flipped_pose`).
 
 ## Commands and operators
 
 Entry paths:
 
 1. **`ActionRegistry` & `setupDefaultActions.ts`** — Centralized catalog of commands, tools, shortcuts, and handlers.
-2. **`App.vue` key handler** — Matches `keymapStore.matchingActionIds`, then leftover copy/paste / timeline / rig keys.
+2. **`App.vue` key handler** — Matches `keymapStore.matchingActionIds` (including copy/paste).
 3. **Window events** — `src/core/commands/editorCommands.ts` (`requestModalTool`, `requestCameraView`, primitive placement) consumed by `Viewport3D.vue`.
 4. **Modal operators** — subclass `ModalOperator`, start via `operatorManager.start` from the viewport. Confirm writes through `onCommit`; Escape restores the `EditableMesh` snapshot. Undo is blocked while an operator is active.
 5. **Command palette / menus** — query `actionRegistry.getAll()` or call `projectStore.perform*` directly.
@@ -109,6 +110,8 @@ Left toolbar (`LeftToolbar.vue`) is a docked icon shelf: Object/Vertex/Edge/Face
 
 `HeaderMenu.vue` is the app chrome: File/Edit/Add, space+pivot, snap, live mirror X/Y/Z, workspace tabs, then view/overlays/shading/object shade/x-ray/command search. The floating LightWave cluster is pan / orbit / zoom / frame only.
 
+Pointer conventions: `docs/INPUT.md`. Icon conventions: `docs/ICONS.md`.
+
 ## Alias
 
 `@/` maps to `src/` (Vite + `tsconfig`).
@@ -135,7 +138,9 @@ Color swatch sets in the library are separate from pixel data. The verbs are `se
 
 ## Animation & Armatures
 
-Skeletal bone hierarchies and animation clips are library assets. The verbs are `selectClip`, `createClip`, and `evaluatePose` (with multi-clip standard GLTF/GLB game engine export). Full rules: `docs/ANIMATION.md`.
+Skeletal bone hierarchies and animation clips are library assets. The verbs are `selectClip`, `createClip`, and `evaluatePose` (with multi-clip standard GLTF/GLB game engine export). Clip markers are written as glTF `animations[].extras.events`. Full rules: `docs/ANIMATION.md` and `docs/ENGINE_HANDOFF.md`.
+
+Ship bar, tests, and CI: `docs/PRODUCTION.md`.
 
 ## Objects & Hierarchy
 

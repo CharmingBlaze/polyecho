@@ -4,7 +4,7 @@ import { useProjectStore } from '../../stores/projectStore'
 import type { ReferencePlane } from '../../types/reference'
 import UiSection from '../ui/UiSection.vue'
 import UiButton from '../ui/UiButton.vue'
-import { Image, Eye, EyeOff, Trash2, Lock, Unlock, FlipHorizontal } from 'lucide-vue-next'
+import BlenderIcon from '../icons/BlenderIcon.vue'
 
 const projectStore = useProjectStore()
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -37,7 +37,7 @@ function patch(id: string, data: Record<string, unknown>) {
   <div class="flex flex-col gap-2 p-2">
     <input ref="fileInput" type="file" accept="image/*" class="hidden" @change="onFile" />
 
-    <UiSection title="Import" :icon="Image" hint="lightbox" :default-open="true">
+    <UiSection title="Import" blender-icon="image" hint="lightbox" :default-open="true">
       <p class="text-[10px] text-ui-textMuted mb-2 leading-relaxed">
         Drop onto Front or Side, then drag the photo to line it up. Alt-drag in a pane moves that pane’s ref. Shift-drag or Alt-wheel scales.
       </p>
@@ -48,7 +48,7 @@ function patch(id: string, data: Record<string, unknown>) {
       </div>
     </UiSection>
 
-    <UiSection title="References" :icon="Image" :default-open="true">
+    <UiSection title="References" blender-icon="image" :default-open="true">
       <div v-if="projectStore.referenceImages.length === 0" class="text-[10px] text-ui-textMuted py-2">
         No references yet. Drop an image onto Front or Side.
       </div>
@@ -69,8 +69,8 @@ function patch(id: string, data: Record<string, unknown>) {
               :title="img.locked ? 'Unlock to drag' : 'Lock'"
               @click="projectStore.updateReferenceImage(img.id, { locked: !img.locked }, { rebuild: false })"
             >
-              <Lock v-if="img.locked" class="w-3 h-3" />
-              <Unlock v-else class="w-3 h-3" />
+              <BlenderIcon v-if="img.locked" name="lock" :size="12" />
+              <BlenderIcon v-else name="unlock" :size="12" />
             </button>
             <button
               type="button"
@@ -78,7 +78,7 @@ function patch(id: string, data: Record<string, unknown>) {
               title="Flip X"
               @click="projectStore.updateReferenceImage(img.id, { flipX: !img.flipX }, { rebuild: false })"
             >
-              <FlipHorizontal class="w-3 h-3" />
+              <BlenderIcon name="flip-horizontal" :size="12" />
             </button>
             <button
               type="button"
@@ -86,8 +86,8 @@ function patch(id: string, data: Record<string, unknown>) {
               :title="img.visible ? 'Hide' : 'Show'"
               @click="projectStore.updateReferenceImage(img.id, { visible: !img.visible })"
             >
-              <EyeOff v-if="!img.visible" class="w-3 h-3" />
-              <Eye v-else class="w-3 h-3" />
+              <BlenderIcon v-if="!img.visible" name="eye-closed" :size="12" />
+              <BlenderIcon v-else name="eye-open" :size="12" />
             </button>
             <button
               type="button"
@@ -95,7 +95,7 @@ function patch(id: string, data: Record<string, unknown>) {
               title="Remove"
               @click="projectStore.removeReferenceImage(img.id)"
             >
-              <Trash2 class="w-3 h-3" />
+              <BlenderIcon name="trash" :size="12" />
             </button>
           </div>
         </div>

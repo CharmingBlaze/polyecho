@@ -3,41 +3,19 @@ import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import { 
-  boxUnwrap, 
-  planarUnwrap, 
-  cylinderUnwrap, 
-  sphereUnwrap, 
-  coneUnwrap, 
-  cubemapCrossUnwrap, 
-  packUVIslands,
-  gridifyQuadIslands,
-  equalizeTexelDensity,
   sampleFaceTexelDensity,
   calculateUVDistortion,
   generateUVCheckerboardDataURL,
   ensureMeshUVs
 } from '../../core/geometry/UVUnwrap'
 import BlenderIcon from '../icons/BlenderIcon.vue'
-import { 
-  ZoomIn, 
-  ZoomOut, 
-  RotateCw, 
-  RotateCcw, 
-  FlipHorizontal, 
-  FlipVertical, 
-  Grid, 
-  Magnet, 
-  Upload, 
-  Download, 
-  Maximize,
-  Plus
-} from 'lucide-vue-next'
-import { SeamUnwrapper } from '../../core/uv/SeamUnwrapper'
 import { expandFacesToIslands, expandWeldedUvEdges, findUvIslands, stitchUvEdge } from '../../core/uv/UVIslands'
-import type { MeshObject } from '../../types/mesh'
+import { undirectedEdgeId } from '../../core/geometry/EdgeUtils'
+import { EDITOR_EVENTS } from '../../core/commands/editorCommands'
 import TextureSharePrompt from '../modals/TextureSharePrompt.vue'
 import ImportTextureModal from '../modals/ImportTextureModal.vue'
 import { useTextureApply } from '../../composables/useTextureApply'
+import { saveBlobDocument } from '../../core/desktop/desktopApi'
 
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
@@ -106,6 +84,14 @@ const checkerboardImage = ref<HTMLImageElement | null>(null)
 
 const targetTexelDensity = ref<number>(16)
 const sampledDensity = ref<number | null>(null)
+const smartUvAngle = computed({
+  get: () => toolStore.smartUvAngle,
+  set: (value: number) => { toolStore.smartUvAngle = Number.isFinite(value) ? value : 66 }
+})
+const smartUvMargin = computed({
+  get: () => toolStore.smartUvMargin,
+  set: (value: number) => { toolStore.smartUvMargin = Number.isFinite(value) ? value : 2 }
+})
 
 function handleSampleTexelDensity() {
   if (!activeMesh.value) return
@@ -230,6 +216,8 @@ const uvIslandCount = computed(() => {
   return findUvIslands(activeMesh.value).length
 })
 
+const seamCount = computed(() => activeMesh.value?.seamEdgeIds?.length ?? 0)
+
 const selectedFaceCount = computed(() => getTargetFaces().length)
 
 function pinKey(faceIndex: number, vertIndex: number): string {
@@ -267,9 +255,7 @@ function publishUvHover(faceIndex: number | null) {
     toolStore.setUvHoverFaceIds([])
     return
   }
-  const faces = uvSelectMode.value === 'island'
-    ? expandFacesToIslands(activeMesh.value, [faceIndex])
-    : [faceIndex]
+  const faces = expandFacesToIslands(activeMesh.value, [faceIndex])
   hoveredIslandFaceIndices.value = faces
   toolStore.setUvHoverFaceIds(faces.map(i => activeMesh.value!.faces[i]?.id).filter(Boolean))
 }
@@ -383,9 +369,6 @@ function renderCanvas() {
   }
 
   const pb = projectStore.pixelBuffer
-  if (activeMesh.value) {
-    ensureMeshUVs(activeMesh.value)
-  }
 
   // If panOffset hasn't been initialized
   if (panOffset.value.x === 0 && panOffset.value.y === 0) {
@@ -481,7 +464,6 @@ function renderCanvas() {
   projectStore.meshes.forEach(otherMesh => {
     if (otherMesh.id === activeMesh.value?.id || !otherMesh.visible) return
     if (!projectStore.selectedMeshIds.includes(otherMesh.id)) return
-    ensureMeshUVs(otherMesh)
 
     otherMesh.faces.forEach(face => {
       if (!face.uvs || face.uvs.length < 3) return
@@ -605,6 +587,33 @@ function renderCanvas() {
         ctx.stroke()
       })
     })
+
+    const seamSet = new Set(activeMesh.value.seamEdgeIds || [])
+    if (seamSet.size > 0) {
+      ctx.save()
+      ctx.strokeStyle = '#ef4444'
+      ctx.lineWidth = 2.25
+      ctx.lineCap = 'round'
+      activeMesh.value.faces.forEach(face => {
+        if (face.uvs.length < 2) return
+        const n = face.vertexIds.length
+        for (let eIdx = 0; eIdx < n; eIdx++) {
+          const a = face.vertexIds[eIdx]
+          const b = face.vertexIds[(eIdx + 1) % n]
+          if (!a || !b || !seamSet.has(undirectedEdgeId(a, b))) continue
+          const uvA = face.uvs[eIdx]
+          const uvB = face.uvs[(eIdx + 1) % face.uvs.length]
+          if (!uvA || !uvB) continue
+          const ptA = uvToScreen(uvA.u, uvA.v)
+          const ptB = uvToScreen(uvB.u, uvB.v)
+          ctx.beginPath()
+          ctx.moveTo(ptA.x, ptA.y)
+          ctx.lineTo(ptB.x, ptB.y)
+          ctx.stroke()
+        }
+      })
+      ctx.restore()
+    }
 
     // 5. Draw 8-Point Bounding Box Transform Gizmo (Face / Island Mode)
     const b = selectionBounds.value
@@ -1442,6 +1451,45 @@ function syncVerticesTo3D() {
   projectStore.selectedVertexIds = vertIds
 }
 
+function clearUvSelection() {
+  selectedUvVerts.value = []
+  selectedUvEdges.value = []
+  selectedFaceIndices.value = []
+  if (!activeMesh.value) return
+  projectStore.selectedFaceIds = []
+  projectStore.selectedVertexIds = []
+  projectStore.selectedEdgeIds = []
+}
+
+function selectAllUv() {
+  if (!activeMesh.value) return
+  if (uvSelectMode.value === 'vertex') {
+    const verts: { faceIndex: number; vertIndex: number }[] = []
+    activeMesh.value.faces.forEach((face, faceIndex) => {
+      face.vertexIds.forEach((_, vertIndex) => verts.push({ faceIndex, vertIndex }))
+    })
+    selectedUvVerts.value = verts
+    selectedUvEdges.value = []
+    selectedFaceIndices.value = []
+    syncVerticesTo3D()
+  } else if (uvSelectMode.value === 'edge') {
+    const edges: { faceIndex: number; edgeIndex: number }[] = []
+    activeMesh.value.faces.forEach((face, faceIndex) => {
+      face.vertexIds.forEach((_, edgeIndex) => edges.push({ faceIndex, edgeIndex }))
+    })
+    selectedUvEdges.value = expandWeldedUvEdges(activeMesh.value, edges)
+    selectedUvVerts.value = []
+    selectedFaceIndices.value = []
+    syncEdgesTo3D()
+  } else {
+    selectedFaceIndices.value = activeMesh.value.faces.map((_, i) => i)
+    selectedUvVerts.value = []
+    selectedUvEdges.value = []
+    syncFacesTo3D()
+  }
+  scheduleRender()
+}
+
 function syncEdgesTo3D() {
   if (!activeMesh.value) return
   const vertIds: string[] = []
@@ -1518,14 +1566,12 @@ function handleTextureImported(texId?: string) {
 
 function exportTexturePng() {
   projectStore.pixelBuffer.canvas.toBlob((blob) => {
-    if (blob) {
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${projectStore.projectName}_uv_texture.png`
-      a.click()
-      URL.revokeObjectURL(url)
-    }
+    if (!blob) return
+    void saveBlobDocument(
+      blob,
+      `${projectStore.projectName}_uv_texture.png`,
+      [{ name: 'PNG', extensions: ['png'] }]
+    )
   })
 }
 
@@ -1674,82 +1720,71 @@ function applyBulkTransform(fn: (u: number, v: number) => { u: number; v: number
 // ----------------------------------------------------
 // UNIVERSAL UNWRAPPING ACTIONS
 // ----------------------------------------------------
-function commitUnwrappedFaces(result: MeshObject, onlySelected: boolean) {
-  if (!activeMesh.value) return
-  const targets = getTargetFaces()
-  if (onlySelected && targets.length > 0) {
-    const targetSet = new Set(targets)
-    for (const i of targetSet) {
-      if (result.faces[i]) activeMesh.value.faces[i].uvs = result.faces[i].uvs
-    }
-  } else {
-    activeMesh.value.faces = result.faces
-  }
-  projectStore.markGeometryUpdated()
-  scheduleRender()
-}
-
 function handleSeamUnwrap() {
   if (!activeMesh.value) return
-  projectStore.recordState('Unwrap Along Seams')
-  SeamUnwrapper.unwrapMesh(activeMesh.value)
-  projectStore.markGeometryUpdated()
-  scheduleRender()
+  const selected = getTargetFaces()
+  projectStore.performSeamUnwrap(selected.length > 0 ? selected : undefined)
+  nextTick(frameSelection)
+}
+
+function handleSmartUvProject() {
+  if (!activeMesh.value) return
+  const selected = getTargetFaces()
+  projectStore.performSmartUvProject({
+    angleLimitDegrees: smartUvAngle.value,
+    marginPixels: smartUvMargin.value,
+    textureSize: projectStore.pixelBuffer.width,
+    onlyFaceIndices: selected.length > 0 ? selected : undefined
+  })
+  nextTick(frameSelection)
+}
+
+function unwrapSelection(): number[] | undefined {
+  const selected = getTargetFaces()
+  return selected.length > 0 ? selected : undefined
 }
 
 function handleBoxUnwrap() {
   if (!activeMesh.value) return
-  projectStore.recordState('Box Unwrap')
-  commitUnwrappedFaces(boxUnwrap(activeMesh.value), true)
+  projectStore.performBoxUnwrap(unwrapSelection())
+  nextTick(frameSelection)
 }
 
 function handlePlanarUnwrap(axis: 'x' | 'y' | 'z') {
   if (!activeMesh.value) return
-  projectStore.recordState(`Planar Unwrap (${axis.toUpperCase()})`)
-  commitUnwrappedFaces(planarUnwrap(activeMesh.value, axis), true)
+  projectStore.performPlanarUnwrap(axis, unwrapSelection())
+  nextTick(frameSelection)
 }
 
 function handleCylinderUnwrap() {
   if (!activeMesh.value) return
-  projectStore.recordState('Cylindrical Unwrap')
-  commitUnwrappedFaces(cylinderUnwrap(activeMesh.value), true)
+  projectStore.performCylinderUnwrap(unwrapSelection())
+  nextTick(frameSelection)
 }
 
 function handleSphereUnwrap() {
   if (!activeMesh.value) return
-  projectStore.recordState('Spherical Unwrap')
-  commitUnwrappedFaces(sphereUnwrap(activeMesh.value), true)
+  projectStore.performSphereUnwrap(unwrapSelection())
+  nextTick(frameSelection)
 }
 
 function handleConeUnwrap() {
   if (!activeMesh.value) return
-  projectStore.recordState('Conical Fan Unwrap')
-  commitUnwrappedFaces(coneUnwrap(activeMesh.value), true)
+  projectStore.performConeUnwrap(unwrapSelection())
+  nextTick(frameSelection)
 }
 
 function handleCubemapCross() {
   if (!activeMesh.value) return
-  projectStore.recordState('Cubemap Cross Unwrap')
-  commitUnwrappedFaces(cubemapCrossUnwrap(activeMesh.value), true)
+  projectStore.performCubemapCrossUnwrap(unwrapSelection())
+  nextTick(frameSelection)
 }
 
 function handlePackIslands(marginPx = 2) {
   if (!activeMesh.value) return
   const selected = getTargetFaces()
-  projectStore.recordState(
-    selected.length > 0
-      ? `Pack Selected UV Islands (${marginPx}px)`
-      : `Auto-Pack UV Islands (${marginPx}px)`
-  )
-  const unwrapped = packUVIslands(
-    activeMesh.value,
-    marginPx,
-    projectStore.pixelBuffer.width,
-    selected.length > 0 ? selected : undefined
-  )
-  activeMesh.value.faces = unwrapped.faces
-  projectStore.markGeometryUpdated()
-  scheduleRender()
+  projectStore.performPackUVIslands(marginPx, selected.length > 0 ? selected : undefined)
+  nextTick(frameSelection)
 }
 
 function stitchSelectedEdges() {
@@ -1826,10 +1861,11 @@ function weldSelectedUVs() {
     }
   }
 
-  let welded = 0
+  const weldGroups = Array.from(groups.values()).filter(corners => corners.length >= 2)
+  if (weldGroups.length === 0) return
+
   projectStore.recordState('Weld Selected UVs')
-  for (const corners of groups.values()) {
-    if (corners.length < 2) continue
+  for (const corners of weldGroups) {
     let u = 0, v = 0
     for (const c of corners) {
       const uv = activeMesh.value.faces[c.faceIndex].uvs[c.vertIndex]
@@ -1842,9 +1878,7 @@ function weldSelectedUVs() {
       activeMesh.value.faces[c.faceIndex].uvs[c.vertIndex].u = u
       activeMesh.value.faces[c.faceIndex].uvs[c.vertIndex].v = v
     }
-    welded++
   }
-  if (welded === 0) return
   projectStore.markGeometryUpdated()
   scheduleRender()
 }
@@ -1891,21 +1925,14 @@ function frameSelection() {
 
 function handleGridify() {
   if (!activeMesh.value) return
-  projectStore.recordState('Gridify Quad Loops')
-  const targetFaces = getTargetFaces()
-  const unwrapped = gridifyQuadIslands(activeMesh.value, targetFaces)
-  activeMesh.value.faces = unwrapped.faces
-  projectStore.markGeometryUpdated()
-  scheduleRender()
+  projectStore.performGridifyUvQuads(unwrapSelection())
+  nextTick(frameSelection)
 }
 
 function handleEqualizeTexels() {
   if (!activeMesh.value) return
-  projectStore.recordState('Equalize Texel Density')
-  const unwrapped = equalizeTexelDensity(activeMesh.value)
-  activeMesh.value.faces = unwrapped.faces
-  projectStore.markGeometryUpdated()
-  scheduleRender()
+  projectStore.performEqualizeTexelDensity()
+  nextTick(frameSelection)
 }
 
 function alignSelection(alignment: 'left' | 'right' | 'top' | 'bottom' | 'center_h' | 'center_v') {
@@ -1975,6 +2002,15 @@ watch(() => projectStore.activeMeshId, () => {
   })
 })
 watch(() => projectStore.meshes, scheduleRender, { deep: true })
+watch(
+  [() => projectStore.activeMeshId, () => projectStore.geometryRevision],
+  () => {
+    const mesh = activeMesh.value
+    if (mesh && ensureMeshUVs(mesh)) {
+      projectStore.markGeometryUpdated()
+    }
+  }
+)
 watch(() => projectStore.selectedFaceIds, scheduleRender)
 watch(() => projectStore.selectedVertexIds, scheduleRender)
 watch(() => projectStore.selectedEdgeIds, scheduleRender)
@@ -2016,6 +2052,16 @@ function onUvKeyDown(e: KeyboardEvent) {
     e.preventDefault()
     stitchSelectedEdges()
   }
+  if ((e.key === 'a' || e.key === 'A') && e.altKey) {
+    e.preventDefault()
+    clearUvSelection()
+    scheduleRender()
+    return
+  }
+  if ((e.key === 'a' || e.key === 'A') && !e.ctrlKey && !e.metaKey) {
+    e.preventDefault()
+    selectAllUv()
+  }
 }
 
 function onUvKeyUp(e: KeyboardEvent) {
@@ -2026,6 +2072,7 @@ onMounted(() => {
   window.addEventListener('click', closeDropdowns)
   window.addEventListener('keydown', onUvKeyDown)
   window.addEventListener('keyup', onUvKeyUp)
+  window.addEventListener(EDITOR_EVENTS.smartUvProject, handleSmartUvProject)
   // Generate high-contrast numbered calibration test grid
   const img = new Image()
   img.src = generateUVCheckerboardDataURL(512)
@@ -2055,6 +2102,7 @@ onUnmounted(() => {
   window.removeEventListener('click', closeDropdowns)
   window.removeEventListener('keydown', onUvKeyDown)
   window.removeEventListener('keyup', onUvKeyUp)
+  window.removeEventListener(EDITOR_EVENTS.smartUvProject, handleSmartUvProject)
   toolStore.setUvHoverFaceIds([])
   if (renderRafId !== null) {
     cancelAnimationFrame(renderRafId)
@@ -2097,33 +2145,8 @@ defineExpose({
   <div class="uv-editor h-full w-full bg-ui-panel flex flex-col select-none overflow-hidden relative font-mono text-xs touch-none">
     <input ref="fileInputRef" type="file" accept="image/*" @change="handleImageImport" class="hidden" />
 
-    <!-- 1. ROW 1: WORKSPACE TABS & UNIFIED 3D ASSET BINDING HIERARCHY -->
-    <div class="uv-header-row-1 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between gap-2 shrink-0 z-30 select-none h-8.5 min-h-[34px]">
-      <!-- Left: Workspace Switcher Tabs -->
-      <div class="workspace-tabs flex items-center bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle shrink-0">
-        <button 
-          @click="toolStore.uvWorkspaceTab = 'uv'"
-          class="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-xs text-[10px] font-bold transition cursor-pointer"
-          :class="toolStore.uvWorkspaceTab === 'uv' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
-          title="UV Unwrapping, Seams & Quadrant Atlas Mapping"
-        >
-          <BlenderIcon name="uv" :size="12" />
-          <span>UV</span>
-        </button>
-
-        <button 
-          @click="toolStore.uvWorkspaceTab = 'paint'"
-          class="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-xs text-[10px] font-bold transition cursor-pointer"
-          :class="toolStore.uvWorkspaceTab === 'paint' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
-          title="Pixel & Texture Paint Studio"
-        >
-          <BlenderIcon name="brush" :size="11" />
-          <span>Paint</span>
-        </button>
-      </div>
-
-      <!-- Center: Unified Asset Pipeline Hierarchy (OBJ -> MAT -> TEX) -->
-      <div class="asset-pipeline flex items-center gap-1.5 shrink-0 overflow-x-auto">
+    <div class="uv-header-row bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center gap-2 shrink-0 z-30 select-none h-8.5 min-h-[34px]">
+      <div class="asset-pipeline flex items-center gap-1.5 min-w-0">
         <!-- 1. Active 3D Object -->
         <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px] text-ui-textSecondary shrink-0">
           <span class="text-ui-textMuted font-bold text-[8.5px]">OBJ:</span>
@@ -2166,7 +2189,7 @@ defineExpose({
             class="p-0.5 hover:bg-ui-hover text-emerald-400 rounded-xs transition cursor-pointer"
             title="Create a new texture (paint target only)"
           >
-            <Plus class="w-3 h-3" />
+            <BlenderIcon name="plus" :size="12" />
           </button>
         </div>
 
@@ -2177,7 +2200,7 @@ defineExpose({
             class="flex items-center gap-1 px-2 py-0.5 hover:bg-ui-hover text-ui-textAccent rounded-xs text-[10px] font-bold transition cursor-pointer whitespace-nowrap"
             title="Add an image to the library (does not replace the current map)"
           >
-            <Upload class="w-3 h-3 text-ui-accent" />
+            <BlenderIcon name="import" :size="12" />
             <span>Import</span>
           </button>
 
@@ -2186,25 +2209,15 @@ defineExpose({
             class="flex items-center gap-1 px-2 py-0.5 hover:bg-ui-hover text-emerald-400 rounded-xs text-[10px] font-bold transition cursor-pointer whitespace-nowrap"
             title="Export UV Texture PNG"
           >
-            <Download class="w-3 h-3 text-emerald-400" />
+            <BlenderIcon name="export" :size="12" />
             <span>Export</span>
           </button>
         </div>
       </div>
-
-      <!-- Right: Active Resolution & Canvas Readout -->
-      <div class="asset-resolution flex items-center gap-1.5 shrink-0">
-        <div class="px-2 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px] font-mono text-ui-textMuted flex items-center gap-1">
-          <span class="text-[9px] text-ui-textMuted font-bold">RES:</span>
-          <span class="text-amber-300 font-bold">{{ projectStore.pixelBuffer.width }}×{{ projectStore.pixelBuffer.height }}</span>
-        </div>
-      </div>
     </div>
 
-    <!-- 2. ROW 2: DCC MENUS & VIEW CONTROLS -->
-    <div class="uv-header-row-2 bg-ui-panel border-b border-ui-borderSubtle px-2 flex items-center justify-between gap-2 shrink-0 z-20 select-none h-8 min-h-[32px] overflow-visible">
-      <!-- Left: DCC Dropdown Menus -->
-      <div class="flex items-center gap-1 shrink-0">
+    <Teleport defer to="#uv-paint-command-slot">
+      <div class="uv-command-strip flex items-center gap-1">
         <!-- Texture Menu Dropdown -->
         <div class="relative" @click.stop>
           <button 
@@ -2219,11 +2232,11 @@ defineExpose({
           <div v-if="activeDropdown === 'texture'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-56 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
             <button @click="fileInputRef?.click(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-ui-textAccent font-bold">
               <span>Import Image...</span>
-              <Upload class="w-3 h-3 text-ui-accent" />
+              <BlenderIcon name="import" :size="12" />
             </button>
             <button @click="exportTexturePng(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-emerald-400 font-bold">
               <span>Export Texture PNG</span>
-              <Download class="w-3 h-3 text-emerald-400" />
+              <BlenderIcon name="export" :size="12" />
             </button>
             <div class="h-px bg-ui-borderSubtle my-1"></div>
             <button @click="showNewTextureModal = true; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-amber-300 font-medium">
@@ -2237,35 +2250,68 @@ defineExpose({
 
         <!-- UV Menu Dropdown -->
         <div class="relative" @click.stop>
-          <button 
-            @click="toggleDropdown('uv')"
-            class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0"
-            :class="activeDropdown === 'uv' ? 'bg-ui-hover text-ui-textAccent shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-          >
-            <span>UV</span>
-            <span class="text-[8px] opacity-70">▼</span>
-          </button>
+          <div class="flex items-stretch rounded-xs border border-amber-500/40 bg-amber-500/10 overflow-hidden shadow-xs">
+            <button
+              @click="handleSmartUvProject"
+              class="px-2 py-1 text-[11px] font-bold text-amber-300 hover:bg-amber-500/20 transition cursor-pointer flex items-center gap-1 whitespace-nowrap"
+              title="Automatically cut, project, and pack the selected faces or whole mesh (U)"
+            >
+              <BlenderIcon name="uv-smart" :size="12" />
+              <span>Smart UV</span>
+            </button>
+            <button
+              @click="toggleDropdown('uv')"
+              class="px-1.5 text-[8px] text-amber-300 border-l border-amber-500/30 hover:bg-amber-500/20"
+              title="UV projection options"
+            >▼</button>
+          </div>
 
-          <div v-if="activeDropdown === 'uv'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-56 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
-            <button @click="handleSeamUnwrap(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-amber-400 font-bold">
-              <span>Unwrap Along Seams (LSCM)</span>
+          <div v-if="activeDropdown === 'uv'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-64 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+            <button @click="handleSmartUvProject(); closeDropdowns()" class="w-full text-left px-3 py-2 hover:bg-amber-500/15 flex items-center justify-between text-amber-300 font-bold">
+              <span class="flex items-center gap-2"><BlenderIcon name="uv-smart" :size="14" /> Smart UV Project</span>
               <span class="text-[10px] text-ui-textMuted font-mono font-normal">U</span>
             </button>
+            <div class="mx-2 mb-1 p-2 rounded-xs bg-ui-input border border-ui-borderSubtle space-y-1.5" @click.stop>
+              <label class="flex items-center justify-between gap-3 text-[10px] text-ui-textSecondary">
+                <span title="Lower values create more islands; higher values keep more faces together">Cut angle</span>
+                <span class="flex items-center gap-1">
+                  <input v-model.number="smartUvAngle" type="range" min="15" max="120" step="1" class="w-24 accent-amber-500" />
+                  <input v-model.number="smartUvAngle" type="number" min="1" max="179" step="1" class="w-11 h-5 bg-ui-panel border border-ui-borderDefault rounded-xs px-1 text-right font-mono" />
+                  <span>°</span>
+                </span>
+              </label>
+              <label class="flex items-center justify-between gap-3 text-[10px] text-ui-textSecondary">
+                <span>Island margin</span>
+                <span class="flex items-center gap-1">
+                  <input v-model.number="smartUvMargin" type="number" min="0" max="32" step="1" class="w-11 h-5 bg-ui-panel border border-ui-borderDefault rounded-xs px-1 text-right font-mono" />
+                  <span>px</span>
+                </span>
+              </label>
+              <p class="text-[9px] leading-tight text-ui-textMuted">Works on the selection, or the whole mesh when nothing is selected.</p>
+            </div>
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="handleSeamUnwrap(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+              <span class="flex items-center gap-2"><BlenderIcon name="edge-select" :size="13" /> Unwrap Using Marked Seams</span>
+              <span class="text-[9px] text-ui-textMuted">manual</span>
+            </button>
             <button @click="handleBoxUnwrap(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
-              <span>Smart Box Unwrap</span>
+              <span class="flex items-center gap-2"><BlenderIcon name="mesh-cube" :size="13" /> Box Projection</span>
               <span class="text-[9px] text-ui-textMuted">sel or all</span>
             </button>
             <button @click="handleCubemapCross(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-ui-textAccent">
-              <span>Cubemap Cross (Blockbench)</span>
+              <span class="flex items-center gap-2"><BlenderIcon name="mesh-cube" :size="13" /> Cubemap Cross (Blockbench)</span>
             </button>
             <div class="h-px bg-ui-borderSubtle my-1"></div>
-            <button @click="handleCylinderUnwrap(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
+            <button @click="handleCylinderUnwrap(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
+              <BlenderIcon name="mesh-cylinder" :size="13" />
               <span>Cylinder (Tube + Caps)</span>
             </button>
-            <button @click="handleSphereUnwrap(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
+            <button @click="handleSphereUnwrap(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
+              <BlenderIcon name="mesh-sphere" :size="13" />
               <span>Sphere (Equirectangular)</span>
             </button>
-            <button @click="handleConeUnwrap(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
+            <button @click="handleConeUnwrap(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
+              <BlenderIcon name="mesh-cone" :size="13" />
               <span>Cone / Pyramid (Radial Fan)</span>
             </button>
             <div class="h-px bg-ui-borderSubtle my-1"></div>
@@ -2293,7 +2339,7 @@ defineExpose({
 
           <div v-if="activeDropdown === 'islands'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-60 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
             <button @click="handlePackIslands(2); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-emerald-400 font-bold">
-              <span>Auto-Pack Islands (2px Margin)</span>
+              <span class="flex items-center gap-2"><BlenderIcon name="pack-islands" :size="13" /> Auto-Pack Islands (2px Margin)</span>
             </button>
             <button @click="handlePackIslands(0); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Auto-Pack Islands (0px Tight)</span>
@@ -2311,6 +2357,15 @@ defineExpose({
             </button>
             <button @click="handleEqualizeTexels(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover text-sky-400">
               <span>Equalize Texel Density</span>
+            </button>
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="projectStore.markSelectedEdgesAsSeam(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+              <span>Mark Seams (edges or island border)</span>
+              <span class="text-[10px] text-ui-textMuted font-mono">Ctrl+Shift+E</span>
+            </button>
+            <button @click="projectStore.clearSelectedEdgesSeam(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+              <span>Clear Seams (edges or island border)</span>
+              <span class="text-[10px] text-ui-textMuted font-mono">Ctrl+Alt+E</span>
             </button>
             <div class="h-px bg-ui-borderSubtle my-1"></div>
             <button @click="stitchSelectedEdges(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
@@ -2465,7 +2520,6 @@ defineExpose({
             </button>
           </div>
         </div>
-      </div>
 
       <!-- Right: Diagnostic Toggles -->
       <div class="flex items-center gap-1 shrink-0">
@@ -2487,7 +2541,8 @@ defineExpose({
           <span>Heatmap</span>
         </button>
       </div>
-    </div>
+      </div>
+    </Teleport>
 
     <!-- Mini-Modal: Create New Texture -->
     <div v-if="showNewTextureModal" class="absolute inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
@@ -2543,6 +2598,7 @@ defineExpose({
       ref="containerRef" 
       class="uv-canvas-viewport relative flex-1 min-h-0 overflow-hidden"
       @wheel="onWheel"
+      @contextmenu.prevent
     >
       <!-- Vertical Selection & Quick Actions Toolbar (Docked Inside Canvas Left) -->
       <div class="uv-vertical-toolbar" aria-label="UV Selection & Quick Tools">
@@ -2587,22 +2643,22 @@ defineExpose({
         <!-- Quick Transform & UV Operations -->
         <div class="uv-vert-tool-group">
           <button @click="rotateUVs(-90)" class="uv-vert-tool-btn" title="Rotate 90° CCW">
-            <RotateCcw class="w-3.5 h-3.5" />
+            <BlenderIcon name="rotate-ccw" :size="15" />
           </button>
           <button @click="rotateUVs(90)" class="uv-vert-tool-btn" title="Rotate 90° CW">
-            <RotateCw class="w-3.5 h-3.5" />
+            <BlenderIcon name="rotate-cw" :size="15" />
           </button>
           <button @click="flipUVs('u')" class="uv-vert-tool-btn" title="Flip Horizontal">
-            <FlipHorizontal class="w-3.5 h-3.5" />
+            <BlenderIcon name="flip-horizontal" :size="15" />
           </button>
           <button @click="flipUVs('v')" class="uv-vert-tool-btn" title="Flip Vertical">
-            <FlipVertical class="w-3.5 h-3.5" />
+            <BlenderIcon name="flip-vertical" :size="15" />
           </button>
           <button @click="handlePackIslands(2)" class="uv-vert-tool-btn text-emerald-400 hover:text-emerald-300" title="Auto-Pack Islands (2px)">
-            <Maximize class="w-3.5 h-3.5" />
+            <BlenderIcon name="pack-islands" :size="15" />
           </button>
-          <button @click="handleSeamUnwrap" class="uv-vert-tool-btn text-amber-400 hover:text-amber-300" title="Unwrap Along Seams (LSCM)">
-            <BlenderIcon name="uv" :size="14" />
+          <button @click="handleSmartUvProject" class="uv-vert-tool-btn text-amber-400 hover:text-amber-300" title="Smart UV Project: cut, project, and pack (U)">
+            <BlenderIcon name="uv-smart" :size="15" />
           </button>
         </div>
       </div>
@@ -2620,20 +2676,20 @@ defineExpose({
           class="uv-view-toggle"
           :class="{ 'is-active': snapToPixels }"
           title="Snap to pixel grid"
-        ><Magnet class="w-3.5 h-3.5" /><span>Snap</span></button>
+        ><BlenderIcon name="snap" :size="14" /><span>Snap</span></button>
         <button
           @click="showPixelGrid = !showPixelGrid"
           class="uv-view-icon"
           :class="{ 'is-active': showPixelGrid }"
           title="Toggle pixel grid"
-        ><Grid class="w-3.5 h-3.5" /></button>
+        ><BlenderIcon name="grid" :size="14" /></button>
         <div class="uv-zoom-control">
-          <button @click="zoomOut" title="Zoom out"><ZoomOut class="w-3.5 h-3.5" /></button>
+          <button @click="zoomOut" title="Zoom out"><BlenderIcon name="zoom-out" :size="14" /></button>
           <span @dblclick="resetPanZoom" title="Double-click to fit view">{{ Math.round(zoom * 100) }}%</span>
-          <button @click="zoomIn" title="Zoom in"><ZoomIn class="w-3.5 h-3.5" /></button>
+          <button @click="zoomIn" title="Zoom in"><BlenderIcon name="zoom-in" :size="14" /></button>
         </div>
         <button @click="resetPanZoom" class="uv-view-icon" title="Fit UV canvas to view">
-          <Maximize class="w-3.5 h-3.5" />
+          <BlenderIcon name="view-fit" :size="14" />
         </button>
       </div>
 
@@ -2644,6 +2700,7 @@ defineExpose({
         @pointerup="onPointerUp" 
         @pointerleave="onPointerLeave"
         @pointercancel="onPointerUp"
+        @contextmenu.prevent
         class="w-full h-full block touch-none"
       ></canvas>
 
@@ -2651,13 +2708,14 @@ defineExpose({
       <div class="uv-status-hud">
         <span class="flex items-center gap-1">Mode: <strong class="text-ui-textAccent uppercase font-bold">{{ uvSelectMode }}</strong></span>
         <span>Islands: <strong class="text-ui-textPrimary font-bold">{{ uvIslandCount }}</strong></span>
+        <span v-if="seamCount">Seams: <strong class="text-red-400 font-bold">{{ seamCount }}</strong></span>
         <span v-if="selectedFaceCount">Sel: <strong class="text-amber-300 font-bold">{{ selectedFaceCount }}f</strong></span>
         <span v-if="pinnedUvKeys.size">Pins: <strong class="text-pink-400 font-bold">{{ pinnedUvKeys.size }}</strong></span>
         <span v-else class="text-ui-textMuted">No selection</span>
         <span v-if="selectionBounds" class="text-ui-textAccent font-bold">
           Bounds: {{ Math.round(selectionBounds.width * 100) }}% × {{ Math.round(selectionBounds.height * 100) }}%
         </span>
-        <span class="text-ui-textMuted hidden md:inline">Space-drag pan · F frame · V stitch · P pin</span>
+        <span class="text-ui-textMuted hidden md:inline">RMB / Space-drag pan · F frame · V stitch · P pin</span>
       </div>
     </div>
     <ImportTextureModal
@@ -2680,49 +2738,14 @@ defineExpose({
   container-type: inline-size;
 }
 
-.uv-header-row-1 {
+.uv-header-row {
   height: 32px;
   min-height: 32px;
-}
-
-.uv-header-row-2 {
-  height: 32px;
-  min-height: 32px;
+  overflow: hidden;
 }
 
 .asset-pipeline {
   min-width: 0;
-}
-
-@container (max-width: 760px) {
-  .uv-header-row-1 {
-    height: 64px;
-    min-height: 64px;
-    flex-wrap: wrap;
-    align-content: center;
-    padding-block: 4px;
-  }
-
-  .workspace-tabs {
-    order: 1;
-  }
-
-  .asset-resolution {
-    order: 2;
-    margin-left: auto;
-  }
-
-  .asset-pipeline {
-    order: 3;
-    width: 100%;
-    flex: 0 0 100%;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .asset-pipeline::-webkit-scrollbar {
-    display: none;
-  }
 }
 
 .header-dropdown-menu {

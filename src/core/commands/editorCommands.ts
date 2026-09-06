@@ -11,7 +11,8 @@ export const EDITOR_EVENTS = {
   openExport: 'editor:open-export',
   fillFace: 'editor:fill-face',
   openPie: 'editor:open-pie',
-  toggleUvOverlay: 'editor:toggle-uv-overlay'
+  toggleUvOverlay: 'editor:toggle-uv-overlay',
+  smartUvProject: 'editor:smart-uv-project'
 } as const
 
 export type ModalToolCommand =
@@ -72,4 +73,8 @@ export function requestOpenPie(menu: PieMenuCommand) {
 
 export function requestToggleUvOverlay() {
   window.dispatchEvent(new CustomEvent(EDITOR_EVENTS.toggleUvOverlay))
+}
+
+export function requestSmartUvProject() {
+  window.dispatchEvent(new CustomEvent(EDITOR_EVENTS.smartUvProject))
 }

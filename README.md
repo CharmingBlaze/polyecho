@@ -1,10 +1,8 @@
 # PolyEcho
 
-A focused, browser-based low-poly 3D modeling, UV pixel painting, and skeletal animation suite built with Vue 3, TypeScript, and Three.js.
+A focused desktop low-poly 3D modeling, UV pixel painting, and skeletal animation suite built with Vue 3, TypeScript, Three.js, and Electron.
 
 Designed from the ground up for indie game developers, retro game creators (PS1/DS/N64 styles), and technical artists who want a fast, no-nonsense workflow without the overhead of massive DCC packages.
-
-![PolyEcho Screenshot](screenshot.png)
 
 ## Core Workflow
 
@@ -108,22 +106,29 @@ cd polyecho
 # Install dependencies
 npm install
 
-# Start local development server
+# Desktop window (Vite + Electron)
 npm run dev
 
-# Build for production
+# Optional: editor only in a browser tab
+npm run dev:web
+
+# Renderer build, then Windows/macOS/Linux installer
 npm run build
+npm run dist
 ```
 
-Open [http://localhost:5173](http://localhost:5173) in your browser.
+`npm run dev` opens the PolyEcho window. `npm run dev:web` is [http://127.0.0.1:5180](http://127.0.0.1:5180) for layout checks. Desktop packaging: [docs/DESKTOP.md](docs/DESKTOP.md).
 
 ```bash
 npm run typecheck
+npm test
 ```
+
+Ship bar and remaining 1.0 gaps: [docs/PRODUCTION.md](docs/PRODUCTION.md). Godot/Unity/Blender check: [docs/ENGINE_HANDOFF.md](docs/ENGINE_HANDOFF.md).
 
 ## Working on the codebase
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Use [docs/CODEMAP.md](docs/CODEMAP.md) to find modules, [docs/TEXTURES.md](docs/TEXTURES.md) for images/materials/paint target, and [docs/INVARIANTS.md](docs/INVARIANTS.md) before changing mesh IDs, history, or exporters.
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Use [docs/CODEMAP.md](docs/CODEMAP.md) to find modules, [docs/TEXTURES.md](docs/TEXTURES.md) for images/materials/paint target, [docs/ICONS.md](docs/ICONS.md) for `BlenderIcon`, [docs/INPUT.md](docs/INPUT.md) for RMB-pan, and [docs/INVARIANTS.md](docs/INVARIANTS.md) before changing mesh IDs, history, or exporters.
 
 ---
 
@@ -134,6 +139,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/ARCHITECTURE.md](docs/ARCHITECT
 - **Styling**: Tailwind CSS
 - **Icons**: Lucide Vue & Custom Blender DCC SVGs
 - **Build Tool**: Vite
+- **Desktop host**: Electron (Chromium)
 
 ## License
-MIT License. Free to use for personal, indie, and commercial game development.
+See [LICENSE](LICENSE) (MIT). Free to use for personal, indie, and commercial game development.

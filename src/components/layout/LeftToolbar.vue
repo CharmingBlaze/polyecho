@@ -4,13 +4,7 @@ import { useToolStore } from '../../stores/toolStore'
 import { useProjectStore } from '../../stores/projectStore'
 import { useAnimationStore } from '../../stores/animationStore'
 import BlenderIcon from '../icons/BlenderIcon.vue'
-import { requestModalTool, requestPrimitiveMenu } from '../../core/commands/editorCommands'
-import { 
-  MousePointer, 
-  Move, 
-  RotateCw, 
-  PlusCircle
-} from 'lucide-vue-next'
+import { requestModalTool, requestPrimitiveMenu, requestSmartUvProject } from '../../core/commands/editorCommands'
 
 const toolStore = useToolStore()
 const projectStore = useProjectStore()
@@ -21,6 +15,7 @@ const isBlockout = computed(() => toolStore.appMode === 'blockout')
 const isRigging = computed(() => toolStore.appMode === 'rig')
 const isAnimating = computed(() => toolStore.appMode === 'animate')
 const isUVPaint = computed(() => toolStore.appMode === 'uvpaint')
+const isUVEditing = computed(() => isUVPaint.value && toolStore.uvWorkspaceTab === 'uv')
 
 function setSelectMode(mode: 'object' | 'vertex' | 'edge' | 'face') {
   toolStore.selectMode = mode
@@ -198,7 +193,7 @@ function handleOpenPrimitiveMenu() {
         class="w-8 h-8 flex items-center justify-center rounded-xs text-amber-400 hover:text-amber-300 hover:bg-ui-hover transition relative group cursor-pointer mt-auto"
         title="Add 3D Primitive (Shift+A)"
       >
-        <PlusCircle class="w-5 h-5" />
+        <BlenderIcon name="mesh-cube" :size="18" />
       </button>
     </template>
 
@@ -335,11 +330,36 @@ function handleOpenPrimitiveMenu() {
         class="w-8 h-8 flex items-center justify-center rounded-xs text-amber-400 hover:text-amber-300 hover:bg-ui-hover transition relative group cursor-pointer mt-auto"
         title="Add 3D Primitive (Shift+A)"
       >
-        <PlusCircle class="w-5 h-5" />
+        <BlenderIcon name="mesh-cube" :size="18" />
       </button>
     </template>
 
     <!-- 3. UV / PAINT TOOLS -->
+    <template v-else-if="isUVEditing">
+      <div class="flex flex-col items-center gap-1 p-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle shrink-0">
+        <button @click="setSelectMode('object')" class="w-8 h-8 rounded-xs flex items-center justify-center transition cursor-pointer" :class="toolStore.selectMode === 'object' ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textSecondary hover:bg-ui-hover'" title="Island Select (4)">
+          <BlenderIcon name="uv" :size="18" />
+        </button>
+        <button @click="setSelectMode('vertex')" class="w-8 h-8 rounded-xs flex items-center justify-center transition cursor-pointer" :class="toolStore.selectMode === 'vertex' ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textSecondary hover:bg-ui-hover'" title="UV Vertex Select (1)">
+          <BlenderIcon name="vertex-select" :size="18" />
+        </button>
+        <button @click="setSelectMode('edge')" class="w-8 h-8 rounded-xs flex items-center justify-center transition cursor-pointer" :class="toolStore.selectMode === 'edge' ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textSecondary hover:bg-ui-hover'" title="UV Edge Select (2)">
+          <BlenderIcon name="edge-select" :size="18" />
+        </button>
+        <button @click="setSelectMode('face')" class="w-8 h-8 rounded-xs flex items-center justify-center transition cursor-pointer" :class="toolStore.selectMode === 'face' ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textSecondary hover:bg-ui-hover'" title="UV Face Select (3)">
+          <BlenderIcon name="face-select" :size="18" />
+        </button>
+      </div>
+      <div class="w-6 h-px bg-ui-borderSubtle my-0.5 shrink-0"></div>
+      <button
+        @click="requestSmartUvProject"
+        class="w-8 h-8 flex items-center justify-center rounded-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 transition cursor-pointer"
+        title="Smart UV Project (U): automatically cut, project, and pack"
+      >
+        <BlenderIcon name="uv-smart" :size="18" />
+      </button>
+    </template>
+
     <template v-else-if="isUVPaint">
       <button 
         @click="toolStore.setPaintTool('brush')"
@@ -399,7 +419,7 @@ function handleOpenPrimitiveMenu() {
         :class="toolStore.rigTool === 'select_bone' ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textSecondary hover:bg-ui-hover'"
         title="Select Joint (W)"
       >
-        <MousePointer class="w-4.5 h-4.5" />
+        <BlenderIcon name="cursor-select" :size="18" />
       </button>
       <button 
         @click="toolStore.setRigTool('add_bone')"
@@ -415,7 +435,7 @@ function handleOpenPrimitiveMenu() {
         :class="toolStore.modelTool === 'move' ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textSecondary hover:bg-ui-hover'"
         title="Translate Bone (G)"
       >
-        <Move class="w-4.5 h-4.5" />
+        <BlenderIcon name="tool-move" :size="18" />
       </button>
       <button 
         @click="toolStore.setModelTool('rotate')"
@@ -423,7 +443,7 @@ function handleOpenPrimitiveMenu() {
         :class="toolStore.modelTool === 'rotate' ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textSecondary hover:bg-ui-hover'"
         title="Rotate Bone (R)"
       >
-        <RotateCw class="w-4.5 h-4.5" />
+        <BlenderIcon name="tool-rotate" :size="18" />
       </button>
       <button 
         @click="toolStore.setModelTool('scale')"
@@ -454,7 +474,7 @@ function handleOpenPrimitiveMenu() {
         :class="toolStore.modelTool === 'select' ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textSecondary hover:bg-ui-hover'"
         title="Select Bone (W)"
       >
-        <MousePointer class="w-4.5 h-4.5" />
+        <BlenderIcon name="cursor-select" :size="18" />
       </button>
       <button 
         @click="toolStore.setModelTool('rotate')"
@@ -462,7 +482,7 @@ function handleOpenPrimitiveMenu() {
         :class="toolStore.modelTool === 'rotate' ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textSecondary hover:bg-ui-hover'"
         title="Rotate Pose (R)"
       >
-        <RotateCw class="w-4.5 h-4.5" />
+        <BlenderIcon name="tool-rotate" :size="18" />
       </button>
       <button 
         @click="toolStore.setModelTool('move')"
@@ -470,7 +490,7 @@ function handleOpenPrimitiveMenu() {
         :class="toolStore.modelTool === 'move' ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textSecondary hover:bg-ui-hover'"
         title="Translate Root / IK (G)"
       >
-        <Move class="w-4.5 h-4.5" />
+        <BlenderIcon name="tool-move" :size="18" />
       </button>
       <button 
         @click="toolStore.setModelTool('scale')"
@@ -479,6 +499,14 @@ function handleOpenPrimitiveMenu() {
         title="Scale Pose (S)"
       >
         <BlenderIcon name="tool-scale" :size="18" />
+      </button>
+      <div class="w-6 h-px bg-ui-borderSubtle my-0.5"></div>
+      <button
+        @click="animationStore.recordCurrentKeyframe()"
+        class="w-8 h-8 flex items-center justify-center rounded-xs text-amber-400 hover:text-amber-300 hover:bg-ui-hover transition cursor-pointer"
+        title="Insert key on selected bone or object (I / K)"
+      >
+        <BlenderIcon name="keyframe" :size="18" />
       </button>
     </template>
   </aside>

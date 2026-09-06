@@ -2,33 +2,91 @@
   "name": "polyecho",
   "private": true,
   "version": "1.0.0",
+  "description": "Desktop low-poly 3D modeling, UV pixel painting, and skeletal animation",
+  "author": "PolyEcho",
   "type": "module",
+  "main": "electron/main.mjs",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently -k --success first \"vite --host 127.0.0.1 --port 5180 --strictPort\" \"wait-on http://127.0.0.1:5180 && electron .\"",
+    "dev:web": "vite --host 127.0.0.1 --port 5180 --strictPort",
+    "desktop": "electron .",
     "build": "vue-tsc -b && vite build",
+    "dist": "npm run icon && npm run build && electron-builder",
     "preview": "vite preview",
-    "typecheck": "vue-tsc -b --pretty"
+    "typecheck": "vue-tsc -b --pretty",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "handoff:glb": "vitest run src/core/export/EngineHandoff.test.ts",
+    "icon": "vitest run src/core/desktop/appIcon.test.ts"
   },
-  "dependencies": {
-    "@types/three": "^0.170.0",
-    "@vscode/codicons": "^0.0.46-24",
-    "canvas-confetti": "^1.9.4",
-    "dockview-vue": "^8.2.0",
-    "lucide-vue-next": "^0.468.0",
-    "pinia": "^2.3.1",
-    "reka-ui": "^2.10.4",
-    "three": "^0.170.0",
-    "vue": "^3.5.13"
+  "build": {
+    "appId": "com.polyecho.app",
+    "productName": "PolyEcho",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "extraFiles": [
+      "LICENSE"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "PolyEcho"
+    },
+    "mac": {
+      "icon": "build/icon.png",
+      "target": [
+        "dmg"
+      ]
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "target": [
+        "AppImage"
+      ]
+    },
+    "fileAssociations": [
+      {
+        "ext": "psxproj",
+        "name": "PolyEcho Project",
+        "description": "PolyEcho project file",
+        "role": "Editor"
+      }
+    ]
   },
   "devDependencies": {
-    "@types/canvas-confetti": "^1.9.0",
     "@types/node": "^22.10.2",
+    "@types/three": "^0.170.0",
     "@vitejs/plugin-vue": "^5.2.1",
+    "@vscode/codicons": "^0.0.46-24",
     "autoprefixer": "^10.4.20",
+    "concurrently": "^10.0.5",
+    "electron": "^44.2.0",
+    "electron-builder": "^26.15.3",
+    "gltf-validator": "^2.0.0-dev.3.10",
+    "happy-dom": "^20.14.0",
+    "lucide-vue-next": "^0.468.0",
+    "pinia": "^2.3.1",
     "postcss": "^8.4.49",
+    "reka-ui": "^2.10.4",
     "tailwindcss": "^3.4.17",
+    "three": "^0.170.0",
     "typescript": "^5.7.2",
     "vite": "^6.0.0",
-    "vue-tsc": "^2.2.0"
+    "vitest": "^5.0.0",
+    "vue": "^3.5.13",
+    "vue-tsc": "^2.2.0",
+    "wait-on": "^9.1.0"
   }
 }

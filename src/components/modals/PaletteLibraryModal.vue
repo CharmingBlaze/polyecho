@@ -16,6 +16,7 @@ import {
   snapColorToPalette
 } from '../../utils/color'
 import type { Palette } from '../../types/texture'
+import { saveBlobDocument } from '../../core/desktop/desktopApi'
 import { 
   X, 
   Search, 
@@ -130,35 +131,22 @@ function handleSortPalette(p: Palette, by: 'hue' | 'brightness' | 'saturation', 
 
 function handleExportHex(p: Palette, e: MouseEvent) {
   e.stopPropagation()
-  const hexData = exportPaletteToHex(p)
-  const blob = new Blob([hexData], { type: 'text/plain' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${p.name.replace(/\s+/g, '_').toLowerCase()}.hex`
-  a.click()
-  URL.revokeObjectURL(url)
+  const blob = new Blob([exportPaletteToHex(p)], { type: 'text/plain' })
+  void saveBlobDocument(blob, `${p.name.replace(/\s+/g, '_').toLowerCase()}.hex`, [{ name: 'HEX', extensions: ['hex'] }])
 }
 
 function handleExportGpl(p: Palette, e: MouseEvent) {
   e.stopPropagation()
-  const gplData = exportPaletteToGpl(p)
-  const blob = new Blob([gplData], { type: 'text/plain' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${p.name.replace(/\s+/g, '_').toLowerCase()}.gpl`
-  a.click()
-  URL.revokeObjectURL(url)
+  const blob = new Blob([exportPaletteToGpl(p)], { type: 'text/plain' })
+  void saveBlobDocument(blob, `${p.name.replace(/\s+/g, '_').toLowerCase()}.gpl`, [{ name: 'GIMP Palette', extensions: ['gpl'] }])
 }
 
 function handleExportPng(p: Palette, e: MouseEvent) {
   e.stopPropagation()
   const dataUrl = exportPaletteToPng(p, 16)
-  const a = document.createElement('a')
-  a.href = dataUrl
-  a.download = `${p.name.replace(/\s+/g, '_').toLowerCase()}_swatch.png`
-  a.click()
+  void fetch(dataUrl)
+    .then(res => res.blob())
+    .then(blob => saveBlobDocument(blob, `${p.name.replace(/\s+/g, '_').toLowerCase()}_swatch.png`, [{ name: 'PNG', extensions: ['png'] }]))
 }
 
 async function handleFileUpload(e: Event) {

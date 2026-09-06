@@ -4,7 +4,6 @@ import { useProjectStore } from '../../stores/projectStore'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useToolStore } from '../../stores/toolStore'
 import BlenderIcon from '../icons/BlenderIcon.vue'
-import { GitBranch, Search, Plus } from 'lucide-vue-next'
 import { resolveMeshBoneParentId } from '../../core/animation/Armature'
 import { requestPrimitiveMenu } from '../../core/commands/editorCommands'
 import type { MeshObject } from '../../types/mesh'
@@ -202,7 +201,7 @@ function handleAddBone() {
           class="flex items-center gap-1 px-2.5 h-6 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white text-[11px] font-bold shadow-xs transition cursor-pointer"
           title="Add 3D Primitive (Opens Primitives Panel / Shift+A)"
         >
-          <Plus class="w-3.5 h-3.5" />
+          <BlenderIcon name="plus" :size="14" />
           <span>Add</span>
         </button>
 
@@ -212,14 +211,14 @@ function handleAddBone() {
           class="flex items-center gap-1 px-2.5 h-6 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white text-[11px] font-bold shadow-xs transition cursor-pointer"
           title="Add Bone"
         >
-          <Plus class="w-3.5 h-3.5" />
+          <BlenderIcon name="plus" :size="14" />
           <span>{{ animationStore.selectedBoneId ? 'Child' : 'Root' }}</span>
         </button>
       </div>
     </div>
 
     <div class="h-6 px-2 bg-ui-input border-b border-ui-borderSubtle flex items-center gap-1.5">
-      <Search class="w-3 h-3 text-ui-textMuted shrink-0" />
+      <BlenderIcon name="search" :size="12" />
       <input 
         v-model="searchQuery"
         type="text" 
@@ -358,7 +357,7 @@ function handleAddBone() {
               class="p-1 hover:bg-ui-hover rounded-xs text-ui-textMuted hover:text-ui-textAccent transition" 
               title="Add Child Bone"
             >
-              <GitBranch class="w-3.5 h-3.5" />
+              <BlenderIcon name="link" :size="14" />
             </button>
             <button 
               @click.stop="animationStore.deleteBone(bone.id)" 

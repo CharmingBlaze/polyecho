@@ -28,7 +28,10 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { id: 'delete_element', label: 'Delete Selected', category: 'Modeling', defaultKey: 'Delete / X', currentKey: 'Delete / X' },
   { id: 'separate_mesh', label: 'Separate Selection', category: 'Modeling', defaultKey: 'p', currentKey: 'p' },
   { id: 'join_meshes', label: 'Join Meshes', category: 'Modeling', defaultKey: 'Ctrl+j', currentKey: 'Ctrl+j' },
-  { id: 'duplicate', label: 'Duplicate Selection', category: 'Modeling', defaultKey: 'Shift+d', currentKey: 'Shift+d' },
+  { id: 'duplicate', label: 'Duplicate Selection', category: 'Modeling', defaultKey: 'Shift+d', currentKey: 'Shift+d', description: 'Animate: duplicate keys on the current frame to the next frame. Elsewhere: duplicate the mesh selection.' },
+  { id: 'copy_selection', label: 'Copy Selection / Pose', category: 'System', defaultKey: 'Ctrl+c', currentKey: 'Ctrl+c', description: 'Model: copy mesh selection. Animate: copy pose. Disabled on the Paint tab.' },
+  { id: 'paste_clipboard', label: 'Paste Selection / Pose', category: 'System', defaultKey: 'Ctrl+v', currentKey: 'Ctrl+v', description: 'Model: paste clipboard. Animate: paste pose. Disabled on the Paint tab.' },
+  { id: 'paste_flipped_pose', label: 'Paste Mirrored Pose', category: 'Animation', defaultKey: 'Ctrl+Shift+v', currentKey: 'Ctrl+Shift+v' },
   { id: 'add_primitive', label: 'Add Primitive Placement', category: 'Modeling', defaultKey: 'Shift+a', currentKey: 'Shift+a' },
 
   // TRANSFORM
@@ -80,6 +83,9 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { id: 'unbind_geometry', label: 'Unbind Geometry', category: 'Animation', defaultKey: 'Alt+p', currentKey: 'Alt+p' },
 
   // UV & PAINTING
+  { id: 'smart_uv_project', label: 'Smart UV Project', category: 'UV & Painting', defaultKey: 'u', currentKey: 'u', description: 'UV tab only. Automatically cuts, projects, and packs the current selection or whole mesh.' },
+  { id: 'mark_seam', label: 'Mark Seam', category: 'UV & Painting', defaultKey: 'Ctrl+Shift+e', currentKey: 'Ctrl+Shift+e', description: 'Mark selected edges as seams, or the border of selected faces / UV islands.' },
+  { id: 'clear_seam', label: 'Clear Seam', category: 'UV & Painting', defaultKey: 'Ctrl+Alt+e', currentKey: 'Ctrl+Alt+e', description: 'Clear seams on selected edges, or on the border of selected faces / UV islands.' },
   { id: 'paint_brush', label: 'Paint Brush', category: 'UV & Painting', defaultKey: 'b', currentKey: 'b' },
   { id: 'paint_eraser', label: 'Paint Eraser', category: 'UV & Painting', defaultKey: 'e', currentKey: 'e' },
   { id: 'paint_bucket', label: 'Paint Bucket', category: 'UV & Painting', defaultKey: 'g', currentKey: 'g' },
@@ -89,7 +95,8 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { id: 'paint_circle', label: 'Circle Tool', category: 'UV & Painting', defaultKey: 'c', currentKey: 'c' },
   { id: 'paint_dither', label: 'Dither Brush', category: 'UV & Painting', defaultKey: 'd', currentKey: 'd' },
   { id: 'paint_shade', label: 'Shading Brush (UV/Paint)', category: 'UV & Painting', defaultKey: 'h', currentKey: 'h' },
-  { id: 'paint_uv_overlay', label: 'Toggle UV Overlay (Paint)', category: 'UV & Painting', defaultKey: 'o', currentKey: 'o' }
+  { id: 'paint_uv_overlay', label: 'Toggle UV Overlay (Paint)', category: 'UV & Painting', defaultKey: 'o', currentKey: 'o' },
+  { id: 'paint_swap_colors', label: 'Swap Paint Colors', category: 'UV & Painting', defaultKey: 'x', currentKey: 'x' }
 ]
 
 export const useKeymapStore = defineStore('keymap', () => {

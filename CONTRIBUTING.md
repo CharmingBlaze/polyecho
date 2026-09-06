@@ -9,13 +9,16 @@ Free toolchain already in the repo: Node.js 18+, npm, TypeScript, Vue, Vite.
 ```bash
 npm install
 npm run dev
+npm run dev:web
 npm run typecheck
+npm test
 npm run build
 ```
 
-- Dev server: [http://localhost:5173](http://localhost:5173)
+- `npm run dev` opens the Electron window (Vite on [http://localhost:5180](http://localhost:5180))
+- `npm run dev:web` is the SPA in a browser tab
 - `typecheck` runs `vue-tsc` (same checker as production build)
-- `build` is the full production compile
+- `build` compiles the renderer; `npm run dist` packages the desktop installer
 
 Editor: any editor that understands Vue SFCs and TypeScript. Official Vue language support (Volar) is recommended. See `.editorconfig` for indent (2 spaces, LF).
 
@@ -34,7 +37,7 @@ Split by layer, not by “half the UI”:
 1. **Types** in `src/types/` if the document model changes.
 2. **Pure core** (`geometry/`, `mesh/`, `export/`, `animation/`) with no Vue imports.
 3. **Store API** that records history and bumps revisions.
-4. **Input** — `App.vue` key handler and/or `editorCommands` (`requestModalTool`). Update `keymapStore` for the Hotkeys list only. Do not add new calls through unused `InputRouter` / `ActionRegistry` unless you are wiring those modules for real.
+4. **Input** — `App.vue` key handler and/or `editorCommands` (`requestModalTool`). Put new shortcuts on `keymapStore`. `ActionRegistry` is command-palette catalog only unless you wire it for live keys.
 5. **UI** last (menu, inspector, palette).
 6. **Verify** in the running app: the new path, undo/redo, a neighboring mode (Model / UV / Rig / Animate), and export if data leaves the session.
 
@@ -47,10 +50,14 @@ Do not rewrite `Viewport3D.vue` or `projectStore.ts` unless the feature cannot l
 - New mesh math: return a new `MeshObject` (or mutate `EditableMesh` only inside an operator session).
 - Import with `@/` or relative paths; stay consistent with the nearest file.
 - Do not add a second state library, router, or CSS framework. Tailwind + existing `src/components/ui/` is the UI kit.
+- Icons: `BlenderIcon` (`docs/ICONS.md`). Lucide is a last resort, not the default.
+- New canvases: LMB is the tool, **RMB pans** (`docs/INPUT.md`).
 
 ## Verification
 
-There is no automated test suite yet. For modeling, rigging, paint, and export work, run the app and exercise the flow by hand:
+`npm test` runs Vitest on core invariants (edge ids, mesh bridge, project parse, OBJ round-trip, UV islands, skin weights). Add a `*.test.ts` next to the module you change. CI runs typecheck, tests, `npm run build`, and on Windows an unpacked Electron pack. PixelBuffer tests use the happy-dom 2D stub in `src/test/canvas2dStub.ts`.
+
+For modeling, rigging, paint, and export work, still run the app and exercise the flow by hand:
 
 - Create or select geometry, run the tool, confirm, undo, redo.
 - Switch select modes (`1`–`4`) and app modes if the change is not local to one panel.

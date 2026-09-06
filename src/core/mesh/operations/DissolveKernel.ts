@@ -1,9 +1,9 @@
+import * as THREE from 'three'
 import { EditableMesh } from '../MeshKernel'
 
 export class DissolveKernel {
   /**
-   * Dissolves an edge between two adjacent faces, merging them into a single polygon
-   * without deleting surrounding geometry.
+   * Dissolves an edge between two adjacent faces, merging them into one polygon.
    */
   static dissolveEdge(mesh: EditableMesh, edgeId: number): boolean {
     const edge = mesh.edges.get(edgeId)
@@ -16,29 +16,37 @@ export class DissolveKernel {
 
     const vA = edge.v1
     const vB = edge.v2
-
-    // Build merged vertex loop
-    // Traverse face1 up to edge (vA, vB), then stitch face2 in reverse
     const verts1 = face1.vertexIds
     const n1 = verts1.length
-
-    const mergedVerts: number[] = []
     const idxA = verts1.indexOf(vA)
+    if (idxA < 0) return false
 
+    const loop1: number[] = []
+    const uvs1: THREE.Vector2[] = []
     for (let i = 0; i < n1; i++) {
-      const v = verts1[(idxA + i) % n1]
-      mergedVerts.push(v)
+      const idx = (idxA + i) % n1
+      loop1.push(verts1[idx])
+      uvs1.push(face1.uvs[idx]?.clone() ?? new THREE.Vector2())
     }
 
-    // Replace the edge vertices with the remaining face2 vertices
     const verts2 = face2.vertexIds
-    const otherFace2Verts = verts2.filter(vid => vid !== vA && vid !== vB)
+    const otherVerts2: number[] = []
+    const otherUvs2: THREE.Vector2[] = []
+    for (let i = 0; i < verts2.length; i++) {
+      const vid = verts2[i]
+      if (vid === vA || vid === vB) continue
+      otherVerts2.push(vid)
+      otherUvs2.push(face2.uvs[i]?.clone() ?? new THREE.Vector2())
+    }
 
     const finalVerts: number[] = []
-    for (const v of mergedVerts) {
-      finalVerts.push(v)
-      if (v === vB) {
-        finalVerts.push(...otherFace2Verts)
+    const finalUvs: THREE.Vector2[] = []
+    for (let i = 0; i < loop1.length; i++) {
+      finalVerts.push(loop1[i])
+      finalUvs.push(uvs1[i])
+      if (loop1[i] === vB) {
+        finalVerts.push(...otherVerts2)
+        finalUvs.push(...otherUvs2)
       }
     }
 
@@ -49,9 +57,18 @@ export class DissolveKernel {
     mesh.removeFace(f2Id)
     mesh.removeEdge(edgeId)
 
-    mesh.addFace(finalVerts, undefined, matIdx, color)
+    if (finalVerts.length < 3) return false
+    mesh.addFace(finalVerts, finalUvs, matIdx, color)
     mesh.recalculateNormals()
-
     return true
+  }
+
+  static findEdgeId(mesh: EditableMesh, v1: number, v2: number): number | null {
+    for (const edge of mesh.edges.values()) {
+      if ((edge.v1 === v1 && edge.v2 === v2) || (edge.v1 === v2 && edge.v2 === v1)) {
+        return edge.id
+      }
+    }
+    return null
   }
 }

@@ -7,33 +7,23 @@ import { useAnimationStore } from '../../stores/animationStore'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import PolyEchoLogo from '../icons/PolyEchoLogo.vue'
 import ImportTextureModal from '../modals/ImportTextureModal.vue'
-import { 
-  Download, 
-  Upload,
-  Undo2, 
-  Redo2, 
-  Keyboard, 
-  FolderOpen,
-  Save,
-  Plus,
-  Image as ImageIcon,
-  Tv,
-  Palette,
-  Compass,
-  Crosshair,
-  Magnet,
-  FlipHorizontal,
-  ChevronDown,
-  Check,
-  Sliders,
-  Layers,
-  Search
-} from 'lucide-vue-next'
 
 import type { PivotPoint } from '../../types/tools'
-import { ProjectSerializer } from '../../core/project/ProjectSerializer'
+import { loadOpenProject, saveOpenProject } from '../../core/project/projectIo'
 import { ObjImport } from '../../core/import/ObjImport'
 import { GltfImport } from '../../core/import/GltfImport'
+import {
+  getLastProjectPath,
+  isDesktopApp,
+  listRecentProjects,
+  openBinaryFile,
+  openProjectPath,
+  openTextFile,
+  requestDesktopQuit,
+  revealCrashLog,
+  revealInFolder,
+  showDesktopAbout
+} from '../../core/desktop/desktopApi'
 import { EDITOR_EVENTS, requestCameraView, requestPrimitiveMenu } from '../../core/commands/editorCommands'
 
 type NavMenu = 'file' | 'edit' | 'add' | 'workspace' | 'space' | 'view' | 'snap' | 'overlays' | 'shade' | null
@@ -45,6 +35,8 @@ const historyStore = useHistoryStore()
 const animationStore = useAnimationStore()
 
 const isImporting = ref(false)
+const recentProjects = ref<string[]>([])
+const lastSavedPath = ref<string | null>(null)
 const activeDropdown = ref<NavMenu>(null)
 const cameraView = ref<CameraView>('persp')
 
@@ -64,7 +56,9 @@ const showImportModal = ref(false)
 const pendingImportFile = ref<File | null>(null)
 
 function toggleDropdown(name: NavMenu) {
-  activeDropdown.value = activeDropdown.value === name ? null : name
+  const next = activeDropdown.value === name ? null : name
+  activeDropdown.value = next
+  if (next === 'file' && isDesktopApp()) void refreshRecent()
 }
 
 function closeDropdowns() {
@@ -141,47 +135,61 @@ function onDocPointerDown(e: PointerEvent) {
   if (!root) closeDropdowns()
 }
 
-// File / Project handlers
-function saveProject() {
-  const jsonStr = ProjectSerializer.serialize(
-    projectStore.projectName,
-    projectStore.meshes,
-    projectStore.pixelBuffer.canvas,
-    projectStore.activePalette,
-    projectStore.materials,
-    animationStore.armature,
-    animationStore.armature.clips,
-    animationStore.armature.activeClipId,
-    animationStore.currentFrame,
-    toolStore.viewport,
-    projectStore.textures,
-    projectStore.referenceImages
-  )
-  ProjectSerializer.downloadProject(jsonStr, projectStore.projectName || 'PSX_Model')
+async function saveProject(saveAs = false) {
+  await saveOpenProject({ saveAs })
   closeDropdowns()
+}
+
+async function refreshRecent() {
+  recentProjects.value = await listRecentProjects()
+  lastSavedPath.value = getLastProjectPath()
+}
+
+function recentLabel(filePath: string) {
+  const parts = filePath.replace(/\\/g, '/').split('/')
+  return parts[parts.length - 1] || filePath
+}
+
+async function applyProjectText(text: string, filePath?: string | null) {
+  await loadOpenProject(text, filePath)
+}
+
+async function openProject() {
+  closeDropdowns()
+  if (isDesktopApp()) {
+    const file = await openTextFile([{ name: 'PolyEcho Project', extensions: ['psxproj'] }])
+    if (!file) return
+    try {
+      await applyProjectText(file.text, file.path)
+      await refreshRecent()
+    } catch (err) {
+      alert('Failed to load project: ' + err)
+    }
+    return
+  }
+  loadProjectInput.value?.click()
+}
+
+async function openRecent(filePath: string) {
+  closeDropdowns()
+  const file = await openProjectPath(filePath)
+  if (!file) {
+    alert('Could not open that project. It may have been moved or deleted.')
+    await refreshRecent()
+    return
+  }
+  try {
+    await applyProjectText(file.text, file.path)
+  } catch (err) {
+    alert('Failed to load project: ' + err)
+  }
 }
 
 async function handleLoadProject(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
   if (!file) return
   try {
-    const text = await file.text()
-    const proj = ProjectSerializer.deserialize(text)
-    projectStore.projectName = proj.projectName || 'Project'
-    projectStore.meshes = proj.meshes || []
-    if (proj.materials) projectStore.materials = proj.materials
-    if (proj.activePalette) projectStore.activePalette = proj.activePalette
-    if (proj.referenceImages) projectStore.referenceImages = proj.referenceImages
-    if (proj.armature) animationStore.armature = proj.armature
-    if (proj.animations) animationStore.armature.clips = proj.animations
-    if (proj.textures && proj.textures.length > 0) {
-      projectStore.textures = []
-      for (const t of proj.textures) {
-        projectStore.createTexture(t.name, t.width, t.height, t.dataUrl, undefined, { record: false, select: false, atlas: t.atlas })
-      }
-    }
-    projectStore.markGeometryUpdated()
-    projectStore.recordState('Load Project')
+    await applyProjectText(await file.text())
   } catch (err) {
     alert('Failed to load project: ' + err)
   } finally {
@@ -190,14 +198,22 @@ async function handleLoadProject(e: Event) {
   }
 }
 
-async function handleImportObj(e: Event) {
-  const file = (e.target as HTMLInputElement).files?.[0]
-  if (!file) return
+async function importObj() {
+  closeDropdowns()
+  if (isDesktopApp()) {
+    const file = await openTextFile([{ name: 'Wavefront OBJ', extensions: ['obj'] }])
+    if (!file) return
+    await importObjText(file.text, file.name)
+    return
+  }
+  importObjInput.value?.click()
+}
+
+async function importObjText(text: string, fileName: string) {
   if (isImporting.value) return
   isImporting.value = true
   try {
-    const text = await file.text()
-    const result = ObjImport.parse(text, file.name.replace('.obj', ''))
+    const result = ObjImport.parse(text, fileName.replace('.obj', ''))
     if (result.meshes.length > 0) {
       for (const m of result.meshes) {
         projectStore.meshes.push(m)
@@ -205,27 +221,68 @@ async function handleImportObj(e: Event) {
       projectStore.activeMeshId = result.meshes[0].id
       projectStore.selectedMeshIds = [result.meshes[0].id]
       projectStore.markGeometryUpdated()
-      projectStore.recordState(`Import OBJ (${file.name})`)
+      projectStore.recordState(`Import OBJ (${fileName})`)
     }
-  } catch (err) {
+  } catch {
     alert('Failed to import OBJ')
   } finally {
     isImporting.value = false
+  }
+}
+
+async function handleImportObj(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  try {
+    await importObjText(await file.text(), file.name)
+  } finally {
     if (importObjInput.value) importObjInput.value.value = ''
     closeDropdowns()
   }
 }
 
-async function handleImportGltf(e: Event) {
-  const file = (e.target as HTMLInputElement).files?.[0]
-  if (!file) return
+async function importGltf() {
+  closeDropdowns()
+  if (isDesktopApp()) {
+    const file = await openBinaryFile([{ name: 'glTF', extensions: ['glb', 'gltf'] }])
+    if (!file) return
+    await importGltfBuffer(file.bytes, file.name)
+    return
+  }
+  importGltfInput.value?.click()
+}
+
+async function importGltfBuffer(buffer: ArrayBuffer, fileName: string) {
   if (isImporting.value) return
   isImporting.value = true
   try {
-    const buffer = await file.arrayBuffer()
-    const result = await GltfImport.loadFromArrayBuffer(buffer, file.name)
+    const result = await GltfImport.loadFromArrayBuffer(buffer, fileName)
+    const texIdMap = new Map<string, string>()
+    for (const tex of result.textures ?? []) {
+      const created = projectStore.createTexture(
+        tex.name,
+        tex.width || 64,
+        tex.height || 64,
+        tex.dataUrl,
+        undefined,
+        { record: false, select: false }
+      )
+      texIdMap.set(tex.id, created.id)
+    }
+    const matIdMap = new Map<string, string>()
+    for (const mat of result.materials ?? []) {
+      const created = projectStore.createMaterial(
+        mat.name,
+        mat.color,
+        mat.textureId ? (texIdMap.get(mat.textureId) ?? null) : null,
+        { record: false, select: false }
+      )
+      matIdMap.set(mat.id, created.id)
+    }
     if (result.meshes.length > 0) {
       for (const m of result.meshes) {
+        const remapped = m.materialId ? matIdMap.get(m.materialId) : undefined
+        if (remapped) m.materialId = remapped
         projectStore.meshes.push(m)
       }
       projectStore.activeMeshId = result.meshes[0].id
@@ -235,14 +292,35 @@ async function handleImportGltf(e: Event) {
       animationStore.armature = result.armature
     }
     projectStore.markGeometryUpdated()
-    projectStore.recordState(`Import GLTF (${file.name})`)
-  } catch (err) {
+    projectStore.recordState(`Import GLTF (${fileName})`)
+  } catch {
     alert('Failed to import GLTF')
   } finally {
     isImporting.value = false
+  }
+}
+
+async function handleImportGltf(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  try {
+    await importGltfBuffer(await file.arrayBuffer(), file.name)
+  } finally {
     if (importGltfInput.value) importGltfInput.value.value = ''
     closeDropdowns()
   }
+}
+
+async function importTexture() {
+  closeDropdowns()
+  if (isDesktopApp()) {
+    const file = await openBinaryFile([{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }])
+    if (!file) return
+    pendingImportFile.value = new File([file.bytes], file.name)
+    showImportModal.value = true
+    return
+  }
+  importTextureInput.value?.click()
 }
 
 function handleImportTexture(e: Event) {
@@ -267,7 +345,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <header class="master-header-container relative h-8 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between text-xs select-none z-40 font-sans shrink-0">
+  <header class="master-header-container relative h-8 w-full min-w-0 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between text-xs select-none z-40 font-sans shrink-0">
     <!-- Hidden Inputs for File Import -->
     <input ref="loadProjectInput" type="file" accept=".psxproj" class="hidden" @change="handleLoadProject" />
     <input ref="importObjInput" type="file" accept=".obj" class="hidden" @change="handleImportObj" />
@@ -276,7 +354,7 @@ onUnmounted(() => {
 
     <!-- 1. LEFT: Logo + File, Edit, Add Menus + Space/Snap/Symmetry -->
     <div class="flex items-center space-x-1 shrink-0 z-20">
-      <PolyEchoLogo class="mr-2 ml-0.5" />
+      <PolyEchoLogo class="hidden min-[1366px]:flex mr-2 ml-0.5" />
 
       <!-- File Menu -->
       <div class="relative">
@@ -288,38 +366,84 @@ onUnmounted(() => {
           File
         </button>
 
-        <div v-if="activeDropdown === 'file'" class="absolute left-0 top-full mt-0.5 w-56 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+        <div v-if="activeDropdown === 'file'" class="absolute left-0 top-full mt-0.5 w-64 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
           <button @click="$emit('new-project'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between font-medium">
-            <span class="flex items-center gap-2"><Plus class="w-3.5 h-3.5 text-ui-accent" /> New Project</span>
+            <span class="flex items-center gap-2"><BlenderIcon name="plus" :size="14" /> New Project</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+N</span>
           </button>
-          <button @click="loadProjectInput?.click()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
-            <span class="flex items-center gap-2"><FolderOpen class="w-3.5 h-3.5 text-amber-400" /> Open (.psxproj)</span>
+          <button @click="openProject" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span class="flex items-center gap-2"><BlenderIcon name="folder" :size="14" color="#fbbf24" /> Open (.psxproj)</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+O</span>
           </button>
-          <button @click="saveProject" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
-            <span class="flex items-center gap-2"><Save class="w-3.5 h-3.5 text-emerald-400" /> Save Project</span>
+          <button @click="saveProject(false)" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span class="flex items-center gap-2"><BlenderIcon name="save" :size="14" color="#34d399" /> Save Project</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+S</span>
           </button>
+          <button v-if="isDesktopApp()" @click="saveProject(true)" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span class="flex items-center gap-2"><BlenderIcon name="save" :size="14" color="#34d399" /> Save As…</span>
+          </button>
+          <button
+            v-if="isDesktopApp() && lastSavedPath"
+            class="w-full text-left px-3 py-1.5 hover:bg-ui-hover"
+            @click="void revealInFolder(lastSavedPath!); closeDropdowns()"
+          >
+            Show Project in Folder
+          </button>
+
+          <template v-if="isDesktopApp() && recentProjects.length > 0">
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <div class="px-3 py-1 text-[9.5px] font-bold text-ui-textMuted uppercase tracking-wider">Open Recent</div>
+            <button
+              v-for="item in recentProjects"
+              :key="item"
+              :title="item"
+              class="w-full text-left px-3 py-1.5 hover:bg-ui-hover truncate"
+              @click="openRecent(item)"
+            >
+              {{ recentLabel(item) }}
+            </button>
+          </template>
 
           <div class="h-px bg-ui-borderSubtle my-1"></div>
 
           <div class="px-3 py-1 text-[9.5px] font-bold text-ui-textMuted uppercase tracking-wider">Import</div>
-          <button @click="importObjInput?.click()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
-            <Upload class="w-3.5 h-3.5 text-ui-textMuted" /> Wavefront (.obj)
+          <button @click="importObj" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
+            <BlenderIcon name="import" :size="14" /> Wavefront (.obj)
           </button>
-          <button @click="importGltfInput?.click()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
-            <Upload class="w-3.5 h-3.5 text-ui-textMuted" /> GLTF / GLB (.glb)
+          <button @click="importGltf" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
+            <BlenderIcon name="import" :size="14" /> GLTF / GLB (.glb)
           </button>
-          <button @click="importTextureInput?.click()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
-            <ImageIcon class="w-3.5 h-3.5 text-ui-textMuted" /> Texture (PNG, JPG)
+          <button @click="importTexture" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
+            <BlenderIcon name="image" :size="14" /> Texture (PNG, JPG)
           </button>
 
           <div class="h-px bg-ui-borderSubtle my-1"></div>
 
           <button @click="$emit('open-preferences'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
-            <span class="flex items-center gap-2"><Sliders class="w-3.5 h-3.5 text-sky-400" /> Properties & Preferences</span>
+            <span class="flex items-center gap-2"><BlenderIcon name="settings" :size="14" color="#38bdf8" /> Properties & Preferences</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+,</span>
+          </button>
+          <button
+            v-if="isDesktopApp()"
+            class="w-full text-left px-3 py-1.5 hover:bg-ui-hover"
+            @click="void showDesktopAbout(); closeDropdowns()"
+          >
+            About PolyEcho
+          </button>
+          <button
+            v-if="isDesktopApp()"
+            class="w-full text-left px-3 py-1.5 hover:bg-ui-hover"
+            @click="void revealCrashLog(); closeDropdowns()"
+          >
+            Open Crash Log
+          </button>
+          <button
+            v-if="isDesktopApp()"
+            class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between"
+            @click="void requestDesktopQuit(); closeDropdowns()"
+          >
+            <span>Quit</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Alt+F4</span>
           </button>
         </div>
       </div>
@@ -336,19 +460,19 @@ onUnmounted(() => {
 
         <div v-if="activeDropdown === 'edit'" class="absolute left-0 top-full mt-0.5 w-52 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
           <button @click="historyStore.undo(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
-            <span class="flex items-center gap-2"><Undo2 class="w-3.5 h-3.5" /> Undo</span>
+            <span class="flex items-center gap-2"><BlenderIcon name="undo" :size="14" /> Undo</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+Z</span>
           </button>
           <button @click="historyStore.redo(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
-            <span class="flex items-center gap-2"><Redo2 class="w-3.5 h-3.5" /> Redo</span>
+            <span class="flex items-center gap-2"><BlenderIcon name="redo" :size="14" /> Redo</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+Y</span>
           </button>
           <div class="h-px bg-ui-borderSubtle my-1"></div>
           <button @click="$emit('open-preferences'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
-            <Palette class="w-3.5 h-3.5 text-amber-400" /> Preferences & Themes
+            <BlenderIcon name="material" :size="14" color="#f59e0b" /> Preferences & Themes
           </button>
           <button @click="$emit('open-hotkeys'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
-            <Keyboard class="w-3.5 h-3.5 text-sky-400" /> Hotkey Map
+            <BlenderIcon name="keyboard" :size="14" color="#38bdf8" /> Hotkey Map
           </button>
         </div>
       </div>
@@ -380,12 +504,12 @@ onUnmounted(() => {
           class="h-6 px-1.5 rounded-xs bg-ui-input border border-ui-borderDefault text-ui-textPrimary hover:bg-ui-hover flex items-center gap-1 text-[10.5px]"
           title="Transform Space & Pivot Point"
         >
-          <Compass class="w-3 h-3 text-sky-400 shrink-0" />
+          <BlenderIcon name="empty-axis" :size="12" color="#38bdf8" />
           <span class="capitalize">{{ toolStore.transformOrientation }}</span>
           <span class="text-ui-textMuted">·</span>
-          <Crosshair class="w-3 h-3 text-ui-textAccent shrink-0" />
+          <BlenderIcon name="pivot-point" :size="12" />
           <span>{{ pivotLabel[toolStore.pivotPoint] }}</span>
-          <ChevronDown class="w-3 h-3 text-ui-textMuted" />
+          <BlenderIcon name="chevron-down" :size="12" />
         </button>
 
         <div v-if="activeDropdown === 'space'" class="absolute left-0 top-full mt-0.5 w-60 bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-2 grid grid-cols-2 gap-2 z-50 text-[11px] font-mono">
@@ -399,7 +523,7 @@ onUnmounted(() => {
               :class="{ 'text-sky-400 font-semibold': toolStore.transformOrientation === ori }"
             >
               <span>{{ ori }}</span>
-              <Check v-if="toolStore.transformOrientation === ori" class="w-3 h-3" />
+              <BlenderIcon v-if="toolStore.transformOrientation === ori" name="check" :size="12" />
             </button>
           </div>
           <div>
@@ -416,7 +540,7 @@ onUnmounted(() => {
               :class="{ 'text-ui-textAccent font-semibold': toolStore.pivotPoint === piv.id }"
             >
               <span>{{ piv.label }}</span>
-              <Check v-if="toolStore.pivotPoint === piv.id" class="w-3 h-3" />
+              <BlenderIcon v-if="toolStore.pivotPoint === piv.id" name="check" :size="12" />
             </button>
           </div>
         </div>
@@ -431,7 +555,7 @@ onUnmounted(() => {
           title="Toggle Grid Snap"
           @click="toolStore.snapping.grid = !toolStore.snapping.grid"
         >
-          <Magnet class="w-3 h-3" />
+          <BlenderIcon name="snap" :size="12" />
           <span class="tabular-nums">{{ toolStore.snapping.gridSize }}</span>
         </button>
         <button
@@ -441,7 +565,7 @@ onUnmounted(() => {
           title="Snap increment and targets"
           @click="toggleDropdown('snap')"
         >
-          <ChevronDown class="w-3 h-3" />
+          <BlenderIcon name="chevron-down" :size="12" />
           <span
             v-if="snapTargetOn"
             class="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-ui-accent"
@@ -481,7 +605,7 @@ onUnmounted(() => {
 
       <!-- Symmetry Toggles (X Y Z) -->
       <div class="flex items-center h-6 px-1 gap-0.5 rounded-xs bg-ui-input border border-ui-borderDefault text-[10px] font-mono">
-        <FlipHorizontal class="w-3 h-3 text-ui-textMuted mr-0.5" />
+        <BlenderIcon name="flip-horizontal" :size="12" class="mr-0.5" />
         <button
           v-for="axis in (['X', 'Y', 'Z'] as const)"
           :key="axis"
@@ -512,7 +636,7 @@ onUnmounted(() => {
           :title="w.desc"
         >
           <BlenderIcon :name="w.icon" :size="12" />
-          <span>{{ w.label }}</span>
+          <span class="hidden min-[1280px]:inline">{{ w.label }}</span>
         </button>
       </div>
     </div>
@@ -527,7 +651,7 @@ onUnmounted(() => {
           title="Camera View"
         >
           <span class="text-ui-textAccent font-semibold">{{ toolStore.viewport.quadView ? 'Quad' : viewLabel[cameraView] }}</span>
-          <ChevronDown class="w-3 h-3 text-ui-textMuted" />
+          <BlenderIcon name="chevron-down" :size="12" />
         </button>
 
         <div v-if="activeDropdown === 'view'" class="absolute right-0 top-full mt-0.5 w-44 bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-1 z-50 text-[11px] font-mono">
@@ -579,7 +703,7 @@ onUnmounted(() => {
           title="Overlays"
           @click="toggleDropdown('overlays')"
         >
-          <Layers class="w-3 h-3" />
+          <BlenderIcon name="layers" :size="12" />
         </button>
         <div v-if="activeDropdown === 'overlays'" class="absolute right-0 top-full mt-0.5 w-52 bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-2 z-50 text-[11px] font-mono space-y-1.5">
           <div class="text-[9px] font-bold uppercase tracking-wider text-ui-textMuted">Overlays</div>
@@ -630,7 +754,7 @@ onUnmounted(() => {
           @click="toggleDropdown('shade')"
         >
           <span class="capitalize">{{ objectShade }}</span>
-          <ChevronDown class="w-3 h-3 text-ui-textMuted" />
+          <BlenderIcon name="chevron-down" :size="12" />
         </button>
         <div v-if="activeDropdown === 'shade'" class="absolute right-0 top-full mt-0.5 w-40 bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-1 z-50 text-[11px] font-mono">
           <button
@@ -676,7 +800,7 @@ onUnmounted(() => {
         title="Command search (F3)"
         @click="triggerCommandPalette"
       >
-        <Search class="w-3 h-3" />
+        <BlenderIcon name="search" :size="12" />
       </button>
 
       <!-- CRT / TV Scanline Filter -->
@@ -688,7 +812,7 @@ onUnmounted(() => {
           : 'text-ui-textMuted hover:text-ui-textPrimary border-ui-borderDefault bg-ui-input'"
         title="Toggle CRT Retro Scanlines"
       >
-        <Tv class="w-3 h-3" :class="toolStore.viewport.crtFilter ? 'text-amber-400' : 'text-ui-textMuted'" />
+        <BlenderIcon name="display" :size="12" :color="toolStore.viewport.crtFilter ? '#fbbf24' : 'currentColor'" />
       </button>
 
       <!-- Main Export Button -->
@@ -696,7 +820,7 @@ onUnmounted(() => {
         @click="$emit('open-export')"
         class="flex items-center gap-1 px-2.5 h-6 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs text-[11px] font-semibold shadow-xs transition active:scale-95 cursor-pointer ml-1"
       >
-        <Download class="w-3 h-3" />
+        <BlenderIcon name="export" :size="12" />
         <span>Export</span>
       </button>
     </div>

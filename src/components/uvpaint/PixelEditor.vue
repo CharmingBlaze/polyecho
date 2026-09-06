@@ -8,30 +8,13 @@ import BlenderIcon from '../icons/BlenderIcon.vue'
 import ImportTextureModal from '../modals/ImportTextureModal.vue'
 import PaletteLibraryModal from '../modals/PaletteLibraryModal.vue'
 import { DEFAULT_PALETTES, loadCustomPalettes, saveCustomPalettes, snapColorToPalette, type Palette } from '../../utils/color'
-import { useFloatingDrag } from '../../composables/useFloatingDrag'
-import { 
-  ZoomIn, 
-  ZoomOut, 
-  Grid, 
-  Upload, 
-  Download, 
-  ArrowLeftRight, 
-  Maximize, 
-  Sparkles, 
-  Sun, 
-  Moon,
-  Plus,
-  Copy,
-  Trash2,
-  Layers,
-  GripHorizontal,
-  Minus,
-  X,
-  Eye,
-  EyeOff
+import {
+  Sun,
+  Moon
 } from 'lucide-vue-next'
 import { generateShadingRamp } from '../../utils/color'
 import { EDITOR_EVENTS } from '../../core/commands/editorCommands'
+import { saveBlobDocument } from '../../core/desktop/desktopApi'
 
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
@@ -84,6 +67,11 @@ function handleApplyPaintTargetToMesh() {
   applyToActiveMesh(projectStore.activeTexture.id)
 }
 
+function handleActiveObjectChange(meshId: string) {
+  projectStore.selectMesh(meshId)
+  nextTick(() => renderCanvas())
+}
+
 // Shading Tool Options State
 const shadeMode = ref<'lighten' | 'darken'>('lighten')
 const shadeStep = ref<number>(15)
@@ -115,17 +103,6 @@ const zoom = ref<number>(6)
 const isFitToView = ref<boolean>(true)
 const showUvOverlay = ref<boolean>(true)
 const showPixelGrid = ref<boolean>(true)
-const layersPanelOpen = ref(true)
-const layersMinimized = ref(false)
-const layersPos = ref({ x: 88, y: 120 })
-const { isDragging: layersDragging, startDrag: startLayersDrag } = useFloatingDrag(layersPos, {
-  minX: 8,
-  minY: 36,
-  maxPadX: 220,
-  maxPadY: 72
-})
-const paintLayerCount = computed(() => projectStore.pixelBuffer.layers.length)
-
 const paintTools = [
   { id: 'brush', icon: 'brush', key: 'B', title: 'Pencil / Brush Tool' },
   { id: 'eraser', icon: 'eraser', key: 'E', title: 'Eraser Tool' },
@@ -148,6 +125,7 @@ let containerResizeObserver: ResizeObserver | null = null
 // Interactive Drawing & Shape drag preview states
 let isDrawing = false
 let strokeDirty = false
+let drawUsesSecondary = false
 let dragStartCoords: { x: number; y: number } | null = null
 let dragCurrentCoords: { x: number; y: number } | null = null
 let lastDrawCoords: { x: number; y: number } | null = null
@@ -267,14 +245,12 @@ function handleTextureImported(texId?: string) {
 
 function downloadTexturePng() {
   projectStore.pixelBuffer.canvas.toBlob((blob) => {
-    if (blob) {
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${projectStore.projectName}_texture_${projectStore.pixelBuffer.width}x${projectStore.pixelBuffer.height}.png`
-      a.click()
-      URL.revokeObjectURL(url)
-    }
+    if (!blob) return
+    void saveBlobDocument(
+      blob,
+      `${projectStore.projectName}_texture_${projectStore.pixelBuffer.width}x${projectStore.pixelBuffer.height}.png`,
+      [{ name: 'PNG', extensions: ['png'] }]
+    )
   })
 }
 
@@ -297,20 +273,6 @@ function syncActiveTextureSize(w: number, h: number) {
   }
 }
 
-function handleQuickResize(w: number, h: number) {
-  projectStore.recordState(`Resize Texture to ${w}x${h}`)
-  projectStore.pixelBuffer.resize(w, h, 'crop')
-  syncActiveTextureSize(w, h)
-  const maxDim = Math.max(w, h)
-  if (maxDim >= 1024) zoom.value = 1
-  else if (maxDim >= 512) zoom.value = 2
-  else if (maxDim >= 256) zoom.value = 3
-  else if (maxDim >= 128) zoom.value = 4
-  else zoom.value = 6
-  projectStore.markTextureUpdated()
-  renderCanvas()
-}
-
 function applyCustomResize() {
   projectStore.recordState(`Resize Texture to ${resizeW.value}x${resizeH.value}`)
   projectStore.pixelBuffer.resize(resizeW.value, resizeH.value, resizeMode.value)
@@ -327,8 +289,15 @@ let initialPinchZoom = 6
 let initialPinchPan = { x: 0, y: 0 }
 let activePenPointerId: number | null = null
 
+function isTypingTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false
+  const tag = target.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable
+}
+
 function onKeyDown(e: KeyboardEvent) {
-  if (e.code === 'Space') {
+  if (e.code === 'Space' && !isTypingTarget(e.target)) {
+    e.preventDefault()
     isSpacePressed.value = true
   }
 }
@@ -342,56 +311,6 @@ function onKeyUp(e: KeyboardEvent) {
     isSpacePressed.value = false
     isPanning.value = false
   }
-}
-
-function handleAddLayer() {
-  projectStore.recordState('Add Texture Layer')
-  projectStore.pixelBuffer.addLayer()
-  projectStore.markTextureUpdated()
-  renderCanvas()
-}
-
-function handleDeleteLayer(id: string) {
-  projectStore.recordState('Delete Texture Layer')
-  projectStore.pixelBuffer.deleteLayer(id)
-  projectStore.markTextureUpdated()
-  renderCanvas()
-}
-
-function handleDuplicateLayer(id: string) {
-  projectStore.recordState('Duplicate Texture Layer')
-  projectStore.pixelBuffer.duplicateLayer(id)
-  projectStore.markTextureUpdated()
-  renderCanvas()
-}
-
-function handleLayerMetaChange() {
-  projectStore.pixelBuffer.composite()
-  projectStore.markTextureUpdated()
-  renderCanvas()
-}
-
-function setActiveLayer(id: string) {
-  projectStore.pixelBuffer.activeLayerId = id
-  renderCanvas()
-}
-
-function toggleLayersPanel() {
-  if (layersPanelOpen.value && !layersMinimized.value) {
-    layersPanelOpen.value = false
-    return
-  }
-  layersPanelOpen.value = true
-  layersMinimized.value = false
-}
-
-function closeLayersPanel() {
-  layersPanelOpen.value = false
-}
-
-function toggleLayerVisible(layer: { visible: boolean }) {
-  layer.visible = !layer.visible
-  handleLayerMetaChange()
 }
 
 function applyAdjustment(action: string) {
@@ -509,7 +428,7 @@ function renderCanvas() {
 
   // 5. Draw Interactive Live Shape Preview (Line, Rect, Circle)
   if (isDrawing && dragStartCoords && dragCurrentCoords) {
-    const isSecondary = false
+    const isSecondary = drawUsesSecondary
     const color = isSecondary ? toolStore.secondaryColor : toolStore.primaryColor
     const size = toolStore.brushSize
     const opacity = toolStore.brushOpacity
@@ -621,14 +540,14 @@ function onPointerDown(e: PointerEvent) {
     return
   }
 
-  // Middle click, Space+LMB, Alt+LMB -> Pan Canvas
-  if (e.button === 1 || (e.button === 0 && isSpacePressed.value) || e.altKey) {
+  // RMB / MMB / Space+LMB / Alt+LMB -> Pan Canvas (secondary color is Ctrl+LMB or swatch RMB)
+  if (e.button === 1 || e.button === 2 || (e.button === 0 && isSpacePressed.value) || e.altKey) {
     isPanning.value = true
     panStart = { x: e.clientX - panOffset.value.x, y: e.clientY - panOffset.value.y }
     return
   }
 
-  if (e.button !== 0 && e.button !== 2) return
+  if (e.button !== 0) return
 
   toolStore.currentPointerType = (e.pointerType as any) || 'mouse'
   toolStore.currentPressure = e.pressure || 1.0
@@ -637,6 +556,7 @@ function onPointerDown(e: PointerEvent) {
   if (!coords) return
 
   isDrawing = true
+  drawUsesSecondary = e.ctrlKey || e.metaKey
   dragStartCoords = { ...coords }
   dragCurrentCoords = { ...coords }
   lastDrawCoords = null
@@ -648,7 +568,7 @@ function onPointerDown(e: PointerEvent) {
   }
 
   if (tool !== 'picker') projectStore.recordState('Pixel Paint')
-  drawPixel(coords.x, coords.y, e.button === 2, e.pressure)
+  drawPixel(coords.x, coords.y, drawUsesSecondary, e.pressure)
 }
 
 function onPointerMove(e: PointerEvent) {
@@ -706,8 +626,8 @@ function onPointerMove(e: PointerEvent) {
     const tool = toolStore.paintTool
     if (tool === 'line' || tool === 'rect' || tool === 'circle') {
       renderCanvas()
-    } else {
-      drawPixel(coords.x, coords.y, e.buttons === 2, e.pressure)
+    } else if (tool !== 'bucket') {
+      drawPixel(coords.x, coords.y, drawUsesSecondary, e.pressure)
     }
   }
 }
@@ -736,7 +656,7 @@ function onPointerUp(e: PointerEvent) {
 
   if (coords && dragStartCoords && (tool === 'line' || tool === 'rect' || tool === 'circle')) {
     projectStore.recordState(`Draw ${tool}`)
-    const isSecondary = e.button === 2
+    const isSecondary = drawUsesSecondary
     const color = resolveDrawColor(isSecondary)
     const size = toolStore.brushSize
     const opacity = toolStore.brushOpacity
@@ -762,6 +682,7 @@ function onPointerUp(e: PointerEvent) {
     renderCanvas()
   }
   strokeDirty = false
+  drawUsesSecondary = false
   dragStartCoords = null
   dragCurrentCoords = null
   lastDrawCoords = null
@@ -907,6 +828,8 @@ function resetPanZoom() {
 
 
 watch(() => projectStore.textureRevision, renderCanvas)
+watch(() => projectStore.geometryRevision, renderCanvas)
+watch(() => projectStore.activeMeshId, renderCanvas)
 watch(() => projectStore.activeTextureId, () => {
   nextTick(() => {
     resetPanZoom()
@@ -925,8 +848,6 @@ onMounted(() => {
   nextTick(() => {
     resetPanZoom()
     if (containerRef.value) {
-      const rect = containerRef.value.getBoundingClientRect()
-      layersPos.value = { x: rect.left + 10, y: rect.top + 10 }
       containerResizeObserver = new ResizeObserver(() => {
         if (isFitToView.value) resetPanZoom()
       })
@@ -959,38 +880,15 @@ defineExpose({
   <div class="pixel-editor h-full w-full bg-ui-panel flex flex-col select-none overflow-hidden touch-none relative font-mono text-xs">
     <input ref="fileInputRef" type="file" accept="image/*" @change="handleTextureUpload" class="hidden" />
 
-    <!-- 1. ROW 1: WORKSPACE TABS & UNIFIED 3D ASSET BINDING HIERARCHY -->
-    <div class="pixel-header-row-1 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between gap-2 shrink-0 z-30 select-none h-8.5 min-h-[34px]">
-      <!-- Main 2D Workspace Tabs: UV Editor vs Pixel Paint -->
-      <div class="workspace-tabs flex items-center bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle shrink-0">
-        <button 
-          @click="toolStore.uvWorkspaceTab = 'uv'"
-          class="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-xs text-[10px] font-bold transition cursor-pointer"
-          :class="toolStore.uvWorkspaceTab === 'uv' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
-          title="UV Unwrapping, Seams & Quadrant Atlas Mapping"
-        >
-          <BlenderIcon name="uv" :size="12" />
-          <span>UV</span>
-        </button>
-
-        <button 
-          @click="toolStore.uvWorkspaceTab = 'paint'"
-          class="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-xs text-[10px] font-bold transition cursor-pointer"
-          :class="toolStore.uvWorkspaceTab === 'paint' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
-          title="Pixel & Texture Paint Studio"
-        >
-          <BlenderIcon name="brush" :size="11" />
-          <span>Paint</span>
-        </button>
-      </div>
-
-      <!-- Center: Unified Asset Pipeline Hierarchy (OBJ -> MAT -> TEX) -->
-      <div class="asset-pipeline flex items-center gap-1.5 shrink-0 overflow-x-auto">
+    <div class="pixel-header-row bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center gap-2 shrink-0 z-30 select-none h-8.5 min-h-[34px]">
+      <!-- Unified Asset Pipeline Hierarchy (OBJ -> TEX) -->
+      <div class="asset-pipeline flex items-center gap-1.5 min-w-0">
         <!-- 1. Active 3D Object -->
         <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px] text-ui-textSecondary shrink-0">
           <span class="text-ui-textMuted font-bold text-[8.5px]">OBJ:</span>
           <select 
-            v-model="projectStore.activeMeshId" 
+            :value="projectStore.activeMeshId"
+            @change="handleActiveObjectChange(($event.target as HTMLSelectElement).value)"
             class="bg-transparent text-ui-textPrimary font-bold focus:outline-none cursor-pointer max-w-[100px] truncate"
             title="Active 3D Object"
           >
@@ -1026,9 +924,9 @@ defineExpose({
           <button 
             @click="showNewTextureModal = true"
             class="p-0.5 hover:bg-ui-hover text-emerald-400 rounded-xs transition cursor-pointer"
-            title="Create a new texture (paint target only)"
+            title="Create a new texture and bind it to the active object"
           >
-            <Plus class="w-3 h-3" />
+            <BlenderIcon name="plus" :size="12" />
           </button>
         </div>
 
@@ -1036,119 +934,25 @@ defineExpose({
         <div class="flex items-center bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle shrink-0">
           <button 
             @click="fileInputRef?.click()" 
-            class="flex items-center gap-1 px-2 py-0.5 hover:bg-ui-hover text-ui-textAccent rounded-xs text-[10px] font-bold transition cursor-pointer whitespace-nowrap"
+            class="flex items-center px-1.5 py-0.5 hover:bg-ui-hover text-ui-textAccent rounded-xs transition cursor-pointer"
             title="Import Texture Image"
           >
-            <Upload class="w-3 h-3 text-ui-accent" />
-            <span>Import</span>
+            <BlenderIcon name="import" :size="12" />
           </button>
 
           <button 
             @click="downloadTexturePng" 
-            class="flex items-center gap-1 px-2 py-0.5 hover:bg-ui-hover text-emerald-400 rounded-xs text-[10px] font-bold transition cursor-pointer whitespace-nowrap"
+            class="flex items-center px-1.5 py-0.5 hover:bg-ui-hover text-emerald-400 rounded-xs transition cursor-pointer"
             title="Export Texture PNG"
           >
-            <Download class="w-3 h-3 text-emerald-400" />
-            <span>Export</span>
-          </button>
-        </div>
-
-        <!-- Canvas Resolution Selector -->
-        <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px] shrink-0">
-          <span class="text-ui-textMuted font-bold text-[8.5px]">RES:</span>
-          <select 
-            @change="(e) => {
-              const val = (e.target as HTMLSelectElement).value
-              if (val === 'custom') {
-                resizeW = projectStore.pixelBuffer.width
-                resizeH = projectStore.pixelBuffer.height
-                showResizeModal = true
-              } else {
-                const [w, h] = val.split('x').map(Number)
-                handleQuickResize(w, h)
-              }
-              ;(e.target as HTMLSelectElement).value = 'default'
-            }"
-            class="bg-transparent text-amber-400 font-bold focus:outline-none cursor-pointer"
-          >
-            <option value="default" disabled selected class="bg-ui-panel">{{ projectStore.pixelBuffer.width }}x{{ projectStore.pixelBuffer.height }}</option>
-            <option value="64x64" class="bg-ui-panel text-ui-textPrimary">64 × 64 (PSX)</option>
-            <option value="128x128" class="bg-ui-panel text-ui-textPrimary">128 × 128 (Low-Poly)</option>
-            <option value="256x256" class="bg-ui-panel text-ui-textPrimary">256 × 256 (Atlas)</option>
-            <option value="512x512" class="bg-ui-panel text-ui-textPrimary">512 × 512 (HD)</option>
-            <option value="custom" class="bg-ui-panel text-ui-textAccent font-bold">Custom Size...</option>
-          </select>
-        </div>
-      </div>
-
-      <!-- Right: Primary & Secondary Color Swatch + Hex Input in Row 1 -->
-      <div class="editor-color-strip flex items-center gap-1.5 shrink-0 bg-ui-input px-2 py-0.5 rounded-xs border border-ui-borderSubtle">
-        <span class="text-[9px] text-ui-textMuted font-bold uppercase">Color:</span>
-        <label class="w-5 h-5 rounded-xs border border-ui-borderStrong cursor-pointer shadow-xs relative overflow-hidden block" :style="{ backgroundColor: toolStore.primaryColor }">
-          <input type="color" v-model="toolStore.primaryColor" class="opacity-0 absolute inset-0 w-full h-full cursor-pointer" />
-        </label>
-        <input 
-          type="text" 
-          v-model="toolStore.primaryColor" 
-          class="w-16 px-1.5 py-0.5 bg-ui-panel text-ui-textPrimary font-mono text-[10px] font-bold border border-ui-borderSubtle rounded-xs focus:outline-none focus:border-ui-accent uppercase text-center" 
-          aria-label="Color hex" 
-        />
-      </div>
-    </div>
-
-    <!-- Mini-Modal: Create New Texture in Pixel Editor -->
-    <div v-if="showNewTextureModal" class="absolute inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-      <div class="bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-3 w-80 space-y-3" @click.stop>
-        <div class="flex items-center justify-between border-b border-ui-borderSubtle pb-1.5">
-          <span class="text-xs font-bold text-amber-300 uppercase">Create New Texture Map</span>
-          <button @click="showNewTextureModal = false" class="text-ui-textMuted hover:text-white transition">✕</button>
-        </div>
-
-        <div class="space-y-1">
-          <label class="text-[10px] text-ui-textMuted font-bold uppercase">Texture Name:</label>
-          <input 
-            v-model="newTextureName" 
-            placeholder="e.g. Character_Armor_64" 
-            class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-1 text-ui-textPrimary text-xs focus:outline-none focus:border-amber-400 font-mono"
-          />
-        </div>
-
-        <div class="space-y-1">
-          <label class="text-[10px] text-ui-textMuted font-bold uppercase">Resolution:</label>
-          <div class="grid grid-cols-3 gap-1">
-            <button 
-              v-for="s in [16, 32, 64, 128, 256, 512]" 
-              :key="s"
-              @click="newTextureSize = s"
-              class="py-1 text-center rounded-xs border text-[10px] font-mono transition cursor-pointer"
-              :class="newTextureSize === s ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-bold' : 'bg-ui-input text-ui-textSecondary border-ui-borderSubtle hover:bg-ui-hover'"
-            >
-              {{ s }} × {{ s }}
-            </button>
-          </div>
-        </div>
-
-        <div class="flex gap-1 pt-1">
-          <button 
-            @click="handleCreateNewTexture"
-            class="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xs text-xs font-bold transition cursor-pointer shadow-xs"
-          >
-            Create
-          </button>
-          <button 
-            @click="showNewTextureModal = false"
-            class="px-3 py-1.5 bg-ui-input hover:bg-ui-hover text-ui-textSecondary rounded-xs text-xs transition cursor-pointer"
-          >
-            Cancel
+            <BlenderIcon name="export" :size="12" />
           </button>
         </div>
       </div>
     </div>
 
-    <!-- 2. ROW 2: DCC MENUS, BRUSH SIZE & COLOR SWATCHES -->
-    <div class="pixel-header-row-2 bg-ui-panel border-b border-ui-borderSubtle px-2 flex items-center justify-between gap-2 shrink-0 z-20 select-none h-8 min-h-[32px] overflow-visible">
-      <!-- Left: DCC Menus & Brush Controls -->
-      <div class="editor-command-strip flex items-center gap-1.5 min-w-0">
+    <Teleport defer to="#uv-paint-command-slot">
+      <div class="editor-command-strip flex items-center gap-1.5">
         <!-- Image Menu Dropdown -->
         <div class="relative" @click.stop>
           <button 
@@ -1215,7 +1019,7 @@ defineExpose({
               class="w-full text-left px-3 py-1.5 hover:bg-ui-hover text-amber-400 font-bold flex items-center justify-between border-b border-ui-borderSubtle bg-ui-input/40"
             >
               <span class="flex items-center gap-1.5">
-                <Sparkles class="w-3.5 h-3.5" />
+                <BlenderIcon name="uv-smart" :size="14" />
                 <span>Browse All 50+ Palettes...</span>
               </span>
             </button>
@@ -1256,7 +1060,7 @@ defineExpose({
             class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1"
             :class="activeDropdown === 'shading' ? 'bg-ui-hover text-amber-300 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
           >
-            <Sparkles class="w-3 h-3 text-amber-400" />
+            <BlenderIcon name="texture" :size="12" color="#f59e0b" />
             <span>Shading</span>
             <span class="text-[8px] opacity-70">▼</span>
           </button>
@@ -1380,16 +1184,50 @@ defineExpose({
           >{{ toolStore.brushShape === 'square' ? 'Square' : 'Round' }}</button>
         </div>
       </div>
+    </Teleport>
 
-      <!-- Right: Quick Zoom Fit Action -->
-      <div class="flex items-center gap-1 shrink-0">
-        <button 
-          @click="resetPanZoom" 
-          class="px-2 py-0.5 bg-ui-input hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary border border-ui-borderSubtle rounded-xs text-[9.5px] font-bold font-mono transition cursor-pointer"
-          title="Fit Canvas to Viewport (Home)"
-        >
-          Fit Canvas
-        </button>
+    <div v-if="showNewTextureModal" class="absolute inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+      <div class="bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-3 w-80 space-y-3" @click.stop>
+        <div class="flex items-center justify-between border-b border-ui-borderSubtle pb-1.5">
+          <span class="text-xs font-bold text-amber-300 uppercase">Create New Texture Map</span>
+          <button @click="showNewTextureModal = false" class="text-ui-textMuted hover:text-white transition">✕</button>
+        </div>
+        <div class="space-y-1">
+          <label class="text-[10px] text-ui-textMuted font-bold uppercase">Texture Name:</label>
+          <input
+            v-model="newTextureName"
+            placeholder="e.g. Character_Armor_64"
+            class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-1 text-ui-textPrimary text-xs focus:outline-none focus:border-amber-400 font-mono"
+          />
+        </div>
+        <div class="space-y-1">
+          <label class="text-[10px] text-ui-textMuted font-bold uppercase">Resolution:</label>
+          <div class="grid grid-cols-3 gap-1">
+            <button
+              v-for="s in [16, 32, 64, 128, 256, 512]"
+              :key="s"
+              @click="newTextureSize = s"
+              class="py-1 text-center rounded-xs border text-[10px] font-mono transition cursor-pointer"
+              :class="newTextureSize === s ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-bold' : 'bg-ui-input text-ui-textSecondary border-ui-borderSubtle hover:bg-ui-hover'"
+            >
+              {{ s }} × {{ s }}
+            </button>
+          </div>
+        </div>
+        <div class="flex gap-1 pt-1">
+          <button
+            @click="handleCreateNewTexture"
+            class="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xs text-xs font-bold transition cursor-pointer shadow-xs"
+          >
+            Create
+          </button>
+          <button
+            @click="showNewTextureModal = false"
+            class="px-3 py-1.5 bg-ui-input hover:bg-ui-hover text-ui-textSecondary rounded-xs text-xs transition cursor-pointer"
+          >
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
 
@@ -1398,17 +1236,16 @@ defineExpose({
       <!-- Left Dedicated Paint Tool Rail -->
       <aside class="pixel-tool-rail flex flex-col justify-between items-center py-2 px-1 bg-ui-panel border-r border-ui-borderSubtle z-10 select-none" aria-label="Pixel paint tools">
         <!-- Tools Stack -->
-        <div class="flex flex-col gap-1">
+        <div class="flex flex-col gap-0.5">
           <button
             v-for="tool in paintTools"
             :key="tool.id"
             @click="toolStore.setPaintTool(tool.id)"
-            class="w-7 h-7 flex flex-col items-center justify-center rounded-xs transition cursor-pointer relative group"
-            :class="toolStore.paintTool === tool.id ? 'bg-ui-active text-ui-textAccent font-bold border border-ui-borderDefault shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+            class="w-8 h-8 flex items-center justify-center rounded-xs transition cursor-pointer relative group"
+            :class="toolStore.paintTool === tool.id ? 'bg-ui-active text-ui-textAccent border border-ui-borderDefault shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
             :title="tool.title + ' (' + tool.key + ')'"
           >
-            <BlenderIcon :name="tool.icon" :size="14" />
-            <span class="text-[7px] leading-none opacity-60 mt-0.5 font-mono">{{ tool.key }}</span>
+            <BlenderIcon :name="tool.icon" :size="16" />
           </button>
         </div>
 
@@ -1433,7 +1270,7 @@ defineExpose({
             </label>
           </div>
           <button @click="swapColors" class="p-1 hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary rounded-xs transition cursor-pointer" title="Swap Colors (X)">
-            <ArrowLeftRight class="w-3 h-3" />
+            <BlenderIcon name="swap-colors" :size="14" />
           </button>
         </div>
       </aside>
@@ -1448,151 +1285,10 @@ defineExpose({
         @pointerup="onPointerUp"
         @pointerleave="onPointerUp"
         @pointercancel="onPointerUp"
+        @contextmenu.prevent
       >
-        <!-- Layers popout (Teleport so drag uses viewport coords) -->
-        <Teleport to="body">
-          <div
-            v-if="layersPanelOpen"
-            data-floating-panel
-            class="fixed z-50 flex flex-col bg-ui-panel/95 border border-ui-borderStrong rounded-xs shadow-2xl font-sans select-none pointer-events-auto backdrop-blur-md overflow-hidden"
-            :class="layersDragging ? 'cursor-grabbing' : ''"
-            :style="{
-              left: layersPos.x + 'px',
-              top: layersPos.y + 'px',
-              width: '228px',
-              height: layersMinimized ? '32px' : 'auto'
-            }"
-            aria-label="Texture layers"
-          >
-            <div
-              class="h-8 px-2 flex items-center justify-between border-b border-ui-borderSubtle bg-ui-header cursor-move shrink-0"
-              @pointerdown="startLayersDrag"
-              @dblclick="layersMinimized = !layersMinimized"
-            >
-              <div class="flex items-center gap-1.5 min-w-0">
-                <GripHorizontal class="w-3.5 h-3.5 text-ui-textMuted opacity-60 shrink-0" />
-                <Layers class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span class="text-[10px] font-bold uppercase tracking-wider text-ui-textMuted">Layers</span>
-                <span class="text-[9px] px-1 py-px bg-ui-input border border-ui-borderSubtle rounded-xs text-emerald-400 font-mono">{{ paintLayerCount }}</span>
-              </div>
-              <div class="flex items-center gap-0.5" @pointerdown.stop>
-                <button
-                  type="button"
-                  class="p-1 text-emerald-400 hover:text-emerald-300 rounded-xs hover:bg-ui-hover cursor-pointer"
-                  title="Add layer"
-                  @click="handleAddLayer"
-                >
-                  <Plus class="w-3 h-3" />
-                </button>
-                <button
-                  type="button"
-                  class="p-1 text-ui-textMuted hover:text-ui-textPrimary rounded-xs hover:bg-ui-hover cursor-pointer"
-                  :title="layersMinimized ? 'Expand' : 'Minimize'"
-                  @click="layersMinimized = !layersMinimized"
-                >
-                  <Plus v-if="layersMinimized" class="w-3 h-3" />
-                  <Minus v-else class="w-3 h-3" />
-                </button>
-                <button
-                  type="button"
-                  class="p-1 text-ui-textMuted hover:text-rose-400 rounded-xs hover:bg-ui-hover cursor-pointer"
-                  title="Close layers"
-                  @click="closeLayersPanel"
-                >
-                  <X class="w-3 h-3" />
-                </button>
-              </div>
-            </div>
-
-            <div v-show="!layersMinimized" class="max-h-56 overflow-y-auto custom-scrollbar p-1.5 space-y-1">
-              <div
-                v-for="layer in projectStore.pixelBuffer.layers"
-                :key="layer.id"
-                role="button"
-                tabindex="0"
-                class="rounded-xs border px-1.5 py-1.5 text-left cursor-pointer transition"
-                :class="projectStore.pixelBuffer.activeLayerId === layer.id
-                  ? 'bg-ui-active border-emerald-500/45 shadow-xs'
-                  : 'bg-ui-surface/50 border-ui-borderSubtle hover:bg-ui-hover'"
-                @click="setActiveLayer(layer.id)"
-                @keydown.enter="setActiveLayer(layer.id)"
-                @keydown.space.prevent="setActiveLayer(layer.id)"
-              >
-                <div class="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    class="p-0.5 rounded-xs text-ui-textMuted hover:text-ui-textPrimary cursor-pointer"
-                    :title="layer.visible ? 'Hide layer' : 'Show layer'"
-                    @click.stop="toggleLayerVisible(layer)"
-                  >
-                    <Eye v-if="layer.visible" class="w-3 h-3 text-emerald-400" />
-                    <EyeOff v-else class="w-3 h-3 opacity-50" />
-                  </button>
-                  <span
-                    class="truncate flex-1 text-[11px] font-semibold"
-                    :class="projectStore.pixelBuffer.activeLayerId === layer.id ? 'text-ui-textAccent' : 'text-ui-textPrimary'"
-                    :style="layer.visible ? undefined : { opacity: 0.4 }"
-                  >{{ layer.name }}</span>
-                  <button
-                    type="button"
-                    class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary cursor-pointer"
-                    title="Duplicate layer"
-                    @click.stop="handleDuplicateLayer(layer.id)"
-                  >
-                    <Copy class="w-3 h-3" />
-                  </button>
-                  <button
-                    v-if="projectStore.pixelBuffer.layers.length > 1"
-                    type="button"
-                    class="p-0.5 text-ui-textMuted hover:text-rose-400 cursor-pointer"
-                    title="Delete layer"
-                    @click.stop="handleDeleteLayer(layer.id)"
-                  >
-                    <Trash2 class="w-3 h-3" />
-                  </button>
-                </div>
-                <div class="flex items-center gap-1.5 mt-1 pl-5" @click.stop>
-                  <select
-                    v-model="layer.blendMode"
-                    class="h-5 flex-1 min-w-0 bg-ui-input text-[9px] text-ui-textSecondary border border-ui-borderSubtle rounded-xs px-1 cursor-pointer"
-                    title="Blend mode"
-                    @change="handleLayerMetaChange"
-                  >
-                    <option value="normal">Normal</option>
-                    <option value="multiply">Multiply</option>
-                    <option value="screen">Screen</option>
-                    <option value="overlay">Overlay</option>
-                    <option value="additive">Add</option>
-                  </select>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    v-model.number="layer.opacity"
-                    class="w-14 accent-emerald-500 cursor-pointer h-1"
-                    :title="`Opacity ${Math.round(layer.opacity * 100)}%`"
-                    @input="handleLayerMetaChange"
-                  />
-                  <span class="w-7 text-right text-[9px] font-mono text-ui-textMuted">{{ Math.round(layer.opacity * 100) }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </Teleport>
-
         <!-- Top Right Floating View Controls -->
         <div class="pixel-view-group" aria-label="Canvas View Controls">
-          <button
-            type="button"
-            @click="toggleLayersPanel"
-            class="pixel-view-toggle"
-            :class="{ 'is-active': layersPanelOpen }"
-            title="Layers panel"
-          >
-            <Layers class="w-3.5 h-3.5" />
-            <span>Layers</span>
-          </button>
           <button
             @click="showUvOverlay = !showUvOverlay"
             class="pixel-view-toggle"
@@ -1607,14 +1303,14 @@ defineExpose({
             class="pixel-view-icon"
             :class="{ 'is-active': showPixelGrid }"
             title="Toggle Pixel Grid"
-          ><Grid class="w-3.5 h-3.5" /></button>
+          ><BlenderIcon name="grid" :size="14" /></button>
           <div class="pixel-zoom-control">
-            <button @click="zoomOut" title="Zoom out"><ZoomOut class="w-3.5 h-3.5" /></button>
+            <button @click="zoomOut" title="Zoom out"><BlenderIcon name="zoom-out" :size="14" /></button>
             <span @dblclick="resetPanZoom" title="Double-click to fit">{{ Math.round(zoom * 100) }}%</span>
-            <button @click="zoomIn" title="Zoom in"><ZoomIn class="w-3.5 h-3.5" /></button>
+            <button @click="zoomIn" title="Zoom in"><BlenderIcon name="zoom-in" :size="14" /></button>
           </div>
           <button @click="resetPanZoom" class="pixel-view-icon" title="Fit Canvas to View">
-            <Maximize class="w-3.5 h-3.5" />
+            <BlenderIcon name="view-fit" :size="14" />
           </button>
         </div>
 
@@ -1656,7 +1352,7 @@ defineExpose({
                 class="w-4 h-4 rounded-xxs border border-dashed border-ui-borderDefault hover:border-ui-accent hover:bg-ui-hover flex items-center justify-center text-ui-textMuted hover:text-white transition shrink-0 cursor-pointer"
                 title="Add current primary color to active palette"
               >
-                <Plus class="w-2.5 h-2.5" />
+                <BlenderIcon name="plus" :size="10" />
               </button>
             </div>
 
@@ -1732,7 +1428,7 @@ defineExpose({
           <span v-if="cursorCoords" class="text-ui-textMuted font-mono">
             X:{{ cursorCoords.x }} Y:{{ cursorCoords.y }} [{{ cursorCoords.hex }}]
           </span>
-          <span class="text-ui-textMuted hidden md:inline">Space+Drag / MMB to Pan | Wheel to Zoom</span>
+          <span class="text-ui-textMuted hidden md:inline">RMB / Space+Drag / MMB pan · Ctrl+LMB secondary · Wheel zoom</span>
         </div>
       </div>
     </div>
@@ -1797,58 +1493,10 @@ defineExpose({
   container-type: inline-size;
 }
 
-.pixel-header-row-1,
-.pixel-header-row-2 {
+.pixel-header-row {
   height: 32px;
   min-height: 32px;
-}
-
-.asset-pipeline,
-.editor-command-strip {
-  min-width: 0;
-}
-
-@container (max-width: 760px) {
-  .pixel-header-row-1 {
-    height: 64px;
-    min-height: 64px;
-    flex-wrap: wrap;
-    align-content: center;
-    padding-block: 4px;
-  }
-
-  .workspace-tabs {
-    order: 1;
-  }
-
-  .asset-pipeline {
-    order: 2;
-    width: 100%;
-    flex: 0 0 100%;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .asset-pipeline::-webkit-scrollbar {
-    display: none;
-  }
-
-  .pixel-header-row-2 {
-    height: 64px;
-    min-height: 64px;
-    flex-wrap: wrap;
-    align-content: center;
-    padding-block: 4px;
-  }
-
-  .editor-command-strip {
-    width: 100%;
-    flex: 0 0 100%;
-  }
-
-  .editor-color-strip {
-    margin-left: auto;
-  }
+  overflow: hidden;
 }
 
 .header-dropdown-menu {
@@ -1867,8 +1515,8 @@ defineExpose({
 }
 
 .pixel-tool-rail {
-  width: 36px;
-  min-width: 36px;
+  width: 40px;
+  min-width: 40px;
 }
 
 .pixel-view-group {

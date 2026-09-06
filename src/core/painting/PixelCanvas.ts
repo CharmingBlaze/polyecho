@@ -1,5 +1,6 @@
 import { hexToRgb, getBayerOffset, rgbToHex, rgbToHsl, hslToRgb } from '../../utils/color'
 import { applyFloydSteinbergDither, applyAtkinsonDither } from '../../utils/dithering'
+import { pngFromCanvas } from './encodePng'
 
 export interface PixelDrawParams {
   x: number
@@ -934,6 +935,13 @@ export class PixelBuffer {
 
   toDataURL(): string {
     return this.canvas.toDataURL('image/png')
+  }
+
+  toPngBytes(): Uint8Array {
+    this.composite()
+    const png = pngFromCanvas(this.canvas)
+    if (!png) throw new Error('Could not encode texture PNG.')
+    return png
   }
 
   clone(): PixelBuffer {

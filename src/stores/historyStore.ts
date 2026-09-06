@@ -3,6 +3,7 @@ import { ref, markRaw } from 'vue'
 import { useProjectStore } from './projectStore'
 import { useAnimationStore } from './animationStore'
 import { PixelBuffer } from '../core/painting/PixelCanvas'
+import { cloneMeshDocumentSlice } from '../core/history/applyMeshDocument'
 
 export interface TextureSnapshot {
   id: string
@@ -10,6 +11,7 @@ export interface TextureSnapshot {
   width: number
   height: number
   dataUrl?: string
+  atlas?: { cols: number; rows: number }
   pixelBuffer: PixelBuffer
 }
 
@@ -44,6 +46,20 @@ export const useHistoryStore = defineStore('history', () => {
   const undoStack = ref<HistoryRecord[]>([])
   const redoStack = ref<HistoryRecord[]>([])
   const isApplyingHistory = ref<boolean>(false)
+  const documentEpoch = ref(0)
+  const savedEpoch = ref(0)
+
+  function bumpDocumentEpoch() {
+    documentEpoch.value += 1
+  }
+
+  function markClean() {
+    savedEpoch.value = documentEpoch.value
+  }
+
+  function isDirty() {
+    return documentEpoch.value !== savedEpoch.value
+  }
 
   function captureSnapshot(description: string): AppSnapshot {
     const projectStore = useProjectStore()
@@ -56,6 +72,7 @@ export const useHistoryStore = defineStore('history', () => {
         name: t.name,
         width: t.width,
         height: t.height,
+        atlas: t.atlas ? { ...t.atlas } : undefined,
         pixelBuffer: markRaw(buf) as PixelBuffer
       }
     })
@@ -86,12 +103,20 @@ export const useHistoryStore = defineStore('history', () => {
     const animationStore = useAnimationStore()
 
     try {
-      projectStore.meshes = JSON.parse(JSON.stringify(snapshot.meshes))
-      projectStore.activeMeshId = snapshot.activeMeshId
-      projectStore.selectedMeshIds = [...snapshot.selectedMeshIds]
-      projectStore.selectedVertexIds = [...snapshot.selectedVertexIds]
-      projectStore.selectedEdgeIds = [...snapshot.selectedEdgeIds]
-      projectStore.selectedFaceIds = [...snapshot.selectedFaceIds]
+      const meshSlice = cloneMeshDocumentSlice({
+        meshes: snapshot.meshes,
+        activeMeshId: snapshot.activeMeshId,
+        selectedMeshIds: snapshot.selectedMeshIds,
+        selectedVertexIds: snapshot.selectedVertexIds,
+        selectedEdgeIds: snapshot.selectedEdgeIds,
+        selectedFaceIds: snapshot.selectedFaceIds
+      })
+      projectStore.meshes = meshSlice.meshes
+      projectStore.activeMeshId = meshSlice.activeMeshId
+      projectStore.selectedMeshIds = meshSlice.selectedMeshIds
+      projectStore.selectedVertexIds = meshSlice.selectedVertexIds
+      projectStore.selectedEdgeIds = meshSlice.selectedEdgeIds
+      projectStore.selectedFaceIds = meshSlice.selectedFaceIds
       projectStore.materials = JSON.parse(JSON.stringify(snapshot.materials))
       if (snapshot.activePalette) {
         projectStore.activePalette = JSON.parse(JSON.stringify(snapshot.activePalette))
@@ -106,6 +131,7 @@ export const useHistoryStore = defineStore('history', () => {
           name: t.name,
           width: t.width,
           height: t.height,
+          atlas: t.atlas ? { ...t.atlas } : undefined,
           pixelBuffer: markRaw(clonedBuf) as PixelBuffer
         }
       })
@@ -140,6 +166,7 @@ export const useHistoryStore = defineStore('history', () => {
       undoStack.value.shift()
     }
     redoStack.value = []
+    bumpDocumentEpoch()
   }
 
   function pushAction(action: HistoryRecord) {
@@ -149,6 +176,7 @@ export const useHistoryStore = defineStore('history', () => {
       undoStack.value.shift()
     }
     redoStack.value = []
+    bumpDocumentEpoch()
   }
 
   function undo() {
@@ -170,6 +198,7 @@ export const useHistoryStore = defineStore('history', () => {
     } else {
       currentAction.undo()
     }
+    bumpDocumentEpoch()
   }
 
   function redo() {
@@ -191,11 +220,14 @@ export const useHistoryStore = defineStore('history', () => {
     } else {
       currentAction.redo()
     }
+    bumpDocumentEpoch()
   }
 
   function clearHistory() {
     undoStack.value = []
     redoStack.value = []
+    documentEpoch.value = 0
+    savedEpoch.value = 0
   }
 
   return {
@@ -208,7 +240,10 @@ export const useHistoryStore = defineStore('history', () => {
     pushAction,
     undo,
     redo,
-    clearHistory
+    clearHistory,
+    documentEpoch,
+    markClean,
+    isDirty
   }
 })
 

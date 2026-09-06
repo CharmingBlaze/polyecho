@@ -1,5 +1,7 @@
 import * as THREE from 'three'
 import { EditableMesh, MeshFace, MeshVertex } from './MeshKernel'
+import { TopologyOps } from './operations/TopologyOps'
+import { MergeKernel } from './operations/MergeKernel'
 
 export interface MergeResult {
   mergedVertexCount: number
@@ -161,17 +163,30 @@ export class MeshTopologyService {
     const other1 = e1.v1 === vertexId ? e1.v2 : e1.v1
     const other2 = e2.v1 === vertexId ? e2.v2 : e2.v1
 
-    // Rewire all faces using this vertex
-    for (const [, face] of mesh.faces) {
-      if (face.vertexIds.includes(vertexId)) {
-        face.vertexIds = face.vertexIds.filter(v => v !== vertexId)
+    for (const [fId, face] of [...mesh.faces]) {
+      const idx = face.vertexIds.indexOf(vertexId)
+      if (idx < 0) continue
+      const nextIds = face.vertexIds.filter((_, i) => i !== idx)
+      const nextUvs = face.uvs.filter((_, i) => i !== idx)
+      const matIdx = face.materialIndex
+      const color = face.color
+      mesh.removeFace(fId)
+      if (nextIds.length >= 3) {
+        mesh.addFace(nextIds, nextUvs, matIdx, color, fId)
       }
     }
 
     mesh.removeEdge(e1Id)
     mesh.removeEdge(e2Id)
-    mesh.removeVertex(vertexId)
-    mesh.getOrCreateEdge(other1, other2)
+    const leftover = mesh.vertices.get(vertexId)
+    if (leftover) {
+      leftover.faceIds = []
+      leftover.edgeIds = []
+      mesh.vertices.delete(vertexId)
+    }
+    if (mesh.vertices.has(other1) && mesh.vertices.has(other2)) {
+      mesh.getOrCreateEdge(other1, other2)
+    }
     mesh.recalculateNormals()
     return true
   }
@@ -186,7 +201,7 @@ export class MeshTopologyService {
   static mergeVertices(mesh: EditableMesh, vertexIds: number[], mode: 'CENTER' | 'FIRST' | 'LAST' = 'CENTER'): number {
     if (vertexIds.length < 2) return vertexIds[0] || 0
 
-    let targetPos = new THREE.Vector3()
+    const targetPos = new THREE.Vector3()
     let keepId = vertexIds[0]
 
     if (mode === 'CENTER') {
@@ -198,116 +213,23 @@ export class MeshTopologyService {
     } else if (mode === 'FIRST') {
       const first = mesh.vertices.get(vertexIds[0])
       if (first) targetPos.copy(first.position)
-      keepId = vertexIds[0]
-    } else if (mode === 'LAST') {
+    } else {
       const last = mesh.vertices.get(vertexIds[vertexIds.length - 1])
       if (last) targetPos.copy(last.position)
       keepId = vertexIds[vertexIds.length - 1]
     }
 
-    const keepVert = mesh.vertices.get(keepId)
-    if (keepVert) {
-      keepVert.position.copy(targetPos)
-    }
-
-    const vertSet = new Set(vertexIds)
-
-    // Rewire all faces
-    for (const [fId, face] of Array.from(mesh.faces.entries())) {
-      if (face.vertexIds.some(vid => vertSet.has(vid))) {
-        const newVertIds: number[] = []
-        for (const vid of face.vertexIds) {
-          const mappedId = vertSet.has(vid) ? keepId : vid
-          if (newVertIds.length === 0 || newVertIds[newVertIds.length - 1] !== mappedId) {
-            newVertIds.push(mappedId)
-          }
-        }
-        if (newVertIds.length > 1 && newVertIds[newVertIds.length - 1] === newVertIds[0]) {
-          newVertIds.pop()
-        }
-
-        const uvs = [...face.uvs]
-        const matIdx = face.materialIndex
-        const color = face.color
-
-        mesh.removeFace(fId)
-
-        if (newVertIds.length >= 3) {
-          mesh.addFace(newVertIds, uvs, matIdx, color, fId)
-        }
-      }
-    }
-
-    // Remove merged original vertices
-    for (const vid of vertexIds) {
-      if (vid !== keepId) {
-        mesh.removeVertex(vid)
-      }
-    }
-
-    mesh.recalculateNormals()
-    return keepId
+    return MergeKernel.mergeVertices(mesh, vertexIds, targetPos, keepId)
   }
 
   /**
    * Spatial hash grid based O(N) Merge by Distance (Weld).
    */
   static mergeByDistance(mesh: EditableMesh, vertexIds: number[] = [], threshold = 0.005): MergeResult {
-    const candidates = vertexIds.length > 0 
-      ? vertexIds.map(id => mesh.vertices.get(id)).filter((v): v is MeshVertex => v !== undefined)
-      : Array.from(mesh.vertices.values())
-
     const initialVertCount = mesh.vertices.size
     const initialEdgeCount = mesh.edges.size
     const initialFaceCount = mesh.faces.size
-
-    const cellSize = Math.max(threshold, 0.001)
-    const grid = new Map<string, MeshVertex[]>()
-
-    const getKey = (p: THREE.Vector3) => 
-      `${Math.floor(p.x / cellSize)},${Math.floor(p.y / cellSize)},${Math.floor(p.z / cellSize)}`
-
-    for (const v of candidates) {
-      const key = getKey(v.position)
-      const list = grid.get(key) || []
-      list.push(v)
-      grid.set(key, list)
-    }
-
-    const merged = new Set<number>()
-
-    for (const vA of candidates) {
-      if (merged.has(vA.id)) continue
-
-      const cx = Math.floor(vA.position.x / cellSize)
-      const cy = Math.floor(vA.position.y / cellSize)
-      const cz = Math.floor(vA.position.z / cellSize)
-
-      const cluster: number[] = [vA.id]
-
-      for (let dx = -1; dx <= 1; dx++) {
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dz = -1; dz <= 1; dz++) {
-            const key = `${cx + dx},${cy + dy},${cz + dz}`
-            const neighbors = grid.get(key)
-            if (!neighbors) continue
-
-            for (const vB of neighbors) {
-              if (vB.id === vA.id || merged.has(vB.id)) continue
-              if (vA.position.distanceTo(vB.position) <= threshold) {
-                cluster.push(vB.id)
-                merged.add(vB.id)
-              }
-            }
-          }
-        }
-      }
-
-      if (cluster.length > 1) {
-        this.mergeVertices(mesh, cluster, 'FIRST')
-      }
-    }
-
+    MergeKernel.mergeByDistance(mesh, threshold, vertexIds.length > 0 ? vertexIds : undefined)
     return {
       mergedVertexCount: initialVertCount - mesh.vertices.size,
       removedEdgeCount: initialEdgeCount - mesh.edges.size,
@@ -381,73 +303,97 @@ export class MeshTopologyService {
       }
     }
     if (!targetFace || targetFace.vertexIds.length < 4) return false
-
-    const verts = targetFace.vertexIds
-    const idxA = verts.indexOf(vAId)
-    const idxB = verts.indexOf(vBId)
-
-    const face1Verts: number[] = []
-    let curr = idxA
-    while (curr !== idxB) {
-      face1Verts.push(verts[curr])
-      curr = (curr + 1) % verts.length
-    }
-    face1Verts.push(vBId)
-
-    const face2Verts: number[] = []
-    curr = idxB
-    while (curr !== idxA) {
-      face2Verts.push(verts[curr])
-      curr = (curr + 1) % verts.length
-    }
-    face2Verts.push(vAId)
-
-    if (face1Verts.length < 3 || face2Verts.length < 3) return false
-
-    const matIdx = targetFace.materialIndex
-    const color = targetFace.color
-
-    mesh.removeFace(targetFace.id)
-    mesh.addFace(face1Verts, undefined, matIdx, color)
-    mesh.addFace(face2Verts, undefined, matIdx, color)
-    mesh.getOrCreateEdge(vAId, vBId)
-    mesh.recalculateNormals()
-    return true
+    return !!TopologyOps.splitFace(mesh, targetFace.id, vAId, vBId)
   }
 
   /**
-   * Subdivides a quad face into 4 quads.
+   * Subdivides a tri into 4 tris or a quad into 4 quads. Returns new face ids.
    */
-  static subdivideQuadFace(mesh: EditableMesh, faceId: number): boolean {
+  static subdivideFace(mesh: EditableMesh, faceId: number): number[] {
     const face = mesh.faces.get(faceId)
-    if (!face || face.vertexIds.length !== 4) return false
+    if (!face) return []
 
-    const [v0Id, v1Id, v2Id, v3Id] = face.vertexIds
-    const v0 = mesh.vertices.get(v0Id)!
-    const v1 = mesh.vertices.get(v1Id)!
-    const v2 = mesh.vertices.get(v2Id)!
-    const v3 = mesh.vertices.get(v3Id)!
-
-    const mid01 = mesh.addVertex(v0.position.clone().lerp(v1.position, 0.5)).id
-    const mid12 = mesh.addVertex(v1.position.clone().lerp(v2.position, 0.5)).id
-    const mid23 = mesh.addVertex(v2.position.clone().lerp(v3.position, 0.5)).id
-    const mid30 = mesh.addVertex(v3.position.clone().lerp(v0.position, 0.5)).id
-
-    const centerPos = v0.position.clone().add(v1.position).add(v2.position).add(v3.position).multiplyScalar(0.25)
-    const centerId = mesh.addVertex(centerPos).id
-
+    const verts = face.vertexIds
+    const uvAt = (i: number) => face.uvs[i]?.clone() ?? new THREE.Vector2()
+    const midUv = (i: number, j: number) => uvAt(i).add(uvAt(j)).multiplyScalar(0.5)
     const matIdx = face.materialIndex
     const color = face.color
+    const added: number[] = []
 
-    mesh.removeFace(faceId)
+    if (verts.length === 4) {
+      const [v0, v1, v2, v3] = verts
+      const p0 = mesh.vertices.get(v0)?.position
+      const p1 = mesh.vertices.get(v1)?.position
+      const p2 = mesh.vertices.get(v2)?.position
+      const p3 = mesh.vertices.get(v3)?.position
+      if (!p0 || !p1 || !p2 || !p3) return []
 
-    mesh.addFace([v0Id, mid01, centerId, mid30], undefined, matIdx, color)
-    mesh.addFace([mid01, v1Id, mid12, centerId], undefined, matIdx, color)
-    mesh.addFace([centerId, mid12, v2Id, mid23], undefined, matIdx, color)
-    mesh.addFace([mid30, centerId, mid23, v3Id], undefined, matIdx, color)
+      const mid01 = mesh.addVertex(p0.clone().lerp(p1, 0.5)).id
+      const mid12 = mesh.addVertex(p1.clone().lerp(p2, 0.5)).id
+      const mid23 = mesh.addVertex(p2.clone().lerp(p3, 0.5)).id
+      const mid30 = mesh.addVertex(p3.clone().lerp(p0, 0.5)).id
+      const center = mesh.addVertex(p0.clone().add(p1).add(p2).add(p3).multiplyScalar(0.25)).id
+      const uv0 = uvAt(0)
+      const uv1 = uvAt(1)
+      const uv2 = uvAt(2)
+      const uv3 = uvAt(3)
+      const uvC = uv0.clone().add(uv1).add(uv2).add(uv3).multiplyScalar(0.25)
+      const uv01 = midUv(0, 1)
+      const uv12 = midUv(1, 2)
+      const uv23 = midUv(2, 3)
+      const uv30 = midUv(3, 0)
 
-    mesh.recalculateNormals()
-    return true
+      mesh.removeFace(faceId)
+      const faces = [
+        mesh.addFace([v0, mid01, center, mid30], [uv0, uv01, uvC, uv30], matIdx, color),
+        mesh.addFace([mid01, v1, mid12, center], [uv01, uv1, uv12, uvC], matIdx, color),
+        mesh.addFace([center, mid12, v2, mid23], [uvC, uv12, uv2, uv23], matIdx, color),
+        mesh.addFace([mid30, center, mid23, v3], [uv30, uvC, uv23, uv3], matIdx, color)
+      ]
+      for (const f of faces) {
+        if (f) added.push(f.id)
+      }
+      mesh.recalculateNormals()
+      return added
+    }
+
+    if (verts.length === 3) {
+      const [v0, v1, v2] = verts
+      const p0 = mesh.vertices.get(v0)?.position
+      const p1 = mesh.vertices.get(v1)?.position
+      const p2 = mesh.vertices.get(v2)?.position
+      if (!p0 || !p1 || !p2) return []
+
+      const mid01 = mesh.addVertex(p0.clone().lerp(p1, 0.5)).id
+      const mid12 = mesh.addVertex(p1.clone().lerp(p2, 0.5)).id
+      const mid20 = mesh.addVertex(p2.clone().lerp(p0, 0.5)).id
+      const uv0 = uvAt(0)
+      const uv1 = uvAt(1)
+      const uv2 = uvAt(2)
+      const uv01 = midUv(0, 1)
+      const uv12 = midUv(1, 2)
+      const uv20 = midUv(2, 0)
+
+      mesh.removeFace(faceId)
+      const faces = [
+        mesh.addFace([v0, mid01, mid20], [uv0, uv01, uv20], matIdx, color),
+        mesh.addFace([mid01, v1, mid12], [uv01, uv1, uv12], matIdx, color),
+        mesh.addFace([mid20, mid12, v2], [uv20, uv12, uv2], matIdx, color),
+        mesh.addFace([mid01, mid12, mid20], [uv01, uv12, uv20], matIdx, color)
+      ]
+      for (const f of faces) {
+        if (f) added.push(f.id)
+      }
+      mesh.recalculateNormals()
+      return added
+    }
+
+    return []
+  }
+
+  /** Subdivides a quad face into 4 quads. */
+  static subdivideQuadFace(mesh: EditableMesh, faceId: number): boolean {
+    return this.subdivideFace(mesh, faceId).length === 4
   }
 
   // =========================================================================
@@ -497,16 +443,88 @@ export class MeshTopologyService {
     const count = loopA.length
     for (let i = 0; i < count; i++) {
       const next = (i + 1) % count
-      const a1 = loopA[i]
-      const a2 = loopA[next]
-      const b1 = loopB[i]
-      const b2 = loopB[next]
-
-      mesh.addFace([a1, a2, b2, b1])
+      this.bridgeTwoEdges(mesh, loopA[i], loopA[next], loopB[i], loopB[next], false)
     }
 
     mesh.recalculateNormals()
     return true
+  }
+
+  /** One quad between two edges, oriented by shorter endpoint pairing. */
+  static bridgeTwoEdges(
+    mesh: EditableMesh,
+    a1: number,
+    a2: number,
+    b1: number,
+    b2: number,
+    recalc = true
+  ): number | null {
+    const pa1 = mesh.vertices.get(a1)?.position
+    const pa2 = mesh.vertices.get(a2)?.position
+    const pb1 = mesh.vertices.get(b1)?.position
+    const pb2 = mesh.vertices.get(b2)?.position
+    if (!pa1 || !pa2 || !pb1 || !pb2) return null
+
+    const distNormal = pa1.distanceTo(pb1) + pa2.distanceTo(pb2)
+    const distCross = pa1.distanceTo(pb2) + pa2.distanceTo(pb1)
+    const verts = distNormal <= distCross ? [a1, a2, b2, b1] : [a1, a2, b1, b2]
+    const uvs = [
+      new THREE.Vector2(0, 0),
+      new THREE.Vector2(1, 0),
+      new THREE.Vector2(1, 1),
+      new THREE.Vector2(0, 1)
+    ]
+    const face = mesh.addFace(verts, uvs)
+    if (recalc) mesh.recalculateNormals()
+    return face?.id ?? null
+  }
+
+  /**
+   * Fills a closed even-length boundary: one quad if 4 verts, otherwise a fan to a new center.
+   */
+  static gridFillBoundary(mesh: EditableMesh, boundary: number[]): number[] {
+    if (boundary.length < 4 || boundary.length % 2 !== 0) return []
+    const created: number[] = []
+    const quadUvs = [
+      new THREE.Vector2(0, 0),
+      new THREE.Vector2(1, 0),
+      new THREE.Vector2(1, 1),
+      new THREE.Vector2(0, 1)
+    ]
+
+    if (boundary.length === 4) {
+      const face = mesh.addFace(boundary, quadUvs)
+      if (face) created.push(face.id)
+      mesh.recalculateNormals()
+      return created
+    }
+
+    const center = new THREE.Vector3()
+    let n = 0
+    for (const id of boundary) {
+      const p = mesh.vertices.get(id)?.position
+      if (!p) continue
+      center.add(p)
+      n++
+    }
+    if (n < 4) return []
+    center.multiplyScalar(1 / n)
+    const centerId = mesh.addVertex(center).id
+    const fanUvs = [
+      new THREE.Vector2(0, 0),
+      new THREE.Vector2(0.5, 0),
+      new THREE.Vector2(1, 0),
+      new THREE.Vector2(0.5, 0.5)
+    ]
+    for (let i = 0; i < boundary.length; i += 2) {
+      const face = mesh.addFace(
+        [boundary[i], boundary[(i + 1) % boundary.length], boundary[(i + 2) % boundary.length], centerId],
+        fanUvs
+      )
+      if (face) created.push(face.id)
+    }
+    mesh.recalculateNormals()
+    return created
   }
 
   /**
@@ -559,6 +577,14 @@ export class MeshTopologyService {
         face.normal.negate()
       }
     }
+  }
+
+  static flattenVertices(mesh: EditableMesh, vertexIds: number[], axis: 'x' | 'y' | 'z'): void {
+    const verts = vertexIds.map(id => mesh.vertices.get(id)).filter((v): v is MeshVertex => !!v)
+    if (verts.length === 0) return
+    const avg = verts.reduce((sum, v) => sum + v.position[axis], 0) / verts.length
+    for (const v of verts) v.position[axis] = avg
+    mesh.recalculateNormals()
   }
 
   /**

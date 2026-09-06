@@ -15,20 +15,6 @@ import SkeletonPanel from '../rigging/SkeletonPanel.vue'
 import AnimationInspector from '../inspector/AnimationInspector.vue'
 import UVPaintProps from '../uvpaint/UVPaintProps.vue'
 import BlenderIcon from '../icons/BlenderIcon.vue'
-import { 
-  Layers, 
-  Wrench, 
-  Box, 
-  Scan, 
-  Film, 
-  FolderTree, 
-  Link, 
-  Paintbrush, 
-  Image,
-  Sliders,
-  PanelRightClose,
-  Columns
-} from 'lucide-vue-next'
 
 const toolStore = useToolStore()
 const layoutStore = useLayoutStore()
@@ -115,15 +101,15 @@ const standardPropTabs = computed<PropertyTabItem[]>(() => {
   const mode = toolStore.appMode
   const objectTab: PropertyTabItem =
     mode === 'animate'
-      ? { id: 'props', label: 'Animation', title: 'Animation & Keyframes', icon: Film, accent: 'amber' }
+      ? { id: 'props', label: 'Animation', title: 'Animation & Keyframes', blenderIcon: 'keyframe', accent: 'amber' }
       : mode === 'uvpaint'
-        ? { id: 'props', label: 'UV / Paint', title: 'UV & Seams Properties', icon: Scan, accent: 'sky' }
-        : { id: 'props', label: 'Transform', title: 'Object Transform & Coordinates', icon: Box, accent: 'amber' }
+        ? { id: 'props', label: 'UV / Paint', title: 'UV & Seams Properties', blenderIcon: 'uv', accent: 'sky' }
+        : { id: 'props', label: 'Transform', title: 'Object Transform & Coordinates', blenderIcon: 'empty-axis', accent: 'amber' }
 
-  const mod: PropertyTabItem = { id: 'modifiers', label: 'Modifiers', title: 'Modifiers (Mirror, Subdiv, Solidify)', icon: Wrench, accent: 'sky' }
+  const mod: PropertyTabItem = { id: 'modifiers', label: 'Modifiers', title: 'Modifiers (Mirror, Subdiv, Solidify)', blenderIcon: 'modifier', accent: 'sky' }
   const mat: PropertyTabItem = { id: 'material', label: 'Material', title: 'Material & Shading Properties', blenderIcon: 'material', accent: 'amber' }
   const tex: PropertyTabItem = { id: 'texture', label: 'Texture', title: 'Texture Atlas & Pixel Maps', blenderIcon: 'texture', accent: 'emerald' }
-  const refs: PropertyTabItem = { id: 'refs', label: 'References', title: 'Reference Images for Blockout', icon: Image, accent: 'sky' }
+  const refs: PropertyTabItem = { id: 'refs', label: 'References', title: 'Reference Images for Blockout', blenderIcon: 'image', accent: 'sky' }
 
   if (mode === 'blockout') return [objectTab, refs, mod]
   if (mode === 'uvpaint') return [objectTab, tex, mat, mod]
@@ -131,10 +117,10 @@ const standardPropTabs = computed<PropertyTabItem[]>(() => {
 })
 
 const rigPropTabs = computed<PropertyTabItem[]>(() => [
-  { id: 'skeleton', label: 'Skeleton', title: 'Skeleton & Joint Hierarchy', icon: FolderTree, accent: 'amber' },
-  { id: 'props', label: 'Bone', title: 'Bone Joint Transforms & IK', icon: Sliders, accent: 'sky' },
-  { id: 'bindings', label: 'Bindings', title: 'Mesh Bindings & Parents', icon: Link, accent: 'emerald' },
-  { id: 'weights', label: 'Weights', title: 'Vertex Weight Painting', icon: Paintbrush, accent: 'rose' }
+  { id: 'skeleton', label: 'Skeleton', title: 'Skeleton & Joint Hierarchy', blenderIcon: 'armature', accent: 'amber' },
+  { id: 'props', label: 'Bone', title: 'Bone Joint Transforms & IK', blenderIcon: 'bone', accent: 'sky' },
+  { id: 'bindings', label: 'Bindings', title: 'Mesh Bindings & Parents', blenderIcon: 'link', accent: 'emerald' },
+  { id: 'weights', label: 'Weights', title: 'Vertex Weight Painting', blenderIcon: 'vertex-group', accent: 'rose' }
 ])
 
 const activePropTabs = computed(() => {
@@ -147,6 +133,15 @@ watch(
     layoutStore.restoreInspectorTab(mode)
   },
   { immediate: true }
+)
+
+watch(
+  () => toolStore.uvWorkspaceTab,
+  (tab) => {
+    if (toolStore.appMode === 'uvpaint' && tab === 'paint') {
+      layoutStore.setInspectorTab('texture', 'uvpaint')
+    }
+  }
 )
 </script>
 
@@ -174,7 +169,7 @@ watch(
             : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Split View: Outliner + Properties"
         >
-          <Columns class="w-3 h-3" />
+          <BlenderIcon name="layers" :size="12" />
           <span>Both</span>
         </button>
 
@@ -186,7 +181,7 @@ watch(
             : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Full Outliner Tree (Scene Objects & Bones)"
         >
-          <Layers class="w-3 h-3 text-amber-400" />
+          <BlenderIcon name="mesh-cube" :size="12" color="#fbbf24" />
           <span>Outliner</span>
         </button>
 
@@ -198,7 +193,7 @@ watch(
             : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Full Properties Inspector"
         >
-          <Sliders class="w-3 h-3 text-sky-400" />
+          <BlenderIcon name="settings" :size="12" color="#38bdf8" />
           <span>Properties</span>
         </button>
       </div>
@@ -209,7 +204,7 @@ watch(
         class="p-1 text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover rounded-xs transition cursor-pointer"
         title="Hide Panel (Hotkey: N)"
       >
-        <PanelRightClose class="w-3.5 h-3.5" />
+        <BlenderIcon name="sidebar" :size="14" />
       </button>
     </div>
 

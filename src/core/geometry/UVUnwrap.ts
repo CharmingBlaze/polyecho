@@ -1,17 +1,266 @@
-import { MeshObject, UV, Vertex } from '../../types/mesh'
-import { computeFaceNormal } from '../../utils/math'
+import { MeshObject, UV, Vertex, Vector3D } from '../../types/mesh'
+import { findUvIslands } from '../uv/UVIslands'
+import {
+  computeCentroid,
+  computeFaceNormal,
+  crossVec3,
+  dotVec3,
+  lengthVec3,
+  normalizeVec3,
+  scaleVec3,
+  subVec3
+} from '../../utils/math'
+
+function jacobiEigen3(matrix: number[][]): { values: number[]; vectors: Vector3D[] } {
+  const A = matrix.map(row => row.slice())
+  const V = [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1]
+  ]
+
+  for (let iter = 0; iter < 16; iter++) {
+    let p = 0
+    let q = 1
+    let max = Math.abs(A[0][1])
+    if (Math.abs(A[0][2]) > max) { p = 0; q = 2; max = Math.abs(A[0][2]) }
+    if (Math.abs(A[1][2]) > max) { p = 1; q = 2; max = Math.abs(A[1][2]) }
+    if (max < 1e-12) break
+
+    const app = A[p][p]
+    const aqq = A[q][q]
+    const apq = A[p][q]
+    const tau = (aqq - app) / (2 * apq)
+    const t = tau === 0 ? 1 : Math.sign(tau) / (Math.abs(tau) + Math.hypot(1, tau))
+    const c = 1 / Math.hypot(1, t)
+    const s = t * c
+
+    for (let r = 0; r < 3; r++) {
+      if (r === p || r === q) continue
+      const arp = A[r][p]
+      const arq = A[r][q]
+      A[r][p] = A[p][r] = c * arp - s * arq
+      A[r][q] = A[q][r] = s * arp + c * arq
+    }
+    A[p][p] = c * c * app - 2 * s * c * apq + s * s * aqq
+    A[q][q] = s * s * app + 2 * s * c * apq + c * c * aqq
+    A[p][q] = A[q][p] = 0
+
+    for (let r = 0; r < 3; r++) {
+      const vip = V[r][p]
+      const viq = V[r][q]
+      V[r][p] = c * vip - s * viq
+      V[r][q] = s * vip + c * viq
+    }
+  }
+
+  return {
+    values: [A[0][0], A[1][1], A[2][2]],
+    vectors: [
+      { x: V[0][0], y: V[1][0], z: V[2][0] },
+      { x: V[0][1], y: V[1][1], z: V[2][1] },
+      { x: V[0][2], y: V[1][2], z: V[2][2] }
+    ]
+  }
+}
+
+function bestFitProjectionBasis(points: Vector3D[], preferredNormal: Vector3D): { tangent: Vector3D; bitangent: Vector3D } {
+  const fallbackNormal = normalizeVec3(preferredNormal)
+  const helper = Math.abs(fallbackNormal.y) < 0.9 ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 }
+  let tangent = normalizeVec3(crossVec3(helper, fallbackNormal))
+  let bitangent = normalizeVec3(crossVec3(fallbackNormal, tangent))
+  if (points.length < 3) return { tangent, bitangent }
+
+  const centroid = computeCentroid(points)
+  let xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0
+  for (const point of points) {
+    const dx = point.x - centroid.x
+    const dy = point.y - centroid.y
+    const dz = point.z - centroid.z
+    xx += dx * dx
+    xy += dx * dy
+    xz += dx * dz
+    yy += dy * dy
+    yz += dy * dz
+    zz += dz * dz
+  }
+
+  const { values, vectors } = jacobiEigen3([
+    [xx, xy, xz],
+    [xy, yy, yz],
+    [xz, yz, zz]
+  ])
+  let minIndex = 0
+  let maxIndex = 0
+  for (let i = 1; i < 3; i++) {
+    if (values[i] < values[minIndex]) minIndex = i
+    if (values[i] > values[maxIndex]) maxIndex = i
+  }
+
+  let normal = vectors[minIndex]
+  if (dotVec3(normal, fallbackNormal) < 0) {
+    normal = { x: -normal.x, y: -normal.y, z: -normal.z }
+  }
+  normal = normalizeVec3(normal)
+
+  tangent = subVec3(vectors[maxIndex], scaleVec3(normal, dotVec3(vectors[maxIndex], normal)))
+  if (lengthVec3(tangent) < 1e-6) {
+    tangent = crossVec3(helper, normal)
+  }
+  tangent = normalizeVec3(tangent)
+  bitangent = normalizeVec3(crossVec3(normal, tangent))
+  return { tangent, bitangent }
+}
+
+function rotateIslandToPrincipalAxis(mesh: MeshObject, island: number[]) {
+  let sumU = 0
+  let sumV = 0
+  let count = 0
+  for (const faceIndex of island) {
+    for (const uv of mesh.faces[faceIndex].uvs) {
+      sumU += uv.u
+      sumV += uv.v
+      count++
+    }
+  }
+  if (count === 0) return
+
+  const centerU = sumU / count
+  const centerV = sumV / count
+  let cuu = 0
+  let cvv = 0
+  let cuv = 0
+  for (const faceIndex of island) {
+    for (const uv of mesh.faces[faceIndex].uvs) {
+      const du = uv.u - centerU
+      const dv = uv.v - centerV
+      cuu += du * du
+      cvv += dv * dv
+      cuv += du * dv
+    }
+  }
+
+  const angle = -0.5 * Math.atan2(2 * cuv, cuu - cvv)
+  const cos = Math.cos(angle)
+  const sin = Math.sin(angle)
+  for (const faceIndex of island) {
+    for (const uv of mesh.faces[faceIndex].uvs) {
+      const du = uv.u - centerU
+      const dv = uv.v - centerV
+      uv.u = centerU + du * cos - dv * sin
+      uv.v = centerV + du * sin + dv * cos
+    }
+  }
+}
+
+function resolveTargetFaces(mesh: MeshObject, onlyFaceIndices?: number[]): number[] {
+  if (onlyFaceIndices && onlyFaceIndices.length > 0) {
+    return Array.from(new Set(onlyFaceIndices.filter(i => i >= 0 && i < mesh.faces.length)))
+  }
+  return mesh.faces.map((_, i) => i)
+}
+
+function boundsOfFaces(mesh: MeshObject, vertMap: Map<string, Vertex>, faceIndices: number[]) {
+  let minX = Infinity, minY = Infinity, minZ = Infinity
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+  for (const i of faceIndices) {
+    for (const id of mesh.faces[i].vertexIds) {
+      const p = vertMap.get(id)?.position
+      if (!p) continue
+      if (p.x < minX) minX = p.x
+      if (p.y < minY) minY = p.y
+      if (p.z < minZ) minZ = p.z
+      if (p.x > maxX) maxX = p.x
+      if (p.y > maxY) maxY = p.y
+      if (p.z > maxZ) maxZ = p.z
+    }
+  }
+  if (!Number.isFinite(minX)) {
+    return { minX: -1, maxX: 1, minY: -1, maxY: 1, minZ: -1, maxZ: 1 }
+  }
+  return { minX, maxX, minY, maxY, minZ, maxZ }
+}
+
+function norm01(value: number, min: number, max: number): number {
+  const span = max - min
+  if (span < 1e-8) return 0.5
+  return (value - min) / span
+}
+
+function signedNorm(value: number, min: number, max: number, positive: boolean): number {
+  const t = norm01(value, min, max)
+  return positive ? t : 1 - t
+}
+
+function assignProjectedToRect(
+  points: Vector3D[],
+  axisU: Vector3D,
+  axisV: Vector3D,
+  rect: { u0: number; v0: number; u1: number; v1: number }
+): UV[] {
+  const proj = points.map(p => ({
+    u: p.x * axisU.x + p.y * axisU.y + p.z * axisU.z,
+    v: p.x * axisV.x + p.y * axisV.y + p.z * axisV.z
+  }))
+  let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity
+  for (const p of proj) {
+    if (p.u < minU) minU = p.u
+    if (p.u > maxU) maxU = p.u
+    if (p.v < minV) minV = p.v
+    if (p.v > maxV) maxV = p.v
+  }
+
+  if (points.length !== 4) {
+    return proj.map(p => ({
+      u: rect.u0 + norm01(p.u, minU, maxU) * (rect.u1 - rect.u0),
+      v: rect.v0 + norm01(p.v, minV, maxV) * (rect.v1 - rect.v0)
+    }))
+  }
+
+  const corners = [
+    { u: rect.u0, v: rect.v1 },
+    { u: rect.u1, v: rect.v1 },
+    { u: rect.u1, v: rect.v0 },
+    { u: rect.u0, v: rect.v0 }
+  ]
+  const src = proj.map(p => ({
+    u: rect.u0 + norm01(p.u, minU, maxU) * (rect.u1 - rect.u0),
+    v: rect.v0 + norm01(p.v, minV, maxV) * (rect.v1 - rect.v0)
+  }))
+  const assigned = [-1, -1, -1, -1]
+  const used = new Set<number>()
+  const pairs: { vert: number; corner: number; dist: number }[] = []
+  for (let vert = 0; vert < 4; vert++) {
+    for (let corner = 0; corner < 4; corner++) {
+      const du = src[vert].u - corners[corner].u
+      const dv = src[vert].v - corners[corner].v
+      pairs.push({ vert, corner, dist: du * du + dv * dv })
+    }
+  }
+  pairs.sort((a, b) => a.dist - b.dist)
+  for (const pair of pairs) {
+    if (assigned[pair.vert] !== -1 || used.has(pair.corner)) continue
+    assigned[pair.vert] = pair.corner
+    used.add(pair.corner)
+  }
+  return assigned.map((corner, i) => corners[corner] ?? src[i])
+}
 
 /**
- * Box unwrap along dominant normal axes (X, Y, Z) with auto-normalization.
+ * Box unwrap along dominant normal axes. Uses the target faces' AABB so
+ * scaled or offset meshes land in 0..1 instead of assuming a unit cube.
  */
-export function boxUnwrap(mesh: MeshObject): MeshObject {
+export function boxUnwrap(mesh: MeshObject, onlyFaceIndices?: number[]): MeshObject {
   const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
   const vertMap = new Map<string, Vertex>()
   for (const v of newMesh.vertices) {
     vertMap.set(v.id, v)
   }
+  const targets = resolveTargetFaces(newMesh, onlyFaceIndices)
+  const b = boundsOfFaces(newMesh, vertMap, targets)
 
-  for (const face of newMesh.faces) {
+  for (const faceIndex of targets) {
+    const face = newMesh.faces[faceIndex]
     const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
     if (faceVerts.length < 3) continue
 
@@ -20,104 +269,105 @@ export function boxUnwrap(mesh: MeshObject): MeshObject {
     const absY = Math.abs(normal.y)
     const absZ = Math.abs(normal.z)
 
-    const uvs: UV[] = []
-
     if (absX >= absY && absX >= absZ) {
-      // Dominant X: map Z -> U, Y -> V
-      const sign = normal.x >= 0 ? 1 : -1
-      for (const v of faceVerts) {
-        uvs.push({
-          u: (v.position.z * sign + 1.0) / 2.0,
-          v: (v.position.y + 1.0) / 2.0
-        })
-      }
+      face.uvs = faceVerts.map(v => ({
+        u: signedNorm(v.position.z, b.minZ, b.maxZ, normal.x >= 0),
+        v: norm01(v.position.y, b.minY, b.maxY)
+      }))
     } else if (absY >= absX && absY >= absZ) {
-      // Dominant Y: map X -> U, Z -> V
-      const sign = normal.y >= 0 ? 1 : -1
-      for (const v of faceVerts) {
-        uvs.push({
-          u: (v.position.x + 1.0) / 2.0,
-          v: (v.position.z * sign + 1.0) / 2.0
-        })
-      }
+      face.uvs = faceVerts.map(v => ({
+        u: norm01(v.position.x, b.minX, b.maxX),
+        v: signedNorm(v.position.z, b.minZ, b.maxZ, normal.y >= 0)
+      }))
     } else {
-      // Dominant Z: map X -> U, Y -> V
-      const sign = normal.z >= 0 ? 1 : -1
-      for (const v of faceVerts) {
-        uvs.push({
-          u: (v.position.x * sign + 1.0) / 2.0,
-          v: (v.position.y + 1.0) / 2.0
-        })
-      }
+      face.uvs = faceVerts.map(v => ({
+        u: signedNorm(v.position.x, b.minX, b.maxX, normal.z >= 0),
+        v: norm01(v.position.y, b.minY, b.maxY)
+      }))
     }
-
-    face.uvs = uvs
   }
 
   return newMesh
 }
 
 /**
- * Planar unwrap along specific axis (X, Y, or Z).
+ * Planar unwrap along a world axis, normalized to the target AABB.
  */
-export function planarUnwrap(mesh: MeshObject, axis: 'x' | 'y' | 'z' = 'z'): MeshObject {
+export function planarUnwrap(mesh: MeshObject, axis: 'x' | 'y' | 'z' = 'z', onlyFaceIndices?: number[]): MeshObject {
   const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
   const vertMap = new Map<string, Vertex>()
   for (const v of newMesh.vertices) {
     vertMap.set(v.id, v)
   }
+  const targets = resolveTargetFaces(newMesh, onlyFaceIndices)
+  const b = boundsOfFaces(newMesh, vertMap, targets)
 
-  for (const face of newMesh.faces) {
+  for (const faceIndex of targets) {
+    const face = newMesh.faces[faceIndex]
     const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
-    const uvs: UV[] = []
-
-    for (const v of faceVerts) {
-      if (axis === 'x') {
-        uvs.push({ u: (v.position.z + 1) / 2, v: (v.position.y + 1) / 2 })
-      } else if (axis === 'y') {
-        uvs.push({ u: (v.position.x + 1) / 2, v: (v.position.z + 1) / 2 })
-      } else {
-        uvs.push({ u: (v.position.x + 1) / 2, v: (v.position.y + 1) / 2 })
-      }
+    if (axis === 'x') {
+      face.uvs = faceVerts.map(v => ({
+        u: norm01(v.position.z, b.minZ, b.maxZ),
+        v: norm01(v.position.y, b.minY, b.maxY)
+      }))
+    } else if (axis === 'y') {
+      face.uvs = faceVerts.map(v => ({
+        u: norm01(v.position.x, b.minX, b.maxX),
+        v: norm01(v.position.z, b.minZ, b.maxZ)
+      }))
+    } else {
+      face.uvs = faceVerts.map(v => ({
+        u: norm01(v.position.x, b.minX, b.maxX),
+        v: norm01(v.position.y, b.minY, b.maxY)
+      }))
     }
-    face.uvs = uvs
   }
 
   return newMesh
 }
 
 /**
- * Cylindrical Unwrap: Unrolls radial side faces + maps top/bottom caps into discs.
+ * Cylindrical unwrap around the target AABB Y axis. Caps sit in separate tiles.
  */
-export function cylinderUnwrap(mesh: MeshObject): MeshObject {
+export function cylinderUnwrap(mesh: MeshObject, onlyFaceIndices?: number[]): MeshObject {
   const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
   const vertMap = new Map<string, Vertex>()
   for (const v of newMesh.vertices) {
     vertMap.set(v.id, v)
   }
+  const targets = resolveTargetFaces(newMesh, onlyFaceIndices)
+  const b = boundsOfFaces(newMesh, vertMap, targets)
+  const cx = (b.minX + b.maxX) * 0.5
+  const cz = (b.minZ + b.maxZ) * 0.5
+  let radius = 1e-6
+  for (const faceIndex of targets) {
+    for (const id of newMesh.faces[faceIndex].vertexIds) {
+      const p = vertMap.get(id)?.position
+      if (!p) continue
+      radius = Math.max(radius, Math.hypot(p.x - cx, p.z - cz))
+    }
+  }
 
-  for (const face of newMesh.faces) {
+  for (const faceIndex of targets) {
+    const face = newMesh.faces[faceIndex]
     const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
     if (faceVerts.length < 3) continue
 
     const normal = face.normal || computeFaceNormal(faceVerts.map(v => v.position))
-
-    // Top / Bottom Disc Caps (dominant Y)
     if (Math.abs(normal.y) > 0.7) {
-      const uvs: UV[] = faceVerts.map(v => ({
-        u: (v.position.x + 1) * 0.25 + (normal.y > 0 ? 0.75 : 0.75),
-        v: (v.position.z + 1) * 0.25 + (normal.y > 0 ? 0.5 : 0.0)
+      const tileV0 = normal.y > 0 ? 0.52 : 0.02
+      face.uvs = faceVerts.map(v => ({
+        u: 0.74 + ((v.position.x - cx) / radius * 0.5 + 0.5) * 0.24,
+        v: tileV0 + ((v.position.z - cz) / radius * 0.5 + 0.5) * 0.46
       }))
-      face.uvs = uvs
     } else {
-      // Tube side faces: unroll angle around Y into U (0..0.7) and height into V
-      const uvs: UV[] = faceVerts.map(v => {
-        let angle = Math.atan2(v.position.z, v.position.x) // -PI to PI
-        let u = (angle + Math.PI) / (2 * Math.PI) // 0 to 1
-        let vPos = (v.position.y + 1) / 2
-        return { u: u * 0.7, v: vPos }
+      face.uvs = faceVerts.map(v => {
+        const angle = Math.atan2(v.position.z - cz, v.position.x - cx)
+        return {
+          u: ((angle + Math.PI) / (2 * Math.PI)) * 0.7,
+          v: norm01(v.position.y, b.minY, b.maxY)
+        }
       })
-      face.uvs = uvs
     }
   }
 
@@ -125,64 +375,79 @@ export function cylinderUnwrap(mesh: MeshObject): MeshObject {
 }
 
 /**
- * Spherical Equirectangular Unwrap: Maps longitude & latitude.
+ * Spherical equirectangular unwrap around the target AABB center.
  */
-export function sphereUnwrap(mesh: MeshObject): MeshObject {
+export function sphereUnwrap(mesh: MeshObject, onlyFaceIndices?: number[]): MeshObject {
   const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
   const vertMap = new Map<string, Vertex>()
   for (const v of newMesh.vertices) {
     vertMap.set(v.id, v)
   }
+  const targets = resolveTargetFaces(newMesh, onlyFaceIndices)
+  const b = boundsOfFaces(newMesh, vertMap, targets)
+  const cx = (b.minX + b.maxX) * 0.5
+  const cy = (b.minY + b.maxY) * 0.5
+  const cz = (b.minZ + b.maxZ) * 0.5
 
-  for (const face of newMesh.faces) {
+  for (const faceIndex of targets) {
+    const face = newMesh.faces[faceIndex]
     const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
     if (faceVerts.length < 3) continue
 
-    const uvs: UV[] = faceVerts.map(v => {
-      const len = Math.hypot(v.position.x, v.position.y, v.position.z) || 1
-      const nx = v.position.x / len
-      const ny = v.position.y / len
-      const nz = v.position.z / len
-
-      const u = 0.5 + Math.atan2(nz, nx) / (2 * Math.PI)
-      const vCoord = 0.5 - Math.asin(Math.max(-1, Math.min(1, ny))) / Math.PI
+    face.uvs = faceVerts.map(v => {
+      const dx = v.position.x - cx
+      const dy = v.position.y - cy
+      const dz = v.position.z - cz
+      const len = Math.hypot(dx, dy, dz) || 1
+      const u = 0.5 + Math.atan2(dz / len, dx / len) / (2 * Math.PI)
+      const vCoord = 0.5 - Math.asin(Math.max(-1, Math.min(1, dy / len))) / Math.PI
       return { u, v: 1 - vCoord }
     })
-    face.uvs = uvs
   }
 
   return newMesh
 }
 
 /**
- * Conical Unwrap: Base cap at bottom + radial fan unwrap for sloping cone sides.
+ * Conical unwrap around the target AABB Y axis.
  */
-export function coneUnwrap(mesh: MeshObject): MeshObject {
+export function coneUnwrap(mesh: MeshObject, onlyFaceIndices?: number[]): MeshObject {
   const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
   const vertMap = new Map<string, Vertex>()
   for (const v of newMesh.vertices) {
     vertMap.set(v.id, v)
   }
+  const targets = resolveTargetFaces(newMesh, onlyFaceIndices)
+  const b = boundsOfFaces(newMesh, vertMap, targets)
+  const cx = (b.minX + b.maxX) * 0.5
+  const cz = (b.minZ + b.maxZ) * 0.5
+  let radius = 1e-6
+  for (const faceIndex of targets) {
+    for (const id of newMesh.faces[faceIndex].vertexIds) {
+      const p = vertMap.get(id)?.position
+      if (!p) continue
+      radius = Math.max(radius, Math.hypot(p.x - cx, p.z - cz))
+    }
+  }
 
-  for (const face of newMesh.faces) {
+  for (const faceIndex of targets) {
+    const face = newMesh.faces[faceIndex]
     const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
     if (faceVerts.length < 3) continue
 
     const normal = face.normal || computeFaceNormal(faceVerts.map(v => v.position))
-
     if (normal.y < -0.7) {
-      // Bottom Base Cap
       face.uvs = faceVerts.map(v => ({
-        u: (v.position.x + 1) * 0.25 + 0.75,
-        v: (v.position.z + 1) * 0.25 + 0.5
+        u: 0.76 + ((v.position.x - cx) / radius * 0.5 + 0.5) * 0.22,
+        v: 0.52 + ((v.position.z - cz) / radius * 0.5 + 0.5) * 0.46
       }))
     } else {
-      // Slope fan: distance from apex as V, angle around apex as U
       face.uvs = faceVerts.map(v => {
-        let angle = Math.atan2(v.position.z, v.position.x)
-        let u = (angle + Math.PI) / (2 * Math.PI)
-        let vCoord = (v.position.y + 1) / 2
-        return { u: u * 0.75, v: vCoord }
+        const angle = Math.atan2(v.position.z - cz, v.position.x - cx)
+        return {
+          u: ((angle + Math.PI) / (2 * Math.PI)) * 0.75,
+          v: norm01(v.position.y, b.minY, b.maxY)
+        }
       })
     }
   }
@@ -191,53 +456,204 @@ export function coneUnwrap(mesh: MeshObject): MeshObject {
 }
 
 /**
- * Blockbench Cubemap Cross Unwrap: Unwraps 6 faces of a cube into standard cross layout.
+ * Cubemap cross: each face is projected onto its plane, then fitted into a 4×3 cell.
  */
-export function cubemapCrossUnwrap(mesh: MeshObject): MeshObject {
+export function cubemapCrossUnwrap(mesh: MeshObject, onlyFaceIndices?: number[]): MeshObject {
   const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
   const vertMap = new Map<string, Vertex>()
   for (const v of newMesh.vertices) {
     vertMap.set(v.id, v)
   }
-
-  // Cross 4x3 grid cells (w = 1/4, h = 1/3)
+  const targets = resolveTargetFaces(newMesh, onlyFaceIndices)
   const cellW = 0.25
-  const cellH = 0.3333
+  const cellH = 1 / 3
 
-  for (const face of newMesh.faces) {
+  for (const faceIndex of targets) {
+    const face = newMesh.faces[faceIndex]
     const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
     if (faceVerts.length < 3) continue
 
     const normal = face.normal || computeFaceNormal(faceVerts.map(v => v.position))
-    let col = 1, row = 1
+    let col = 1
+    let row = 1
+    let axisU = { x: 1, y: 0, z: 0 }
+    let axisV = { x: 0, y: 1, z: 0 }
 
-    if (normal.y > 0.5) { col = 1; row = 0 }      // Top
-    else if (normal.y < -0.5) { col = 1; row = 2 } // Bottom
-    else if (normal.z > 0.5) { col = 1; row = 1 }  // Front
-    else if (normal.x > 0.5) { col = 2; row = 1 }  // Right
-    else if (normal.z < -0.5) { col = 3; row = 1 } // Back
-    else if (normal.x < -0.5) { col = 0; row = 1 } // Left
+    if (normal.y > 0.5) {
+      col = 1; row = 0
+      axisU = { x: 1, y: 0, z: 0 }
+      axisV = { x: 0, y: 0, z: -1 }
+    } else if (normal.y < -0.5) {
+      col = 1; row = 2
+      axisU = { x: 1, y: 0, z: 0 }
+      axisV = { x: 0, y: 0, z: 1 }
+    } else if (normal.z > 0.5) {
+      col = 1; row = 1
+      axisU = { x: 1, y: 0, z: 0 }
+      axisV = { x: 0, y: 1, z: 0 }
+    } else if (normal.x > 0.5) {
+      col = 2; row = 1
+      axisU = { x: 0, y: 0, z: -1 }
+      axisV = { x: 0, y: 1, z: 0 }
+    } else if (normal.z < -0.5) {
+      col = 3; row = 1
+      axisU = { x: -1, y: 0, z: 0 }
+      axisV = { x: 0, y: 1, z: 0 }
+    } else if (normal.x < -0.5) {
+      col = 0; row = 1
+      axisU = { x: 0, y: 0, z: 1 }
+      axisV = { x: 0, y: 1, z: 0 }
+    }
 
-    const baseU = col * cellW
-    const baseV = 1.0 - (row + 1) * cellH
-
-    // Map quad vertices clockwise
-    const uvs: UV[] = [
-      { u: baseU, v: baseV + cellH },
-      { u: baseU + cellW, v: baseV + cellH },
-      { u: baseU + cellW, v: baseV },
-      { u: baseU, v: baseV }
-    ]
-
-    face.uvs = faceVerts.map((_, i) => uvs[i % 4] || { u: baseU, v: baseV })
+    const pad = 0.004
+    const u0 = col * cellW + pad
+    const u1 = (col + 1) * cellW - pad
+    const v1 = 1 - row * cellH - pad
+    const v0 = 1 - (row + 1) * cellH + pad
+    face.uvs = assignProjectedToRect(faceVerts.map(v => v.position), axisU, axisV, { u0, v0, u1, v1 })
   }
 
   return newMesh
 }
 
+export interface SmartUvProjectOptions {
+  angleLimitDegrees?: number
+  marginPixels?: number
+  textureSize?: number
+  onlyFaceIndices?: number[]
+}
+
 /**
- * Advanced Disconnected UV Island Segmentation & 2D Shelf Packing
- * Packs all UV islands inside [0..1] with customizable pixel padding.
+ * General-purpose UV projection for arbitrary hard-surface and organic meshes.
+ * Faces are grouped into islands by real mesh adjacency, explicit seams, and
+ * normal angle, then each island is projected onto its own best-fit plane and
+ * packed into the texture tile.
+ */
+export function smartUvProject(mesh: MeshObject, options: SmartUvProjectOptions = {}): MeshObject {
+  const projected: MeshObject = JSON.parse(JSON.stringify(mesh))
+  if (projected.faces.length === 0) return projected
+
+  const requestedAngle = Number(options.angleLimitDegrees ?? 66)
+  const angleLimit = Number.isFinite(requestedAngle) ? Math.max(1, Math.min(179, requestedAngle)) : 66
+  const cosLimit = Math.cos(angleLimit * Math.PI / 180)
+  const requestedFaces = options.onlyFaceIndices?.filter(i => i >= 0 && i < projected.faces.length)
+  const targetFaces = requestedFaces && requestedFaces.length > 0
+    ? Array.from(new Set(requestedFaces))
+    : projected.faces.map((_, i) => i)
+  const targetSet = new Set(targetFaces)
+  const vertexMap = new Map(projected.vertices.map(v => [v.id, v]))
+  const seamSet = new Set(projected.seamEdgeIds || [])
+  const edgeKey = (a: string, b: string) => a < b ? `${a}_${b}` : `${b}_${a}`
+
+  const normals = new Map<number, Vector3D>()
+  for (const faceIndex of targetFaces) {
+    const face = projected.faces[faceIndex]
+    const points = face.vertexIds.map(id => vertexMap.get(id)?.position).filter(Boolean) as Vector3D[]
+    normals.set(faceIndex, face.normal || computeFaceNormal(points))
+  }
+
+  const edgeFaces = new Map<string, number[]>()
+  for (const faceIndex of targetFaces) {
+    const ids = projected.faces[faceIndex].vertexIds
+    for (let i = 0; i < ids.length; i++) {
+      const key = edgeKey(ids[i], ids[(i + 1) % ids.length])
+      const linked = edgeFaces.get(key) || []
+      linked.push(faceIndex)
+      edgeFaces.set(key, linked)
+    }
+  }
+
+  const neighbors = new Map<number, Array<{ face: number; edge: string }>>()
+  for (const faceIndex of targetFaces) neighbors.set(faceIndex, [])
+  for (const [edge, faces] of edgeFaces) {
+    for (let i = 0; i < faces.length; i++) {
+      for (let j = i + 1; j < faces.length; j++) {
+        neighbors.get(faces[i])?.push({ face: faces[j], edge })
+        neighbors.get(faces[j])?.push({ face: faces[i], edge })
+      }
+    }
+  }
+
+  const visited = new Set<number>()
+  const islands: number[][] = []
+  for (const seed of targetFaces) {
+    if (visited.has(seed)) continue
+    const island: number[] = []
+    const queue = [seed]
+    const seedNormal = normals.get(seed) || { x: 0, y: 1, z: 0 }
+    let normalSum = { ...seedNormal }
+    visited.add(seed)
+
+    while (queue.length > 0) {
+      const current = queue.shift()!
+      island.push(current)
+      const averageNormal = normalizeVec3(normalSum)
+      for (const link of neighbors.get(current) || []) {
+        if (!targetSet.has(link.face) || visited.has(link.face) || seamSet.has(link.edge)) continue
+        const candidateNormal = normals.get(link.face) || seedNormal
+        const localNormal = normals.get(current) || seedNormal
+        if (dotVec3(localNormal, candidateNormal) < cosLimit) continue
+        // Prevent a chain of gentle bends from wrapping an island all the way
+        // around a sphere or tube and overlapping its planar projection.
+        if (dotVec3(averageNormal, candidateNormal) < cosLimit) continue
+        visited.add(link.face)
+        queue.push(link.face)
+        normalSum = {
+          x: normalSum.x + candidateNormal.x,
+          y: normalSum.y + candidateNormal.y,
+          z: normalSum.z + candidateNormal.z
+        }
+      }
+    }
+    islands.push(island)
+  }
+
+  for (let islandIndex = 0; islandIndex < islands.length; islandIndex++) {
+    const island = islands[islandIndex]
+    let normalSum = { x: 0, y: 0, z: 0 }
+    const uniquePoints = new Map<string, Vector3D>()
+    for (const faceIndex of island) {
+      const normal = normals.get(faceIndex) || { x: 0, y: 1, z: 0 }
+      normalSum.x += normal.x
+      normalSum.y += normal.y
+      normalSum.z += normal.z
+      for (const id of projected.faces[faceIndex].vertexIds) {
+        const position = vertexMap.get(id)?.position
+        if (position) uniquePoints.set(id, position)
+      }
+    }
+    const { tangent, bitangent } = bestFitProjectionBasis(
+      Array.from(uniquePoints.values()),
+      normalSum
+    )
+
+    for (const faceIndex of island) {
+      const face = projected.faces[faceIndex]
+      face.uvs = face.vertexIds.map(id => {
+        const position = vertexMap.get(id)?.position || { x: 0, y: 0, z: 0 }
+        // Separate projection spaces before packing so two cut islands whose
+        // local coordinates happen to match cannot be mistaken for welded UVs.
+        return {
+          u: dotVec3(position, tangent) + islandIndex * 10000,
+          v: dotVec3(position, bitangent)
+        }
+      })
+    }
+    rotateIslandToPrincipalAxis(projected, island)
+  }
+
+  return packUVIslands(
+    projected,
+    Number.isFinite(Number(options.marginPixels)) ? Number(options.marginPixels) : 2,
+    Number.isFinite(Number(options.textureSize)) ? Number(options.textureSize) : 64,
+    targetFaces
+  )
+}
+
+/**
+ * Packs disconnected UV islands inside [0..1] with pixel-accurate padding.
+ * Island connectivity requires a shared 3D edge with welded UV endpoints;
+ * unrelated faces that merely overlap in UV space remain separate islands.
  */
 export function packUVIslands(
   mesh: MeshObject,
@@ -248,51 +664,10 @@ export function packUVIslands(
   const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
   if (newMesh.faces.length === 0) return newMesh
 
-  const margin = Math.max(0.001, marginPixels / textureSize)
-  const allowed = onlyFaceIndices && onlyFaceIndices.length > 0
-    ? new Set(onlyFaceIndices)
-    : null
-
-  const faceCount = newMesh.faces.length
-  const faceVisited = new Array(faceCount).fill(false)
-  const islands: number[][] = []
-
-  function shareUvEdge(fAIdx: number, fBIdx: number): boolean {
-    const fA = newMesh.faces[fAIdx]
-    const fB = newMesh.faces[fBIdx]
-    if (!fA.uvs || !fB.uvs) return false
-
-    let shared = 0
-    for (const uvA of fA.uvs) {
-      for (const uvB of fB.uvs) {
-        if (Math.abs(uvA.u - uvB.u) < 0.002 && Math.abs(uvA.v - uvB.v) < 0.002) {
-          shared++
-          break
-        }
-      }
-    }
-    return shared >= 2
-  }
-
-  for (let i = 0; i < faceCount; i++) {
-    if (faceVisited[i] || (allowed && !allowed.has(i))) continue
-    const island: number[] = [i]
-    faceVisited[i] = true
-    const queue = [i]
-
-    while (queue.length > 0) {
-      const curr = queue.shift()!
-      for (let j = 0; j < faceCount; j++) {
-        if (allowed && !allowed.has(j)) continue
-        if (!faceVisited[j] && shareUvEdge(curr, j)) {
-          faceVisited[j] = true
-          island.push(j)
-          queue.push(j)
-        }
-      }
-    }
-    islands.push(island)
-  }
+  const safeMarginPixels = Number.isFinite(marginPixels) ? marginPixels : 2
+  const safeTextureSize = Number.isFinite(textureSize) ? textureSize : 64
+  const margin = Math.max(0, safeMarginPixels / Math.max(1, safeTextureSize))
+  const islands = findUvIslands(newMesh, onlyFaceIndices)
 
   // 2. Measure Island Bounding Boxes
   interface IslandBox {
@@ -326,51 +701,69 @@ export function packUVIslands(
     }
   })
 
-  // Sort islands descending by height
-  boxes.sort((a, b) => b.h - a.h)
+  boxes.sort((a, b) => Math.max(b.w, b.h) - Math.max(a.w, a.h))
 
-  // 3. 2D Shelf Bin Packing
-  let shelfX = margin
-  let shelfY = margin
-  let shelfHeight = 0
-  let totalScale = 1.0
+  interface Placement { box: IslandBox; u: number; v: number; rotated: boolean }
+  const tryPack = (scale: number): Placement[] | null => {
+    const placements: Placement[] = []
+    let x = margin
+    let y = margin
+    let rowHeight = 0
+    const limit = 1 - margin + 1e-8
 
-  // Calculate required area to estimate downscaling if needed
-  let totalIslandArea = 0
-  for (const b of boxes) {
-    totalIslandArea += (b.w + margin * 2) * (b.h + margin * 2)
-  }
+    for (const box of boxes) {
+      const choices = [
+        { rotated: false, w: box.w * scale, h: box.h * scale },
+        { rotated: true, w: box.h * scale, h: box.w * scale }
+      ].filter(choice => choice.w <= 1 - margin * 2 + 1e-8 && choice.h <= 1 - margin * 2 + 1e-8)
+      if (choices.length === 0) return null
 
-  if (totalIslandArea > 0.85) {
-    totalScale = Math.min(1.0, Math.sqrt(0.85 / totalIslandArea))
-  }
+      let choice = choices
+        .filter(item => x + item.w <= limit)
+        .sort((a, b) => Math.max(rowHeight, a.h) - Math.max(rowHeight, b.h) || a.w - b.w)[0]
 
-  for (const b of boxes) {
-    const bw = b.w * totalScale
-    const bh = b.h * totalScale
+      if (!choice) {
+        x = margin
+        y += rowHeight + margin
+        rowHeight = 0
+        choice = choices.sort((a, b) => a.h - b.h || a.w - b.w)[0]
+      }
+      if (!choice || y + choice.h > limit) return null
 
-    // If rectangle exceeds shelf width, start new shelf
-    if (shelfX + bw + margin > 1.0) {
-      shelfX = margin
-      shelfY += shelfHeight + margin
-      shelfHeight = 0
+      placements.push({ box, u: x, v: y, rotated: choice.rotated })
+      x += choice.w + margin
+      rowHeight = Math.max(rowHeight, choice.h)
     }
+    return placements
+  }
 
-    // If exceeds vertical space, apply uniform compression
-    const targetU0 = shelfX
-    const targetV0 = 1.0 - (shelfY + bh)
+  let low = 0
+  let high = 1
+  while (tryPack(high)) high *= 2
+  for (let i = 0; i < 28; i++) {
+    const mid = (low + high) / 2
+    if (tryPack(mid)) low = mid
+    else high = mid
+  }
+  let appliedScale = low * 0.999
+  let placements = tryPack(appliedScale)
+  if (!placements) {
+    appliedScale = low
+    placements = tryPack(low) || []
+  }
 
-    for (const fIdx of b.indices) {
-      for (const uv of newMesh.faces[fIdx].uvs) {
-        const normU = (uv.u - b.minU) / b.w
-        const normV = (uv.v - b.minV) / b.h
-        uv.u = Math.max(0, Math.min(1, targetU0 + normU * bw))
-        uv.v = Math.max(0, Math.min(1, targetV0 + normV * bh))
+  for (const placement of placements) {
+    const { box, u: targetU, v: targetV, rotated } = placement
+    for (const faceIndex of box.indices) {
+      for (const uv of newMesh.faces[faceIndex].uvs) {
+        const sourceU = uv.u - box.minU
+        const sourceV = uv.v - box.minV
+        const packedU = rotated ? sourceV : sourceU
+        const packedV = rotated ? box.w - sourceU : sourceV
+        uv.u = Math.max(0, Math.min(1, targetU + packedU * appliedScale))
+        uv.v = Math.max(0, Math.min(1, targetV + packedV * appliedScale))
       }
     }
-
-    shelfX += bw + margin
-    shelfHeight = Math.max(shelfHeight, bh)
   }
 
   return newMesh
@@ -387,9 +780,8 @@ export function gridifyQuadIslands(mesh: MeshObject, targetFaceIndices?: number[
 
   for (const fIdx of facesToProcess) {
     const face = newMesh.faces[fIdx]
-    if (!face || face.uvs.length !== 4) continue // Only quads
+    if (!face || face.uvs.length !== 4) continue
 
-    // Bounding box of quad
     let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity
     for (const uv of face.uvs) {
       if (uv.u < minU) minU = uv.u
@@ -398,13 +790,31 @@ export function gridifyQuadIslands(mesh: MeshObject, targetFaceIndices?: number[
       if (uv.v > maxV) maxV = uv.v
     }
 
-    // Straighten 4 corners
-    face.uvs = [
+    const corners = [
       { u: minU, v: maxV },
       { u: maxU, v: maxV },
       { u: maxU, v: minV },
       { u: minU, v: minV }
     ]
+    const assigned = [-1, -1, -1, -1]
+    const used = new Set<number>()
+    const pairs: { vert: number; corner: number; dist: number }[] = []
+    for (let vert = 0; vert < 4; vert++) {
+      for (let corner = 0; corner < 4; corner++) {
+        const du = face.uvs[vert].u - corners[corner].u
+        const dv = face.uvs[vert].v - corners[corner].v
+        pairs.push({ vert, corner, dist: du * du + dv * dv })
+      }
+    }
+    pairs.sort((a, b) => a.dist - b.dist)
+    for (const pair of pairs) {
+      if (assigned[pair.vert] !== -1 || used.has(pair.corner)) continue
+      assigned[pair.vert] = pair.corner
+      used.add(pair.corner)
+    }
+    face.uvs = assigned.map((corner, index) => (
+      corner >= 0 ? { ...corners[corner] } : { ...face.uvs[index] }
+    ))
   }
 
   return newMesh
@@ -420,61 +830,54 @@ export function equalizeTexelDensity(mesh: MeshObject): MeshObject {
     vertMap.set(v.id, v)
   }
 
-  // Calculate 3D area vs 2D UV area
+  const islands = findUvIslands(newMesh)
   let totalWorldArea = 0
   let totalUvArea = 0
-
-  interface FaceMetrics {
-    face: any
-    worldArea: number
-    uvArea: number
-  }
-
-  const metrics: FaceMetrics[] = []
-
-  for (const face of newMesh.faces) {
-    if (face.uvs.length < 3) continue
-    const verts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
-    if (verts.length < 3) continue
-
-    // 3D Triangle Area (cross product)
-    const p0 = verts[0].position, p1 = verts[1].position, p2 = verts[2].position
-    const e1 = { x: p1.x - p0.x, y: p1.y - p0.y, z: p1.z - p0.z }
-    const e2 = { x: p2.x - p0.x, y: p2.y - p0.y, z: p2.z - p0.z }
-    const crossX = e1.y * e2.z - e1.z * e2.y
-    const crossY = e1.z * e2.x - e1.x * e2.z
-    const crossZ = e1.x * e2.y - e1.y * e2.x
-    const wArea = 0.5 * Math.hypot(crossX, crossY, crossZ)
-
-    // 2D UV Area
-    const u0 = face.uvs[0], u1 = face.uvs[1], u2 = face.uvs[2]
-    const uvArea = 0.5 * Math.abs((u1.u - u0.u) * (u2.v - u0.v) - (u2.u - u0.u) * (u1.v - u0.v))
-
-    totalWorldArea += wArea
+  const islandMetrics = islands.map(island => {
+    let worldArea = 0
+    let uvArea = 0
+    let centerU = 0
+    let centerV = 0
+    let corners = 0
+    for (const faceIndex of island) {
+      const face = newMesh.faces[faceIndex]
+      if (face.uvs.length < 3) continue
+      const verts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
+      if (verts.length < 3) continue
+      const p0 = verts[0].position, p1 = verts[1].position, p2 = verts[2].position
+      const e1 = { x: p1.x - p0.x, y: p1.y - p0.y, z: p1.z - p0.z }
+      const e2 = { x: p2.x - p0.x, y: p2.y - p0.y, z: p2.z - p0.z }
+      worldArea += 0.5 * Math.hypot(
+        e1.y * e2.z - e1.z * e2.y,
+        e1.z * e2.x - e1.x * e2.z,
+        e1.x * e2.y - e1.y * e2.x
+      )
+      const u0 = face.uvs[0], u1 = face.uvs[1], u2 = face.uvs[2]
+      uvArea += 0.5 * Math.abs((u1.u - u0.u) * (u2.v - u0.v) - (u2.u - u0.u) * (u1.v - u0.v))
+      for (const uv of face.uvs) {
+        centerU += uv.u
+        centerV += uv.v
+        corners++
+      }
+    }
+    totalWorldArea += worldArea
     totalUvArea += uvArea
-    metrics.push({ face, worldArea: wArea, uvArea })
-  }
+    return { island, worldArea, uvArea, centerU, centerV, corners }
+  })
 
   if (totalWorldArea === 0 || totalUvArea === 0) return newMesh
 
   const avgRatio = totalUvArea / totalWorldArea
-
-  for (const m of metrics) {
-    if (m.worldArea === 0 || m.uvArea === 0) continue
-    const targetUvArea = m.worldArea * avgRatio
-    const scale = Math.sqrt(targetUvArea / m.uvArea)
-
-    // Center of face UVs
-    let cU = 0, cV = 0
-    for (const uv of m.face.uvs) {
-      cU += uv.u; cV += uv.v
-    }
-    cU /= m.face.uvs.length
-    cV /= m.face.uvs.length
-
-    for (const uv of m.face.uvs) {
-      uv.u = cU + (uv.u - cU) * Math.max(0.1, Math.min(3.0, scale))
-      uv.v = cV + (uv.v - cV) * Math.max(0.1, Math.min(3.0, scale))
+  for (const metrics of islandMetrics) {
+    if (metrics.worldArea === 0 || metrics.uvArea === 0 || metrics.corners === 0) continue
+    const scale = Math.max(0.1, Math.min(3.0, Math.sqrt((metrics.worldArea * avgRatio) / metrics.uvArea)))
+    const centerU = metrics.centerU / metrics.corners
+    const centerV = metrics.centerV / metrics.corners
+    for (const faceIndex of metrics.island) {
+      for (const uv of newMesh.faces[faceIndex].uvs) {
+        uv.u = centerU + (uv.u - centerU) * scale
+        uv.v = centerV + (uv.v - centerV) * scale
+      }
     }
   }
 
@@ -531,46 +934,7 @@ export function applyTargetTexelDensity(
     ? new Set(targetFaceIndices)
     : new Set(newMesh.faces.map((_, i) => i))
 
-  // Find islands among the target faces
-  const faceVisited = new Array(newMesh.faces.length).fill(false)
-  const islands: number[][] = []
-
-  function shareUvEdge(fAIdx: number, fBIdx: number): boolean {
-    const fA = newMesh.faces[fAIdx]
-    const fB = newMesh.faces[fBIdx]
-    if (!fA.uvs || !fB.uvs) return false
-
-    let shared = 0
-    for (const uvA of fA.uvs) {
-      for (const uvB of fB.uvs) {
-        if (Math.abs(uvA.u - uvB.u) < 0.002 && Math.abs(uvA.v - uvB.v) < 0.002) {
-          shared++
-          break
-        }
-      }
-    }
-    return shared >= 2
-  }
-
-  for (let i = 0; i < newMesh.faces.length; i++) {
-    if (!targetSet.has(i) || faceVisited[i]) continue
-    const island: number[] = [i]
-    faceVisited[i] = true
-    const queue = [i]
-
-    while (queue.length > 0) {
-      const curr = queue.shift()!
-      for (let j = 0; j < newMesh.faces.length; j++) {
-        if (!targetSet.has(j) || faceVisited[j]) continue
-        if (shareUvEdge(curr, j)) {
-          faceVisited[j] = true
-          island.push(j)
-          queue.push(j)
-        }
-      }
-    }
-    islands.push(island)
-  }
+  const islands = findUvIslands(newMesh, Array.from(targetSet))
 
   for (const island of islands) {
     let islandWorldArea = 0

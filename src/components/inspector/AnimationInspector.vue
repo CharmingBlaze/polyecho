@@ -6,17 +6,7 @@ import { useToolStore } from '../../stores/toolStore'
 import { resolveMeshBoneParentId, sampleTrack } from '../../core/animation/Armature'
 import UiSection from '../ui/UiSection.vue'
 import UiButton from '../ui/UiButton.vue'
-import {
-  Key,
-  Film,
-  Sliders,
-  GitCommitVertical,
-  Sparkles,
-  RotateCcw,
-  Copy,
-  Clipboard,
-  Search
-} from 'lucide-vue-next'
+import BlenderIcon from '../icons/BlenderIcon.vue'
 
 const animationStore = useAnimationStore()
 const projectStore = useProjectStore()
@@ -93,6 +83,7 @@ function keyBlend() {
 
 function startScrubVector(e: MouseEvent, targetObj: { x: number; y: number; z: number }, axis: 'x' | 'y' | 'z', step = 0.05, precision = 2) {
   e.preventDefault()
+  projectStore.recordState(`Adjust ${axis.toUpperCase()}`)
   const startX = e.clientX
   const startVal = Number(targetObj[axis]) || 0
   const onMouseMove = (moveEvent: MouseEvent) => {
@@ -101,7 +92,6 @@ function startScrubVector(e: MouseEvent, targetObj: { x: number; y: number; z: n
   const onMouseUp = () => {
     window.removeEventListener('mousemove', onMouseMove)
     window.removeEventListener('mouseup', onMouseUp)
-    projectStore.recordState(`Adjust ${axis.toUpperCase()}`)
     if (animationStore.autoKey) animationStore.recordCurrentKeyframe({ record: false })
   }
   window.addEventListener('mousemove', onMouseMove)
@@ -128,7 +118,7 @@ const generators: { label: string; run: () => void }[] = [
   <div class="flex flex-col select-none text-xs font-sans">
     <div class="h-7 bg-ui-header border-b border-ui-borderSubtle px-2.5 flex items-center justify-between">
       <div class="flex items-center space-x-1.5">
-        <Film class="w-3 h-3 text-sky-400" />
+        <BlenderIcon name="keyframe" :size="13" color="#38bdf8" />
         <span class="text-[11px] font-medium text-ui-textMuted">Animate</span>
       </div>
       <span class="font-semibold text-ui-textPrimary truncate max-w-[150px] text-[11px]">
@@ -136,7 +126,7 @@ const generators: { label: string; run: () => void }[] = [
       </span>
     </div>
 
-    <UiSection title="Clip" :icon="Film" :default-open="true">
+    <UiSection title="Clip" blender-icon="keyframe-map" :default-open="true">
       <select
         :value="animationStore.activeClip?.id"
         class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-xs cursor-pointer"
@@ -161,23 +151,23 @@ const generators: { label: string; run: () => void }[] = [
       </div>
     </UiSection>
 
-    <UiSection title="Keyframe" :icon="Key" :default-open="true">
+    <UiSection title="Keyframe" blender-icon="keyframe" :default-open="true">
       <p class="text-[10px] text-ui-textMuted leading-snug">{{ keyTargetLabel }}</p>
       <p v-if="animationStore.recordedStatusMessage !== 'Ready'" class="text-[9px] text-emerald-400 truncate">{{ animationStore.recordedStatusMessage }}</p>
       <div class="grid grid-cols-2 gap-1">
         <UiButton size="xs" variant="primary" title="I or K" @click="animationStore.recordCurrentKeyframe()">Insert key</UiButton>
         <UiButton size="xs" @click="animationStore.recordAllBonesKeyframe()">Key all</UiButton>
         <UiButton size="xs" @click="animationStore.clearKeyframeAtCurrentTime()">Clear frame</UiButton>
-        <UiButton size="xs" title="Alt+R" @click="animationStore.resetPose()"><RotateCcw class="w-3 h-3" /> Reset</UiButton>
+        <UiButton size="xs" title="Alt+R" @click="animationStore.resetPose()"><BlenderIcon name="undo" :size="12" /> Reset</UiButton>
       </div>
       <div class="grid grid-cols-2 gap-1">
-        <UiButton size="xs" @click="animationStore.copyPose()"><Copy class="w-3 h-3" /> Copy</UiButton>
-        <UiButton size="xs" @click="animationStore.pastePose()"><Clipboard class="w-3 h-3" /> Paste</UiButton>
+        <UiButton size="xs" @click="animationStore.copyPose()"><BlenderIcon name="duplicate" :size="12" /> Copy</UiButton>
+        <UiButton size="xs" @click="animationStore.pastePose()"><BlenderIcon name="import" :size="12" /> Paste</UiButton>
       </div>
       <UiButton size="xs" class="w-full" @click="animationStore.pasteFlippedPose()">Paste flipped</UiButton>
     </UiSection>
 
-    <UiSection v-if="selectedBone" title="Pose" :icon="GitCommitVertical" :default-open="true">
+    <UiSection v-if="selectedBone" title="Pose" blender-icon="pose" :default-open="true">
       <div class="text-[9px] text-ui-textMuted">Rotation</div>
       <div class="grid grid-cols-3 gap-1">
         <div v-for="ax in (['x', 'y', 'z'] as const)" :key="'r'+ax" class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
@@ -194,7 +184,7 @@ const generators: { label: string; run: () => void }[] = [
       </div>
     </UiSection>
 
-    <UiSection v-if="hasBones" title="Bones" :icon="Search" :badge="filteredBones.length" :default-open="true">
+    <UiSection v-if="hasBones" title="Bones" blender-icon="bone" :badge="filteredBones.length" :default-open="true">
       <input v-model="boneSearchQuery" placeholder="Find bone…" class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-1 text-[10px]" />
       <div class="max-h-36 overflow-y-auto space-y-0.5">
         <button
@@ -207,16 +197,43 @@ const generators: { label: string; run: () => void }[] = [
         >{{ b.name }}</button>
       </div>
     </UiSection>
-    <UiSection v-else title="Bones" :icon="GitCommitVertical" :default-open="false">
+    <UiSection v-else title="Bones" blender-icon="bone" :default-open="false">
       <p class="text-[10px] text-ui-textMuted leading-snug">No armature. This clip keys the selected object. Build a skeleton in Rig to pose bones.</p>
       <UiButton size="xs" class="w-full" @click="toolStore.setAppMode('rig')">Open Rig</UiButton>
     </UiSection>
 
-    <UiSection title="Playback" :icon="Sliders" :default-open="true">
+    <UiSection title="Playback" blender-icon="display" :default-open="true">
       <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
         <span>Auto-key on release</span>
         <input type="checkbox" v-model="animationStore.autoKey" class="accent-rose-500" />
       </label>
+      <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
+        <span class="flex items-center gap-1"><BlenderIcon name="onion-skin" :size="12" /> Onion skin</span>
+        <input type="checkbox" v-model="animationStore.onionSkin" class="accent-amber-500" />
+      </label>
+      <div v-if="animationStore.onionSkin" class="grid grid-cols-2 gap-1">
+        <label class="flex flex-col gap-0.5 text-[9px] text-ui-textMuted">
+          Frames
+          <input
+            type="number"
+            min="1"
+            max="4"
+            v-model.number="animationStore.onionFramesCount"
+            class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1 py-0.5 text-[10px] text-ui-textPrimary font-mono"
+          />
+        </label>
+        <label class="flex flex-col gap-0.5 text-[9px] text-ui-textMuted">
+          Opacity
+          <input
+            type="number"
+            min="0.1"
+            max="0.8"
+            step="0.05"
+            v-model.number="animationStore.onionOpacity"
+            class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1 py-0.5 text-[10px] text-ui-textPrimary font-mono"
+          />
+        </label>
+      </div>
       <div class="grid grid-cols-2 gap-1">
         <UiButton size="xs" :variant="animationStore.interpolationMode === 'step' ? 'accent' : 'default'" @click="animationStore.interpolationMode = 'step'">Step</UiButton>
         <UiButton size="xs" :variant="animationStore.interpolationMode === 'linear' ? 'accent' : 'default'" @click="animationStore.interpolationMode = 'linear'">Linear</UiButton>
@@ -249,7 +266,7 @@ const generators: { label: string; run: () => void }[] = [
       </template>
     </UiSection>
 
-    <UiSection title="Generate" :icon="Sparkles" :default-open="false">
+    <UiSection title="Generate" blender-icon="uv-smart" :default-open="false">
       <p class="text-[9px] text-ui-textMuted">Creates a clip and selects it.</p>
       <div class="grid grid-cols-3 gap-1">
         <UiButton v-for="g in generators" :key="g.label" size="xs" @click="g.run">{{ g.label }}</UiButton>
@@ -270,7 +287,7 @@ const generators: { label: string; run: () => void }[] = [
       </div>
     </UiSection>
 
-    <UiSection v-if="activeMesh && hasBones" title="Mesh parent" :icon="GitCommitVertical" :default-open="false">
+    <UiSection v-if="activeMesh && hasBones" title="Mesh parent" blender-icon="link" :default-open="false">
       <p class="text-[9px] text-ui-textMuted">Object bind. Skin weights live in Rig → Bind / Wts.</p>
       <select
         :value="activeMeshBoneId || 'none'"

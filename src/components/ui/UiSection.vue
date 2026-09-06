@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { ChevronRight, ChevronDown } from 'lucide-vue-next'
+import BlenderIcon from '../icons/BlenderIcon.vue'
 
 const props = withDefaults(defineProps<{
   title: string
@@ -10,6 +10,7 @@ const props = withDefaults(defineProps<{
   badge?: string | number
   hint?: string
   icon?: any
+  blenderIcon?: string
 }>(), {
   defaultOpen: true,
   isOpen: undefined,
@@ -55,12 +56,14 @@ function toggle() {
       @click="toggle"
     >
       <div class="flex items-center space-x-1.5 truncate">
-        <component 
+        <BlenderIcon
           v-if="collapsible"
-          :is="localIsOpen ? ChevronDown : ChevronRight" 
-          class="w-3 h-3 text-ui-textMuted shrink-0 transition-transform" 
+          :name="localIsOpen ? 'chevron-down' : 'chevron-right'"
+          :size="12"
+          class="text-ui-textMuted shrink-0"
         />
-        <component v-if="icon" :is="icon" class="w-3 h-3 text-ui-textMuted shrink-0" />
+        <BlenderIcon v-if="blenderIcon" :name="blenderIcon as any" :size="12" class="text-ui-textMuted" />
+        <component v-else-if="icon" :is="icon" class="w-3 h-3 text-ui-textMuted shrink-0" />
         <span class="font-sans font-semibold text-[11px] text-ui-textSecondary truncate">
           {{ title }}
         </span>

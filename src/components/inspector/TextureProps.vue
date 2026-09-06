@@ -8,6 +8,7 @@ import BlenderIcon from '../icons/BlenderIcon.vue'
 import ImportTextureModal from '../modals/ImportTextureModal.vue'
 import TextureSharePrompt from '../modals/TextureSharePrompt.vue'
 import { useTextureApply } from '../../composables/useTextureApply'
+import { saveBlobDocument } from '../../core/desktop/desktopApi'
 import { 
   Plus, 
   Trash2, 
@@ -28,7 +29,6 @@ import {
   Search,
   Grid,
   Image as ImageIcon,
-  Layers,
   Maximize2,
   Filter
 } from 'lucide-vue-next'
@@ -69,6 +69,12 @@ const sliceRows = ref<number>(2)
 
 const activeTexture = computed(() => {
   return projectStore.textures.find(t => t.id === projectStore.activeTextureId) || projectStore.textures[0]
+})
+
+const paintLayers = computed(() => {
+  void projectStore.textureRevision
+  const layers = activeTexture.value?.pixelBuffer?.layers
+  return layers ? layers.slice() : []
 })
 
 const filteredTextures = computed(() => {
@@ -260,14 +266,12 @@ function handleTextureImported(texId: string) {
 function exportTexturePng() {
   if (!activeTexture.value || !activeTexture.value.pixelBuffer) return
   activeTexture.value.pixelBuffer.canvas.toBlob((blob: Blob | null) => {
-    if (blob) {
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${activeTexture.value?.name || 'texture'}_${activeTexture.value?.width}x${activeTexture.value?.height}.png`
-      a.click()
-      URL.revokeObjectURL(url)
-    }
+    if (!blob) return
+    void saveBlobDocument(
+      blob,
+      `${activeTexture.value?.name || 'texture'}_${activeTexture.value?.width}x${activeTexture.value?.height}.png`,
+      [{ name: 'PNG', extensions: ['png'] }]
+    )
   })
 }
 
@@ -316,13 +320,29 @@ function handleLayerChange() {
   projectStore.markTextureUpdated(tex.id)
 }
 
+function beginLayerMetaEdit(label: string) {
+  projectStore.recordState(label)
+}
+
+function handleToggleLayerVisible(layer: { visible: boolean }) {
+  projectStore.recordState(layer.visible ? 'Hide Texture Layer' : 'Show Texture Layer')
+  layer.visible = !layer.visible
+  handleLayerChange()
+}
+
+function setActiveLayer(id: string) {
+  const tex = activeTexture.value
+  if (!tex?.pixelBuffer) return
+  tex.pixelBuffer.activeLayerId = id
+}
+
 function openPaintStudio() {
-  toolStore.appMode = 'uvpaint'
+  toolStore.setAppMode('uvpaint')
   toolStore.uvWorkspaceTab = 'paint'
 }
 
 function openUvStudio() {
-  toolStore.appMode = 'uvpaint'
+  toolStore.setAppMode('uvpaint')
   toolStore.uvWorkspaceTab = 'uv'
 }
 
@@ -509,6 +529,88 @@ function ditherTextureToPalette(algorithm: 'floyd' | 'atkinson') {
       </div>
     </UiSection>
 
+    <UiSection
+      v-if="activeTexture && paintLayers.length"
+      title="Layers"
+      blender-icon="layers"
+      :default-open="true"
+      :badge="paintLayers.length"
+    >
+      <template #actions>
+        <UiButton size="xs" variant="ghost" title="Add layer" @click="handleAddLayer">
+          <BlenderIcon name="plus" :size="12" color="#34d399" />
+        </UiButton>
+      </template>
+      <div class="space-y-1 max-h-56 overflow-y-auto custom-scrollbar">
+        <div
+          v-for="layer in paintLayers"
+          :key="layer.id"
+          class="rounded-xs border px-1.5 py-1.5 cursor-pointer"
+          :class="activeTexture.pixelBuffer.activeLayerId === layer.id
+            ? 'bg-ui-active border-emerald-500/45 shadow-xs'
+            : 'bg-ui-surface/40 border-ui-borderSubtle hover:bg-ui-hover'"
+          @click="setActiveLayer(layer.id)"
+        >
+          <div class="flex items-center gap-1.5">
+            <button
+              type="button"
+              class="p-0.5 rounded-xs text-ui-textMuted hover:text-ui-textPrimary cursor-pointer"
+              :title="layer.visible ? 'Hide layer' : 'Show layer'"
+              @click.stop="handleToggleLayerVisible(layer)"
+            >
+              <BlenderIcon v-if="layer.visible" name="eye-open" :size="12" color="#34d399" />
+              <BlenderIcon v-else name="eye-closed" :size="12" />
+            </button>
+            <span
+              class="flex-1 min-w-0 font-medium truncate text-[11px]"
+              :class="activeTexture.pixelBuffer.activeLayerId === layer.id ? 'text-ui-textAccent' : 'text-ui-textPrimary'"
+              :style="layer.visible ? undefined : { opacity: 0.4 }"
+            >{{ layer.name }}</span>
+            <button type="button" class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary cursor-pointer" title="Duplicate" @click.stop="handleDuplicateLayer(layer.id)">
+              <BlenderIcon name="duplicate" :size="12" />
+            </button>
+            <button
+              v-if="paintLayers.length > 1"
+              type="button"
+              class="p-0.5 text-ui-textMuted hover:text-rose-400 cursor-pointer"
+              title="Delete"
+              @click.stop="handleDeleteLayer(layer.id)"
+            >
+              <BlenderIcon name="trash" :size="12" />
+            </button>
+          </div>
+          <div class="flex items-center gap-1.5 mt-1 pl-5" @click.stop>
+            <select
+              v-model="layer.blendMode"
+              class="h-5 flex-1 min-w-0 bg-ui-input text-[9px] text-ui-textSecondary border border-ui-borderSubtle rounded-xs px-1 cursor-pointer"
+              title="Blend mode"
+              @pointerdown="beginLayerMetaEdit('Layer Blend')"
+              @change="handleLayerChange"
+            >
+              <option value="normal">Normal</option>
+              <option value="multiply">Multiply</option>
+              <option value="screen">Screen</option>
+              <option value="overlay">Overlay</option>
+              <option value="additive">Add</option>
+            </select>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              v-model.number="layer.opacity"
+              class="w-14 accent-emerald-500 cursor-pointer h-1"
+              :title="`Opacity ${Math.round(layer.opacity * 100)}%`"
+              @pointerdown="beginLayerMetaEdit('Layer Opacity')"
+              @input="handleLayerPreview"
+              @change="handleLayerChange"
+            />
+            <span class="w-7 text-right text-[9px] font-mono text-ui-textMuted">{{ Math.round(layer.opacity * 100) }}</span>
+          </div>
+        </div>
+      </div>
+    </UiSection>
+
     <UiSection title="Library" :icon="Grid" :badge="projectStore.textures.length" :default-open="true">
       <p class="text-[10px] text-ui-textMuted leading-snug">Click to paint/UV this image. Delete does not bind another map.</p>
       <div class="flex items-center gap-1.5 px-2 h-5.5 bg-ui-input border border-ui-borderSubtle rounded-xs">
@@ -678,67 +780,6 @@ function ditherTextureToPalette(algorithm: 'floyd' | 'atkinson') {
           <RotateCw class="w-3 h-3 text-amber-400" />
           Rotate 90°
         </UiButton>
-      </div>
-    </UiSection>
-
-    <UiSection v-if="activeTexture && activeTexture.pixelBuffer?.layers" title="Layers" :icon="Layers" :default-open="true" :badge="activeTexture.pixelBuffer.layers.length">
-      <template #actions>
-        <UiButton size="xs" variant="ghost" title="Add layer" @click="handleAddLayer">
-          <Plus class="w-3 h-3 text-emerald-400" />
-        </UiButton>
-      </template>
-      <div class="space-y-1 max-h-36 overflow-y-auto custom-scrollbar">
-        <div
-          v-for="layer in activeTexture.pixelBuffer.layers"
-          :key="layer.id"
-          class="flex items-center gap-1.5 px-1.5 h-6 rounded-xs border text-[10px] cursor-pointer"
-          :class="activeTexture.pixelBuffer.activeLayerId === layer.id ? 'bg-ui-surface border-emerald-500/50' : 'bg-ui-surface/40 border-ui-borderSubtle hover:bg-ui-hover'"
-          @click="activeTexture.pixelBuffer.activeLayerId = layer.id"
-        >
-          <input
-            type="checkbox"
-            v-model="layer.visible"
-            class="accent-emerald-500 cursor-pointer w-3 h-3"
-            title="Visibility"
-            @change="handleLayerChange"
-          />
-          <span class="flex-1 min-w-0 font-medium truncate text-ui-textPrimary" :class="{ 'opacity-40': !layer.visible }">{{ layer.name }}</span>
-          <div class="flex items-center gap-1 shrink-0" @click.stop>
-            <select
-              v-model="layer.blendMode"
-              class="h-5 bg-ui-input text-[9px] text-ui-textSecondary border border-ui-borderSubtle rounded-xs px-1"
-              @change="handleLayerChange"
-            >
-              <option value="normal">Norm</option>
-              <option value="multiply">Mul</option>
-              <option value="screen">Scr</option>
-              <option value="overlay">Ovl</option>
-              <option value="additive">Add</option>
-            </select>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.05"
-              v-model.number="layer.opacity"
-              class="w-10 accent-emerald-500 cursor-pointer h-1"
-              :title="`Opacity ${Math.round(layer.opacity * 100)}%`"
-              @input="handleLayerPreview"
-            />
-            <button type="button" class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary" title="Duplicate" @click="handleDuplicateLayer(layer.id)">
-              <Copy class="w-2.5 h-2.5" />
-            </button>
-            <button
-              v-if="activeTexture.pixelBuffer.layers.length > 1"
-              type="button"
-              class="p-0.5 text-ui-textMuted hover:text-rose-400"
-              title="Delete"
-              @click="handleDeleteLayer(layer.id)"
-            >
-              <Trash2 class="w-2.5 h-2.5" />
-            </button>
-          </div>
-        </div>
       </div>
     </UiSection>
 

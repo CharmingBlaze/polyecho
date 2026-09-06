@@ -53,6 +53,15 @@ const props = withDefaults(defineProps<{
     | 'armature'
     | 'pose'
     | 'keyframe'
+    | 'play'
+    | 'pause'
+    | 'skip-start'
+    | 'skip-end'
+    | 'chevron-left'
+    | 'record'
+    | 'film'
+    | 'marker'
+    | 'onion-skin'
     | 'vertex-group'
     | 'constraint'
     | 'empty-axis'
@@ -92,6 +101,36 @@ const props = withDefaults(defineProps<{
     | 'undo'
     | 'redo'
     | 'export'
+    | 'import'
+    | 'rotate-ccw'
+    | 'rotate-cw'
+    | 'flip-horizontal'
+    | 'flip-vertical'
+    | 'zoom-in'
+    | 'zoom-out'
+    | 'grid'
+    | 'view-fit'
+    | 'pack-islands'
+    | 'uv-smart'
+    | 'cursor-select'
+    | 'chevron-down'
+    | 'chevron-right'
+    | 'search'
+    | 'save'
+    | 'folder'
+    | 'close'
+    | 'warning'
+    | 'check'
+    | 'settings'
+    | 'sidebar'
+    | 'link'
+    | 'image'
+    | 'swap-colors'
+    | 'modifier'
+    | 'layers'
+    | 'display'
+    | 'keyframe-map'
+    | 'keyboard'
   size?: number | string
   color?: string
 }>(), {
@@ -471,6 +510,45 @@ const sizePx = computed(() => typeof props.size === 'number' ? `${props.size}px`
       <polygon points="12,4 19,12 12,20 5,12" fill="#eab308" stroke="#ca8a04" stroke-width="1.5" />
     </g>
 
+    <g v-else-if="name === 'play'">
+      <path d="M8 5L19 12L8 19V5Z" fill="currentColor" />
+    </g>
+
+    <g v-else-if="name === 'pause'">
+      <rect x="6" y="5" width="4.5" height="14" rx="0.8" fill="currentColor" />
+      <rect x="13.5" y="5" width="4.5" height="14" rx="0.8" fill="currentColor" />
+    </g>
+
+    <g v-else-if="name === 'skip-start'">
+      <rect x="4.5" y="5" width="2.2" height="14" rx="0.4" fill="currentColor" />
+      <path d="M19.5 5L8.5 12L19.5 19V5Z" fill="currentColor" />
+    </g>
+
+    <g v-else-if="name === 'skip-end'">
+      <path d="M4.5 5L15.5 12L4.5 19V5Z" fill="currentColor" />
+      <rect x="17.3" y="5" width="2.2" height="14" rx="0.4" fill="currentColor" />
+    </g>
+
+    <g v-else-if="name === 'record'">
+      <circle cx="12" cy="12" r="7.5" fill="#e11d48" />
+    </g>
+
+    <g v-else-if="name === 'film'">
+      <rect x="3" y="5" width="18" height="14" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none" />
+      <path d="M3 9H21M3 15H21" stroke="currentColor" stroke-width="1.4" />
+      <path d="M7 5V9M12 5V9M17 5V9M7 15V19M12 15V19M17 15V19" stroke="currentColor" stroke-width="1.4" />
+    </g>
+
+    <g v-else-if="name === 'marker'">
+      <path d="M7 4H17V13L12 16.5L7 13V4Z" fill="currentColor" />
+      <path d="M12 16.5V21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+    </g>
+
+    <g v-else-if="name === 'onion-skin'">
+      <rect x="4" y="6" width="12" height="12" rx="1.5" stroke="currentColor" stroke-width="1.4" fill="none" opacity="0.45" />
+      <rect x="8" y="6" width="12" height="12" rx="1.5" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.18" />
+    </g>
+
     <!-- UV / UV_DATA / TEXTURE (Blender Official UV Workspace Icon) -->
     <g v-else-if="name === 'uv' || name === 'uv-data'">
       <!-- 2D Texture Frame with rounded corners -->
@@ -485,63 +563,45 @@ const sizePx = computed(() => typeof props.size === 'number' ? `${props.size}px`
       <circle cx="18" cy="14" r="1.5" fill="#f59e0b" />
     </g>
 
-    <!-- DRAW & BRUSH (Exact Official Blender UI Draw / Grease Pencil / Annotate Icon) -->
-    <g v-else-if="name === 'brush' || name === 'draw' || name === 'tool-draw' || name === 'paint'">
-      <!-- Rounded Top Eraser Cap -->
-      <path 
-        d="M15.8 8.2L18.6 5.4C19.6 4.4 21.2 4.4 22.2 5.4C23.2 6.4 23.2 8.0 22.2 9.0L19.4 11.8L15.8 8.2Z" 
-        fill="currentColor" 
-      />
-      <!-- Pencil Body & Sharp Tapered Tip -->
-      <path 
-        d="M14.2 9.8L17.8 13.4L11.6 19.6L4.5 21.5L6.4 14.4L14.2 9.8Z" 
-        fill="currentColor" 
-      />
+    <!-- Paint / pixel tools: filled 24-grid silhouettes (readable at toolbar size) -->
+    <g v-else-if="name === 'brush' || name === 'draw' || name === 'tool-draw' || name === 'paint'" transform="scale(0.09375)">
+      <path fill="currentColor" d="M227.31,73.37,182.63,28.68a16,16,0,0,0-22.63,0L36.69,152A15.86,15.86,0,0,0,32,163.31V208a16,16,0,0,0,16,16H92.69A15.86,15.86,0,0,0,104,219.31L227.31,96a16,16,0,0,0,0-22.63ZM192,108.68,147.31,64l24-24L216,84.68Z" />
     </g>
 
-    <g v-else-if="name === 'fill'">
-      <path d="M19 11L13 5L5 13L11 19L19 11Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
-      <path d="M5 13L2 16C2 16 3 19 6 19C9 19 10 17 11 17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-      <path d="M21 16C21 17.5 19.5 19 19.5 19C19.5 19 18 17.5 18 16C18 15 19 14 19.5 14C20 14 21 15 21 16Z" fill="#38bdf8" stroke="#38bdf8" />
+    <g v-else-if="name === 'fill'" transform="scale(0.09375)">
+      <path fill="currentColor" d="M256,208a24,24,0,0,1-48,0c0-17.91,15.57-41.77,17.34-44.44a8,8,0,0,1,13.32,0C240.43,166.23,256,190.09,256,208ZM132.49,124.49a12,12,0,0,0-17-17l0,0s0,0,0,0a12,12,0,0,0,17,16.94ZM37.65,18.34A8,8,0,0,0,26.34,29.66l32.6,32.6L70.25,51ZM234.53,139.07a8,8,0,0,0,3.13-13.24L122.17,10.34a8,8,0,0,0-11.31,0L70.25,51l40.43,40.42a28,28,0,1,1-11.31,11.32L58.94,62.26,15,106.17a24,24,0,0,0,0,33.94L99.89,225a24,24,0,0,0,33.94,0l78.49-78.49Z" />
     </g>
 
-    <g v-else-if="name === 'eraser'">
-      <path d="M16 4L20 8L11 17H7V13L16 4Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
-      <path d="M7 17L4 20H15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+    <g v-else-if="name === 'eraser'" transform="scale(0.09375)">
+      <path fill="currentColor" d="M225,80.4,183.6,39a24,24,0,0,0-33.94,0L31,157.66a24,24,0,0,0,0,33.94l30.06,30.06A8,8,0,0,0,66.74,224H216a8,8,0,0,0,0-16h-84.7L225,114.34A24,24,0,0,0,225,80.4ZM213.67,103,160,156.69,107.31,104,161,50.34a8,8,0,0,1,11.32,0l41.38,41.38a8,8,0,0,1,0,11.31Z" />
     </g>
 
-    <g v-else-if="name === 'picker'">
-      <path d="M18 3L21 6L14 13L11 10L18 3Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
-      <path d="M11 10L6 15V18H9L14 13" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
-      <line x1="6" y1="18" x2="3" y2="21" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+    <g v-else-if="name === 'picker'" transform="scale(0.09375)">
+      <path fill="currentColor" d="M224,67.3a35.79,35.79,0,0,0-11.26-25.66c-14-13.28-36.72-12.78-50.62,1.13L138.8,66.2a24,24,0,0,0-33.14.77l-5,5a16,16,0,0,0,0,22.64l2,2.06-51,51a39.75,39.75,0,0,0-10.53,38l-8,18.41A13.68,13.68,0,0,0,36,219.3a15.92,15.92,0,0,0,17.71,3.35L71.23,215a39.89,39.89,0,0,0,37.06-10.75l51-51,2.06,2.06a16,16,0,0,0,22.62,0l5-5a24,24,0,0,0,.74-33.18l23.75-23.87A35.75,35.75,0,0,0,224,67.3ZM97,193a24,24,0,0,1-24,6,8,8,0,0,0-5.55.31l-18.1,7.91L57,189.41a8,8,0,0,0,.25-5.75A23.88,23.88,0,0,1,63,159l51-51,33.94,34Z" />
     </g>
 
-    <g v-else-if="name === 'dither'">
-      <rect x="4" y="4" width="4" height="4" fill="currentColor" />
-      <rect x="12" y="4" width="4" height="4" fill="currentColor" />
-      <rect x="8" y="8" width="4" height="4" fill="currentColor" />
-      <rect x="16" y="8" width="4" height="4" fill="currentColor" />
-      <rect x="4" y="12" width="4" height="4" fill="currentColor" />
-      <rect x="12" y="12" width="4" height="4" fill="currentColor" />
-      <rect x="8" y="16" width="4" height="4" fill="currentColor" />
-      <rect x="16" y="16" width="4" height="4" fill="currentColor" />
+    <g v-else-if="name === 'dither'" transform="scale(0.09375)">
+      <path fill="currentColor" d="M208,32H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V48A16,16,0,0,0,208,32Zm0,176H128V128H48V48h80v80h80v80Z" />
     </g>
 
-    <g v-else-if="name === 'line'">
-      <line x1="4" y1="20" x2="20" y2="4" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+    <g v-else-if="name === 'line'" transform="scale(0.09375)">
+      <path fill="currentColor" d="M214.64,41.36a32,32,0,0,0-50.2,38.89L80.25,164.44a32.06,32.06,0,0,0-38.89,4.94h0a32,32,1,0,0,50.2,6.37l84.19-84.19a32,32,0,0,0,38.89-50.2Zm-139.33,162a16,16,0,0,1-22.64-22.64h0a16,16,0,0,1,22.63,0h0A16,16,0,0,1,75.31,203.33Zm128-128a16,16,0,1,1,0-22.63A16,16,0,0,1,203.33,75.3Z" />
     </g>
 
-    <g v-else-if="name === 'rect' || name === 'square'">
-      <rect x="4" y="4" width="16" height="16" rx="1" fill="none" stroke="currentColor" stroke-width="1.8" />
+    <g v-else-if="name === 'rect' || name === 'square'" transform="scale(0.09375)">
+      <path fill="currentColor" d="M216,40H40A16,16,0,0,0,24,56V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A16,16,0,0,0,216,40Zm0,160H40V56H216V200Z" />
     </g>
 
-    <g v-else-if="name === 'circle'">
-      <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.8" />
+    <g v-else-if="name === 'circle'" transform="scale(0.09375)">
+      <path fill="currentColor" d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Z" />
     </g>
 
-    <g v-else-if="name === 'shade'">
-      <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.5" />
-      <path d="M12 4A8 8 0 0 1 12 20Z" fill="currentColor" />
+    <g v-else-if="name === 'shade'" transform="scale(0.09375)">
+      <path fill="currentColor" d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24ZM40,128a88.1,88.1,0,0,1,88-88V216A88.1,88.1,0,0,1,40,128Z" />
+    </g>
+
+    <g v-else-if="name === 'swap-colors'" transform="scale(0.09375)">
+      <path fill="currentColor" d="M42.34,85.66a8,8,0,0,1,0-11.32l32-32A8,8,0,0,1,88,48V72H208a8,8,0,0,1,0,16H88v24a8,8,0,0,1-13.66,5.66Zm171.32,84.68-32-32A8,8,0,0,0,168,144v24H48a8,8,0,0,0,0,16H168v24a8,8,0,0,0,13.66,5.66l32-32A8,8,0,0,0,213.66,170.34Z" />
     </g>
 
     <g v-else-if="name === 'marquee' || name === 'select-box'">
@@ -604,6 +664,182 @@ const sizePx = computed(() => typeof props.size === 'number' ? `${props.size}px`
       <path d="M6 3V11C6 14.3 8.7 17 12 17C15.3 17 18 14.3 18 11V3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
       <line x1="4" y1="7" x2="8" y2="7" stroke="currentColor" stroke-width="1.6" />
       <line x1="16" y1="7" x2="20" y2="7" stroke="currentColor" stroke-width="1.6" />
+    </g>
+
+    <g v-else-if="name === 'undo'">
+      <path d="M8 7H5V4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M5 7C7.2 4.4 10.4 3 14 3C18.4 3 22 6.6 22 11C22 15.4 18.4 19 14 19C10.8 19 8 17.2 6.5 14.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+    </g>
+
+    <g v-else-if="name === 'redo'">
+      <path d="M16 7H19V4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M19 7C16.8 4.4 13.6 3 10 3C5.6 3 2 6.6 2 11C2 15.4 5.6 19 10 19C13.2 19 16 17.2 17.5 14.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+    </g>
+
+    <g v-else-if="name === 'export'">
+      <rect x="4" y="10" width="16" height="11" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none" />
+      <path d="M12 14V3M12 3L8.5 6.5M12 3L15.5 6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+    </g>
+
+    <g v-else-if="name === 'import'">
+      <rect x="4" y="10" width="16" height="11" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none" />
+      <path d="M12 3V13M12 13L8.5 9.5M12 13L15.5 9.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+    </g>
+
+    <g v-else-if="name === 'rotate-ccw'">
+      <path d="M8 6H4V10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M4 10C5.6 6.8 8.6 5 12 5C16.4 5 20 8.6 20 13C20 17.4 16.4 21 12 21C8.8 21 6 19.1 4.7 16.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+    </g>
+
+    <g v-else-if="name === 'rotate-cw'">
+      <path d="M16 6H20V10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M20 10C18.4 6.8 15.4 5 12 5C7.6 5 4 8.6 4 13C4 17.4 7.6 21 12 21C15.2 21 18 19.1 19.3 16.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+    </g>
+
+    <g v-else-if="name === 'flip-horizontal'">
+      <path d="M11 4V20" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 2" />
+      <path d="M3 7L10 12L3 17V7Z" fill="currentColor" fill-opacity="0.25" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+      <path d="M21 7L14 12L21 17V7Z" fill="#f59e0b" fill-opacity="0.3" stroke="#f59e0b" stroke-width="1.4" stroke-linejoin="round" />
+    </g>
+
+    <g v-else-if="name === 'flip-vertical'">
+      <path d="M4 12H20" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 2" />
+      <path d="M7 3L12 10L17 3H7Z" fill="currentColor" fill-opacity="0.25" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+      <path d="M7 21L12 14L17 21H7Z" fill="#f59e0b" fill-opacity="0.3" stroke="#f59e0b" stroke-width="1.4" stroke-linejoin="round" />
+    </g>
+
+    <g v-else-if="name === 'zoom-in'">
+      <circle cx="11" cy="11" r="6.5" stroke="currentColor" stroke-width="1.6" fill="none" />
+      <path d="M8.5 11H13.5M11 8.5V13.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+      <path d="M16 16L21 21" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+    </g>
+
+    <g v-else-if="name === 'zoom-out'">
+      <circle cx="11" cy="11" r="6.5" stroke="currentColor" stroke-width="1.6" fill="none" />
+      <path d="M8.5 11H13.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+      <path d="M16 16L21 21" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+    </g>
+
+    <g v-else-if="name === 'grid'">
+      <rect x="3.5" y="3.5" width="17" height="17" rx="1" stroke="currentColor" stroke-width="1.4" fill="none" />
+      <path d="M9.2 3.5V20.5M14.8 3.5V20.5M3.5 9.2H20.5M3.5 14.8H20.5" stroke="currentColor" stroke-width="1.3" />
+    </g>
+
+    <g v-else-if="name === 'view-fit'">
+      <rect x="6" y="6" width="12" height="12" rx="1" stroke="currentColor" stroke-width="1.4" fill="none" />
+      <path d="M3 8V3H8M16 3H21V8M21 16V21H16M8 21H3V16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+    </g>
+
+    <g v-else-if="name === 'pack-islands'">
+      <rect x="3" y="3" width="18" height="18" rx="1.5" stroke="currentColor" stroke-width="1.4" fill="none" />
+      <rect x="5" y="5" width="7" height="6" fill="#38bdf8" fill-opacity="0.35" stroke="#38bdf8" stroke-width="1.2" />
+      <rect x="13.5" y="5" width="5.5" height="9" fill="#f59e0b" fill-opacity="0.3" stroke="#f59e0b" stroke-width="1.2" />
+      <rect x="5" y="13" width="7" height="6" fill="currentColor" fill-opacity="0.2" stroke="currentColor" stroke-width="1.2" />
+    </g>
+
+    <g v-else-if="name === 'uv-smart'">
+      <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.4" fill="none" />
+      <polygon points="5.5,17 10,6 16,12.5" stroke="#38bdf8" stroke-width="1.3" fill="#38bdf8" fill-opacity="0.22" stroke-linejoin="round" />
+      <path d="M16 5.5L17.2 8L20 8.3L18 10.2L18.5 13L16 11.6L13.5 13L14 10.2L12 8.3L14.8 8Z" fill="#f59e0b" />
+    </g>
+
+    <g v-else-if="name === 'cursor-select'">
+      <path d="M5 3L5 18L9.2 14.2L12.2 21L14.6 20L11.6 13.3L17 13.3L5 3Z" fill="currentColor" />
+    </g>
+
+    <g v-else-if="name === 'chevron-down'">
+      <path d="M6 9L12 15L18 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+    </g>
+
+    <g v-else-if="name === 'chevron-left'">
+      <path d="M15 6L9 12L15 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+    </g>
+
+    <g v-else-if="name === 'chevron-right'">
+      <path d="M9 6L15 12L9 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+    </g>
+
+    <g v-else-if="name === 'search'">
+      <circle cx="11" cy="11" r="6.5" stroke="currentColor" stroke-width="1.6" fill="none" />
+      <path d="M16 16L21 21" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+    </g>
+
+    <g v-else-if="name === 'save'">
+      <path d="M5 4H16L20 8V20H5V4Z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round" />
+      <rect x="8" y="13" width="8" height="7" fill="currentColor" fill-opacity="0.2" />
+      <rect x="8" y="4" width="7" height="5" fill="currentColor" fill-opacity="0.25" />
+    </g>
+
+    <g v-else-if="name === 'folder'">
+      <path d="M3 7H9L11 9.5H21V19H3V7Z" stroke="currentColor" stroke-width="1.5" fill="currentColor" fill-opacity="0.12" stroke-linejoin="round" />
+      <path d="M3 7V5.5H8L9.5 7" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+    </g>
+
+    <g v-else-if="name === 'close'">
+      <path d="M6 6L18 18M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+    </g>
+
+    <g v-else-if="name === 'warning'">
+      <path d="M12 3L22 20H2L12 3Z" stroke="#f59e0b" stroke-width="1.5" fill="#f59e0b" fill-opacity="0.2" stroke-linejoin="round" />
+      <path d="M12 9V13.5" stroke="#f59e0b" stroke-width="1.7" stroke-linecap="round" />
+      <circle cx="12" cy="16.8" r="1" fill="#f59e0b" />
+    </g>
+
+    <g v-else-if="name === 'check'">
+      <path d="M5 12.5L10 17.5L19 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+    </g>
+
+    <g v-else-if="name === 'settings'">
+      <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5" fill="none" />
+      <path d="M12 3.5V6.2M12 17.8V20.5M20.5 12H17.8M6.2 12H3.5M18.1 5.9L16.2 7.8M7.8 16.2L5.9 18.1M18.1 18.1L16.2 16.2M7.8 7.8L5.9 5.9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+    </g>
+
+    <g v-else-if="name === 'sidebar'">
+      <rect x="3" y="4" width="18" height="16" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none" />
+      <path d="M15 4V20" stroke="currentColor" stroke-width="1.5" />
+      <rect x="15.5" y="4.5" width="5" height="15" fill="#f59e0b" fill-opacity="0.25" />
+    </g>
+
+    <g v-else-if="name === 'link'">
+      <path d="M9.5 14.5L14.5 9.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+      <path d="M8 11.5L5.8 13.7C4.3 15.2 4.3 17.6 5.8 19.1C7.3 20.6 9.7 20.6 11.2 19.1L13.5 16.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+      <path d="M16 12.5L18.2 10.3C19.7 8.8 19.7 6.4 18.2 4.9C16.7 3.4 14.3 3.4 12.8 4.9L10.5 7.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+    </g>
+
+    <g v-else-if="name === 'image'">
+      <rect x="3" y="5" width="18" height="14" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none" />
+      <circle cx="8.5" cy="10" r="1.8" fill="currentColor" />
+      <path d="M21 16L15.5 11L7 19" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+    </g>
+
+    <g v-else-if="name === 'modifier'">
+      <rect x="4" y="4" width="16" height="16" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none" />
+      <path d="M8 12H16M12 8V16" stroke="#38bdf8" stroke-width="1.6" stroke-linecap="round" />
+      <circle cx="8" cy="8" r="1.3" fill="#f59e0b" />
+      <circle cx="16" cy="16" r="1.3" fill="#f59e0b" />
+    </g>
+
+    <g v-else-if="name === 'layers'">
+      <path d="M12 4L21 8.5L12 13L3 8.5L12 4Z" stroke="currentColor" stroke-width="1.4" fill="currentColor" fill-opacity="0.15" stroke-linejoin="round" />
+      <path d="M3 12L12 16.5L21 12" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+      <path d="M3 15.5L12 20L21 15.5" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+    </g>
+
+    <g v-else-if="name === 'display'">
+      <rect x="3" y="4" width="18" height="12" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none" />
+      <path d="M8 20H16M12 16V20" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+      <rect x="5.5" y="6.5" width="13" height="7" fill="currentColor" fill-opacity="0.12" />
+    </g>
+
+    <g v-else-if="name === 'keyframe-map'">
+      <rect x="3" y="5" width="18" height="14" rx="1.5" stroke="currentColor" stroke-width="1.4" fill="none" />
+      <path d="M6 9H10M6 12H14M6 15H11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+      <circle cx="17" cy="12" r="2.2" fill="#eab308" />
+    </g>
+
+    <g v-else-if="name === 'keyboard'">
+      <rect x="2" y="7" width="20" height="11" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none" />
+      <path d="M5 10H7M9 10H11M13 10H15M17 10H19M5 13H8M10 13H14M16 13H19M8 16H16" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
     </g>
   </svg>
 </template>

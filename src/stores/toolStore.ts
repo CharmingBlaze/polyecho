@@ -43,8 +43,12 @@ export const useToolStore = defineStore('tool', () => {
   // Vertex Painting settings
   const vertexPaintColor = ref<string>('#ffffff')
   const uvWorkspaceTab = ref<'uv' | 'paint'>('uv')
+  /** Modeling select mode to restore when leaving UV / Paint. */
+  const lastMeshSelectMode = ref<SelectMode>('object')
   /** Face ids of the UV island under the cursor — 3D viewport highlights these. */
   const uvHoverFaceIds = ref<string[]>([])
+  const smartUvAngle = ref(66)
+  const smartUvMargin = ref(2)
 
   // Snapping & Precision
   const snapping = ref<SnappingSettings>({
@@ -87,15 +91,35 @@ export const useToolStore = defineStore('tool', () => {
     return appMode.value === 'model' || appMode.value === 'blockout'
   }
 
+  function isMeshSelectMode(mode: SelectMode) {
+    return mode === 'object' || mode === 'vertex' || mode === 'edge' || mode === 'face'
+  }
+
   function setAppMode(mode: AppMode) {
-    const leavingBlockout = appMode.value === 'blockout' && mode !== 'blockout'
+    const prev = appMode.value
+    const leavingBlockout = prev === 'blockout' && mode !== 'blockout'
+    const enteringUvPaint = mode === 'uvpaint' && prev !== 'uvpaint'
+    const leavingUvPaint = prev === 'uvpaint' && mode !== 'uvpaint'
+
+    if (enteringUvPaint && isMeshSelectMode(selectMode.value)) {
+      lastMeshSelectMode.value = selectMode.value
+    } else if (enteringUvPaint) {
+      lastMeshSelectMode.value = 'object'
+    }
+
     appMode.value = mode
     isBoxSelectActive.value = false
-    if ((mode === 'model' || mode === 'blockout' || mode === 'uvpaint') && (selectMode.value === 'bone' || selectMode.value === 'origin')) {
-      selectMode.value = 'object'
-    } else if (mode === 'animate' || mode === 'rig') {
+
+    if (mode === 'animate' || mode === 'rig') {
       selectMode.value = 'bone'
+    } else if (enteringUvPaint) {
+      selectMode.value = 'face'
+    } else if (leavingUvPaint && mode === 'model') {
+      selectMode.value = lastMeshSelectMode.value
+    } else if ((mode === 'model' || mode === 'blockout') && (selectMode.value === 'bone' || selectMode.value === 'origin')) {
+      selectMode.value = 'object'
     }
+
     if (mode === 'blockout') {
       selectMode.value = 'object'
       modelTool.value = 'move'
@@ -153,6 +177,8 @@ export const useToolStore = defineStore('tool', () => {
     uvWorkspaceTab,
     uvHoverFaceIds,
     setUvHoverFaceIds,
+    smartUvAngle,
+    smartUvMargin,
     snapping,
     cursor3D,
     viewport,

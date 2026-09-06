@@ -74,7 +74,7 @@ Related:
 
 | UI | New | Dropdown / click | Apply |
 | :--- | :--- | :--- | :--- |
-| Texture panel | `createTexture` | `selectTexture` (library list) | **Use** on object → share prompt. Library + Atlas are open; size / filter / pixels stay collapsed. |
+| Texture panel | `createTexture` | `selectTexture` (library list) | **Use** on object → share prompt. Layers sit under Image (paint uses this instead of a floating canvas panel). Library + Atlas are open; size / filter / pixels stay collapsed. |
 | Material inspector | `createTexture` then `applyTextureToMaterial` | `applyTextureToMaterial` | n/a (already material-scoped) |
 | Object inspector (Transform) | — | — | Shading links jump to Material / Texture tabs (no texture dropdown) |
 | UV / Pixel **TEX** | `createTexture` then bind active object | `applyTextureToMesh(..., 'this_object')` | **Apply** still there if bind was skipped |

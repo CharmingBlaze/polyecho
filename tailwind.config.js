@@ -71,8 +71,9 @@ export default {
         'ui-control-sm': 'var(--ui-h-control-sm)',
       },
       fontFamily: {
-        mono: ['"JetBrains Mono"', 'Consolas', 'monospace'],
-        pixel: ['"Press Start 2P"', 'monospace', 'sans-serif'],
+        sans: ['Segoe UI', 'system-ui', 'sans-serif'],
+        mono: ['ui-monospace', 'Consolas', 'monospace'],
+        pixel: ['ui-monospace', 'monospace', 'sans-serif'],
       }
     },
   },

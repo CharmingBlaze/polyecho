@@ -1,30 +1,11 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useProjectStore } from '../../stores/projectStore'
 import BlenderIcon from '../icons/BlenderIcon.vue'
-import { 
-  Play, 
-  Pause, 
-  Square,
-  Circle,
-  Diamond,
-  Plus,
-  Trash2,
-  Copy,
-  Film,
-  ChevronDown,
-  ChevronRight,
-  RotateCcw,
-  FlipHorizontal,
-  SkipBack,
-  SkipForward,
-  ChevronLeft,
+import {
   Maximize2,
-  Minimize2,
-  Flag,
-  TrendingUp,
-  FolderTree
+  Minimize2
 } from 'lucide-vue-next'
 import { InterpolationType } from '../../types/animation'
 import { sampleTrack } from '../../core/animation/Armature'
@@ -245,8 +226,32 @@ const timeMarkers = computed(() => {
 })
 
 const rulerContainerRef = ref<HTMLElement | null>(null)
+const keyframeScrollRef = ref<HTMLElement | null>(null)
+let keyframePan: { x: number; y: number } | null = null
+
+function onKeyframePanDown(e: PointerEvent) {
+  if (e.button !== 2) return
+  const el = keyframeScrollRef.value
+  if (!el) return
+  e.preventDefault()
+  ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+  keyframePan = { x: e.clientX + el.scrollLeft, y: e.clientY + el.scrollTop }
+}
+
+function onKeyframePanMove(e: PointerEvent) {
+  if (!keyframePan) return
+  const el = keyframeScrollRef.value
+  if (!el) return
+  el.scrollLeft = keyframePan.x - e.clientX
+  el.scrollTop = keyframePan.y - e.clientY
+}
+
+function onKeyframePanUp() {
+  keyframePan = null
+}
 
 function startRulerScrub(e: MouseEvent) {
+  if (e.button === 2) return
   e.preventDefault()
   
   const updateScrub = (event: MouseEvent) => {
@@ -328,7 +333,14 @@ const graphYRange = computed(() => {
   }
 })
 
-function mapGraphCoords(frame: number, val: number, svgW = 800, svgH = 220) {
+const GRAPH_SVG_W = 800
+const GRAPH_SVG_H = 220
+const graphPan = ref({ x: 0, y: 0 })
+let graphViewPan: { startX: number; startY: number; panX: number; panY: number } | null = null
+let graphDidPan = false
+let graphDidDragKey = false
+
+function mapGraphCoords(frame: number, val: number, svgW = GRAPH_SVG_W, svgH = GRAPH_SVG_H) {
   const padL = 45
   const padR = 25
   const padT = 20
@@ -338,13 +350,30 @@ function mapGraphCoords(frame: number, val: number, svgW = 800, svgH = 220) {
 
   const duration = Math.max(1, maxFrames.value)
   const normX = Math.max(0, Math.min(1, frame / duration))
-  const x = padL + normX * plotW
+  const x = padL + normX * plotW + graphPan.value.x
 
   const { min, max } = graphYRange.value
   const normY = (val - min) / Math.max(0.001, max - min)
-  const y = padT + plotH * (1 - Math.max(0, Math.min(1, normY)))
+  const y = padT + plotH * (1 - Math.max(0, Math.min(1, normY))) + graphPan.value.y
 
   return { x, y }
+}
+
+function graphSvgPoint(e: MouseEvent, svg: SVGSVGElement) {
+  const rect = svg.getBoundingClientRect()
+  return {
+    x: ((e.clientX - rect.left) / Math.max(1, rect.width)) * GRAPH_SVG_W,
+    y: ((e.clientY - rect.top) / Math.max(1, rect.height)) * GRAPH_SVG_H
+  }
+}
+
+function unmapGraphValue(svgY: number) {
+  const padT = 20
+  const padB = 30
+  const plotH = GRAPH_SVG_H - padT - padB
+  const { min, max } = graphYRange.value
+  const t = (svgY - graphPan.value.y - padT) / Math.max(0.001, plotH)
+  return max - Math.max(0, Math.min(1, t)) * (max - min)
 }
 
 const graphSampledCurves = computed(() => {
@@ -415,6 +444,22 @@ const graphKeyNodes = computed(() => {
 
 let graphEditRecorded = false
 
+watch(
+  () => {
+    const sel = selectedGraphKey.value
+    const clip = animationStore.activeClip
+    if (!sel || !clip) return null
+    const track = clip.tracks.find(t => t.targetId === sel.targetId)
+    if (!track) return null
+    const keys = sel.channel === 'position' ? track.positionKeys : sel.channel === 'rotation' ? track.rotationKeys : track.scaleKeys
+    return keys.find(k => k.frame === sel.frame)?.value[sel.axis] ?? null
+  },
+  (value) => {
+    if (value === null || !selectedGraphKey.value) return
+    selectedGraphKey.value.value = value
+  }
+)
+
 function selectGraphNode(node: { axis: 'x' | 'y' | 'z'; frame: number; value: number; interpolation: InterpolationType }) {
   if (!activeGraphTarget.value) return
   graphEditRecorded = false
@@ -432,18 +477,66 @@ function selectGraphNode(node: { axis: 'x' | 'y' | 'z'; frame: number; value: nu
 
 function updateGraphKeyVal(val: number) {
   if (!selectedGraphKey.value) return
-  if (!graphEditRecorded) {
-    projectStore.recordState('Edit Keyframe Value')
-    graphEditRecorded = true
-  }
+  const shouldRecord = !graphEditRecorded
+  graphEditRecorded = true
   selectedGraphKey.value.value = val
   animationStore.updateKeyframeValue(
     selectedGraphKey.value.targetId,
     selectedGraphKey.value.channel,
     selectedGraphKey.value.frame,
     selectedGraphKey.value.axis,
-    val
+    val,
+    { record: shouldRecord }
   )
+}
+
+function startGraphKeyDrag(e: MouseEvent, node: { axis: 'x' | 'y' | 'z'; frame: number; value: number; interpolation: InterpolationType }) {
+  if (e.button !== 0) return
+  e.preventDefault()
+  e.stopPropagation()
+  graphDidDragKey = false
+  selectGraphNode(node)
+  const svg = (e.currentTarget as SVGElement).ownerSVGElement
+  if (!svg) return
+
+  const onMove = (moveEvent: MouseEvent) => {
+    graphDidDragKey = true
+    const pt = graphSvgPoint(moveEvent, svg)
+    updateGraphKeyVal(Number(unmapGraphValue(pt.y).toFixed(3)))
+  }
+  const onUp = () => {
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+  }
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
+}
+
+function onGraphPointerDown(e: PointerEvent) {
+  if (e.button !== 2) return
+  e.preventDefault()
+  graphDidPan = false
+  ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+  graphViewPan = {
+    startX: e.clientX,
+    startY: e.clientY,
+    panX: graphPan.value.x,
+    panY: graphPan.value.y
+  }
+}
+
+function onGraphPointerMove(e: PointerEvent) {
+  if (!graphViewPan) return
+  const svg = e.currentTarget as SVGSVGElement
+  const rect = svg.getBoundingClientRect()
+  const dx = ((e.clientX - graphViewPan.startX) / Math.max(1, rect.width)) * GRAPH_SVG_W
+  const dy = ((e.clientY - graphViewPan.startY) / Math.max(1, rect.height)) * GRAPH_SVG_H
+  if (Math.abs(dx) > 1 || Math.abs(dy) > 1) graphDidPan = true
+  graphPan.value = { x: graphViewPan.panX + dx, y: graphViewPan.panY + dy }
+}
+
+function onGraphPointerUp() {
+  graphViewPan = null
 }
 
 function updateGraphKeyInterp(mode: InterpolationType) {
@@ -468,14 +561,18 @@ function deleteSelectedGraphNode() {
 }
 
 function handleGraphSvgClick(e: MouseEvent) {
-  const svg = (e.currentTarget as SVGElement).getBoundingClientRect()
-  const clickX = e.clientX - svg.left
+  if (e.button === 2 || graphDidPan || graphDidDragKey) {
+    graphDidPan = false
+    graphDidDragKey = false
+    return
+  }
+  const svg = e.currentTarget as SVGSVGElement
+  const pt = graphSvgPoint(e, svg)
   const padL = 45
   const padR = 25
-  const plotW = svg.width - padL - padR
-  const ratio = Math.max(0, Math.min(1, (clickX - padL) / plotW))
-  const targetFrame = Math.round(ratio * maxFrames.value)
-  animationStore.setFrame(targetFrame)
+  const plotW = GRAPH_SVG_W - padL - padR
+  const ratio = Math.max(0, Math.min(1, (pt.x - graphPan.value.x - padL) / plotW))
+  animationStore.setFrame(Math.round(ratio * maxFrames.value))
 }
 </script>
 
@@ -511,7 +608,7 @@ function handleGraphSvgClick(e: MouseEvent) {
           class="px-3 py-1 rounded-xs transition text-[11px] flex items-center gap-1.5"
           :class="activeTab === 'graph' ? 'bg-ui-active text-ui-textAccent font-bold border border-ui-accent/40 shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
         >
-          <TrendingUp class="w-3 h-3 text-emerald-500" />
+          <BlenderIcon name="keyframe-map" :size="12" color="#10b981" />
           <span>Graph Curves</span>
         </button>
 
@@ -539,16 +636,16 @@ function handleGraphSvgClick(e: MouseEvent) {
         <button 
           @click="animationStore.copyPose" 
           class="px-2 py-0.5 rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition flex items-center gap-1"
-          title="Copy Pose (Ctrl+C)"
+          title="Copy Pose (Ctrl+C in Animate)"
         >
-          <Copy class="w-2.5 h-2.5" />
+          <BlenderIcon name="duplicate" :size="11" />
           <span>Copy</span>
         </button>
 
         <button 
           @click="animationStore.pastePose" 
           class="px-2 py-0.5 rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition flex items-center gap-1"
-          title="Paste Pose (Ctrl+V)"
+          title="Paste Pose (Ctrl+V · Ctrl+Shift+V flipped)"
         >
           <span>Paste</span>
         </button>
@@ -558,7 +655,7 @@ function handleGraphSvgClick(e: MouseEvent) {
           class="px-2 py-0.5 rounded-xs hover:bg-ui-hover text-ui-textAccent hover:opacity-80 transition flex items-center gap-1"
           title="Paste Flipped (Mirror Left/Right for Walk Cycles)"
         >
-          <FlipHorizontal class="w-2.5 h-2.5" />
+          <BlenderIcon name="flip-horizontal" :size="11" />
           <span>Flip (Walk Mirror)</span>
         </button>
 
@@ -567,7 +664,7 @@ function handleGraphSvgClick(e: MouseEvent) {
           class="px-2 py-0.5 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary transition flex items-center gap-1"
           title="Reset Pose (Alt+R)"
         >
-          <RotateCcw class="w-2.5 h-2.5" />
+          <BlenderIcon name="rotate-ccw" :size="11" />
           <span>Reset</span>
         </button>
 
@@ -577,7 +674,7 @@ function handleGraphSvgClick(e: MouseEvent) {
           :class="animationStore.showBoneHierarchyPopout ? 'bg-ui-active text-ui-textAccent font-bold' : ''"
           title="Toggle Floating Bone Hierarchy (H)"
         >
-          <FolderTree class="w-2.5 h-2.5 text-ui-accent" />
+          <BlenderIcon name="bone" :size="11" />
           <span>Hierarchy (H)</span>
         </button>
       </div>
@@ -600,7 +697,7 @@ function handleGraphSvgClick(e: MouseEvent) {
           class="p-1 rounded-xs bg-ui-input hover:bg-ui-accent hover:text-white text-ui-textAccent border border-ui-borderSubtle transition" 
           title="Add New Animation"
         >
-          <Plus class="w-3 h-3" />
+          <BlenderIcon name="plus" :size="12" />
         </button>
 
         <button 
@@ -608,7 +705,7 @@ function handleGraphSvgClick(e: MouseEvent) {
           class="p-1 rounded-xs bg-ui-input hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary border border-ui-borderSubtle transition" 
           title="Duplicate Current Animation"
         >
-          <Copy class="w-3 h-3" />
+          <BlenderIcon name="duplicate" :size="12" />
         </button>
 
         <button 
@@ -617,7 +714,7 @@ function handleGraphSvgClick(e: MouseEvent) {
           class="p-1 rounded-xs bg-ui-input hover:bg-rose-500/20 text-ui-textMuted hover:text-rose-400 border border-ui-borderSubtle transition" 
           title="Delete Current Animation"
         >
-          <Trash2 class="w-3 h-3" />
+          <BlenderIcon name="trash" :size="12" />
         </button>
       </div>
     </div>
@@ -629,24 +726,24 @@ function handleGraphSvgClick(e: MouseEvent) {
         <!-- Frame Navigation Steppers -->
         <div class="flex items-center space-x-0.5 bg-ui-input border border-ui-borderSubtle rounded-xs p-0.5 shadow-xs">
           <button @click="animationStore.setFrame(0)" class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary transition" title="First Frame (Home)">
-            <SkipBack class="w-3 h-3" />
+            <BlenderIcon name="skip-start" :size="12" />
           </button>
           <button @click="stepFrame(-1)" class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary transition" title="Prev Frame (Left Arrow)">
-            <ChevronLeft class="w-3 h-3" />
+            <BlenderIcon name="chevron-left" :size="12" />
           </button>
           <button 
             @click="animationStore.togglePlay"
             class="px-2.5 py-0.5 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white flex items-center justify-center shadow-xs transition active:scale-95"
             title="Play / Pause (Space)"
           >
-            <Pause v-if="animationStore.isPlaying" class="w-3 h-3" />
-            <Play v-else class="w-3 h-3 fill-current ml-0.5" />
+            <BlenderIcon v-if="animationStore.isPlaying" name="pause" :size="12" />
+            <BlenderIcon v-else name="play" :size="12" />
           </button>
           <button @click="stepFrame(1)" class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary transition" title="Next Frame (Right Arrow)">
-            <ChevronRight class="w-3 h-3" />
+            <BlenderIcon name="chevron-right" :size="12" />
           </button>
           <button @click="animationStore.setFrame(maxFrames)" class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary transition" title="Last Frame (End)">
-            <SkipForward class="w-3 h-3" />
+            <BlenderIcon name="skip-end" :size="12" />
           </button>
         </div>
 
@@ -711,7 +808,7 @@ function handleGraphSvgClick(e: MouseEvent) {
           class="flex items-center space-x-1 px-2 py-0.5 rounded-xs transition border text-[10px] cursor-pointer"
           :class="animationStore.interpolationMode === 'cubic' ? 'bg-ui-active text-ui-textAccent font-bold border-ui-accent/50 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
         >
-          <Circle class="w-2.5 h-2.5 fill-current text-sky-400" />
+          <BlenderIcon name="circle" :size="10" color="#38bdf8" />
           <span>Smooth</span>
         </button>
 
@@ -720,7 +817,7 @@ function handleGraphSvgClick(e: MouseEvent) {
           class="flex items-center space-x-1 px-2 py-0.5 rounded-xs transition border text-[10px] cursor-pointer"
           :class="animationStore.interpolationMode === 'linear' ? 'bg-ui-active text-ui-textAccent font-bold border-ui-accent/50 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
         >
-          <Diamond class="w-2.5 h-2.5 fill-current text-amber-400" />
+          <BlenderIcon name="keyframe" :size="10" />
           <span>Linear</span>
         </button>
 
@@ -729,7 +826,7 @@ function handleGraphSvgClick(e: MouseEvent) {
           class="flex items-center space-x-1 px-2 py-0.5 rounded-xs transition border text-[10px] cursor-pointer"
           :class="animationStore.interpolationMode === 'step' ? 'bg-ui-active text-ui-textAccent font-bold border-ui-accent/50 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
         >
-          <Square class="w-2.5 h-2.5 fill-current text-purple-400" />
+          <BlenderIcon name="rect" :size="10" color="#c084fc" />
           <span>Step</span>
         </button>
       </div>
@@ -742,7 +839,7 @@ function handleGraphSvgClick(e: MouseEvent) {
           :class="animationStore.autoKey ? 'bg-rose-500/20 text-rose-400 border-rose-500/50 shadow-xs font-bold' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Auto Keyframing (Automatically records keyframes upon transform)"
         >
-          <span class="w-1.5 h-1.5 rounded-full" :class="animationStore.autoKey ? 'bg-rose-500 animate-pulse' : 'bg-ui-textMuted'"></span>
+          <BlenderIcon name="record" :size="10" :color="animationStore.autoKey ? '#f43f5e' : 'currentColor'" />
           <span>Auto Key</span>
         </button>
 
@@ -753,7 +850,7 @@ function handleGraphSvgClick(e: MouseEvent) {
             class="flex items-center space-x-1 px-2 py-0.5 rounded-xs bg-ui-input hover:bg-ui-hover text-ui-textAccent border border-ui-borderSubtle transition text-[10px] cursor-pointer"
             title="Add Game Event Marker at Active Frame"
           >
-            <Flag class="w-2.5 h-2.5" />
+            <BlenderIcon name="marker" :size="11" />
             <span>+ Event</span>
           </button>
 
@@ -797,7 +894,16 @@ function handleGraphSvgClick(e: MouseEvent) {
     </div>
 
     <!-- VIEW 1: KEYFRAME EDITOR (Expandable Dope Sheet Matrix) -->
-    <div v-show="activeTab === 'keyframe'" class="flex-1 overflow-x-auto overflow-y-auto bg-ui-root relative min-h-0 flex flex-col">
+    <div
+      v-show="activeTab === 'keyframe'"
+      ref="keyframeScrollRef"
+      class="flex-1 overflow-x-auto overflow-y-auto bg-ui-root relative min-h-0 flex flex-col"
+      @pointerdown="onKeyframePanDown"
+      @pointermove="onKeyframePanMove"
+      @pointerup="onKeyframePanUp"
+      @pointercancel="onKeyframePanUp"
+      @contextmenu.prevent
+    >
       <!-- Time Ruler Row with Interactive Scrubbing -->
       <div 
         ref="rulerContainerRef"
@@ -807,7 +913,7 @@ function handleGraphSvgClick(e: MouseEvent) {
         <!-- Sticky left corner header -->
         <div class="w-44 px-2 h-full bg-ui-panel border-r border-ui-borderDefault absolute left-0 top-0 flex items-center justify-between z-30 font-semibold text-[10px] text-ui-textMuted uppercase tracking-wider">
           <span class="flex items-center gap-1 text-ui-textPrimary">
-            <Film class="w-3 h-3 text-ui-accent" />
+            <BlenderIcon name="film" :size="12" />
             <span>Channels</span>
           </span>
           <span class="font-mono text-[9px] text-ui-textAccent font-bold">{{ maxFrames }}f / {{ (maxFrames / fps).toFixed(1) }}s</span>
@@ -877,8 +983,8 @@ function handleGraphSvgClick(e: MouseEvent) {
             <div class="w-44 px-2 truncate text-ui-textPrimary font-mono text-[10px] font-medium flex items-center justify-between gap-1.5 shrink-0 bg-ui-panel border-r border-ui-borderSubtle h-full sticky left-0 z-10">
               <div class="flex items-center space-x-1 truncate">
                 <button @click.stop="toggleTrackExpand(bone.id)" class="text-ui-textMuted hover:text-ui-textPrimary p-0.5">
-                  <ChevronDown v-if="expandedTracks[bone.id]" class="w-3 h-3 text-ui-textAccent" />
-                  <ChevronRight v-else class="w-3 h-3 text-ui-textMuted" />
+                  <BlenderIcon v-if="expandedTracks[bone.id]" name="chevron-down" :size="12" />
+                  <BlenderIcon v-else name="chevron-right" :size="12" />
                 </button>
                 <BlenderIcon name="bone" :size="11" color="#a855f7" />
                 <span class="truncate">{{ bone.name }}</span>
@@ -1022,8 +1128,8 @@ function handleGraphSvgClick(e: MouseEvent) {
             <div class="w-44 px-2 truncate text-ui-textPrimary font-mono text-[10px] font-medium flex items-center justify-between gap-1.5 shrink-0 bg-ui-panel border-r border-ui-borderSubtle h-full sticky left-0 z-10">
               <div class="flex items-center space-x-1 truncate">
                 <button @click.stop="toggleTrackExpand(mesh.id)" class="text-ui-textMuted hover:text-ui-textPrimary p-0.5">
-                  <ChevronDown v-if="expandedTracks[mesh.id]" class="w-3 h-3 text-ui-textAccent" />
-                  <ChevronRight v-else class="w-3 h-3 text-ui-textMuted" />
+                  <BlenderIcon v-if="expandedTracks[mesh.id]" name="chevron-down" :size="12" />
+                  <BlenderIcon v-else name="chevron-right" :size="12" />
                 </button>
                 <BlenderIcon name="mesh-cube" :size="11" color="#38bdf8" />
                 <span class="truncate">{{ mesh.name }}</span>
@@ -1122,7 +1228,7 @@ function handleGraphSvgClick(e: MouseEvent) {
     </div>
 
     <!-- VIEW 2: GRAPH EDITOR / CURVE EDITOR -->
-    <div v-show="activeTab === 'graph'" class="flex-1 flex flex-col bg-ui-root overflow-hidden font-mono">
+    <div v-show="activeTab === 'graph'" class="flex-1 flex flex-col bg-ui-root overflow-hidden font-mono" @contextmenu.prevent>
       <!-- Graph Top Controls Bar -->
       <div class="h-8 bg-ui-header border-b border-ui-borderSubtle px-3 flex items-center justify-between gap-3 shrink-0 text-xs">
         <!-- Target & Channel Switcher -->
@@ -1236,7 +1342,7 @@ function handleGraphSvgClick(e: MouseEvent) {
             class="text-rose-500 hover:text-white p-1 hover:bg-rose-900/40 rounded-xs"
             title="Delete Selected Key"
           >
-            <Trash2 class="w-3 h-3" />
+            <BlenderIcon name="trash" :size="12" />
           </button>
         </div>
         <div v-else class="text-[10px] text-ui-textMuted italic">
@@ -1251,6 +1357,11 @@ function handleGraphSvgClick(e: MouseEvent) {
           preserveAspectRatio="none"
           class="w-full h-full cursor-crosshair select-none"
           @click="handleGraphSvgClick"
+          @pointerdown="onGraphPointerDown"
+          @pointermove="onGraphPointerMove"
+          @pointerup="onGraphPointerUp"
+          @pointercancel="onGraphPointerUp"
+          @contextmenu.prevent
         >
           <!-- Grid Lines (Horizontal values) -->
           <line x1="45" y1="20" x2="775" y2="20" stroke="currentColor" class="text-ui-borderSubtle opacity-40" stroke-dasharray="3 3" stroke-width="1" />
@@ -1323,9 +1434,9 @@ function handleGraphSvgClick(e: MouseEvent) {
               :fill="node.color" 
               stroke="#0f172a" 
               stroke-width="1.5"
-              class="cursor-pointer hover:r-6 hover:stroke-white transition-all"
+              class="cursor-ns-resize hover:r-6 hover:stroke-white transition-all"
               :class="{ 'stroke-white stroke-[2.5] ring-2': selectedGraphKey?.frame === node.frame && selectedGraphKey?.axis === node.axis }"
-              @click.stop="selectGraphNode(node)"
+              @pointerdown.stop="startGraphKeyDrag($event, node)"
             >
               <title>{{ node.axis.toUpperCase() }}: {{ node.value.toFixed(2) }} at {{ node.frame }}f ({{ node.interpolation }})</title>
             </circle>
@@ -1356,7 +1467,7 @@ function handleGraphSvgClick(e: MouseEvent) {
           @click="showNewClipModal = true"
           class="px-2.5 py-1 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white font-bold text-[10px] flex items-center space-x-1 transition"
         >
-          <Plus class="w-3 h-3" />
+          <BlenderIcon name="plus" :size="12" />
           <span>+ Add Animation</span>
         </button>
       </div>
@@ -1371,13 +1482,13 @@ function handleGraphSvgClick(e: MouseEvent) {
         >
           <div class="flex items-center justify-between">
             <div class="flex items-center space-x-1.5 truncate">
-              <Film class="w-3.5 h-3.5 text-ui-textAccent" />
+              <BlenderIcon name="film" :size="14" />
               <span class="font-bold text-ui-textPrimary truncate">{{ clip.name }}</span>
             </div>
 
             <div class="flex items-center space-x-1" @click.stop>
               <button @click="animationStore.duplicateClip(clip.id)" class="text-ui-textMuted hover:text-ui-textPrimary p-1" title="Duplicate">
-                <Copy class="w-3 h-3" />
+                <BlenderIcon name="duplicate" :size="12" />
               </button>
               <button 
                 v-if="animationStore.armature.clips.length > 1" 
@@ -1385,7 +1496,7 @@ function handleGraphSvgClick(e: MouseEvent) {
                 class="text-ui-textMuted hover:text-rose-400 p-1" 
                 title="Delete"
               >
-                <Trash2 class="w-3 h-3" />
+                <BlenderIcon name="trash" :size="12" />
               </button>
             </div>
           </div>

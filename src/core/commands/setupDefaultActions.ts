@@ -1,10 +1,10 @@
 import { actionRegistry, type CommandAction } from './ActionRegistry'
-import { requestExport, requestModalTool, requestPrimitivePlacement, requestCameraView, requestFillFace } from './editorCommands'
+import { requestExport, requestModalTool, requestPrimitivePlacement, requestCameraView, requestFillFace, requestSmartUvProject } from './editorCommands'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useHistoryStore } from '../../stores/historyStore'
-import { ProjectSerializer } from '../project/ProjectSerializer'
+import { saveOpenProject } from '../project/projectIo'
 
 export function setupDefaultActions(
   projectStore: ReturnType<typeof useProjectStore>,
@@ -255,7 +255,7 @@ export function setupDefaultActions(
       category: 'Selection',
       shortcut: '1',
       icon: 'vertex-select',
-      handler: () => { toolStore.selectMode = 'vertex'; toolStore.setAppMode('model') }
+      handler: () => { toolStore.setAppMode('model'); toolStore.selectMode = 'vertex' }
     },
     {
       id: 'mode_edge',
@@ -263,7 +263,7 @@ export function setupDefaultActions(
       category: 'Selection',
       shortcut: '2',
       icon: 'edge-select',
-      handler: () => { toolStore.selectMode = 'edge'; toolStore.setAppMode('model') }
+      handler: () => { toolStore.setAppMode('model'); toolStore.selectMode = 'edge' }
     },
     {
       id: 'mode_face',
@@ -271,7 +271,7 @@ export function setupDefaultActions(
       category: 'Selection',
       shortcut: '3',
       icon: 'face-select',
-      handler: () => { toolStore.selectMode = 'face'; toolStore.setAppMode('model') }
+      handler: () => { toolStore.setAppMode('model'); toolStore.selectMode = 'face' }
     },
     {
       id: 'mode_object',
@@ -279,14 +279,14 @@ export function setupDefaultActions(
       category: 'Selection',
       shortcut: '4',
       icon: 'mesh-cube',
-      handler: () => { toolStore.selectMode = 'object'; toolStore.setAppMode('model') }
+      handler: () => { toolStore.setAppMode('model'); toolStore.selectMode = 'object' }
     },
     {
       id: 'mode_origin',
       label: 'Origin / Pivot Mode',
       category: 'Selection',
       shortcut: '5',
-      handler: () => { toolStore.selectMode = 'origin'; toolStore.setAppMode('model') }
+      handler: () => { toolStore.setAppMode('model'); toolStore.selectMode = 'origin' }
     },
     {
       id: 'mode_bone',
@@ -294,7 +294,7 @@ export function setupDefaultActions(
       category: 'Selection',
       shortcut: '6',
       icon: 'bone',
-      handler: () => { toolStore.selectMode = 'bone'; toolStore.setAppMode('rig') }
+      handler: () => { toolStore.setAppMode('rig'); toolStore.selectMode = 'bone' }
     },
     {
       id: 'toggle_edit_object',
@@ -428,21 +428,7 @@ export function setupDefaultActions(
       category: 'File & Project',
       shortcut: 'Ctrl+s',
       handler: () => {
-        const jsonStr = ProjectSerializer.serialize(
-          projectStore.projectName,
-          projectStore.meshes,
-          projectStore.pixelBuffer.canvas,
-          projectStore.activePalette,
-          projectStore.materials,
-          animationStore.armature,
-          animationStore.armature.clips,
-          animationStore.armature.activeClipId,
-          animationStore.currentFrame,
-          toolStore.viewport,
-          projectStore.textures,
-          projectStore.referenceImages
-        )
-        ProjectSerializer.downloadProject(jsonStr, projectStore.projectName || 'PSX_Model')
+        void saveOpenProject()
       }
     },
     {
@@ -469,14 +455,31 @@ export function setupDefaultActions(
 
     // 8. UV & TEXTURE
     {
+      id: 'smart_uv_project',
+      label: 'Smart UV Project',
+      category: 'UV & Texture',
+      shortcut: 'u',
+      icon: 'uv-smart',
+      handler: () => {
+        if (toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'uv') {
+          requestSmartUvProject()
+          return
+        }
+        projectStore.performSmartUvProject({
+          angleLimitDegrees: toolStore.smartUvAngle,
+          marginPixels: toolStore.smartUvMargin
+        })
+      }
+    },
+    {
       id: 'mark_seam',
-      label: 'Mark Seam on Selected Edges',
+      label: 'Mark Seam (edges or island border)',
       category: 'UV & Texture',
       handler: () => projectStore.markSelectedEdgesAsSeam()
     },
     {
       id: 'clear_seam',
-      label: 'Clear Seams on Selected Edges',
+      label: 'Clear Seams (edges or island border)',
       category: 'UV & Texture',
       handler: () => projectStore.clearSelectedEdgesSeam()
     },
@@ -484,7 +487,6 @@ export function setupDefaultActions(
       id: 'unwrap_seams',
       label: 'Unwrap UVs Along Seams',
       category: 'UV & Texture',
-      shortcut: 'u',
       handler: () => projectStore.performSeamUnwrap()
     },
     {
@@ -492,6 +494,19 @@ export function setupDefaultActions(
       label: 'Pack UV Islands',
       category: 'UV & Texture',
       handler: () => projectStore.performPackUVIslands()
+    },
+    {
+      id: 'box_unwrap',
+      label: 'Box UV Projection',
+      category: 'UV & Texture',
+      icon: 'mesh-cube',
+      handler: () => projectStore.performBoxUnwrap()
+    },
+    {
+      id: 'gridify_uv_quads',
+      label: 'Gridify Quad UVs',
+      category: 'UV & Texture',
+      handler: () => projectStore.performGridifyUvQuads()
     },
     {
       id: 'bake_scene_atlas',

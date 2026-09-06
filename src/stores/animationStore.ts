@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed, onScopeDispose } from 'vue'
+import { ref, computed, onScopeDispose, watch } from 'vue'
 import { Armature, Bone, BoneSocket, Keyframe, AnimationClip, AnimationTrack, InterpolationType } from '../types/animation'
 import { Vector3D, MeshObject, Vertex } from '../types/mesh'
 import { sampleTrack, setMeshBoneParent } from '../core/animation/Armature'
@@ -8,6 +8,7 @@ import { applyIKConstraints } from '../core/animation/IKSolver'
 import { SpringPhysicsSolver } from '../core/animation/SpringPhysics'
 import { useProjectStore } from './projectStore'
 import { useToolStore } from './toolStore'
+import { parseUndirectedEdgeId } from '../core/geometry/EdgeUtils'
 
 function genId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).substring(2, 9)}`
@@ -608,26 +609,13 @@ export const useAnimationStore = defineStore('animation', () => {
       }
       targetVertexIds = Array.from(vertSet)
     } else if (targetType === 'edges') {
+      const known = activeMesh.vertices.map(v => v.id)
       const vertSet = new Set<string>()
       for (const edgeId of projectStore.selectedEdgeIds) {
-        const parts = edgeId.split('_')
-        if (parts.length >= 2) {
-          vertSet.add(parts[0])
-          vertSet.add(parts[1])
-        }
-      }
-      if (vertSet.size === 0 && projectStore.selectedEdgeIds.length > 0) {
-        for (const f of activeMesh.faces) {
-          for (let i = 0; i < f.vertexIds.length; i++) {
-            const v1 = f.vertexIds[i]
-            const v2 = f.vertexIds[(i + 1) % f.vertexIds.length]
-            const eKey = `${v1}_${v2}`
-            const eKeyRev = `${v2}_${v1}`
-            if (projectStore.selectedEdgeIds.includes(eKey) || projectStore.selectedEdgeIds.includes(eKeyRev)) {
-              vertSet.add(v1)
-              vertSet.add(v2)
-            }
-          }
+        const parsed = parseUndirectedEdgeId(edgeId, known)
+        if (parsed) {
+          vertSet.add(parsed.v1)
+          vertSet.add(parsed.v2)
         }
       }
       targetVertexIds = Array.from(vertSet)
@@ -646,12 +634,13 @@ export const useAnimationStore = defineStore('animation', () => {
         }
         targetVertexIds = Array.from(vertSet)
       } else if (projectStore.selectedEdgeIds.length > 0) {
+        const known = activeMesh.vertices.map(v => v.id)
         const vertSet = new Set<string>()
         for (const edgeId of projectStore.selectedEdgeIds) {
-          const parts = edgeId.split('_')
-          if (parts.length >= 2) {
-            vertSet.add(parts[0])
-            vertSet.add(parts[1])
+          const parsed = parseUndirectedEdgeId(edgeId, known)
+          if (parsed) {
+            vertSet.add(parsed.v1)
+            vertSet.add(parsed.v2)
           }
         }
         targetVertexIds = Array.from(vertSet)
@@ -1316,17 +1305,25 @@ export const useAnimationStore = defineStore('animation', () => {
     }
   }
 
-  function updateKeyframeValue(targetId: string, channel: 'position' | 'rotation' | 'scale', frame: number, axis: 'x' | 'y' | 'z', value: number) {
+  function updateKeyframeValue(
+    targetId: string,
+    channel: 'position' | 'rotation' | 'scale',
+    frame: number,
+    axis: 'x' | 'y' | 'z',
+    value: number,
+    options?: { record?: boolean }
+  ) {
     if (!activeClip.value) return
     const track = activeClip.value.tracks.find(t => t.targetId === targetId)
     if (!track) return
 
     const keyList = channel === 'position' ? track.positionKeys : channel === 'rotation' ? track.rotationKeys : track.scaleKeys
     const key = keyList.find(k => k.frame === frame)
-    if (key) {
-      key.value[axis] = value
-      evaluatePose()
-    }
+    if (!key) return
+    if (key.value[axis] === value) return
+    if (options?.record !== false) projectStore.recordState('Edit Keyframe Value')
+    key.value[axis] = value
+    evaluatePose()
   }
 
   // ----------------------------------------------------
@@ -1751,7 +1748,11 @@ export const useAnimationStore = defineStore('animation', () => {
   function setClipDuration(seconds: number) {
     if (!activeClip.value) return
     const fps = activeClip.value.fps || 12
-    activeClip.value.durationFrames = Math.max(1, Math.round(seconds * fps))
+    const frames = Math.max(1, Math.round(seconds * fps))
+    if (frames === activeClip.value.durationFrames) return
+    projectStore.recordState('Set Clip Duration')
+    activeClip.value.durationFrames = frames
+    if (currentFrame.value > frames) setFrame(frames)
   }
 
   // ----------------------------------------------------
@@ -1816,6 +1817,40 @@ export const useAnimationStore = defineStore('animation', () => {
     evaluatePose()
   }
 
+  function duplicateKeysAtCurrentFrame() {
+    if (!activeClip.value) return
+    const src = currentFrame.value
+    const dest = src + 1
+    const pending: { list: Keyframe<Vector3D>[]; clone: Keyframe<Vector3D> }[] = []
+    for (const track of activeClip.value.tracks) {
+      for (const list of [track.positionKeys, track.rotationKeys, track.scaleKeys]) {
+        const key = list.find(k => k.frame === src)
+        if (!key) continue
+        const clone = JSON.parse(JSON.stringify(key)) as Keyframe<Vector3D>
+        clone.frame = dest
+        pending.push({ list, clone })
+      }
+    }
+    if (pending.length === 0) {
+      recordedStatusMessage.value = `No keys on frame ${src} to duplicate`
+      return
+    }
+    projectStore.recordState('Duplicate Keys')
+    if (dest > activeClip.value.durationFrames) {
+      activeClip.value.durationFrames = dest
+    }
+    for (const item of pending) {
+      const existing = item.list.findIndex(k => k.frame === dest)
+      if (existing !== -1) item.list[existing] = item.clone
+      else {
+        item.list.push(item.clone)
+        item.list.sort((a, b) => a.frame - b.frame)
+      }
+    }
+    setFrame(dest)
+    recordedStatusMessage.value = `Duplicated ${pending.length} keys ${src} → ${dest}`
+  }
+
   function evaluatePose() {
     if (!activeClip.value) return
 
@@ -1842,6 +1877,20 @@ export const useAnimationStore = defineStore('animation', () => {
     applyIKConstraints(armature.value.bones)
   }
 
+  watch(
+    () => useToolStore().appMode,
+    (mode) => {
+      if (mode !== 'animate' && isPlaying.value) {
+        isPlaying.value = false
+        stopPlayback()
+      }
+      if (mode === 'animate') {
+        isWeightPaintActive.value = false
+        evaluatePose()
+      }
+    }
+  )
+
   return {
     armature,
     selectedBoneId,
@@ -1867,6 +1916,7 @@ export const useAnimationStore = defineStore('animation', () => {
     deleteClip,
     renameClip,
     selectClip,
+    duplicateKeysAtCurrentFrame,
     addRootBone,
     addChildBone,
     extrudeBone,

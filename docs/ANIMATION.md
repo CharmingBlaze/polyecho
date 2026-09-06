@@ -101,6 +101,26 @@ X-ray bones (`xrayBones` or viewport X-Ray) only changes depth test. It does not
 - Enable IK on the Bone tab; `evaluatePose` re-solves it after sampling keys. Two-bone + pole when chain length is 2.
 - Click-to-place auto-weights only the first bone.
 
+## Animate workspace shortcuts
+
+| Input | Action |
+| :--- | :--- |
+| Space | Play / pause (`togglePlay`). Stops if you leave Animate. |
+| I / K | Insert key on the selected bone, or the active object if no bone is selected |
+| Shift+D | Duplicate keys on this frame onto the next frame (`duplicateKeysAtCurrentFrame`) |
+| Delete / X | Delete keys on the selected bone at this frame (does not delete bones) |
+| Ctrl+C / Ctrl+V | Copy / paste pose (not mesh clipboard). Ctrl+Shift+V pastes flipped. |
+| Alt+R | Reset pose (auto-keys if Auto-key is on) |
+| ← → / , . | Previous / next frame |
+| RMB drag | Pan the viewport, scroll the dope sheet, or pan the graph editor |
+| Graph LMB drag | Drag a curve key vertically (one undo step) |
+
+Onion skin is a viewport overlay. Toggle it on the Animate inspector Playback section (`onionSkin`, `onionFramesCount`, `onionOpacity`). Ghosts are red (past) and green (future).
+
+`updateKeyframeValue` records undo unless you pass `{ record: false }` (used while dragging a graph key after the first sample).
+
+Bind / unbind geometry (Ctrl+P / Alt+P) is **Rig only**. Extrude bone (E) is **Rig only**.
+
 ## Do not
 
 - Extrude bones with **E** in Animate (that is Rig-only). Use **I** / **K** to key.

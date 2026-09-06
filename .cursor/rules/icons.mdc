@@ -1,0 +1,12 @@
+---
+description: Prefer BlenderIcon for editor chrome
+globs: src/components/**/*.vue
+alwaysApply: false
+---
+
+# Icons
+
+- Use `BlenderIcon` (`src/components/icons/BlenderIcon.vue`) for tools, modes, menus, and panel chrome.
+- Reuse an existing `name` (or add a 24×24 glyph **and** the union member). Do not invent a second icon component.
+- Lucide only when there is no Blender equivalent and the control is not a DCC tool (e.g. a drag grip). Do not mix Lucide and `BlenderIcon` in the same toolbar row.
+- Full list and how to add glyphs: `docs/ICONS.md`.

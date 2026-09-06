@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { useProjectStore } from '../../stores/projectStore'
 import { useAnimationStore } from '../../stores/animationStore'
+import { useHistoryStore } from '../../stores/historyStore'
+import { setLastProjectPath } from '../../core/desktop/desktopApi'
+import { refreshDesktopTitle } from '../../core/project/projectIo'
 import { 
   createCharacterTemplate, 
   createTreasureChestTemplate, 
@@ -10,14 +13,13 @@ import { X, Box, User, Shield, Castle } from 'lucide-vue-next'
 
 const projectStore = useProjectStore()
 const animationStore = useAnimationStore()
+const historyStore = useHistoryStore()
 
 const emit = defineEmits<{
   (e: 'close'): void
 }>()
 
 function loadTemplate(type: 'blank' | 'character' | 'chest' | 'dungeon') {
-  projectStore.recordState('Load Template')
-
   if (type === 'blank') {
     projectStore.resetToDefaultProject()
   } else if (type === 'character') {
@@ -43,6 +45,10 @@ function loadTemplate(type: 'blank' | 'character' | 'chest' | 'dungeon') {
   projectStore.activeMeshId = projectStore.meshes[0]?.id || ''
   projectStore.clearSubSelections()
   projectStore.markGeometryUpdated()
+  historyStore.clearHistory()
+  historyStore.markClean()
+  setLastProjectPath(null)
+  void refreshDesktopTitle()
   emit('close')
 }
 </script>

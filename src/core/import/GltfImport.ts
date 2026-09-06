@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { MeshObject, Vertex, Face } from '../../types/mesh'
 import { Armature, Bone, AnimationClip, AnimationTrack } from '../../types/animation'
+import { Material, TextureMap } from '../../types/texture'
 import { computeFaceNormal } from '../../utils/math'
 import { ensureMeshUVs, boxUnwrap } from '../geometry/UVUnwrap'
 
@@ -10,6 +11,8 @@ export interface GltfImportResult {
   armature?: Armature
   animations?: AnimationClip[]
   textureImage?: HTMLImageElement
+  textures?: TextureMap[]
+  materials?: Material[]
 }
 
 export class GltfImport {
@@ -31,6 +34,9 @@ export class GltfImport {
     const meshes: MeshObject[] = []
     const bones: Bone[] = []
     const threeBones: THREE.Bone[] = []
+    const importedTextures: TextureMap[] = []
+    const importedMaterials: Material[] = []
+    const textureByUuid = new Map<string, string>()
 
     // 1. Traverse scene graph to collect meshes & bones
     gltf.scene.updateMatrixWorld(true)
@@ -162,6 +168,12 @@ export class GltfImport {
         }
 
         if (meshVertices.length > 0 && meshFaces.length > 0) {
+          const bound = bindImportedMaterial(
+            threeMesh.material,
+            importedTextures,
+            importedMaterials,
+            textureByUuid
+          )
           const gltfMesh: MeshObject = {
             id: `mesh_gltf_${Date.now()}_${meshes.length + 1}`,
             name: threeMesh.name || `${fileName}_Mesh_${meshes.length + 1}`,
@@ -170,7 +182,7 @@ export class GltfImport {
             position: { x: 0, y: 0, z: 0 },
             rotation: { x: 0, y: 0, z: 0 },
             scale: { x: 1, y: 1, z: 1 },
-            materialId: 'default_material',
+            materialId: bound,
             shadeMode: 'flat',
             vertices: meshVertices,
             faces: meshFaces
@@ -233,6 +245,24 @@ export class GltfImport {
                 value: { x: values[k * 3], y: values[k * 3 + 1], z: values[k * 3 + 2] },
                 interpolation: 'linear'
               })
+            } else if (prop === 'quaternion') {
+              const q = new THREE.Quaternion(
+                values[k * 4],
+                values[k * 4 + 1],
+                values[k * 4 + 2],
+                values[k * 4 + 3]
+              )
+              const euler = new THREE.Euler().setFromQuaternion(q)
+              animTrack.rotationKeys.push({
+                id: `krot_${frame}_${k}`,
+                frame,
+                value: {
+                  x: THREE.MathUtils.radToDeg(euler.x),
+                  y: THREE.MathUtils.radToDeg(euler.y),
+                  z: THREE.MathUtils.radToDeg(euler.z)
+                },
+                interpolation: 'linear'
+              })
             }
           }
         }
@@ -260,7 +290,77 @@ export class GltfImport {
     return {
       meshes,
       armature,
-      animations: animations.length > 0 ? animations : undefined
+      animations: animations.length > 0 ? animations : undefined,
+      textures: importedTextures.length > 0 ? importedTextures : undefined,
+      materials: importedMaterials.length > 0 ? importedMaterials : undefined
     }
   }
+}
+
+function firstMaterial(mat: THREE.Material | THREE.Material[]): THREE.Material | null {
+  if (Array.isArray(mat)) return mat[0] ?? null
+  return mat ?? null
+}
+
+function textureToDataUrl(tex: THREE.Texture): string | undefined {
+  const img = tex.image as { toDataURL?: (type?: string) => string } | HTMLCanvasElement | undefined
+  if (!img) return undefined
+  if (typeof (img as HTMLCanvasElement).toDataURL === 'function') {
+    try {
+      return (img as HTMLCanvasElement).toDataURL('image/png')
+    } catch {
+      return undefined
+    }
+  }
+  return undefined
+}
+
+function bindImportedMaterial(
+  rawMat: THREE.Material | THREE.Material[],
+  textures: TextureMap[],
+  materials: Material[],
+  textureByUuid: Map<string, string>
+): string {
+  const threeMat = firstMaterial(rawMat)
+  const map = threeMat && 'map' in threeMat
+    ? ((threeMat as THREE.MeshStandardMaterial).map ?? null)
+    : null
+
+  let textureId: string | null = null
+  if (map) {
+    const existing = textureByUuid.get(map.uuid)
+    if (existing) {
+      textureId = existing
+    } else {
+      const image = map.image as { width?: number; height?: number } | undefined
+      textureId = `tex_gltf_${textures.length + 1}`
+      textureByUuid.set(map.uuid, textureId)
+      textures.push({
+        id: textureId,
+        name: map.name || `Imported_${textures.length + 1}`,
+        width: image?.width || 64,
+        height: image?.height || 64,
+        dataUrl: textureToDataUrl(map)
+      })
+    }
+  }
+
+  const color = threeMat && 'color' in threeMat && (threeMat as THREE.MeshStandardMaterial).color
+    ? `#${(threeMat as THREE.MeshStandardMaterial).color.getHexString()}`
+    : '#ffffff'
+  const matId = `mat_gltf_${materials.length + 1}`
+  materials.push({
+    id: matId,
+    name: threeMat?.name || `Imported_${materials.length + 1}`,
+    textureId,
+    color,
+    shading: 'textured',
+    psxJitter: false,
+    psxJitterResolution: 240,
+    psxAffine: false,
+    dither: false,
+    ditherLevel: 32,
+    wireframe: false
+  })
+  return matId
 }

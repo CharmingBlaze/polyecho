@@ -64,6 +64,28 @@ function getDB(): Promise<IDBDatabase> {
 }
 
 export class ProjectStorage {
+  /** Reject autosave payloads that would fail `.psxproj` face/UV checks. */
+  static isValidProjectData(data: unknown): data is ProjectStorageData {
+    if (!data || typeof data !== 'object') return false
+    const obj = data as Record<string, unknown>
+    if (typeof obj.name !== 'string' || !Array.isArray(obj.meshes) || obj.meshes.length === 0) {
+      return false
+    }
+    for (let i = 0; i < obj.meshes.length; i++) {
+      const mesh = obj.meshes[i]
+      if (!mesh || typeof mesh !== 'object') return false
+      const m = mesh as Record<string, unknown>
+      if (!Array.isArray(m.vertices) || !Array.isArray(m.faces)) return false
+      for (const face of m.faces) {
+        if (!face || typeof face !== 'object') return false
+        const f = face as Record<string, unknown>
+        if (!Array.isArray(f.vertexIds) || f.vertexIds.length < 3) return false
+        if (Array.isArray(f.uvs) && f.uvs.length !== f.vertexIds.length) return false
+      }
+    }
+    return true
+  }
+
   static async saveProject(data: Omit<ProjectStorageData, 'id' | 'updatedAt'>, id = AUTOSAVE_KEY): Promise<void> {
     try {
       const db = await getDB()
@@ -98,7 +120,8 @@ export class ProjectStorage {
         const request = store.get(id)
 
         request.onsuccess = () => {
-          resolve(request.result || null)
+          const row = request.result
+          resolve(row && ProjectStorage.isValidProjectData(row) ? row : null)
         }
         request.onerror = () => reject(request.error)
       })
