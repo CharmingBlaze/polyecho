@@ -4,7 +4,7 @@ import { useToolStore } from '../../stores/toolStore'
 import { useProjectStore } from '../../stores/projectStore'
 import { useAnimationStore } from '../../stores/animationStore'
 import BlenderIcon from '../icons/BlenderIcon.vue'
-import { requestModalTool, requestPrimitiveMenu, requestSmartUvProject } from '../../core/commands/editorCommands'
+import { requestFillFace, requestModalTool, requestPrimitiveMenu, requestSmartUvProject } from '../../core/commands/editorCommands'
 
 const toolStore = useToolStore()
 const projectStore = useProjectStore()
@@ -28,6 +28,12 @@ function handleSetTool(tool: any) {
 
 function handleStartModal(toolName: string) {
   requestModalTool(toolName as any)
+}
+
+function handleSubdivide() {
+  if (toolStore.selectMode === 'object' || toolStore.selectMode === 'vertex' || toolStore.selectMode === 'edge' || toolStore.selectMode === 'face') {
+    projectStore.performSubdivide(toolStore.selectMode)
+  }
 }
 
 function handleOpenPrimitiveMenu() {
@@ -84,7 +90,7 @@ function handleOpenPrimitiveMenu() {
         @click="handleSetTool('select')"
         class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
         :class="toolStore.modelTool === 'select' ? 'bg-ui-active text-ui-textAccent shadow-inner' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-        title="Select Box (W)"
+        title="Select Box (B)"
       >
         <BlenderIcon name="select-box" :size="18" />
       </button>
@@ -117,6 +123,15 @@ function handleOpenPrimitiveMenu() {
         title="Scale (S)"
       >
         <BlenderIcon name="tool-scale" :size="18" />
+      </button>
+
+      <!-- Subdivide (Object + Edit) -->
+      <button 
+        @click="handleSubdivide"
+        class="w-8 h-8 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition relative group cursor-pointer"
+        title="Subdivide (W). Object mode splits the whole mesh."
+      >
+        <BlenderIcon name="tool-subdivide" :size="18" />
       </button>
 
       <!-- EDIT MODE MESH MODELING TOOLS (Vertex, Edge, Face) -->
@@ -166,6 +181,24 @@ function handleOpenPrimitiveMenu() {
           title="Knife Topology (K)"
         >
           <BlenderIcon name="tool-knife" :size="18" />
+        </button>
+
+        <!-- Fill -->
+        <button 
+          @click="requestFillFace()"
+          class="w-8 h-8 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition relative group cursor-pointer"
+          title="Fill Face (F)"
+        >
+          <BlenderIcon name="fill-face" :size="18" />
+        </button>
+
+        <!-- Merge -->
+        <button 
+          @click="projectStore.performMerge('center')"
+          class="w-8 h-8 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition relative group cursor-pointer"
+          title="Merge at Center (M)"
+        >
+          <BlenderIcon name="tool-merge" :size="18" />
         </button>
 
         <!-- Poly Draw -->
@@ -242,7 +275,7 @@ function handleOpenPrimitiveMenu() {
         @click="handleSetTool('select')"
         class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
         :class="toolStore.modelTool === 'select' ? 'bg-ui-active text-ui-textAccent shadow-inner' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-        title="Select Box (W)"
+        title="Select Box (B)"
       >
         <BlenderIcon name="select-box" :size="18" />
       </button>
@@ -275,6 +308,14 @@ function handleOpenPrimitiveMenu() {
         title="Scale (S)"
       >
         <BlenderIcon name="tool-scale" :size="18" />
+      </button>
+
+      <button 
+        @click="handleSubdivide"
+        class="w-8 h-8 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition relative group cursor-pointer"
+        title="Subdivide (W). Object mode splits the whole mesh."
+      >
+        <BlenderIcon name="tool-subdivide" :size="18" />
       </button>
 
       <div class="w-6 h-px bg-ui-borderSubtle my-0.5"></div>
@@ -457,7 +498,7 @@ function handleOpenPrimitiveMenu() {
       <div class="w-6 h-px bg-ui-borderSubtle my-0.5"></div>
 
       <button 
-        @click="animationStore.isWeightPaintActive = !animationStore.isWeightPaintActive"
+        @click="animationStore.toggleWeightPaint()"
         class="w-8 h-8 flex items-center justify-center rounded-xs transition cursor-pointer"
         :class="animationStore.isWeightPaintActive ? 'bg-amber-500/20 text-amber-400 font-bold border border-amber-500/50' : 'text-ui-textSecondary hover:bg-ui-hover'"
         title="Weight Paint Mode (Ctrl+Tab)"

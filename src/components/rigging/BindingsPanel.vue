@@ -93,8 +93,6 @@ function handleBind() {
     lastActionMessage.value = 'Select a target bone first'
     return
   }
-  projectStore.recordState('Bind Geometry to Bone')
-  
   let targetType: any = targetMode.value
   if (bindingAlgorithm.value === 'smooth') {
     targetType = 'smooth_auto'
@@ -111,7 +109,6 @@ function handleBind() {
 
 function handleUnbind() {
   if (!activeMesh.value) return
-  projectStore.recordState('Unbind Geometry')
   animationStore.unbindGeometry(activeMesh.value.id, selectedBone.value?.id)
   showActionMessage(`Unbound ${activeMesh.value.name}`)
 }

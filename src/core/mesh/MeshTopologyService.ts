@@ -307,93 +307,468 @@ export class MeshTopologyService {
   }
 
   /**
-   * Subdivides a tri into 4 tris or a quad into 4 quads. Returns new face ids.
+   * Blender-style Subdivide: split selected edges once (shared verts), then rebuild
+   * fully-split tris/quads as a cuts×cuts grid. Neighbor faces that pick up extra
+   * edge verts are tessellated back to tris/quads (no T-junctions).
    */
-  static subdivideFace(mesh: EditableMesh, faceId: number): number[] {
-    const face = mesh.faces.get(faceId)
-    if (!face) return []
+  static subdivideFaces(
+    mesh: EditableMesh,
+    faceIds: number[],
+    options?: { cuts?: number; smoothness?: number; extraEdgeIds?: number[] }
+  ): number[] {
+    const cuts = Math.max(1, Math.min(10, Math.round(options?.cuts ?? 1)))
+    const smoothness = Math.max(0, Math.min(1, options?.smoothness ?? 0))
 
-    const verts = face.vertexIds
-    const uvAt = (i: number) => face.uvs[i]?.clone() ?? new THREE.Vector2()
-    const midUv = (i: number, j: number) => uvAt(i).add(uvAt(j)).multiplyScalar(0.5)
-    const matIdx = face.materialIndex
-    const color = face.color
-    const added: number[] = []
+    const splitEdgeIds = new Set<number>()
+    for (const fId of faceIds) {
+      const face = mesh.faces.get(fId)
+      if (!face) continue
+      for (const eId of face.edgeIds) splitEdgeIds.add(eId)
+    }
+    for (const eId of options?.extraEdgeIds ?? []) {
+      if (mesh.edges.has(eId)) splitEdgeIds.add(eId)
+    }
+    if (splitEdgeIds.size === 0) return []
 
-    if (verts.length === 4) {
-      const [v0, v1, v2, v3] = verts
+    const origCentroids = new Map<number, THREE.Vector3>()
+    for (const [fId, face] of mesh.faces) {
+      const acc = new THREE.Vector3()
+      let n = 0
+      for (const vId of face.vertexIds) {
+        const p = mesh.vertices.get(vId)?.position
+        if (!p) continue
+        acc.add(p)
+        n++
+      }
+      if (n > 0) origCentroids.set(fId, acc.multiplyScalar(1 / n))
+    }
+
+    type FaceSnap = {
+      id: number
+      vertexIds: number[]
+      uvs: THREE.Vector2[]
+      materialIndex: number
+      color?: string
+      edgeIds: number[]
+    }
+    const affected = new Map<number, FaceSnap>()
+    for (const eId of splitEdgeIds) {
+      const edge = mesh.edges.get(eId)
+      if (!edge) continue
+      for (const fId of edge.faceIds) {
+        const face = mesh.faces.get(fId)
+        if (!face || affected.has(fId)) continue
+        affected.set(fId, {
+          id: fId,
+          vertexIds: [...face.vertexIds],
+          uvs: face.uvs.map(uv => uv.clone()),
+          materialIndex: face.materialIndex,
+          color: face.color,
+          edgeIds: [...face.edgeIds]
+        })
+      }
+    }
+    if (affected.size === 0) return []
+
+    const selectedSet = new Set(faceIds.filter(id => affected.has(id)))
+    const fullySplit = new Set<number>()
+    for (const snap of affected.values()) {
+      if (snap.vertexIds.length !== 3 && snap.vertexIds.length !== 4) continue
+      if (!snap.edgeIds.every(eId => splitEdgeIds.has(eId))) continue
+      if (selectedSet.has(snap.id) || snap.edgeIds.every(eId => splitEdgeIds.has(eId))) {
+        fullySplit.add(snap.id)
+      }
+    }
+    // Edge-only: a tri/quad whose every original edge is split still gets a grid.
+    for (const snap of affected.values()) {
+      if ((snap.vertexIds.length === 3 || snap.vertexIds.length === 4) &&
+          snap.edgeIds.length === snap.vertexIds.length &&
+          snap.edgeIds.every(eId => splitEdgeIds.has(eId))) {
+        fullySplit.add(snap.id)
+      }
+    }
+
+    const edgeKey = (a: number, b: number) => (a < b ? `${a}_${b}` : `${b}_${a}`)
+    const midsFromMin = new Map<string, number[]>()
+
+    for (const eId of splitEdgeIds) {
+      const edge = mesh.edges.get(eId)
+      if (!edge) continue
+      const pA = mesh.vertices.get(edge.v1)?.position
+      const pB = mesh.vertices.get(edge.v2)?.position
+      if (!pA || !pB) continue
+
+      const centroids: THREE.Vector3[] = []
+      for (const fId of edge.faceIds) {
+        const c = origCentroids.get(fId)
+        if (c) centroids.push(c)
+      }
+      const pull = new THREE.Vector3()
+      if (centroids.length > 0) {
+        for (const c of centroids) pull.add(c)
+        pull.multiplyScalar(1 / centroids.length)
+      }
+      const edgeMid = pA.clone().lerp(pB, 0.5)
+
+      const mids: number[] = []
+      for (let k = 1; k <= cuts; k++) {
+        const t = k / (cuts + 1)
+        const linear = pA.clone().lerp(pB, t)
+        if (smoothness > 0 && centroids.length > 0) {
+          const offset = pull.clone().sub(edgeMid).multiplyScalar(0.5)
+          const smooth = linear.clone().add(offset)
+          linear.lerp(smooth, smoothness)
+        }
+        mids.push(mesh.addVertex(linear).id)
+      }
+      midsFromMin.set(edgeKey(edge.v1, edge.v2), mids)
+    }
+
+    const midsFromTo = (a: number, b: number): number[] => {
+      const mids = midsFromMin.get(edgeKey(a, b))
+      if (!mids || mids.length === 0) return []
+      return a < b ? [...mids] : [...mids].reverse()
+    }
+
+    const expandLoop = (verts: number[], uvs: THREE.Vector2[]) => {
+      const outV: number[] = []
+      const outUv: THREE.Vector2[] = []
+      const n = verts.length
+      for (let i = 0; i < n; i++) {
+        const a = verts[i]
+        const b = verts[(i + 1) % n]
+        const uvA = uvs[i]?.clone() ?? new THREE.Vector2()
+        const uvB = uvs[(i + 1) % n]?.clone() ?? new THREE.Vector2()
+        outV.push(a)
+        outUv.push(uvA)
+        const mids = midsFromTo(a, b)
+        for (let k = 0; k < mids.length; k++) {
+          const t = (k + 1) / (mids.length + 1)
+          outV.push(mids[k])
+          outUv.push(uvA.clone().lerp(uvB, t))
+        }
+      }
+      return { verts: outV, uvs: outUv }
+    }
+
+    const pushFace = (
+      verts: number[],
+      uvs: THREE.Vector2[],
+      matIdx: number,
+      color: string | undefined,
+      into: number[]
+    ) => {
+      if (verts.length < 3) return
+      const f = mesh.addFace(verts, uvs, matIdx, color)
+      if (f) into.push(f.id)
+    }
+
+    const tessellateNgon = (
+      verts: number[],
+      uvs: THREE.Vector2[],
+      matIdx: number,
+      color: string | undefined,
+      into: number[]
+    ) => {
+      const n = verts.length
+      if (n < 3) return
+      if (n <= 4) {
+        pushFace(verts, uvs, matIdx, color, into)
+        return
+      }
+      if (n === 5) {
+        let midIdx = -1
+        for (let i = 0; i < n; i++) {
+          const a = verts[(i - 1 + n) % n]
+          const b = verts[i]
+          const c = verts[(i + 1) % n]
+          if (midsFromMin.has(edgeKey(a, c)) && midsFromTo(a, c).includes(b)) {
+            midIdx = i
+            break
+          }
+        }
+        if (midIdx === -1) midIdx = 1
+        const prev = (midIdx - 1 + n) % n
+        const next = (midIdx + 1) % n
+        const far1 = (midIdx + 2) % n
+        const far2 = (midIdx + 3) % n
+        pushFace(
+          [verts[prev], verts[midIdx], verts[far2]],
+          [uvs[prev], uvs[midIdx], uvs[far2]],
+          matIdx,
+          color,
+          into
+        )
+        pushFace(
+          [verts[midIdx], verts[next], verts[far1], verts[far2]],
+          [uvs[midIdx], uvs[next], uvs[far1], uvs[far2]],
+          matIdx,
+          color,
+          into
+        )
+        return
+      }
+
+      const center = new THREE.Vector3()
+      const uvC = new THREE.Vector2()
+      for (let i = 0; i < n; i++) {
+        const p = mesh.vertices.get(verts[i])?.position
+        if (p) center.add(p)
+        uvC.add(uvs[i] ?? new THREE.Vector2())
+      }
+      center.multiplyScalar(1 / n)
+      uvC.multiplyScalar(1 / n)
+      const cId = mesh.addVertex(center).id
+      for (let i = 0; i < n; i++) {
+        pushFace(
+          [verts[i], verts[(i + 1) % n], cId],
+          [uvs[i], uvs[(i + 1) % n], uvC.clone()],
+          matIdx,
+          color,
+          into
+        )
+      }
+    }
+
+    const buildQuadGrid = (snap: FaceSnap, into: number[]) => {
+      const [v0, v1, v2, v3] = snap.vertexIds
       const p0 = mesh.vertices.get(v0)?.position
       const p1 = mesh.vertices.get(v1)?.position
       const p2 = mesh.vertices.get(v2)?.position
       const p3 = mesh.vertices.get(v3)?.position
-      if (!p0 || !p1 || !p2 || !p3) return []
+      if (!p0 || !p1 || !p2 || !p3) return
+      const uv0 = snap.uvs[0]?.clone() ?? new THREE.Vector2()
+      const uv1 = snap.uvs[1]?.clone() ?? new THREE.Vector2()
+      const uv2 = snap.uvs[2]?.clone() ?? new THREE.Vector2()
+      const uv3 = snap.uvs[3]?.clone() ?? new THREE.Vector2()
+      const segs = cuts + 1
+      const grid: number[][] = Array.from({ length: segs + 1 }, () => Array(segs + 1).fill(0))
+      const uvGrid: THREE.Vector2[][] = Array.from({ length: segs + 1 }, () =>
+        Array.from({ length: segs + 1 }, () => new THREE.Vector2())
+      )
 
-      const mid01 = mesh.addVertex(p0.clone().lerp(p1, 0.5)).id
-      const mid12 = mesh.addVertex(p1.clone().lerp(p2, 0.5)).id
-      const mid23 = mesh.addVertex(p2.clone().lerp(p3, 0.5)).id
-      const mid30 = mesh.addVertex(p3.clone().lerp(p0, 0.5)).id
-      const center = mesh.addVertex(p0.clone().add(p1).add(p2).add(p3).multiplyScalar(0.25)).id
-      const uv0 = uvAt(0)
-      const uv1 = uvAt(1)
-      const uv2 = uvAt(2)
-      const uv3 = uvAt(3)
-      const uvC = uv0.clone().add(uv1).add(uv2).add(uv3).multiplyScalar(0.25)
-      const uv01 = midUv(0, 1)
-      const uv12 = midUv(1, 2)
-      const uv23 = midUv(2, 3)
-      const uv30 = midUv(3, 0)
-
-      mesh.removeFace(faceId)
-      const faces = [
-        mesh.addFace([v0, mid01, center, mid30], [uv0, uv01, uvC, uv30], matIdx, color),
-        mesh.addFace([mid01, v1, mid12, center], [uv01, uv1, uv12, uvC], matIdx, color),
-        mesh.addFace([center, mid12, v2, mid23], [uvC, uv12, uv2, uv23], matIdx, color),
-        mesh.addFace([mid30, center, mid23, v3], [uv30, uvC, uv23, uv3], matIdx, color)
-      ]
-      for (const f of faces) {
-        if (f) added.push(f.id)
+      const bilinear = (s: number, t: number, a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3) => {
+        const ab = a.clone().lerp(b, s)
+        const dc = d.clone().lerp(c, s)
+        return ab.lerp(dc, t)
       }
-      mesh.recalculateNormals()
-      return added
+      const bilinearUv = (s: number, t: number) => {
+        const ab = uv0.clone().lerp(uv1, s)
+        const dc = uv3.clone().lerp(uv2, s)
+        return ab.lerp(dc, t)
+      }
+
+      for (let j = 0; j <= segs; j++) {
+        for (let i = 0; i <= segs; i++) {
+          const s = i / segs
+          const t = j / segs
+          uvGrid[i][j] = bilinearUv(s, t)
+          const onLeft = i === 0
+          const onRight = i === segs
+          const onBottom = j === 0
+          const onTop = j === segs
+          if (onBottom && onLeft) grid[i][j] = v0
+          else if (onBottom && onRight) grid[i][j] = v1
+          else if (onTop && onRight) grid[i][j] = v2
+          else if (onTop && onLeft) grid[i][j] = v3
+          else if (onBottom) grid[i][j] = midsFromTo(v0, v1)[i - 1]
+          else if (onRight) grid[i][j] = midsFromTo(v1, v2)[j - 1]
+          else if (onTop) grid[i][j] = midsFromTo(v3, v2)[i - 1]
+          else if (onLeft) grid[i][j] = midsFromTo(v0, v3)[j - 1]
+          else {
+            const pos = bilinear(s, t, p0, p1, p2, p3)
+            if (smoothness > 0) {
+              const c = p0.clone().add(p1).add(p2).add(p3).multiplyScalar(0.25)
+              pos.lerp(c, smoothness * 0.35)
+            }
+            grid[i][j] = mesh.addVertex(pos).id
+          }
+        }
+      }
+
+      for (let j = 0; j < segs; j++) {
+        for (let i = 0; i < segs; i++) {
+          pushFace(
+            [grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1]],
+            [uvGrid[i][j], uvGrid[i + 1][j], uvGrid[i + 1][j + 1], uvGrid[i][j + 1]],
+            snap.materialIndex,
+            snap.color,
+            into
+          )
+        }
+      }
     }
 
-    if (verts.length === 3) {
-      const [v0, v1, v2] = verts
+    const buildTriGrid = (snap: FaceSnap, into: number[]) => {
+      const [v0, v1, v2] = snap.vertexIds
       const p0 = mesh.vertices.get(v0)?.position
       const p1 = mesh.vertices.get(v1)?.position
       const p2 = mesh.vertices.get(v2)?.position
-      if (!p0 || !p1 || !p2) return []
+      if (!p0 || !p1 || !p2) return
+      const uv0 = snap.uvs[0]?.clone() ?? new THREE.Vector2()
+      const uv1 = snap.uvs[1]?.clone() ?? new THREE.Vector2()
+      const uv2 = snap.uvs[2]?.clone() ?? new THREE.Vector2()
+      const n = cuts + 1
+      const idAt = new Map<string, number>()
+      const uvAt = new Map<string, THREE.Vector2>()
+      const keyOf = (i: number, j: number) => `${i},${j}`
 
-      const mid01 = mesh.addVertex(p0.clone().lerp(p1, 0.5)).id
-      const mid12 = mesh.addVertex(p1.clone().lerp(p2, 0.5)).id
-      const mid20 = mesh.addVertex(p2.clone().lerp(p0, 0.5)).id
-      const uv0 = uvAt(0)
-      const uv1 = uvAt(1)
-      const uv2 = uvAt(2)
-      const uv01 = midUv(0, 1)
-      const uv12 = midUv(1, 2)
-      const uv20 = midUv(2, 0)
-
-      mesh.removeFace(faceId)
-      const faces = [
-        mesh.addFace([v0, mid01, mid20], [uv0, uv01, uv20], matIdx, color),
-        mesh.addFace([mid01, v1, mid12], [uv01, uv1, uv12], matIdx, color),
-        mesh.addFace([mid20, mid12, v2], [uv20, uv12, uv2], matIdx, color),
-        mesh.addFace([mid01, mid12, mid20], [uv01, uv12, uv20], matIdx, color)
-      ]
-      for (const f of faces) {
-        if (f) added.push(f.id)
+      for (let i = 0; i <= n; i++) {
+        for (let j = 0; j <= n - i; j++) {
+          const a = (n - i - j) / n
+          const b = j / n
+          const c = i / n
+          const uv = uv0.clone().multiplyScalar(a).add(uv1.clone().multiplyScalar(b)).add(uv2.clone().multiplyScalar(c))
+          uvAt.set(keyOf(i, j), uv)
+          let id: number
+          if (i === 0 && j === 0) id = v0
+          else if (i === 0 && j === n) id = v1
+          else if (i === n && j === 0) id = v2
+          else if (i === 0) id = midsFromTo(v0, v1)[j - 1]
+          else if (j === 0) id = midsFromTo(v0, v2)[i - 1]
+          else if (i + j === n) id = midsFromTo(v1, v2)[i - 1]
+          else {
+            const pos = p0.clone().multiplyScalar(a).add(p1.clone().multiplyScalar(b)).add(p2.clone().multiplyScalar(c))
+            id = mesh.addVertex(pos).id
+          }
+          idAt.set(keyOf(i, j), id)
+        }
       }
-      mesh.recalculateNormals()
-      return added
+
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n - i; j++) {
+          const a = keyOf(i, j)
+          const b = keyOf(i, j + 1)
+          const c = keyOf(i + 1, j)
+          pushFace(
+            [idAt.get(a)!, idAt.get(b)!, idAt.get(c)!],
+            [uvAt.get(a)!, uvAt.get(b)!, uvAt.get(c)!],
+            snap.materialIndex,
+            snap.color,
+            into
+          )
+          if (j + 1 <= n - i - 1) {
+            const d = keyOf(i + 1, j + 1)
+            if (idAt.has(d)) {
+              pushFace(
+                [idAt.get(b)!, idAt.get(d)!, idAt.get(c)!],
+                [uvAt.get(b)!, uvAt.get(d)!, uvAt.get(c)!],
+                snap.materialIndex,
+                snap.color,
+                into
+              )
+            }
+          }
+        }
+      }
     }
 
-    return []
+    const primaryIds: number[] = []
+    const neighborIds: number[] = []
+    for (const snap of affected.values()) mesh.removeFace(snap.id)
+
+    for (const snap of affected.values()) {
+      const into = fullySplit.has(snap.id) || selectedSet.has(snap.id) ? primaryIds : neighborIds
+      if (fullySplit.has(snap.id) && snap.vertexIds.length === 4) {
+        buildQuadGrid(snap, into)
+      } else if (fullySplit.has(snap.id) && snap.vertexIds.length === 3) {
+        buildTriGrid(snap, into)
+      } else {
+        const expanded = expandLoop(snap.vertexIds, snap.uvs)
+        tessellateNgon(expanded.verts, expanded.uvs, snap.materialIndex, snap.color, into)
+      }
+    }
+
+    mesh.recalculateNormals()
+    return primaryIds.length > 0 ? primaryIds : neighborIds
+  }
+
+  /**
+   * Subdivides a tri into 4 tris or a quad into 4 quads. Returns new face ids.
+   */
+  static subdivideFace(
+    mesh: EditableMesh,
+    faceId: number,
+    options?: { cuts?: number; smoothness?: number }
+  ): number[] {
+    return this.subdivideFaces(mesh, [faceId], options)
   }
 
   /** Subdivides a quad face into 4 quads. */
   static subdivideQuadFace(mesh: EditableMesh, faceId: number): boolean {
     return this.subdivideFace(mesh, faceId).length === 4
+  }
+
+  /** Blender Poke Faces: centroid vertex fanned to every original edge. */
+  static pokeFaces(mesh: EditableMesh, faceIds: number[]): number[] {
+    const added: number[] = []
+    for (const fId of [...faceIds]) {
+      const face = mesh.faces.get(fId)
+      if (!face || face.vertexIds.length < 3) continue
+      const verts = [...face.vertexIds]
+      const uvs = face.uvs.map(uv => uv.clone())
+      const matIdx = face.materialIndex
+      const color = face.color
+      const center = new THREE.Vector3()
+      const uvC = new THREE.Vector2()
+      for (let i = 0; i < verts.length; i++) {
+        const p = mesh.vertices.get(verts[i])?.position
+        if (p) center.add(p)
+        uvC.add(uvs[i] ?? new THREE.Vector2())
+      }
+      center.multiplyScalar(1 / verts.length)
+      uvC.multiplyScalar(1 / verts.length)
+      const cId = mesh.addVertex(center).id
+      mesh.removeFace(fId)
+      for (let i = 0; i < verts.length; i++) {
+        const f = mesh.addFace(
+          [verts[i], verts[(i + 1) % verts.length], cId],
+          [uvs[i], uvs[(i + 1) % verts.length], uvC.clone()],
+          matIdx,
+          color
+        )
+        if (f) added.push(f.id)
+      }
+    }
+    mesh.recalculateNormals()
+    return added
+  }
+
+  /** Split quads into two triangles (shortest diagonal, like Blender). */
+  static triangulateFaces(mesh: EditableMesh, faceIds: number[]): number[] {
+    const added: number[] = []
+    for (const fId of [...faceIds]) {
+      const face = mesh.faces.get(fId)
+      if (!face || face.vertexIds.length !== 4) {
+        if (face) added.push(fId)
+        continue
+      }
+      const [v0, v1, v2, v3] = face.vertexIds
+      const [uv0, uv1, uv2, uv3] = face.uvs.map(uv => uv.clone())
+      const p0 = mesh.vertices.get(v0)?.position
+      const p1 = mesh.vertices.get(v1)?.position
+      const p2 = mesh.vertices.get(v2)?.position
+      const p3 = mesh.vertices.get(v3)?.position
+      if (!p0 || !p1 || !p2 || !p3) continue
+      const d02 = p0.distanceToSquared(p2)
+      const d13 = p1.distanceToSquared(p3)
+      const matIdx = face.materialIndex
+      const color = face.color
+      mesh.removeFace(fId)
+      if (d02 <= d13) {
+        const a = mesh.addFace([v0, v1, v2], [uv0, uv1, uv2], matIdx, color)
+        const b = mesh.addFace([v0, v2, v3], [uv0, uv2, uv3], matIdx, color)
+        if (a) added.push(a.id)
+        if (b) added.push(b.id)
+      } else {
+        const a = mesh.addFace([v0, v1, v3], [uv0, uv1, uv3], matIdx, color)
+        const b = mesh.addFace([v1, v2, v3], [uv1, uv2, uv3], matIdx, color)
+        if (a) added.push(a.id)
+        if (b) added.push(b.id)
+      }
+    }
+    mesh.recalculateNormals()
+    return added
   }
 
   // =========================================================================

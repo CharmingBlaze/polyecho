@@ -4350,7 +4350,10 @@ function execSpecial(action: string) {
   } else if (action === 'bevel') {
     startModalOperator('bevel')
   } else if (action === 'subdivide') {
-    projectStore.performSubdivide()
+    const mode = toolStore.selectMode
+    if (mode === 'object' || mode === 'vertex' || mode === 'edge' || mode === 'face') {
+      projectStore.performSubdivide(mode)
+    }
   } else if (action === 'loopcut') {
     startModalOperator('loopcut')
   } else if (action === 'extrude') {
@@ -4365,15 +4368,9 @@ function execSpecial(action: string) {
   } else if (action === 'flip-normals') {
     projectStore.performFlipNormals()
   } else if (action === 'poke') {
-    if (projectStore.activeMesh) {
-      projectStore.recordState('Poke Faces')
-      projectStore.performSubdivide()
-    }
+    projectStore.performPokeFaces()
   } else if (action === 'triangulate') {
-    if (projectStore.activeMesh) {
-      projectStore.recordState('Triangulate Faces')
-      projectStore.performSubdivide()
-    }
+    projectStore.performTriangulate()
   } else if (action === 'origin-geometry') {
     const activeMesh = projectStore.activeMesh
     if (activeMesh && activeMesh.vertices.length > 0) {
@@ -6020,6 +6017,7 @@ onUnmounted(() => {
           <div class="py-0.5">
             <button @click="execSpecial('subdivide')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
               <span>Subdivide</span>
+              <span class="text-[10px] text-amber-400 font-bold">W</span>
             </button>
             <button @click="execSpecial('loopcut')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
               <span>Loop Cut and Slide</span>
@@ -6049,6 +6047,10 @@ onUnmounted(() => {
               <span>Extrude Faces</span>
               <span class="text-[10px] text-amber-400 font-bold">E</span>
             </button>
+            <button @click="execSpecial('subdivide')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>Subdivide</span>
+              <span class="text-[10px] text-amber-400 font-bold">W</span>
+            </button>
             <button @click="execSpecial('extrude-individual')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
               <span>Extrude Individual</span>
               <span class="text-[10px] text-amber-400 font-bold">Alt+E</span>
@@ -6059,6 +6061,11 @@ onUnmounted(() => {
             </button>
             <button @click="execSpecial('poke')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
               <span>Poke Face (Centroid)</span>
+              <span class="text-[10px] text-ui-textMuted font-mono">Alt+P</span>
+            </button>
+            <button @click="execSpecial('triangulate')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>Triangulate Faces</span>
+              <span class="text-[10px] text-ui-textMuted font-mono">Ctrl+T</span>
             </button>
             <button @click="execSpecial('flip-normals')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
               <span>Flip Normals</span>
@@ -6081,6 +6088,10 @@ onUnmounted(() => {
             </button>
             <button @click="execSpecial('origin-cursor')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
               <span>Set Origin to 3D Cursor</span>
+            </button>
+            <button @click="execSpecial('subdivide')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+              <span>Subdivide</span>
+              <span class="text-[10px] text-amber-400 font-bold">W</span>
             </button>
             <button @click="execSpecial('duplicate')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
               <span>Duplicate Objects</span>

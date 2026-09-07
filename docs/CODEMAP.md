@@ -49,7 +49,7 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/core/mesh/MeshKernel.ts` | `EditableMesh` + snapshots |
 | `src/core/mesh/MeshBridge.ts` | `MeshObject` ↔ `EditableMesh` |
 | `src/core/mesh/HalfEdgeTopology.ts` | Half-edge helpers |
-| `src/core/mesh/MeshTopologyService.ts` | Topology queries + one-shot bridge / grid-fill / cleanup / subdivide |
+| `src/core/mesh/MeshTopologyService.ts` | Topology queries + one-shot bridge / grid-fill / cleanup / subdivide / poke / triangulate |
 | `src/core/mesh/MeshValidator.ts` | Sanity checks |
 | `src/core/mesh/operations/*Kernel.ts` | Interactive + one-shot kernels (extrude/inset/bevel/merge/dissolve/…) |
 | `src/core/geometry/Operations.ts` | One-shot `MeshObject` ops (fill loop/winding, 2-vert connect, merge, dissolve, …) |
@@ -120,11 +120,11 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | :--- | :--- |
 | `src/components/layout/` | Header, toolbars, status |
 | `src/components/viewport/` | 3D view (`Viewport3D`: picking, gizmo, fill camera, modal start). Space/pivot/snap/shade/overlays/x-ray live in `HeaderMenu.vue`. |
-| `src/components/inspector/` | Transform, material, texture, modifiers, references (`ReferenceProps`), animation (`AnimationInspector` = Animate workspace) |
+| `src/components/inspector/MeshToolsProps.vue` | Modeling Tools tab: Subdivide (cuts/smoothness), extrude/inset/bevel, merge, poke, triangulate |
 | `src/components/outliner/` | Object tree |
 | `src/components/uvpaint/` | UV editor, pixel editor (`PixelCanvas.vue` is the UV/Paint tab router), palettes |
 | `src/components/animation/` | Timeline (no separate DopeSheet component) |
-| `src/components/rigging/` | Rig inspector: Skel (`SkeletonPanel`), Bone (`RiggingPanel`), Bind, Weights |
+| `src/components/rigging/` | Rig inspector: Skel (`SkeletonPanel` + `BoneTreeNode`), Bone (`RiggingPanel`), Bind, Weights |
 | `src/components/modals/` | Export, import, prefs, palette, command search |
 | `src/components/ui/` | Shared buttons, menus, fields |
 | `src/components/icons/BlenderIcon.vue` | Editor glyphs — add names here (`docs/ICONS.md`) |

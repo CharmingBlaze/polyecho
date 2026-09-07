@@ -115,14 +115,62 @@ export function setupDefaultActions(
     // 2. TOPOLOGY
     {
       id: 'subdivide',
-      label: 'Subdivide Mesh',
+      label: 'Subdivide',
       category: 'Topology',
       shortcut: 'w',
       icon: 'subdivide',
       handler: () => {
         if (projectStore.activeMesh) {
-          projectStore.performSubdivide()
+          if (toolStore.selectMode === 'object' || toolStore.selectMode === 'vertex' || toolStore.selectMode === 'edge' || toolStore.selectMode === 'face') {
+            projectStore.performSubdivide(toolStore.selectMode)
+          }
         }
+      }
+    },
+    {
+      id: 'poke_faces',
+      label: 'Poke Faces',
+      category: 'Topology',
+      shortcut: 'Alt+p',
+      handler: () => {
+        if (projectStore.activeMesh) projectStore.performPokeFaces()
+      }
+    },
+    {
+      id: 'triangulate',
+      label: 'Triangulate Faces',
+      category: 'Topology',
+      shortcut: 'Ctrl+t',
+      handler: () => {
+        if (projectStore.activeMesh) projectStore.performTriangulate()
+      }
+    },
+    {
+      id: 'dissolve',
+      label: 'Dissolve Selection',
+      category: 'Topology',
+      shortcut: 'Ctrl+x',
+      icon: 'dissolve',
+      handler: () => {
+        if (toolStore.selectMode === 'edge') projectStore.performDissolve('edge')
+        else if (toolStore.selectMode === 'vertex') projectStore.performDissolve('vertex')
+      }
+    },
+    {
+      id: 'bridge_edges',
+      label: 'Bridge Edge Loops',
+      category: 'Topology',
+      icon: 'bridge-edges',
+      handler: () => {
+        if (projectStore.activeMesh) projectStore.performBridgeEdges()
+      }
+    },
+    {
+      id: 'grid_fill',
+      label: 'Grid Fill',
+      category: 'Topology',
+      handler: () => {
+        if (projectStore.activeMesh) projectStore.performGridFill()
       }
     },
     {

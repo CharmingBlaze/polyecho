@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createCube } from './Primitives'
-import { bevelFaces, bridgeEdgeLoops, cleanupMeshGeometry, connectTwoVertices, deleteElements, dissolveElements, extrudeFaces, fillFaceFromVertices, flattenVerticesOnAxis, flipNormals, gridFill, insetFaces, mergeVertices, mergeVerticesAdvanced, subdivideFaces } from './Operations'
+import { bevelFaces, bridgeEdgeLoops, cleanupMeshGeometry, connectTwoVertices, deleteElements, dissolveElements, extrudeFaces, fillFaceFromVertices, flattenVerticesOnAxis, flipNormals, gridFill, insetFaces, mergeVertices, mergeVerticesAdvanced, pokeFaces, subdivideFaces, triangulateFaces } from './Operations'
 import type { MeshObject } from '../../types/mesh'
 import { undirectedEdgeId } from './EdgeUtils'
 
@@ -106,11 +106,67 @@ describe('Operations', () => {
     }
   })
 
-  it('subdivideFaces turns one cube face into four', () => {
+  it('subdivideFaces turns one cube face into four and keeps neighbor edges shared', () => {
     const cube = createCube('Cube', 2)
     const result = subdivideFaces(cube, [cube.faces[0].id])
-    expect(result.mesh.faces.length).toBe(9)
     expect(result.selectedFaceIds).toHaveLength(4)
+    expect(cube.faces).toHaveLength(6)
+    // 4 new quads + 4 neighbors tessellated (tri+quad) + 1 untouched back face
+    expect(result.mesh.faces.length).toBe(13)
+    expect(result.mesh.vertices.length).toBe(13)
+    for (const face of result.mesh.faces) {
+      expect(face.uvs.length).toBe(face.vertexIds.length)
+      expect(face.vertexIds.length).toBeGreaterThanOrEqual(3)
+      expect(face.vertexIds.length).toBeLessThanOrEqual(4)
+    }
+  })
+
+  it('subdivideFaces with 2 cuts makes a 3x3 grid on a selected quad', () => {
+    const cube = createCube('Cube', 2)
+    const result = subdivideFaces(cube, [cube.faces[0].id], { cuts: 2 })
+    expect(result.selectedFaceIds).toHaveLength(9)
+    expect(cube.faces).toHaveLength(6)
+  })
+
+  it('subdivideFaces shares a midpoint when two adjacent faces are subdivided', () => {
+    const cube = createCube('Cube', 2)
+    const a = cube.faces[0]
+    const shared = new Set(a.vertexIds)
+    const neighbor = cube.faces.find(f => f.id !== a.id && f.vertexIds.filter(id => shared.has(id)).length === 2)!
+    const result = subdivideFaces(cube, [a.id, neighbor.id])
+    expect(result.selectedFaceIds).toHaveLength(8)
+    expect(result.mesh.vertices.length).toBeGreaterThan(cube.vertices.length)
+    expect(result.mesh.vertices.length).toBeLessThan(cube.vertices.length + 16)
+    for (const face of result.mesh.faces) {
+      expect(face.vertexIds.length).toBeGreaterThanOrEqual(3)
+      expect(face.vertexIds.length).toBeLessThanOrEqual(4)
+    }
+  })
+
+  it('subdivideFaces on every cube face makes 24 quads', () => {
+    const cube = createCube('Cube', 2)
+    const result = subdivideFaces(cube, cube.faces.map(f => f.id))
+    expect(result.selectedFaceIds).toHaveLength(24)
+    expect(result.mesh.faces.length).toBe(24)
+    expect(result.mesh.vertices.length).toBe(26)
+    expect(cube.faces).toHaveLength(6)
+  })
+
+  it('pokeFaces fans a quad into four triangles', () => {
+    const cube = createCube('Cube', 2)
+    const result = pokeFaces(cube, [cube.faces[0].id])
+    expect(result.selectedFaceIds).toHaveLength(4)
+    expect(result.mesh.faces.length).toBe(9)
+    expect(result.mesh.vertices.length).toBe(9)
+    expect(cube.faces).toHaveLength(6)
+  })
+
+  it('triangulateFaces splits a quad along the short diagonal', () => {
+    const cube = createCube('Cube', 2)
+    const result = triangulateFaces(cube, [cube.faces[0].id])
+    expect(result.selectedFaceIds).toHaveLength(2)
+    expect(result.mesh.faces.length).toBe(7)
+    expect(result.mesh.vertices.length).toBe(8)
     expect(cube.faces).toHaveLength(6)
   })
 

@@ -31,6 +31,15 @@ function onFile(e: Event) {
 function patch(id: string, data: Record<string, unknown>) {
   projectStore.updateReferenceImage(id, data as any, { rebuild: false })
 }
+
+function beginAdjustment() {
+  projectStore.recordReferenceEdit('Adjust Reference')
+}
+
+function edit(id: string, data: Record<string, unknown>, label = 'Edit Reference') {
+  projectStore.recordReferenceEdit(label)
+  projectStore.updateReferenceImage(id, data as any, { rebuild: false })
+}
 </script>
 
 <template>
@@ -39,7 +48,7 @@ function patch(id: string, data: Record<string, unknown>) {
 
     <UiSection title="Import" blender-icon="image" hint="lightbox" :default-open="true">
       <p class="text-[10px] text-ui-textMuted mb-2 leading-relaxed">
-        Drop onto Front or Side, then drag the photo to line it up. Alt-drag in a pane moves that pane’s ref. Shift-drag or Alt-wheel scales.
+        Drop a drawing on Front or Side, then line it up in the matching view. Drag the image to move it; Shift-drag or Alt-wheel scales it. Lock it before tracing.
       </p>
       <div class="grid grid-cols-3 gap-1">
         <UiButton size="xs" @click="pickFile('front')">Front</UiButton>
@@ -67,7 +76,7 @@ function patch(id: string, data: Record<string, unknown>) {
               class="p-0.5"
               :class="img.locked ? 'text-amber-400' : 'text-ui-textMuted hover:text-ui-textPrimary'"
               :title="img.locked ? 'Unlock to drag' : 'Lock'"
-              @click="projectStore.updateReferenceImage(img.id, { locked: !img.locked }, { rebuild: false })"
+              @click="edit(img.id, { locked: !img.locked }, img.locked ? 'Unlock Reference' : 'Lock Reference')"
             >
               <BlenderIcon v-if="img.locked" name="lock" :size="12" />
               <BlenderIcon v-else name="unlock" :size="12" />
@@ -76,7 +85,7 @@ function patch(id: string, data: Record<string, unknown>) {
               type="button"
               class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary"
               title="Flip X"
-              @click="projectStore.updateReferenceImage(img.id, { flipX: !img.flipX }, { rebuild: false })"
+              @click="edit(img.id, { flipX: !img.flipX }, 'Flip Reference')"
             >
               <BlenderIcon name="flip-horizontal" :size="12" />
             </button>
@@ -84,7 +93,7 @@ function patch(id: string, data: Record<string, unknown>) {
               type="button"
               class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary"
               :title="img.visible ? 'Hide' : 'Show'"
-              @click="projectStore.updateReferenceImage(img.id, { visible: !img.visible })"
+              @click="edit(img.id, { visible: !img.visible }, img.visible ? 'Hide Reference' : 'Show Reference')"
             >
               <BlenderIcon v-if="!img.visible" name="eye-closed" :size="12" />
               <BlenderIcon v-else name="eye-open" :size="12" />
@@ -105,7 +114,7 @@ function patch(id: string, data: Record<string, unknown>) {
             class="bg-ui-input border border-ui-borderDefault rounded-xs text-[10px] text-ui-textPrimary px-1 py-0.5"
             :value="img.plane"
             @click.stop
-            @change="projectStore.updateReferenceImage(img.id, { plane: ($event.target as HTMLSelectElement).value as ReferencePlane })"
+            @change="edit(img.id, { plane: ($event.target as HTMLSelectElement).value as ReferencePlane }, 'Move Reference Plane')"
           >
             <option value="front">Front</option>
             <option value="side">Side</option>
@@ -114,20 +123,23 @@ function patch(id: string, data: Record<string, unknown>) {
         </label>
         <label class="block text-[10px] text-ui-textMuted mb-1">
           Opacity {{ Math.round(img.opacity * 100) }}%
-          <input type="range" min="0.1" max="1" step="0.05" class="w-full" :value="img.opacity" @click.stop @input="patch(img.id, { opacity: Number(($event.target as HTMLInputElement).value) })" />
+          <input type="range" min="0.1" max="1" step="0.05" class="w-full" :value="img.opacity" @click.stop @pointerdown="beginAdjustment" @input="patch(img.id, { opacity: Number(($event.target as HTMLInputElement).value) })" />
         </label>
         <label class="block text-[10px] text-ui-textMuted mb-1">
           Scale {{ img.scale.toFixed(1) }}
-          <input type="range" min="0.5" max="16" step="0.25" class="w-full" :value="img.scale" @click.stop @input="patch(img.id, { scale: Number(($event.target as HTMLInputElement).value) })" />
+          <input type="range" min="0.5" max="16" step="0.25" class="w-full" :value="img.scale" @click.stop @pointerdown="beginAdjustment" @input="patch(img.id, { scale: Number(($event.target as HTMLInputElement).value) })" />
         </label>
         <label class="block text-[10px] text-ui-textMuted mb-1">
           Move X {{ img.offsetX.toFixed(2) }}
-          <input type="range" min="-12" max="12" step="0.05" class="w-full" :value="img.offsetX" @click.stop @input="patch(img.id, { offsetX: Number(($event.target as HTMLInputElement).value) })" />
+          <input type="range" min="-12" max="12" step="0.05" class="w-full" :value="img.offsetX" @click.stop @pointerdown="beginAdjustment" @input="patch(img.id, { offsetX: Number(($event.target as HTMLInputElement).value) })" />
         </label>
         <label class="block text-[10px] text-ui-textMuted">
           Move Y {{ img.offsetY.toFixed(2) }}
-          <input type="range" min="-12" max="12" step="0.05" class="w-full" :value="img.offsetY" @click.stop @input="patch(img.id, { offsetY: Number(($event.target as HTMLInputElement).value) })" />
+          <input type="range" min="-12" max="12" step="0.05" class="w-full" :value="img.offsetY" @click.stop @pointerdown="beginAdjustment" @input="patch(img.id, { offsetY: Number(($event.target as HTMLInputElement).value) })" />
         </label>
+        <UiButton size="xs" class="w-full mt-1" @click.stop="projectStore.resetReferenceImageTransform(img.id)">
+          Reset alignment
+        </UiButton>
       </div>
     </UiSection>
   </div>

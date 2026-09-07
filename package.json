@@ -1,7 +1,7 @@
 {
   "name": "polyecho",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Desktop low-poly 3D modeling, UV pixel painting, and skeletal animation",
   "author": "PolyEcho",
   "type": "module",

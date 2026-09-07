@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import UiSection from '../ui/UiSection.vue'
 import UiButton from '../ui/UiButton.vue'
+import BoneTreeNode from './BoneTreeNode.vue'
 import { 
   Plus, 
   Trash2, 
@@ -23,58 +24,12 @@ const animationStore = useAnimationStore()
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
 
-const editingBoneId = ref<string | null>(null)
-const editingName = ref<string>('')
-const editingSocketId = ref<string | null>(null)
-const editingSocketName = ref<string>('')
-
 const rootBones = computed(() => {
   return animationStore.armature.bones.filter(b => !b.parentId)
 })
 
 const selectedBone = computed(() => animationStore.selectedBone)
 const selectedSocket = computed(() => animationStore.selectedSocket)
-
-function getChildBones(parentId: string) {
-  return animationStore.armature.bones.filter(b => b.parentId === parentId)
-}
-
-function selectBone(id: string) {
-  animationStore.selectedSocketId = null
-  animationStore.selectBone(id)
-}
-
-function selectSocket(socketId: string) {
-  animationStore.selectSocket(socketId)
-}
-
-function startRename(id: string, name: string) {
-  editingBoneId.value = id
-  editingName.value = name
-}
-
-function commitRename(id: string) {
-  if (editingName.value.trim()) {
-    animationStore.renameBone(id, editingName.value.trim())
-  }
-  editingBoneId.value = null
-}
-
-function startSocketRename(id: string, name: string) {
-  editingSocketId.value = id
-  editingSocketName.value = name
-}
-
-function commitSocketRename(boneId: string, socketId: string) {
-  if (editingSocketName.value.trim()) {
-    const bone = animationStore.armature.bones.find(b => b.id === boneId)
-    const sock = bone?.sockets?.find(s => s.id === socketId)
-    if (sock) {
-      sock.name = editingSocketName.value.trim()
-    }
-  }
-  editingSocketId.value = null
-}
 
 function handleAddRoot() {
   projectStore.recordState('Add Root Bone')
@@ -105,17 +60,11 @@ function handleAddRoot() {
   animationStore.selectedBoneId = bone.id
 }
 
-function handleAddChild(parentId: string) {
-  projectStore.recordState('Add Child Bone')
-  animationStore.addChildBone(parentId, `Bone_${animationStore.armature.bones.length + 1}`)
-}
-
 function handleExtrude() {
   if (!animationStore.selectedBoneId) {
     handleAddRoot()
     return
   }
-  projectStore.recordState('Extrude Bone')
   animationStore.extrudeBone(animationStore.selectedBoneId)
 }
 
@@ -123,55 +72,19 @@ function handleToggleDrawBone() {
   animationStore.clickToPlaceMode = !animationStore.clickToPlaceMode
 }
 
-function handleAddSocket(boneId: string) {
-  projectStore.recordState('Add Bone Socket')
-  const s = animationStore.addSocket(boneId, `Socket_${Date.now().toString(36).slice(-3)}`)
-  if (s) {
-    animationStore.selectSocket(s.id)
-  }
-}
-
 function handleRemoveSocket(boneId: string, socketId: string) {
-  projectStore.recordState('Remove Bone Socket')
   animationStore.removeSocket(boneId, socketId)
   if (animationStore.selectedSocketId === socketId) {
     animationStore.selectedSocketId = null
   }
 }
 
-function handleDeleteBone(id: string) {
-  projectStore.recordState('Delete Bone')
-  animationStore.deleteBone(id)
-}
-
 function handleSymmetrize() {
-  projectStore.recordState('Symmetrize Skeleton')
   animationStore.symmetrizeArmature()
 }
 
 function handleReparent(boneId: string, parentBoneId: string) {
-  const bone = animationStore.armature.bones.find(b => b.id === boneId)
-  if (!bone || bone.id === parentBoneId) return
-
-  if (bone.parentId) {
-    const oldP = animationStore.armature.bones.find(b => b.id === bone.parentId)
-    if (oldP) {
-      oldP.childrenIds = oldP.childrenIds.filter(id => id !== bone.id)
-    }
-  } else {
-    animationStore.armature.rootBoneIds = animationStore.armature.rootBoneIds.filter(id => id !== bone.id)
-  }
-
-  if (parentBoneId === 'root') {
-    bone.parentId = null
-    animationStore.armature.rootBoneIds.push(bone.id)
-  } else {
-    bone.parentId = parentBoneId
-    const newP = animationStore.armature.bones.find(b => b.id === parentBoneId)
-    if (newP && !newP.childrenIds.includes(bone.id)) {
-      newP.childrenIds.push(bone.id)
-    }
-  }
+  animationStore.reparentBone(boneId, parentBoneId === 'root' ? null : parentBoneId)
 }
 
 function handleAttachActiveMeshToSocket(socketId: string) {
@@ -247,6 +160,8 @@ function handleAttachActiveMeshToSocket(socketId: string) {
       :default-open="true"
     >
       <div class="bg-ui-input/50 rounded-xs border border-ui-borderSubtle p-1 space-y-0.5 overflow-y-auto max-h-[280px]">
+        <BoneTreeNode v-for="root in rootBones" :key="root.id" :bone-id="root.id" />
+        <div v-pre class="hidden">
         <template v-for="root in rootBones" :key="root.id">
           <!-- Root Bone Row -->
           <div 
@@ -377,7 +292,7 @@ function handleAttachActiveMeshToSocket(socketId: string) {
               </div>
             </div>
           </template>
-        </template>
+        </template></div>
       </div>
 
     </UiSection>

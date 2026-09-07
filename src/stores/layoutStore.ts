@@ -26,11 +26,11 @@ export const useLayoutStore = defineStore('layout', () => {
     y: 46 
   })
 
-  type InspectorTab = 'outliner' | 'props' | 'modifiers' | 'material' | 'texture' | 'refs' | 'bindings' | 'weights' | 'skeleton'
+  type InspectorTab = 'outliner' | 'props' | 'tools' | 'modifiers' | 'material' | 'texture' | 'refs' | 'bindings' | 'weights' | 'skeleton'
 
   const inspectorTabsByMode: Record<string, InspectorTab[]> = {
-    model: ['outliner', 'props', 'modifiers', 'material', 'texture'],
-    blockout: ['outliner', 'props', 'refs', 'modifiers'],
+    model: ['outliner', 'tools', 'props', 'modifiers', 'material', 'texture'],
+    blockout: ['outliner', 'tools', 'props', 'refs', 'modifiers'],
     uvpaint: ['outliner', 'props', 'texture', 'material', 'modifiers'],
     animate: ['outliner', 'props', 'modifiers', 'material', 'texture'],
     rig: ['skeleton', 'props', 'bindings', 'weights']

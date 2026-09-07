@@ -103,6 +103,10 @@ const zoom = ref<number>(6)
 const isFitToView = ref<boolean>(true)
 const showUvOverlay = ref<boolean>(true)
 const showPixelGrid = ref<boolean>(true)
+const showLayers = ref<boolean>(false)
+// PixelBuffer is deliberately non-reactive (canvas-heavy). Bump this after a
+// layer mutation so the small layer popover stays in sync.
+const layerRevision = ref(0)
 const paintTools = [
   { id: 'brush', icon: 'brush', key: 'B', title: 'Pencil / Brush Tool' },
   { id: 'eraser', icon: 'eraser', key: 'E', title: 'Eraser Tool' },
@@ -145,6 +149,85 @@ const activePalette = computed<string[]>({
     projectStore.activePalette.colors = colors
   }
 })
+
+const layers = computed(() => {
+  layerRevision.value
+  return projectStore.pixelBuffer.layers
+})
+
+const activeLayerId = computed(() => {
+  layerRevision.value
+  return projectStore.pixelBuffer.activeLayerId
+})
+
+function refreshLayers() {
+  layerRevision.value++
+  projectStore.pixelBuffer.composite()
+  projectStore.markTextureUpdated()
+  renderCanvas()
+}
+
+function addPaintLayer() {
+  projectStore.recordState('Add Paint Layer')
+  projectStore.pixelBuffer.addLayer()
+  refreshLayers()
+}
+
+function duplicatePaintLayer(layerId: string) {
+  projectStore.recordState('Duplicate Paint Layer')
+  projectStore.pixelBuffer.duplicateLayer(layerId)
+  refreshLayers()
+}
+
+function deletePaintLayer(layerId: string) {
+  if (projectStore.pixelBuffer.layers.length <= 1) return
+  projectStore.recordState('Delete Paint Layer')
+  projectStore.pixelBuffer.deleteLayer(layerId)
+  refreshLayers()
+}
+
+function selectPaintLayer(layerId: string) {
+  projectStore.pixelBuffer.activeLayerId = layerId
+  layerRevision.value++
+  renderCanvas()
+}
+
+function toggleLayerVisibility(layerId: string) {
+  const layer = projectStore.pixelBuffer.layers.find(item => item.id === layerId)
+  if (!layer) return
+  projectStore.recordState('Toggle Paint Layer')
+  layer.visible = !layer.visible
+  refreshLayers()
+}
+
+function setActiveLayerOpacity(value: number) {
+  const layer = projectStore.pixelBuffer.activeLayer
+  if (!layer) return
+  layer.opacity = Math.max(0, Math.min(1, value / 100))
+  refreshLayers()
+}
+
+function renameActivePaintLayer(name: string) {
+  const layer = projectStore.pixelBuffer.activeLayer
+  const next = name.trim()
+  if (!layer || !next || next === layer.name) return
+  projectStore.recordState('Rename Paint Layer')
+  layer.name = next
+  refreshLayers()
+}
+
+function setActiveLayerBlendMode(value: string) {
+  const layer = projectStore.pixelBuffer.activeLayer
+  if (!layer) return
+  if (!['normal', 'multiply', 'screen', 'overlay', 'additive'].includes(value)) return
+  projectStore.recordState('Change Layer Blend Mode')
+  layer.blendMode = value as typeof layer.blendMode
+  refreshLayers()
+}
+
+function clampBrushSize(value: number) {
+  toolStore.brushSize = Math.max(1, Math.min(128, Math.round(Number(value) || 1)))
+}
 
 function switchPalette(pal: Palette) {
   projectStore.activePalette = pal
@@ -296,9 +379,25 @@ function isTypingTarget(target: EventTarget | null) {
 }
 
 function onKeyDown(e: KeyboardEvent) {
+  if (toolStore.appMode !== 'uvpaint' || toolStore.uvWorkspaceTab !== 'paint') return
+  if (isTypingTarget(e.target)) return
+  if (e.key === 'Escape' && activeDropdown.value) {
+    e.preventDefault()
+    closeDropdowns()
+    showLayers.value = false
+    return
+  }
   if (e.code === 'Space' && !isTypingTarget(e.target)) {
     e.preventDefault()
     isSpacePressed.value = true
+  }
+  if (e.key === '[') {
+    e.preventDefault()
+    clampBrushSize(toolStore.brushSize - (e.shiftKey ? 5 : 1))
+  }
+  if (e.key === ']') {
+    e.preventDefault()
+    clampBrushSize(toolStore.brushSize + (e.shiftKey ? 5 : 1))
   }
 }
 
@@ -885,7 +984,7 @@ defineExpose({
       <div class="asset-pipeline flex items-center gap-1.5 min-w-0">
         <!-- 1. Active 3D Object -->
         <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px] text-ui-textSecondary shrink-0">
-          <span class="text-ui-textMuted font-bold text-[8.5px]">OBJ:</span>
+          <span class="asset-label text-ui-textMuted font-bold text-[8.5px]">OBJ:</span>
           <select 
             :value="projectStore.activeMeshId"
             @change="handleActiveObjectChange(($event.target as HTMLSelectElement).value)"
@@ -898,11 +997,11 @@ defineExpose({
           </select>
         </div>
 
-        <span class="text-ui-textMuted text-[9px] font-bold shrink-0">→</span>
+        <span class="asset-arrow text-ui-textMuted text-[9px] font-bold shrink-0">→</span>
 
         <!-- 2. Active Texture Map bound to this Object -->
         <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px] text-ui-textSecondary shrink-0">
-          <span class="text-ui-textMuted font-bold text-[8.5px]">TEX:</span>
+          <span class="asset-label text-ui-textMuted font-bold text-[8.5px]">TEX:</span>
           <select 
             :value="projectStore.activeTextureId" 
             @change="handleTextureBindingChange(($event.target as HTMLSelectElement).value)"
@@ -919,7 +1018,7 @@ defineExpose({
             title="Apply this paint target to the active object"
             @click="handleApplyPaintTargetToMesh"
           >
-            Apply
+            <span class="asset-apply-label">Apply</span>
           </button>
           <button 
             @click="showNewTextureModal = true"
@@ -1162,12 +1261,36 @@ defineExpose({
           <span class="text-[9px] text-ui-textMuted font-bold uppercase">Size:</span>
           <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle p-0.5">
             <button
-              v-for="s in [1, 2, 4, 8, 16, 32]"
+              v-for="s in [1, 2, 4, 8, 16]"
               :key="s"
-              @click="toolStore.brushSize = s"
+              @click="clampBrushSize(s)"
               class="px-1.5 py-0.5 text-[9px] font-bold rounded-xs transition cursor-pointer"
               :class="toolStore.brushSize === s ? 'bg-ui-active text-ui-textAccent shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
             >{{ s }}</button>
+          </div>
+          <input
+            :value="toolStore.brushSize"
+            @input="clampBrushSize(Number(($event.target as HTMLInputElement).value))"
+            type="number"
+            min="1"
+            max="128"
+            class="w-10 h-5 bg-ui-input border border-ui-borderSubtle rounded-xs text-center text-[9px] font-bold text-ui-textPrimary focus:outline-none focus:border-ui-accent"
+            title="Brush size, 1–128 px ([ and ] adjust)"
+            aria-label="Brush size in pixels"
+          />
+
+          <div class="flex items-center gap-1 ml-1" title="Brush opacity">
+            <span class="text-[9px] text-ui-textMuted font-bold uppercase">α</span>
+            <input
+              v-model.number="toolStore.brushOpacity"
+              type="range"
+              min="0.05"
+              max="1"
+              step="0.05"
+              class="w-14 h-1 accent-amber-400 cursor-pointer"
+              aria-label="Brush opacity"
+            />
+            <span class="w-7 text-right text-[9px] font-mono text-ui-textSecondary">{{ Math.round(toolStore.brushOpacity * 100) }}%</span>
           </div>
 
           <button
@@ -1289,6 +1412,68 @@ defineExpose({
       >
         <!-- Top Right Floating View Controls -->
         <div class="pixel-view-group" aria-label="Canvas View Controls">
+          <div class="relative">
+            <button
+              @click="showLayers = !showLayers"
+              class="pixel-view-toggle"
+              :class="{ 'is-active': showLayers }"
+              title="Paint layers"
+            >
+              <span>Layers</span>
+              <span class="text-[8px] opacity-70">{{ layers.length }}</span>
+            </button>
+            <div v-if="showLayers" class="absolute right-0 top-full mt-1 w-52 bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-1.5 text-[10px] text-ui-textPrimary">
+              <div class="flex items-center justify-between px-1 pb-1 border-b border-ui-borderSubtle">
+                <span class="font-bold text-ui-textMuted uppercase text-[9px]">Paint layers</span>
+                <button @click="addPaintLayer" class="px-1.5 py-0.5 rounded-xs bg-ui-active text-ui-textAccent hover:bg-ui-hover font-bold" title="Add layer">+ Add</button>
+              </div>
+              <div class="max-h-44 overflow-y-auto py-1 space-y-0.5">
+                <div
+                  v-for="layer in layers.slice().reverse()"
+                  :key="layer.id"
+                  @click="selectPaintLayer(layer.id)"
+                  class="group flex items-center gap-1 p-1 rounded-xs cursor-pointer border"
+                  :class="activeLayerId === layer.id ? 'bg-ui-active border-ui-borderDefault' : 'border-transparent hover:bg-ui-hover'"
+                >
+                  <button @click.stop="toggleLayerVisibility(layer.id)" class="w-4 text-center text-[10px] text-ui-textSecondary hover:text-ui-textPrimary" :title="layer.visible ? 'Hide layer' : 'Show layer'">{{ layer.visible ? '◉' : '○' }}</button>
+                  <span class="min-w-0 flex-1 truncate font-medium">{{ layer.name }}</span>
+                  <button @click.stop="duplicatePaintLayer(layer.id)" class="hidden group-hover:block px-1 text-ui-textMuted hover:text-ui-textAccent" title="Duplicate layer">⧉</button>
+                  <button v-if="layers.length > 1" @click.stop="deletePaintLayer(layer.id)" class="hidden group-hover:block px-1 text-ui-textMuted hover:text-rose-400" title="Delete layer">×</button>
+                </div>
+              </div>
+              <div v-if="projectStore.pixelBuffer.activeLayer" class="pt-1 border-t border-ui-borderSubtle flex items-center gap-1">
+                <input
+                  :value="projectStore.pixelBuffer.activeLayer.name"
+                  class="w-20 min-w-0 bg-ui-input border border-ui-borderSubtle rounded-xs px-1 py-0.5 text-[9px] text-ui-textPrimary focus:outline-none focus:border-ui-accent"
+                  aria-label="Active layer name"
+                  @click.stop
+                  @change="renameActivePaintLayer(($event.target as HTMLInputElement).value)"
+                  @keydown.enter="($event.target as HTMLInputElement).blur()"
+                />
+                <input
+                  :value="Math.round(projectStore.pixelBuffer.activeLayer.opacity * 100)"
+                  @pointerdown="projectStore.recordState('Change Layer Opacity')"
+                  @input="setActiveLayerOpacity(Number(($event.target as HTMLInputElement).value))"
+                  type="range" min="0" max="100" step="1" class="flex-1 h-1 accent-amber-400 cursor-pointer"
+                  aria-label="Active layer opacity"
+                />
+                <span class="w-7 text-right font-mono text-ui-textMuted">{{ Math.round(projectStore.pixelBuffer.activeLayer.opacity * 100) }}%</span>
+              </div>
+              <select
+                v-if="projectStore.pixelBuffer.activeLayer"
+                :value="projectStore.pixelBuffer.activeLayer.blendMode"
+                @change="setActiveLayerBlendMode(($event.target as HTMLSelectElement).value)"
+                class="mt-1 w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1 py-0.5 text-[9px] text-ui-textSecondary focus:outline-none focus:border-ui-accent"
+                aria-label="Active layer blend mode"
+              >
+                <option value="normal">Normal blend</option>
+                <option value="multiply">Multiply</option>
+                <option value="screen">Screen</option>
+                <option value="overlay">Overlay</option>
+                <option value="additive">Additive</option>
+              </select>
+            </div>
+          </div>
           <button
             @click="showUvOverlay = !showUvOverlay"
             class="pixel-view-toggle"
@@ -1369,7 +1554,7 @@ defineExpose({
           <div class="h-4 w-px bg-ui-borderSubtle shrink-0"></div>
 
           <!-- 5-Tone Color Shading Options Bar -->
-          <div class="flex items-center gap-1 shrink-0 bg-ui-input/60 px-1.5 py-0.5 rounded-xs border border-ui-borderSubtle">
+          <div class="pixel-shading-dock flex items-center gap-1 shrink-0 bg-ui-input/60 px-1.5 py-0.5 rounded-xs border border-ui-borderSubtle">
             <span class="text-[8.5px] font-bold text-amber-300 uppercase whitespace-nowrap">Shading:</span>
             <div class="flex items-center gap-1">
               <button 
@@ -1501,6 +1686,40 @@ defineExpose({
 
 .header-dropdown-menu {
   animation: dropdownIn 100ms ease-out forwards;
+  max-height: calc(100vh - 88px);
+  overscroll-behavior: contain;
+}
+
+/* The paint pane is often only half the workspace. Keep every primary action
+   reachable there and progressively move supporting detail out of the way. */
+@container (max-width: 900px) {
+  .pixel-header-row { padding-left: 5px; padding-right: 5px; gap: 5px; }
+  .asset-pipeline { gap: 3px; }
+  .asset-label, .asset-arrow, .asset-apply-label { display: none; }
+  .asset-pipeline select { max-width: 84px !important; }
+  .editor-command-strip { gap: 2px; }
+  .editor-command-strip > .relative > button { padding-left: 5px; padding-right: 5px; font-size: 10px; }
+  .editor-command-strip > .h-4 { margin-left: 1px; margin-right: 1px; }
+  .pixel-palette-dock { left: 6px; right: 6px; bottom: 6px; max-width: none; gap: 4px; }
+  .pixel-palette-dock .max-w-md { max-width: 180px; }
+  .pixel-status-hud { bottom: 6px; right: 6px; }
+}
+
+@container (max-width: 700px) {
+  .pixel-shading-dock { display: none; }
+  .pixel-palette-dock > .h-4 { display: none; }
+  .pixel-palette-dock .max-w-md { max-width: 112px; }
+  .pixel-palette-dock [title="Open Palette Library"] { display: none; }
+  .editor-command-strip > .relative > button { padding-left: 4px; padding-right: 4px; }
+  .editor-command-strip > .relative > button span:not(:last-child) { display: none; }
+  .pixel-status-hud .hidden { display: none; }
+}
+
+@container (max-width: 520px) {
+  .pixel-header-row { display: none; }
+  .pixel-tool-rail { width: 34px; min-width: 34px; }
+  .pixel-tool-rail .w-8 { width: 28px; height: 28px; }
+  .pixel-palette-dock { padding: 3px; }
 }
 
 @keyframes dropdownIn {

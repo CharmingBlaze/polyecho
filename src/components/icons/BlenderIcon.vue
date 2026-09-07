@@ -16,7 +16,8 @@ const props = withDefaults(defineProps<{
     | 'tool-extrude' 
     | 'tool-inset' 
     | 'tool-bevel'
-    | 'tool-subdivide' 
+    | 'tool-subdivide'
+    | 'subdivide'
     | 'tool-merge'
     | 'tool-knife'
     | 'tool-loopcut'
@@ -127,6 +128,7 @@ const props = withDefaults(defineProps<{
     | 'image'
     | 'swap-colors'
     | 'modifier'
+    | 'tools'
     | 'layers'
     | 'display'
     | 'keyframe-map'
@@ -249,7 +251,7 @@ const sizePx = computed(() => typeof props.size === 'number' ? `${props.size}px`
     </g>
 
     <!-- SUBDIVIDE -->
-    <g v-else-if="name === 'tool-subdivide'">
+    <g v-else-if="name === 'tool-subdivide' || name === 'subdivide'">
       <rect x="4" y="4" width="16" height="16" stroke="currentColor" stroke-width="1.5" />
       <line x1="12" y1="4" x2="12" y2="20" stroke="#818cf8" stroke-width="1.5" />
       <line x1="4" y1="12" x2="20" y2="12" stroke="#818cf8" stroke-width="1.5" />
@@ -817,6 +819,12 @@ const sizePx = computed(() => typeof props.size === 'number' ? `${props.size}px`
       <path d="M8 12H16M12 8V16" stroke="#38bdf8" stroke-width="1.6" stroke-linecap="round" />
       <circle cx="8" cy="8" r="1.3" fill="#f59e0b" />
       <circle cx="16" cy="16" r="1.3" fill="#f59e0b" />
+    </g>
+
+    <g v-else-if="name === 'tools'">
+      <path d="M14.5 3.5L16 5L9 12L7.5 10.5L14.5 3.5Z" stroke="#f59e0b" stroke-width="1.5" fill="#f59e0b" fill-opacity="0.25" />
+      <path d="M7 13.5L4 20L10.5 17" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round" />
+      <path d="M15 14.5H20V17.5C20 19 18.5 20 17.5 20C16.5 20 15.5 19.2 15.5 18V16" stroke="#38bdf8" stroke-width="1.5" fill="none" stroke-linecap="round" />
     </g>
 
     <g v-else-if="name === 'layers'">

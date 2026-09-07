@@ -49,6 +49,9 @@ export const useToolStore = defineStore('tool', () => {
   const uvHoverFaceIds = ref<string[]>([])
   const smartUvAngle = ref(66)
   const smartUvMargin = ref(2)
+  /** Blender Subdivide redo: Number of Cuts / Smoothness. */
+  const subdivideCuts = ref(1)
+  const subdivideSmoothness = ref(0)
 
   // Snapping & Precision
   const snapping = ref<SnappingSettings>({
@@ -179,6 +182,8 @@ export const useToolStore = defineStore('tool', () => {
     setUvHoverFaceIds,
     smartUvAngle,
     smartUvMargin,
+    subdivideCuts,
+    subdivideSmoothness,
     snapping,
     cursor3D,
     viewport,

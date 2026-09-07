@@ -104,7 +104,7 @@ Interactive topology (extrude / inset / bevel / loop cut / knife) belongs in a k
 | Inspector field | `src/components/inspector/` reading the owning store |
 | New app mode panel | Component under the matching folder; gate with `toolStore.appMode` |
 
-Right sidebar (`RightSidebar.vue`): List / context (Object, UV, or Anim) / Mod / Mat / Tex. UV workspace orders Tex before Mat and Mod. Rig uses Skel / Bone / Bind / Wts. The last tab is remembered per workspace (`layoutStore.setInspectorTab` / `restoreInspectorTab`) and restore lands on a tab visible in that workspace. Object vs vertex `selectMode` does not change the tab.
+Right sidebar (`RightSidebar.vue`): Tools / List / context (Object, UV, or Anim) / Mod / Mat / Tex. UV workspace orders Tex before Mat and Mod. Rig uses Skel / Bone / Bind / Wts. The last tab is remembered per workspace (`layoutStore.setInspectorTab` / `restoreInspectorTab`) and restore lands on a tab visible in that workspace. Object vs vertex `selectMode` does not change the tab. The Tools tab (`MeshToolsProps`) hosts Blender-style mesh operators (Subdivide with cuts/smoothness, extrude, inset, bevel, merge, poke, triangulate, …).
 
 Left toolbar (`LeftToolbar.vue`) is a docked icon shelf: Object/Vertex/Edge/Face plus the workspace tools. T to toggle. Hover labels use `useFastTitleTips` (not OS `title` delay).
 

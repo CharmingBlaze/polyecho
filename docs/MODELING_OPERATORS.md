@@ -67,6 +67,10 @@ Live controls sit next to Space / Pivot in the app header. Magnet + chevron: gri
 | **`Ctrl+R`**| Loop Cut | `LoopCutOperator` | Detects quad edge rings and splits with interactive slide + scroll wheel count. |
 | **Drag** | Primitive Placement | `PrimitivePlacementOperator` | Interactive click-and-drag grid spawner for boxes, cylinders, and spheres. |
 | **F** (Model) | Fill | one-shot `Operations.fillFaceFromVertices` | See **Fill (F)** below. Not a modal operator. |
+| **W** | Subdivide | one-shot `MeshTopologyService.subdivideFaces` | Object mode: every face on the selected mesh(es). Edit mode: current faces/edges. Number of Cuts + Smoothness in the Tools panel. Shared edge verts; neighbors tessellate. |
+| **Alt+P** | Poke Faces | one-shot `MeshTopologyService.pokeFaces` | Centroid fan. Mesh workspace only (Rig Alt+P unbinds). |
+| **Ctrl+T** | Triangulate | one-shot `MeshTopologyService.triangulateFaces` | Shortest diagonal on selected quads. |
+| **Ctrl+X** | Dissolve | one-shot `DissolveKernel` / `dissolveVertex` | Vertices or edges. |
 | **F** (Blockout) | Poly Draw | `PolyDrawOperator` | Front/Side silhouette; Persp view-plane or mesh face (N = ground). Close, then extrude toward the camera (F flips). MMB orbit. New mesh on commit. |
 | **V** (Blockout) | Poly Build | `PolyBuildOperator` | Reuse front-most verts, or place on a hit face / view plane. After a fill the last edge + that face plane stay; Tab walks around. MMB orbit. |
 

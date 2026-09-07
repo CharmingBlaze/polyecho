@@ -14,13 +14,15 @@ import WeightsPanel from '../rigging/WeightsPanel.vue'
 import SkeletonPanel from '../rigging/SkeletonPanel.vue'
 import AnimationInspector from '../inspector/AnimationInspector.vue'
 import UVPaintProps from '../uvpaint/UVPaintProps.vue'
+import MeshToolsProps from '../inspector/MeshToolsProps.vue'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 
 const toolStore = useToolStore()
 const layoutStore = useLayoutStore()
 
-// View Layout Mode: 'split' (stacked Outliner + Properties) | 'outliner' (Full Outliner) | 'props' (Full Properties)
-const panelViewMode = ref<'split' | 'outliner' | 'props'>('split')
+// Keep the inspector focused by default. Scene navigation and the combined
+// layout remain available when the user explicitly needs them.
+const panelViewMode = ref<'split' | 'outliner' | 'props'>('props')
 
 const activeTab = computed({
   get: () => layoutStore.inspectorTab === 'outliner' ? 'props' : layoutStore.inspectorTab,
@@ -56,7 +58,7 @@ function startResizeLeft(e: MouseEvent) {
 }
 
 // Vertical Splitter between Outliner and Properties
-const outlinerPercent = ref(38) // 38% height for outliner by default
+const outlinerPercent = ref(32) // leave the inspector usable in explicit split view
 const isSplittingVertical = ref(false)
 let splitStartY = 0
 let startPercent = 38
@@ -89,7 +91,7 @@ function startVerticalSplit(e: MouseEvent) {
 }
 
 type PropertyTabItem = {
-  id: 'props' | 'modifiers' | 'material' | 'texture' | 'refs' | 'skeleton' | 'bindings' | 'weights'
+  id: 'props' | 'tools' | 'modifiers' | 'material' | 'texture' | 'refs' | 'skeleton' | 'bindings' | 'weights'
   label: string
   title: string
   icon?: any
@@ -106,14 +108,16 @@ const standardPropTabs = computed<PropertyTabItem[]>(() => {
         ? { id: 'props', label: 'UV / Paint', title: 'UV & Seams Properties', blenderIcon: 'uv', accent: 'sky' }
         : { id: 'props', label: 'Transform', title: 'Object Transform & Coordinates', blenderIcon: 'empty-axis', accent: 'amber' }
 
+  const tools: PropertyTabItem = { id: 'tools', label: 'Tools', title: 'Mesh Tools (Subdivide, Extrude, Inset…)', blenderIcon: 'tools', accent: 'amber' }
   const mod: PropertyTabItem = { id: 'modifiers', label: 'Modifiers', title: 'Modifiers (Mirror, Subdiv, Solidify)', blenderIcon: 'modifier', accent: 'sky' }
   const mat: PropertyTabItem = { id: 'material', label: 'Material', title: 'Material & Shading Properties', blenderIcon: 'material', accent: 'amber' }
   const tex: PropertyTabItem = { id: 'texture', label: 'Texture', title: 'Texture Atlas & Pixel Maps', blenderIcon: 'texture', accent: 'emerald' }
   const refs: PropertyTabItem = { id: 'refs', label: 'References', title: 'Reference Images for Blockout', blenderIcon: 'image', accent: 'sky' }
 
-  if (mode === 'blockout') return [objectTab, refs, mod]
+  if (mode === 'blockout') return [tools, objectTab, refs, mod]
   if (mode === 'uvpaint') return [objectTab, tex, mat, mod]
-  return [objectTab, mod, mat, tex]
+  if (mode === 'animate') return [objectTab, mod, mat, tex]
+  return [tools, objectTab, mod, mat, tex]
 })
 
 const rigPropTabs = computed<PropertyTabItem[]>(() => [
@@ -167,10 +171,10 @@ watch(
           :class="panelViewMode === 'split' 
             ? 'bg-ui-active text-ui-textAccent font-bold shadow-xs' 
             : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
-          title="Split View: Outliner + Properties"
+          title="Split view: scene and inspector"
         >
           <BlenderIcon name="layers" :size="12" />
-          <span>Both</span>
+          <span>Split</span>
         </button>
 
         <button
@@ -179,10 +183,10 @@ watch(
           :class="panelViewMode === 'outliner' 
             ? 'bg-ui-active text-ui-textAccent font-bold shadow-xs' 
             : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
-          title="Full Outliner Tree (Scene Objects & Bones)"
+          title="Scene objects and bones"
         >
           <BlenderIcon name="mesh-cube" :size="12" color="#fbbf24" />
-          <span>Outliner</span>
+          <span>Scene</span>
         </button>
 
         <button
@@ -191,20 +195,22 @@ watch(
           :class="panelViewMode === 'props' 
             ? 'bg-ui-active text-ui-textAccent font-bold shadow-xs' 
             : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
-          title="Full Properties Inspector"
+          title="Focused inspector"
         >
           <BlenderIcon name="settings" :size="12" color="#38bdf8" />
-          <span>Properties</span>
+          <span>Inspect</span>
         </button>
       </div>
 
       <!-- Quick Hide Panel Button -->
       <button 
         @click="layoutStore.showRightSidebar = false"
-        class="p-1 text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover rounded-xs transition cursor-pointer"
+        class="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover border border-transparent hover:border-ui-borderSubtle rounded-xs transition cursor-pointer"
         title="Hide Panel (Hotkey: N)"
       >
         <BlenderIcon name="sidebar" :size="14" />
+        <span>Hide</span>
+        <span class="text-ui-textMuted/70 text-xs leading-none">×</span>
       </button>
     </div>
 
@@ -251,6 +257,10 @@ watch(
             <AnimationInspector v-else-if="toolStore.appMode === 'animate'" />
             <UVPaintProps v-else-if="toolStore.appMode === 'uvpaint'" />
             <TransformProps v-else />
+          </div>
+
+          <div v-else-if="activeTab === 'tools'" class="h-full flex flex-col">
+            <MeshToolsProps />
           </div>
 
           <div v-else-if="activeTab === 'modifiers'" class="h-full flex flex-col">
@@ -326,6 +336,10 @@ watch(
               <AnimationInspector v-else-if="toolStore.appMode === 'animate'" />
               <UVPaintProps v-else-if="toolStore.appMode === 'uvpaint'" />
               <TransformProps v-else />
+            </div>
+
+            <div v-else-if="activeTab === 'tools'" class="h-full flex flex-col">
+              <MeshToolsProps />
             </div>
 
             <div v-else-if="activeTab === 'modifiers'" class="h-full flex flex-col">

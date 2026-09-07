@@ -78,7 +78,8 @@ export function solveCCDIK(
   targetPos: THREE.Vector3,
   allBones: Bone[],
   chainLength = 2,
-  iterations = 10
+  iterations = 10,
+  influence = 1
 ): boolean {
   const chain: Bone[] = []
   let curr = allBones.find(b => b.id === endBoneId)
@@ -107,6 +108,8 @@ export function solveCCDIK(
       const toTarget = targetPos.clone().sub(bonePivotWorld).normalize()
 
       const rotDelta = new THREE.Quaternion().setFromUnitVectors(toEnd, toTarget)
+      // Preserve the animator's keyed pose when the constraint is partial.
+      const weightedDelta = new THREE.Quaternion().slerp(rotDelta, THREE.MathUtils.clamp(influence, 0, 1))
 
       // Apply rotation step to bone
       const currentQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(
@@ -115,7 +118,7 @@ export function solveCCDIK(
         THREE.MathUtils.degToRad(bone.rotation.z)
       ))
 
-      currentQuat.premultiply(rotDelta)
+      currentQuat.premultiply(weightedDelta)
       const newEuler = new THREE.Euler().setFromQuaternion(currentQuat)
 
       bone.rotation.x = Number(THREE.MathUtils.radToDeg(newEuler.x).toFixed(2))
@@ -165,6 +168,7 @@ export function applyIKConstraints(allBones: Bone[]): void {
     const ik = endBone.ikConstraint!
     const chainLength = Math.max(2, Math.round(ik.chainLength || 2))
     const iterations = ik.iterations ?? 10
+    const influence = THREE.MathUtils.clamp(ik.weight ?? 1, 0, 1)
 
     let targetPos: THREE.Vector3 | null = null
     if (ik.targetBoneId) {
@@ -190,13 +194,21 @@ export function applyIKConstraints(allBones: Bone[]): void {
       if (solved) {
         const rootDeg = eulerDegFromThree(solved.rootRot)
         const midDeg = eulerDegFromThree(solved.midRot)
-        root.rotation = rootDeg
-        mid.rotation = midDeg
+        root.rotation = {
+          x: THREE.MathUtils.lerp(root.rotation.x, rootDeg.x, influence),
+          y: THREE.MathUtils.lerp(root.rotation.y, rootDeg.y, influence),
+          z: THREE.MathUtils.lerp(root.rotation.z, rootDeg.z, influence)
+        }
+        mid.rotation = {
+          x: THREE.MathUtils.lerp(mid.rotation.x, midDeg.x, influence),
+          y: THREE.MathUtils.lerp(mid.rotation.y, midDeg.y, influence),
+          z: THREE.MathUtils.lerp(mid.rotation.z, midDeg.z, influence)
+        }
       } else {
-        solveCCDIK(endBone.id, targetPos, allBones, chainLength, iterations)
+        solveCCDIK(endBone.id, targetPos, allBones, chainLength, iterations, influence)
       }
     } else {
-      solveCCDIK(endBone.id, targetPos, allBones, chainLength, iterations)
+      solveCCDIK(endBone.id, targetPos, allBones, chainLength, iterations, influence)
     }
   }
 }

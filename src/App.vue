@@ -41,9 +41,9 @@ const keymapStore = useKeymapStore()
 const fastTip = useFastTitleTips()
 
 type DockTab = {
-  id: 'props' | 'modifiers' | 'material' | 'texture' | 'refs' | 'skeleton' | 'bindings' | 'weights'
+  id: 'props' | 'tools' | 'modifiers' | 'material' | 'texture' | 'refs' | 'skeleton' | 'bindings' | 'weights'
   title: string
-  blender: 'material' | 'texture' | 'uv' | 'empty-axis' | 'modifier' | 'image' | 'armature' | 'bone' | 'link' | 'vertex-group' | 'keyframe'
+  blender: 'material' | 'texture' | 'uv' | 'empty-axis' | 'modifier' | 'image' | 'armature' | 'bone' | 'link' | 'vertex-group' | 'keyframe' | 'tools'
 }
 
 const collapsedPropTabs = computed<DockTab[]>(() => {
@@ -58,6 +58,7 @@ const collapsedPropTabs = computed<DockTab[]>(() => {
   }
   if (mode === 'blockout') {
     return [
+      { id: 'tools', title: 'Mesh Tools (Subdivide, Extrude…)', blender: 'tools' },
       { id: 'props', title: 'Transform & Object Properties', blender: 'empty-axis' },
       { id: 'refs', title: 'Reference Images for Blockout', blender: 'image' },
       { id: 'modifiers', title: 'Modifiers', blender: 'modifier' },
@@ -71,8 +72,17 @@ const collapsedPropTabs = computed<DockTab[]>(() => {
       { id: 'modifiers', title: 'Modifiers', blender: 'modifier' },
     ]
   }
+  if (mode === 'animate') {
+    return [
+      { id: 'props', title: 'Animation & Keyframes', blender: 'keyframe' },
+      { id: 'modifiers', title: 'Modifiers', blender: 'modifier' },
+      { id: 'material', title: 'Material & Shading', blender: 'material' },
+      { id: 'texture', title: 'Textures & Pixel Maps', blender: 'texture' },
+    ]
+  }
   return [
-    { id: 'props', title: mode === 'animate' ? 'Animation & Keyframes' : 'Transform & Object Properties', blender: mode === 'animate' ? 'keyframe' : 'empty-axis' },
+    { id: 'tools', title: 'Mesh Tools (Subdivide, Extrude…)', blender: 'tools' },
+    { id: 'props', title: 'Transform & Object Properties', blender: 'empty-axis' },
     { id: 'modifiers', title: 'Modifiers', blender: 'modifier' },
     { id: 'material', title: 'Material & Shading', blender: 'material' },
     { id: 'texture', title: 'Textures & Pixel Maps', blender: 'texture' },
@@ -93,7 +103,29 @@ const showPreferencesModal = ref(false)
 watch(
   () => toolStore.appMode,
   (mode) => {
-    if (mode === 'uvpaint') projectStore.syncPaintTargetFromMesh()
+    if (mode === 'uvpaint') {
+      projectStore.syncPaintTargetFromMesh()
+      // Painting benefits much more from horizontal room than a permanently
+      // visible inspector. The slim dock remains available to reopen it.
+      layoutStore.showRightSidebar = false
+    }
+    if (mode === 'blockout') {
+      // The reference inspector is the starting point for a tracing session.
+      // Reopen it when arriving from the roomier UV/Paint workspace.
+      layoutStore.showRightSidebar = true
+      layoutStore.setInspectorTab('refs', 'blockout')
+    }
+    if (mode === 'model') {
+      // Returning from UV/Paint should restore the practical object inspector.
+      layoutStore.showRightSidebar = true
+      layoutStore.setInspectorTab('props', 'model')
+    }
+    if (mode === 'rig') {
+      // Rigging needs the Skeleton / Bone / Bind / Weights inspector within
+      // reach; UV/Paint may have tucked it away on the previous workspace.
+      layoutStore.showRightSidebar = true
+      layoutStore.setInspectorTab('props', 'rig')
+    }
   }
 )
 
@@ -185,6 +217,10 @@ function resolveKeymapAction(ids: string[]): string | null {
   if (ids.includes('fill_face') || ids.includes('polydraw')) {
     if (mode === 'blockout' && ids.includes('polydraw')) return 'polydraw'
     if (mode === 'model' && ids.includes('fill_face')) return 'fill_face'
+  }
+  if (ids.includes('poke_faces') || ids.includes('unbind_geometry')) {
+    if (isMeshWorkspace() && ids.includes('poke_faces')) return 'poke_faces'
+    if ((mode === 'rig' || mode === 'animate') && ids.includes('unbind_geometry')) return 'unbind_geometry'
   }
   if (ids.includes('box_select') && isMeshWorkspace()) return 'box_select'
   for (const id of ids) {
@@ -338,8 +374,30 @@ function runKeymapAction(id: string) {
       if (toolStore.appMode === 'blockout') requestModalTool('polybuild')
       return
     case 'subdivide':
-      if (isMeshWorkspace() && projectStore.activeMesh) projectStore.performSubdivide()
+      if (isMeshWorkspace() && projectStore.activeMesh) {
+        if (toolStore.selectMode === 'object' || toolStore.selectMode === 'vertex' || toolStore.selectMode === 'edge' || toolStore.selectMode === 'face') {
+          projectStore.performSubdivide(toolStore.selectMode)
+        }
+      }
       else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') toolStore.setModelTool('move')
+      return
+    case 'poke_faces':
+      if (isMeshWorkspace()) projectStore.performPokeFaces()
+      return
+    case 'triangulate':
+      if (isMeshWorkspace()) projectStore.performTriangulate()
+      return
+    case 'dissolve':
+      if (isMeshWorkspace()) {
+        if (toolStore.selectMode === 'edge') projectStore.performDissolve('edge')
+        else if (toolStore.selectMode === 'vertex') projectStore.performDissolve('vertex')
+      }
+      return
+    case 'bridge_edges':
+      if (isMeshWorkspace()) projectStore.performBridgeEdges()
+      return
+    case 'grid_fill':
+      if (isMeshWorkspace()) projectStore.performGridFill()
       return
     case 'connect_verts':
       if (isMeshWorkspace()) projectStore.performConnectVertices()

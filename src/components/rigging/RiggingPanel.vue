@@ -53,39 +53,16 @@ function adjustBoneLength(delta: number) {
 
 function handleReparent(parentBoneId: string) {
   if (!selectedBone.value) return
-  const bone = selectedBone.value
-  if (bone.id === parentBoneId) return
-
-  if (bone.parentId) {
-    const oldP = animationStore.armature.bones.find(b => b.id === bone.parentId)
-    if (oldP) {
-      oldP.childrenIds = oldP.childrenIds.filter(id => id !== bone.id)
-    }
-  } else {
-    animationStore.armature.rootBoneIds = animationStore.armature.rootBoneIds.filter(id => id !== bone.id)
-  }
-
-  if (parentBoneId === 'root') {
-    bone.parentId = null
-    animationStore.armature.rootBoneIds.push(bone.id)
-  } else {
-    bone.parentId = parentBoneId
-    const newP = animationStore.armature.bones.find(b => b.id === parentBoneId)
-    if (newP && !newP.childrenIds.includes(bone.id)) {
-      newP.childrenIds.push(bone.id)
-    }
-  }
+  animationStore.reparentBone(selectedBone.value.id, parentBoneId === 'root' ? null : parentBoneId)
 }
 
 function handleAddSocket() {
   if (!selectedBone.value) return
-  projectStore.recordState('Add Socket')
   animationStore.addSocket(selectedBone.value.id, `Socket_${Date.now().toString(36).slice(-3)}`)
 }
 
 function handleRemoveSocket(socketId: string) {
   if (!selectedBone.value) return
-  projectStore.recordState('Remove Socket')
   animationStore.removeSocket(selectedBone.value.id, socketId)
 }
 
@@ -236,14 +213,16 @@ function toggleSpring(on: boolean) {
             <span class="font-mono text-ui-textPrimary">{{ selectedBone.ikConstraint.chainLength }}</span>
           </div>
           <input type="range" min="2" max="6" step="1" v-model.number="selectedBone.ikConstraint.chainLength" class="w-full accent-amber-500 h-1" />
+          <label class="text-[9px] text-ui-textMuted">Target</label>
           <select
             :value="selectedBone.ikConstraint.targetBoneId || ''"
             class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-xs cursor-pointer"
             @change="selectedBone.ikConstraint!.targetBoneId = ($event.target as HTMLSelectElement).value || undefined"
           >
-            <option value="" class="bg-ui-panel">Gizmo / last pos</option>
+            <option value="" class="bg-ui-panel">Viewport target / last pose</option>
             <option v-for="b in animationStore.armature.bones.filter(b => b.id !== selectedBone?.id)" :key="b.id" :value="b.id" class="bg-ui-panel">{{ b.name }}</option>
           </select>
+          <label class="text-[9px] text-ui-textMuted">Pole (bend direction)</label>
           <select
             :value="selectedBone.ikConstraint.poleTargetBoneId || ''"
             class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-xs cursor-pointer"
@@ -252,6 +231,16 @@ function toggleSpring(on: boolean) {
             <option value="" class="bg-ui-panel">No pole</option>
             <option v-for="b in animationStore.armature.bones.filter(b => b.id !== selectedBone?.id)" :key="b.id" :value="b.id" class="bg-ui-panel">{{ b.name }}</option>
           </select>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <div class="flex justify-between text-[9px] text-ui-textMuted"><span>Iterations</span><span>{{ selectedBone.ikConstraint.iterations || 10 }}</span></div>
+              <input v-model.number="selectedBone.ikConstraint.iterations" type="range" min="1" max="32" step="1" class="w-full accent-amber-500 h-1" title="Higher values improve longer-chain IK convergence" />
+            </div>
+            <div>
+              <div class="flex justify-between text-[9px] text-ui-textMuted"><span>Influence</span><span>{{ Math.round((selectedBone.ikConstraint.weight ?? 1) * 100) }}%</span></div>
+              <input v-model.number="selectedBone.ikConstraint.weight" type="range" min="0" max="1" step="0.05" class="w-full accent-amber-500 h-1" title="Blend between the keyed pose and the IK solve" />
+            </div>
+          </div>
         </template>
       </UiSection>
 

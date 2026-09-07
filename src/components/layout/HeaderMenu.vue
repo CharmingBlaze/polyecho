@@ -24,9 +24,9 @@ import {
   revealInFolder,
   showDesktopAbout
 } from '../../core/desktop/desktopApi'
-import { EDITOR_EVENTS, requestCameraView, requestPrimitiveMenu } from '../../core/commands/editorCommands'
+import { EDITOR_EVENTS, requestCameraView, requestFillFace, requestModalTool, requestPrimitiveMenu } from '../../core/commands/editorCommands'
 
-type NavMenu = 'file' | 'edit' | 'add' | 'workspace' | 'space' | 'view' | 'snap' | 'overlays' | 'shade' | null
+type NavMenu = 'file' | 'edit' | 'mesh' | 'add' | 'workspace' | 'space' | 'view' | 'snap' | 'overlays' | 'shade' | null
 type CameraView = 'persp' | 'top' | 'front' | 'right' | 'iso'
 
 const projectStore = useProjectStore()
@@ -101,6 +101,13 @@ const overlayOn = computed(() =>
 function applyObjectShade(mode: 'flat' | 'smooth' | 'auto') {
   projectStore.setShadeMode(mode)
   if (mode !== 'auto') toolStore.viewport.shadeMode = mode
+  closeDropdowns()
+}
+
+function runMeshSubdivide() {
+  if (toolStore.selectMode === 'object' || toolStore.selectMode === 'vertex' || toolStore.selectMode === 'edge' || toolStore.selectMode === 'face') {
+    projectStore.performSubdivide(toolStore.selectMode)
+  }
   closeDropdowns()
 }
 
@@ -477,6 +484,86 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <!-- Mesh Menu -->
+      <div v-if="toolStore.appMode === 'model' || toolStore.appMode === 'blockout'" class="relative">
+        <button 
+          class="px-1.5 py-0.5 text-[11.5px] font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
+          :class="{ 'bg-ui-hover text-ui-textPrimary font-bold': activeDropdown === 'mesh' }"
+          @click="toggleDropdown('mesh')"
+        >
+          Mesh
+        </button>
+
+        <div v-if="activeDropdown === 'mesh'" class="absolute left-0 top-full mt-0.5 w-56 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+          <button @click="requestModalTool('extrude'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span class="flex items-center gap-2"><BlenderIcon name="tool-extrude" :size="14" /> Extrude</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">E</span>
+          </button>
+          <button @click="requestModalTool('inset'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span class="flex items-center gap-2"><BlenderIcon name="tool-inset" :size="14" /> Inset Faces</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">I</span>
+          </button>
+          <button @click="requestModalTool('bevel'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span class="flex items-center gap-2"><BlenderIcon name="tool-bevel" :size="14" /> Bevel</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+B</span>
+          </button>
+          <button @click="requestModalTool('loop_cut'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span class="flex items-center gap-2"><BlenderIcon name="tool-loopcut" :size="14" /> Loop Cut</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+R</span>
+          </button>
+          <button @click="requestModalTool('knife'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span class="flex items-center gap-2"><BlenderIcon name="tool-knife" :size="14" /> Knife</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">K</span>
+          </button>
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+          <button
+            @click="runMeshSubdivide()"
+            class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between"
+          >
+            <span class="flex items-center gap-2"><BlenderIcon name="tool-subdivide" :size="14" /> Subdivide</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">W</span>
+          </button>
+          <button @click="projectStore.performPokeFaces(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Poke Faces</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Alt+P</span>
+          </button>
+          <button @click="projectStore.performTriangulate(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Triangulate Faces</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+T</span>
+          </button>
+          <button @click="requestFillFace(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span class="flex items-center gap-2"><BlenderIcon name="fill-face" :size="14" /> Fill</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">F</span>
+          </button>
+          <button @click="projectStore.performGridFill(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
+            Grid Fill
+          </button>
+          <button @click="projectStore.performBridgeEdges(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
+            <BlenderIcon name="bridge-edges" :size="14" /> Bridge Edge Loops
+          </button>
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+          <button @click="projectStore.performMerge('center'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span class="flex items-center gap-2"><BlenderIcon name="tool-merge" :size="14" /> Merge at Center</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">M</span>
+          </button>
+          <button @click="projectStore.performConnectVertices(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span class="flex items-center gap-2"><BlenderIcon name="connect-verts" :size="14" /> Connect Vertices</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">J</span>
+          </button>
+          <button @click="projectStore.performFlipNormals(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span class="flex items-center gap-2"><BlenderIcon name="flip-normals" :size="14" /> Flip Normals</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Shift+N</span>
+          </button>
+          <button
+            @click="(toolStore.selectMode === 'edge' ? projectStore.performDissolve('edge') : projectStore.performDissolve('vertex')); closeDropdowns()"
+            class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between"
+          >
+            <span class="flex items-center gap-2"><BlenderIcon name="dissolve" :size="14" /> Dissolve</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+X</span>
+          </button>
+        </div>
+      </div>
+
       <!-- Add Menu -->
       <div class="relative">
         <button 
@@ -622,24 +709,31 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 2. CENTER: Workspace Segmented Menu Strip -->
-    <div class="flex items-center justify-center shrink-0 z-10 px-2">
-      <div class="flex items-center gap-0.5 bg-ui-input/90 p-0.5 rounded-xs border border-ui-borderSubtle font-sans text-xs shrink-0 shadow-inner">
+    <!-- 2. CENTER: Primary workspace navigation -->
+    <nav class="flex items-center justify-center shrink-0 z-10 px-2" aria-label="Workspaces">
+      <div class="workspace-switcher flex items-center gap-0.5 bg-ui-input/90 p-0.5 rounded-xs border border-ui-borderSubtle font-sans text-xs shrink-0 shadow-inner">
         <button
           v-for="w in workspaces"
           :key="w.id"
           @click="toolStore.setAppMode(w.id)"
-          class="h-5.5 px-2.5 rounded-xs text-[11px] font-semibold transition cursor-pointer flex items-center gap-1.5 whitespace-nowrap select-none"
+          class="workspace-switcher__item relative h-6 px-2.5 rounded-xs text-[11px] font-semibold transition-[color,background-color,border-color,box-shadow] duration-150 cursor-pointer flex items-center gap-1.5 whitespace-nowrap select-none"
           :class="toolStore.appMode === w.id 
-            ? 'bg-ui-active text-ui-textAccent font-bold shadow-xs border border-ui-borderDefault/80' 
-            : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover/60 border border-transparent'"
+            ? 'bg-ui-active text-ui-textPrimary font-bold shadow-xs border border-ui-borderDefault/80' 
+            : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover/80 border border-transparent'"
           :title="w.desc"
+          :aria-label="w.label + ' workspace'"
+          :aria-current="toolStore.appMode === w.id ? 'page' : undefined"
         >
-          <BlenderIcon :name="w.icon" :size="12" />
+          <BlenderIcon :name="w.icon" :size="13" :class="toolStore.appMode === w.id ? 'text-ui-textAccent' : ''" />
           <span class="hidden min-[1280px]:inline">{{ w.label }}</span>
+          <span
+            v-if="toolStore.appMode === w.id"
+            class="absolute left-2 right-2 -bottom-px h-0.5 rounded-full bg-ui-accent"
+            aria-hidden="true"
+          ></span>
         </button>
       </div>
-    </div>
+    </nav>
 
     <!-- 3. RIGHT: Camera View + Shading + TV + Export -->
     <div class="flex items-center space-x-1 shrink-0 z-20">

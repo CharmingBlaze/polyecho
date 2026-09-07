@@ -136,6 +136,36 @@ const generators: { label: string; run: () => void }[] = [
           {{ c.name }} · {{ c.durationFrames }}f
         </option>
       </select>
+      <label class="flex flex-col gap-0.5 text-[9px] text-ui-textMuted">
+        Action name
+        <input
+          :value="animationStore.activeClip?.name || ''"
+          :disabled="!animationStore.activeClip"
+          class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-1 text-[10px] text-ui-textPrimary disabled:opacity-50"
+          @change="animationStore.activeClip && animationStore.renameClip(animationStore.activeClip.id, ($event.target as HTMLInputElement).value)"
+        />
+      </label>
+      <div class="grid grid-cols-2 gap-1">
+        <label class="flex flex-col gap-0.5 text-[9px] text-ui-textMuted">
+          Frame rate
+          <select
+            :value="animationStore.activeClip?.fps || 12"
+            class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1 py-1 text-[10px] text-ui-textPrimary"
+            @change="animationStore.setActiveClipFps(Number(($event.target as HTMLSelectElement).value))"
+          >
+            <option v-for="rate in [12, 15, 24, 30, 60]" :key="rate" :value="rate">{{ rate }} fps</option>
+          </select>
+        </label>
+        <label class="flex flex-col gap-0.5 text-[9px] text-ui-textMuted">
+          Preview speed
+          <select v-model.number="animationStore.playbackSpeed" class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1 py-1 text-[10px] text-ui-textPrimary">
+            <option :value="0.25">¼×</option>
+            <option :value="0.5">½×</option>
+            <option :value="1">1×</option>
+            <option :value="2">2×</option>
+          </select>
+        </label>
+      </div>
       <div class="flex gap-1">
         <input
           v-model="newClipTitle"
@@ -241,9 +271,9 @@ const generators: { label: string; run: () => void }[] = [
         <UiButton size="xs" :variant="animationStore.interpolationMode === 'bezier' ? 'accent' : 'default'" @click="animationStore.interpolationMode = 'bezier'">Bezier</UiButton>
       </div>
       <div class="grid grid-cols-3 gap-1">
-        <UiButton size="xs" :variant="animationStore.loopMode === 'loop' ? 'accent' : 'default'" @click="animationStore.loopMode = 'loop'">Loop</UiButton>
-        <UiButton size="xs" :variant="animationStore.loopMode === 'once' ? 'accent' : 'default'" @click="animationStore.loopMode = 'once'">Once</UiButton>
-        <UiButton size="xs" :variant="animationStore.loopMode === 'pingpong' ? 'accent' : 'default'" @click="animationStore.loopMode = 'pingpong'">Bounce</UiButton>
+        <UiButton size="xs" :variant="animationStore.loopMode === 'loop' ? 'accent' : 'default'" @click="animationStore.setLoopMode('loop')">Loop</UiButton>
+        <UiButton size="xs" :variant="animationStore.loopMode === 'once' ? 'accent' : 'default'" @click="animationStore.setLoopMode('once')">Once</UiButton>
+        <UiButton size="xs" :variant="animationStore.loopMode === 'pingpong' ? 'accent' : 'default'" @click="animationStore.setLoopMode('pingpong')">Bounce</UiButton>
       </div>
       <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
         <span>X-Ray mesh (Alt+Z)</span>

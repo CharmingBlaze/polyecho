@@ -94,25 +94,74 @@ export function insetFaces(
   return { mesh: out, selectedFaceIds, selectedVertexIds }
 }
 
+export interface SubdivideOptions {
+  cuts?: number
+  smoothness?: number
+  edgeIds?: string[]
+}
+
 /**
- * Subdivides faces into smaller quads/triangles.
+ * Blender Subdivide: shared edge verts, Number of Cuts, Smoothness.
+ * Neighbor faces that inherit split verts are tessellated so the mesh stays manifold.
  */
-export function subdivideFaces(mesh: MeshObject, faceIds: string[]): OperationResult {
-  if (faceIds.length === 0) {
+export function subdivideFaces(
+  mesh: MeshObject,
+  faceIds: string[],
+  options?: SubdivideOptions
+): OperationResult {
+  const edgeIds = options?.edgeIds ?? []
+  if (faceIds.length === 0 && edgeIds.length === 0) {
     return { mesh, selectedFaceIds: [], selectedVertexIds: [] }
   }
 
   const bridge = MeshBridge.meshObjectToEditableMesh(mesh)
-  const newSelectedFaces: string[] = []
-  for (const id of faceIds) {
-    const num = bridge.strToNumFaceId.get(id)
-    if (num == null) continue
-    const created = MeshTopologyService.subdivideFace(bridge.mesh, num)
-    for (const nid of created) {
-      newSelectedFaces.push(bridge.numToStrFaceId.get(nid) || `f_${nid}`)
+  const numFaces = faceIds
+    .map(id => bridge.strToNumFaceId.get(id))
+    .filter((id): id is number => id !== undefined)
+
+  const extraEdgeIds: number[] = []
+  if (edgeIds.length > 0) {
+    const knownVerts = mesh.vertices.map(v => v.id)
+    for (const id of edgeIds) {
+      const parsed = parseUndirectedEdgeId(id, knownVerts)
+      if (!parsed) continue
+      const n1 = bridge.strToNumVertId.get(parsed.v1)
+      const n2 = bridge.strToNumVertId.get(parsed.v2)
+      if (n1 == null || n2 == null) continue
+      const eId = DissolveKernel.findEdgeId(bridge.mesh, n1, n2)
+      if (eId != null) extraEdgeIds.push(eId)
     }
   }
 
+  const created = MeshTopologyService.subdivideFaces(bridge.mesh, numFaces, {
+    cuts: options?.cuts,
+    smoothness: options?.smoothness,
+    extraEdgeIds
+  })
+
+  const out = MeshBridge.editableMeshToMeshObject(
+    bridge.mesh,
+    mesh,
+    bridge.numToStrVertId,
+    bridge.numToStrFaceId
+  )
+  return {
+    mesh: out,
+    selectedFaceIds: created.map(id => bridge.numToStrFaceId.get(id) || `f_${id}`),
+    selectedVertexIds: []
+  }
+}
+
+/** Blender Poke Faces: insert a centroid and fan triangles. */
+export function pokeFaces(mesh: MeshObject, faceIds: string[]): OperationResult {
+  if (faceIds.length === 0) {
+    return { mesh, selectedFaceIds: [], selectedVertexIds: [] }
+  }
+  const bridge = MeshBridge.meshObjectToEditableMesh(mesh)
+  const nums = faceIds
+    .map(id => bridge.strToNumFaceId.get(id))
+    .filter((id): id is number => id !== undefined)
+  const created = MeshTopologyService.pokeFaces(bridge.mesh, nums)
   return {
     mesh: MeshBridge.editableMeshToMeshObject(
       bridge.mesh,
@@ -120,7 +169,29 @@ export function subdivideFaces(mesh: MeshObject, faceIds: string[]): OperationRe
       bridge.numToStrVertId,
       bridge.numToStrFaceId
     ),
-    selectedFaceIds: newSelectedFaces,
+    selectedFaceIds: created.map(id => bridge.numToStrFaceId.get(id) || `f_${id}`),
+    selectedVertexIds: []
+  }
+}
+
+/** Split selected quads into two triangles (shortest diagonal). */
+export function triangulateFaces(mesh: MeshObject, faceIds: string[]): OperationResult {
+  if (faceIds.length === 0) {
+    return { mesh, selectedFaceIds: [], selectedVertexIds: [] }
+  }
+  const bridge = MeshBridge.meshObjectToEditableMesh(mesh)
+  const nums = faceIds
+    .map(id => bridge.strToNumFaceId.get(id))
+    .filter((id): id is number => id !== undefined)
+  const created = MeshTopologyService.triangulateFaces(bridge.mesh, nums)
+  return {
+    mesh: MeshBridge.editableMeshToMeshObject(
+      bridge.mesh,
+      mesh,
+      bridge.numToStrVertId,
+      bridge.numToStrFaceId
+    ),
+    selectedFaceIds: created.map(id => bridge.numToStrFaceId.get(id) || `f_${id}`),
     selectedVertexIds: []
   }
 }

@@ -106,7 +106,9 @@ export const useAnimationStore = defineStore('animation', () => {
   // Blockbench / GLB Animator Pose Clipboard
   const poseClipboard = ref<Record<string, { position: Vector3D; rotation: Vector3D; scale: Vector3D }>>({})
 
-  let playInterval: number | null = null
+  let playbackFrame: number | null = null
+  let playbackLastTime = 0
+  let playbackAccumulator = 0
   let playDirection = 1
 
   // Computed
@@ -221,9 +223,34 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function selectClip(clipId: string) {
+    const clip = armature.value.clips.find(c => c.id === clipId)
+    if (!clip) return
     armature.value.activeClipId = clipId
+    // Clips persist their basic loop preference. Ping-pong is intentionally a
+    // preview mode, so it falls back to the clip's normal loop setting.
+    loopMode.value = clip.loop ? 'loop' : 'once'
     currentFrame.value = 0
     evaluatePose()
+  }
+
+  function setActiveClipFps(fps: number) {
+    const clip = activeClip.value
+    if (!clip) return
+    const next = Math.max(1, Math.min(120, Math.round(Number(fps) || 12)))
+    if (next === clip.fps) return
+    projectStore.recordState('Set Animation FPS')
+    clip.fps = next
+  }
+
+  function setLoopMode(mode: 'loop' | 'once' | 'pingpong') {
+    if (loopMode.value === mode) return
+    const clip = activeClip.value
+    const persistedLoop = mode !== 'once'
+    if (clip && clip.loop !== persistedLoop) {
+      projectStore.recordState('Set Clip Loop Mode')
+      clip.loop = persistedLoop
+    }
+    loopMode.value = mode
   }
 
   // ----------------------------------------------------
@@ -326,6 +353,42 @@ export const useAnimationStore = defineStore('animation', () => {
       projectStore.recordState('Rename Bone')
       bone.name = newName.trim()
     }
+  }
+
+  /**
+   * Move a bone in the hierarchy while keeping the tree valid. Keeping this in
+   * the store prevents the Skeleton and Bone inspectors from drifting apart.
+   */
+  function reparentBone(boneId: string, parentBoneId: string | null): boolean {
+    const bone = armature.value.bones.find(item => item.id === boneId)
+    if (!bone || boneId === parentBoneId) return false
+
+    // A bone cannot become a child of itself or any of its descendants.
+    let cursor = parentBoneId
+    while (cursor) {
+      if (cursor === boneId) return false
+      cursor = armature.value.bones.find(item => item.id === cursor)?.parentId || null
+    }
+
+    const normalizedParentId = parentBoneId || null
+    if (bone.parentId === normalizedParentId) return false
+
+    projectStore.recordState('Reparent Bone')
+    if (bone.parentId) {
+      const oldParent = armature.value.bones.find(item => item.id === bone.parentId)
+      if (oldParent) oldParent.childrenIds = oldParent.childrenIds.filter(id => id !== bone.id)
+    } else {
+      armature.value.rootBoneIds = armature.value.rootBoneIds.filter(id => id !== bone.id)
+    }
+
+    bone.parentId = normalizedParentId
+    if (normalizedParentId) {
+      const parent = armature.value.bones.find(item => item.id === normalizedParentId)
+      if (parent && !parent.childrenIds.includes(bone.id)) parent.childrenIds.push(bone.id)
+    } else if (!armature.value.rootBoneIds.includes(bone.id)) {
+      armature.value.rootBoneIds.push(bone.id)
+    }
+    return true
   }
 
   function selectBone(id: string | null) {
@@ -1768,43 +1831,63 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function startPlayback() {
-    if (playInterval) clearInterval(playInterval)
-    const fps = activeClip.value?.fps || 12
-    const intervalMs = 1000 / (fps * playbackSpeed.value)
+    stopPlayback()
+    const maxF = activeClip.value?.durationFrames || 24
+    if (loopMode.value === 'once' && currentFrame.value >= maxF) currentFrame.value = 0
+    playbackLastTime = performance.now()
+    playbackAccumulator = 0
 
-    playInterval = window.setInterval(() => {
-      const maxF = activeClip.value?.durationFrames || 24
-
-      if (loopMode.value === 'pingpong') {
-        let nextF = currentFrame.value + playDirection
-        if (nextF >= maxF) {
-          nextF = maxF
-          playDirection = -1
-        } else if (nextF <= 0) {
-          nextF = 0
-          playDirection = 1
-        }
-        currentFrame.value = nextF
-      } else if (loopMode.value === 'once') {
-        if (currentFrame.value >= maxF) {
-          stopPlayback()
-          isPlaying.value = false
-          return
-        }
-        currentFrame.value++
-      } else {
-        currentFrame.value = (currentFrame.value + 1) % (maxF + 1)
+    const tick = (now: number) => {
+      if (!isPlaying.value) {
+        playbackFrame = null
+        return
       }
 
-      evaluatePose()
-    }, intervalMs)
+      // Accumulation keeps frame pacing stable during a busy render and means
+      // speed/FPS changes take effect immediately without restarting playback.
+      playbackAccumulator += Math.min(250, now - playbackLastTime)
+      playbackLastTime = now
+      const frameMs = 1000 / ((activeClip.value?.fps || 12) * Math.max(0.1, playbackSpeed.value))
+      let changed = false
+
+      while (playbackAccumulator >= frameMs) {
+        playbackAccumulator -= frameMs
+        const lastFrame = activeClip.value?.durationFrames || 24
+        if (loopMode.value === 'pingpong') {
+          let next = currentFrame.value + playDirection
+          if (next >= lastFrame) {
+            next = lastFrame
+            playDirection = -1
+          } else if (next <= 0) {
+            next = 0
+            playDirection = 1
+          }
+          currentFrame.value = next
+        } else if (loopMode.value === 'once') {
+          if (currentFrame.value >= lastFrame) {
+            isPlaying.value = false
+            stopPlayback()
+            return
+          }
+          currentFrame.value++
+        } else {
+          currentFrame.value = (currentFrame.value + 1) % (lastFrame + 1)
+        }
+        changed = true
+      }
+      if (changed) evaluatePose()
+      playbackFrame = window.requestAnimationFrame(tick)
+    }
+
+    playbackFrame = window.requestAnimationFrame(tick)
   }
 
   function stopPlayback() {
-    if (playInterval) {
-      clearInterval(playInterval)
-      playInterval = null
+    if (playbackFrame !== null) {
+      window.cancelAnimationFrame(playbackFrame)
+      playbackFrame = null
     }
+    playbackAccumulator = 0
   }
 
   onScopeDispose(() => {
@@ -1916,6 +1999,8 @@ export const useAnimationStore = defineStore('animation', () => {
     deleteClip,
     renameClip,
     selectClip,
+    setActiveClipFps,
+    setLoopMode,
     duplicateKeysAtCurrentFrame,
     addRootBone,
     addChildBone,
@@ -1927,6 +2012,7 @@ export const useAnimationStore = defineStore('animation', () => {
     clearArmature,
     deleteBone,
     renameBone,
+    reparentBone,
     selectBone,
     selectedSocketId,
     selectedSocket,

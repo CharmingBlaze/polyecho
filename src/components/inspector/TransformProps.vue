@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, toRaw } from 'vue'
 import { useProjectStore } from '../../stores/projectStore'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useToolStore } from '../../stores/toolStore'
@@ -7,6 +7,8 @@ import UiSection from '../ui/UiSection.vue'
 import UiNumberField from '../ui/UiNumberField.vue'
 import UiButton from '../ui/UiButton.vue'
 import { useLayoutStore } from '../../stores/layoutStore'
+import { MeshBridge } from '../../core/mesh/MeshBridge'
+import { MeshValidator } from '../../core/mesh/MeshValidator'
 import { 
   Copy, 
   FlipHorizontal, 
@@ -42,6 +44,14 @@ const activeMaterial = computed(() => {
   return projectStore.materials.find(m => m.id === matId) || projectStore.materials[0]
 })
 
+const meshHealth = computed(() => {
+  void projectStore.geometryRevision
+  const meshObj = activeMesh.value
+  if (!meshObj) return null
+  const { mesh } = MeshBridge.meshObjectToEditableMesh(toRaw(meshObj))
+  return MeshValidator.validate(mesh)
+})
+
 
 function updateTransform() {
   projectStore.recordState('Transform Input')
@@ -71,6 +81,16 @@ function handleMirrorX() {
     f.uvs.reverse()
   }
   projectStore.markGeometryUpdated()
+}
+
+function handleCleanMesh() {
+  if (!activeMesh.value) return
+  projectStore.performCleanupMesh()
+}
+
+function openUvWorkspace() {
+  if (!activeMesh.value) return
+  toolStore.setAppMode('uvpaint')
 }
 
 // ---------------------------------------------
@@ -360,7 +380,32 @@ function toggleOriginMode() {
             <FlipHorizontal class="w-3 h-3 text-ui-textMuted" />
             <span>Mirror X</span>
           </UiButton>
+          <UiButton @click="handleCleanMesh" size="xs" title="Remove duplicate vertices and unusable geometry">
+            <Wrench class="w-3 h-3 text-emerald-400" />
+            <span>Clean mesh</span>
+          </UiButton>
+          <UiButton @click="openUvWorkspace" size="xs" title="Open this object in the UV / Paint workspace">
+            <ImageIcon class="w-3 h-3 text-sky-400" />
+            <span>UV / Paint</span>
+          </UiButton>
         </div>
+      </UiSection>
+
+      <UiSection v-if="activeMesh && meshHealth" title="Mesh health" :icon="Box" hint="topology" :default-open="false">
+        <div
+          class="rounded-xs border px-2 py-1.5 text-[10px] leading-snug"
+          :class="meshHealth.valid ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/40 bg-amber-500/10 text-amber-200'"
+        >
+          <template v-if="meshHealth.valid">Topology looks ready for UVs, modifiers, and export.</template>
+          <template v-else>Topology needs attention before export.</template>
+        </div>
+        <div v-if="!meshHealth.valid" class="grid grid-cols-2 gap-x-2 gap-y-1 text-[10px] text-ui-textMuted">
+          <span v-if="meshHealth.nonManifoldEdges.length">{{ meshHealth.nonManifoldEdges.length }} non-manifold edge{{ meshHealth.nonManifoldEdges.length === 1 ? '' : 's' }}</span>
+          <span v-if="meshHealth.zeroAreaFaces.length">{{ meshHealth.zeroAreaFaces.length }} zero-area face{{ meshHealth.zeroAreaFaces.length === 1 ? '' : 's' }}</span>
+          <span v-if="meshHealth.brokenHalfEdges.length">{{ meshHealth.brokenHalfEdges.length }} broken connection{{ meshHealth.brokenHalfEdges.length === 1 ? '' : 's' }}</span>
+          <span v-if="meshHealth.orphanVertices.length">{{ meshHealth.orphanVertices.length }} unused vertex{{ meshHealth.orphanVertices.length === 1 ? '' : 'es' }}</span>
+        </div>
+        <UiButton size="xs" class="w-full" @click="handleCleanMesh">Clean mesh</UiButton>
       </UiSection>
 
       <UiSection title="Display" :icon="Eye" :default-open="false">

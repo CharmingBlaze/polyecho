@@ -30,7 +30,7 @@ PolyEcho combines four integrated workspaces:
   - Merge at Center (`M`), First, Last, and Distance (Weld).
   - Fill Face from Boundary (`F`) and Connect Vertices (`J`).
   - Dissolve Edges and Vertices.
-  - Divide / Subdivide (Quads into 4 quads, edges with midpoint interpolation).
+  - Subdivide (`W`): object mode splits the whole mesh; edit mode uses the current selection. Number of Cuts and Smoothness live in the Tools panel. Shared edge verts, no T-junctions.
   - Flip Edge Diagonal (Rotate triangle hypotenuse).
   - Separate Selection (`P`) & Join Meshes (`Ctrl+J`).
   - Flip Face Normals & Recalculate Outside Normals.
@@ -75,6 +75,8 @@ PolyEcho combines four integrated workspaces:
 | `Ctrl + B` | Bevel / Chamfer |
 | `Ctrl + R` | Loop Cut & Slide |
 | `K` | Knife Topology Tool |
+| `B` | Box Select (Marquee) |
+| `W` | Subdivide |
 | `F` | Fill Face / Bridge Loop |
 | `J` | Connect 2 Selected Vertices |
 | `M` | Merge Vertices Menu |

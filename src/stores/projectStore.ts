@@ -8,7 +8,9 @@ import {
   extrudeFaces, 
   insetFaces, 
   bevelFaces, 
-  subdivideFaces, 
+  subdivideFaces,
+  pokeFaces,
+  triangulateFaces,
   mergeVerticesAdvanced,
   fillFaceFromVertices,
   flattenVerticesOnAxis,
@@ -395,6 +397,23 @@ export const useProjectStore = defineStore('project', () => {
     if (rebuild) referenceRevision.value++
   }
 
+  /** Start one undoable reference adjustment; callers can then stream slider/drag updates. */
+  function recordReferenceEdit(label = 'Edit Reference') {
+    recordState(label)
+  }
+
+  function resetReferenceImageTransform(id: string) {
+    const image = referenceImages.value.find(img => img.id === id)
+    if (!image) return
+    recordState('Reset Reference Alignment')
+    updateReferenceImage(id, {
+      scale: 4,
+      offsetX: 0,
+      offsetY: 0,
+      flipX: false
+    }, { rebuild: false })
+  }
+
   function removeReferenceImage(id: string) {
     recordState('Remove Reference Image')
     if (selectedReferenceId.value === id) selectedReferenceId.value = ''
@@ -448,26 +467,88 @@ export const useProjectStore = defineStore('project', () => {
     replaceMesh(result.mesh)
   }
 
-  function performSubdivide(mode?: 'vertex' | 'edge' | 'face') {
+  function performSubdivide(mode?: 'object' | 'vertex' | 'edge' | 'face') {
+    if (!activeMesh.value) return
+    const toolStore = useToolStore()
+    const resolved = mode ?? (
+      toolStore.selectMode === 'object' || toolStore.selectMode === 'vertex'
+        || toolStore.selectMode === 'edge' || toolStore.selectMode === 'face'
+        ? toolStore.selectMode
+        : null
+    )
+    if (!resolved) return
+
+    if (resolved === 'object') {
+      const ids = selectedMeshIds.value.length > 0
+        ? [...selectedMeshIds.value]
+        : (activeMeshId.value ? [activeMeshId.value] : [])
+      const targets = meshes.value.filter(m => ids.includes(m.id) && m.faces.length > 0)
+      if (targets.length === 0) return
+      recordState('Subdivide')
+      for (const mesh of targets) {
+        const result = subdivideFaces(mesh, mesh.faces.map(f => f.id), {
+          cuts: toolStore.subdivideCuts,
+          smoothness: toolStore.subdivideSmoothness
+        })
+        replaceMesh(result.mesh)
+      }
+      clearSubSelections()
+      return
+    }
+
+    let targetFaceIds: string[] = []
+    let edgeIds: string[] = []
+
+    if (resolved === 'face') {
+      targetFaceIds = [...selectedFaceIds.value]
+    } else if (resolved === 'edge') {
+      edgeIds = [...selectedEdgeIds.value]
+    } else {
+      const sel = new Set(selectedVertexIds.value)
+      edgeIds = getMeshEdges(activeMesh.value)
+        .filter(e => sel.has(e.v1) && sel.has(e.v2))
+        .map(e => e.id)
+      if (edgeIds.length === 0) {
+        targetFaceIds = activeMesh.value.faces
+          .filter(face => face.vertexIds.every(id => sel.has(id)))
+          .map(f => f.id)
+      }
+    }
+
+    if (targetFaceIds.length === 0 && edgeIds.length === 0) return
+
+    recordState('Subdivide')
+    const result = subdivideFaces(activeMesh.value, targetFaceIds, {
+      cuts: toolStore.subdivideCuts,
+      smoothness: toolStore.subdivideSmoothness,
+      edgeIds
+    })
+    selectedFaceIds.value = result.selectedFaceIds
+    selectedVertexIds.value = result.selectedVertexIds
+    replaceMesh(result.mesh)
+  }
+
+  function performPokeFaces() {
     if (!activeMesh.value) return
     let targetFaceIds = [...selectedFaceIds.value]
-
-    if (mode === 'edge' && selectedEdgeIds.value.length > 0) {
+    if (targetFaceIds.length === 0 && selectedEdgeIds.value.length > 0) {
       const selectedEdges = getMeshEdges(activeMesh.value).filter(e => selectedEdgeIds.value.includes(e.id))
       targetFaceIds = activeMesh.value.faces
         .filter(face => selectedEdges.some(edge => face.vertexIds.includes(edge.v1) && face.vertexIds.includes(edge.v2)))
         .map(face => face.id)
-    } else if (mode === 'vertex' && selectedVertexIds.value.length > 0) {
-      targetFaceIds = activeMesh.value.faces
-        .filter(face => face.vertexIds.some(id => selectedVertexIds.value.includes(id)))
-        .map(face => face.id)
     }
+    if (targetFaceIds.length === 0) return
+    recordState('Poke Faces')
+    const result = pokeFaces(activeMesh.value, targetFaceIds)
+    selectedFaceIds.value = result.selectedFaceIds
+    replaceMesh(result.mesh)
+  }
 
-    if (mode && targetFaceIds.length === 0) return
-    if (targetFaceIds.length === 0) targetFaceIds = activeMesh.value.faces.map(f => f.id)
-
-    recordState('Subdivide')
-    const result = subdivideFaces(activeMesh.value, targetFaceIds)
+  function performTriangulate() {
+    if (!activeMesh.value) return
+    if (selectedFaceIds.value.length === 0) return
+    recordState('Triangulate Faces')
+    const result = triangulateFaces(activeMesh.value, selectedFaceIds.value)
     selectedFaceIds.value = result.selectedFaceIds
     replaceMesh(result.mesh)
   }
@@ -2262,6 +2343,8 @@ export const useProjectStore = defineStore('project', () => {
     setReferenceOnPlane,
     selectReference,
     updateReferenceImage,
+    recordReferenceEdit,
+    resetReferenceImageTransform,
     removeReferenceImage,
     parentMesh,
     unparentMesh,
@@ -2277,6 +2360,8 @@ export const useProjectStore = defineStore('project', () => {
     performInset,
     performBevel,
     performSubdivide,
+    performPokeFaces,
+    performTriangulate,
     performMerge,
     performFillFace,
     performFlatten,

@@ -2031,6 +2031,11 @@ function onUvKeyDown(e: KeyboardEvent) {
   if (toolStore.appMode !== 'uvpaint' || toolStore.uvWorkspaceTab !== 'uv') return
   const tag = (e.target as HTMLElement)?.tagName
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return
+  if (e.key === 'Escape' && activeDropdown.value) {
+    e.preventDefault()
+    closeDropdowns()
+    return
+  }
   if (e.code === 'Space') {
     spaceHeld = true
     e.preventDefault()
