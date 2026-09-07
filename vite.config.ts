@@ -11,6 +11,11 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  server: {
+    watch: {
+      ignored: ['**/release/**', '**/dist/**'],
+    },
+  },
   test: {
     environment: 'happy-dom',
     include: ['src/**/*.test.ts'],
