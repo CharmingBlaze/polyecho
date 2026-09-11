@@ -82,8 +82,10 @@ export class ViewportLayerManager {
         obj.geometry.dispose()
         const material = (obj as THREE.Mesh).material
         if (Array.isArray(material)) {
-          for (const m of material) m.dispose()
-        } else if (material) {
+          for (const m of material) {
+            if (!m.userData?.retain) m.dispose()
+          }
+        } else if (material && !material.userData?.retain) {
           material.dispose()
         }
       }

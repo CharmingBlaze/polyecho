@@ -4,11 +4,13 @@ import { useToolStore } from '../../stores/toolStore'
 import { useProjectStore } from '../../stores/projectStore'
 import { useAnimationStore } from '../../stores/animationStore'
 import BlenderIcon from '../icons/BlenderIcon.vue'
+import { useLayoutStore } from '../../stores/layoutStore'
 import { requestFillFace, requestModalTool, requestPrimitiveMenu, requestSmartUvProject } from '../../core/commands/editorCommands'
 
 const toolStore = useToolStore()
 const projectStore = useProjectStore()
 const animationStore = useAnimationStore()
+const layoutStore = useLayoutStore()
 
 const isModeling = computed(() => toolStore.appMode === 'model')
 const isBlockout = computed(() => toolStore.appMode === 'blockout')
@@ -38,6 +40,12 @@ function handleSubdivide() {
 
 function handleOpenPrimitiveMenu() {
   requestPrimitiveMenu()
+}
+
+function toggleCombinedGizmo() {
+  const next = !toolStore.viewport.combinedGizmo
+  toolStore.viewport.combinedGizmo = next
+  if (next) toolStore.setModelTool('move')
 }
 </script>
 
@@ -83,6 +91,18 @@ function handleOpenPrimitiveMenu() {
         </button>
       </div>
 
+      <button
+        type="button"
+        @click="handleOpenPrimitiveMenu"
+        class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
+        :class="layoutStore.showPrimitivePanel
+          ? 'bg-ui-active text-amber-300 shadow-inner'
+          : 'text-amber-400 hover:text-amber-300 hover:bg-ui-hover'"
+        title="Add Primitive (Shift+A) — panel stays open until you close it"
+      >
+        <BlenderIcon name="mesh-cube" :size="18" />
+      </button>
+
       <div class="w-6 h-px bg-ui-borderSubtle my-0.5 shrink-0"></div>
 
       <!-- Select Box -->
@@ -123,6 +143,16 @@ function handleOpenPrimitiveMenu() {
         title="Scale (S)"
       >
         <BlenderIcon name="tool-scale" :size="18" />
+      </button>
+
+      <button
+        type="button"
+        @click="toggleCombinedGizmo"
+        class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
+        :class="toolStore.viewport.combinedGizmo ? 'bg-ui-active text-ui-textAccent shadow-inner' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+        title="Combined gizmo — all-in-one translate, rotate, and scale"
+      >
+        <BlenderIcon name="gizmo-combined" :size="18" />
       </button>
 
       <!-- Subdivide (Object + Edit) -->
@@ -219,15 +249,6 @@ function handleOpenPrimitiveMenu() {
           <BlenderIcon name="connect-verts" :size="18" />
         </button>
       </template>
-
-      <!-- Add Primitive Placement -->
-      <button 
-        @click="handleOpenPrimitiveMenu"
-        class="w-8 h-8 flex items-center justify-center rounded-xs text-amber-400 hover:text-amber-300 hover:bg-ui-hover transition relative group cursor-pointer mt-auto"
-        title="Add 3D Primitive (Shift+A)"
-      >
-        <BlenderIcon name="mesh-cube" :size="18" />
-      </button>
     </template>
 
     <!-- 2. BLOCKOUT WORKSPACE TOOLS -->
@@ -267,6 +288,18 @@ function handleOpenPrimitiveMenu() {
           <BlenderIcon name="face-select" :size="20" />
         </button>
       </div>
+
+      <button
+        type="button"
+        @click="handleOpenPrimitiveMenu"
+        class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
+        :class="layoutStore.showPrimitivePanel
+          ? 'bg-ui-active text-amber-300 shadow-inner'
+          : 'text-amber-400 hover:text-amber-300 hover:bg-ui-hover'"
+        title="Add Primitive (Shift+A) — panel stays open until you close it"
+      >
+        <BlenderIcon name="mesh-cube" :size="18" />
+      </button>
 
       <div class="w-6 h-px bg-ui-borderSubtle my-0.5 shrink-0"></div>
 
@@ -308,6 +341,16 @@ function handleOpenPrimitiveMenu() {
         title="Scale (S)"
       >
         <BlenderIcon name="tool-scale" :size="18" />
+      </button>
+
+      <button
+        type="button"
+        @click="toggleCombinedGizmo"
+        class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
+        :class="toolStore.viewport.combinedGizmo ? 'bg-ui-active text-ui-textAccent shadow-inner' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+        title="Combined gizmo — all-in-one translate, rotate, and scale"
+      >
+        <BlenderIcon name="gizmo-combined" :size="18" />
       </button>
 
       <button 
@@ -363,15 +406,6 @@ function handleOpenPrimitiveMenu() {
         title="Knife Topology (K)"
       >
         <BlenderIcon name="tool-knife" :size="18" />
-      </button>
-
-      <!-- Add Primitive -->
-      <button 
-        @click="handleOpenPrimitiveMenu"
-        class="w-8 h-8 flex items-center justify-center rounded-xs text-amber-400 hover:text-amber-300 hover:bg-ui-hover transition relative group cursor-pointer mt-auto"
-        title="Add 3D Primitive (Shift+A)"
-      >
-        <BlenderIcon name="mesh-cube" :size="18" />
       </button>
     </template>
 
@@ -474,7 +508,7 @@ function handleOpenPrimitiveMenu() {
         @click="toolStore.setModelTool('move')"
         class="w-8 h-8 flex items-center justify-center rounded-xs transition cursor-pointer"
         :class="toolStore.modelTool === 'move' ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textSecondary hover:bg-ui-hover'"
-        title="Translate Bone (G)"
+        title="Move / Translate (G)"
       >
         <BlenderIcon name="tool-move" :size="18" />
       </button>

@@ -5,6 +5,7 @@ export interface OperatorManagerState {
   active: boolean
   operatorName: string
   statusText: string
+  previewTick: number
 }
 
 export class OperatorManager {
@@ -14,7 +15,8 @@ export class OperatorManager {
   public state = ref<OperatorManagerState>({
     active: false,
     operatorName: '',
-    statusText: ''
+    statusText: '',
+    previewTick: 0,
   })
 
   static getInstance(): OperatorManager {
@@ -35,25 +37,34 @@ export class OperatorManager {
     this.state.value.active = true
     this.state.value.operatorName = operator.name
     this.state.value.statusText = operator.statusText
+    this.state.value.previewTick++
   }
 
   handlePointerMove(e: PointerEvent) {
     if (!this.activeOperator) return
     this.activeOperator.pointerMove(e)
+    if (!this.activeOperator) return
     this.state.value.statusText = this.activeOperator.statusText
+    this.state.value.previewTick++
   }
 
   handleKeyDown(e: KeyboardEvent): boolean {
     if (!this.activeOperator) return false
     const handled = this.activeOperator.keyDown(e)
-    this.state.value.statusText = this.activeOperator.statusText
+    if (this.activeOperator) {
+      this.state.value.statusText = this.activeOperator.statusText
+      this.state.value.previewTick++
+    }
     return handled
   }
 
   handleWheel(e: WheelEvent): boolean {
     if (!this.activeOperator) return false
     const handled = this.activeOperator.wheel(e)
-    this.state.value.statusText = this.activeOperator.statusText
+    if (this.activeOperator) {
+      this.state.value.statusText = this.activeOperator.statusText
+      this.state.value.previewTick++
+    }
     return handled
   }
 
@@ -61,7 +72,10 @@ export class OperatorManager {
     if (!this.activeOperator) return false
     this.activeOperator.syncPointerFromEvent(e)
     const handled = this.activeOperator.handlePointerDown(e.button)
-    this.state.value.statusText = this.activeOperator.statusText
+    if (this.activeOperator) {
+      this.state.value.statusText = this.activeOperator.statusText
+      this.state.value.previewTick++
+    }
     return handled
   }
 

@@ -25,16 +25,143 @@ export interface Segment2DIntersection {
 export class ScreenGeometry {
   static blockoutFrontFrac = 1 / 3
   static blockoutSideFrac = 1 / 3
+  static blockoutMaximized: 'none' | 'front' | 'side' | 'persp' = 'none'
+  static blockoutFrontCollapsed = false
+  static blockoutSideCollapsed = false
+  static blockoutPerspCollapsed = false
+  /** Restore-strip width for a minimized Blockout pane (chrome only, no 3D). */
+  static COLLAPSED_PX = 40
 
   static tripleCols(total: number) {
-    let front = Math.max(1, Math.round(total * ScreenGeometry.blockoutFrontFrac))
-    let side = Math.max(1, Math.round(total * ScreenGeometry.blockoutSideFrac))
+    const max = ScreenGeometry.blockoutMaximized
+    if (max === 'front') return { front: total, side: 0, persp: 0, xSide: total, xPersp: total }
+    if (max === 'side') return { front: 0, side: total, persp: 0, xSide: 0, xPersp: total }
+    if (max === 'persp') return { front: 0, side: 0, persp: total, xSide: 0, xPersp: 0 }
+
+    const fc = ScreenGeometry.blockoutFrontCollapsed
+    const sc = ScreenGeometry.blockoutSideCollapsed
+    const pc = ScreenGeometry.blockoutPerspCollapsed
+    if (fc || sc || pc) {
+      return ScreenGeometry.collapsedTripleCols(total, fc, sc, pc)
+    }
+
+    const f = Math.max(0, ScreenGeometry.blockoutFrontFrac)
+    const s = Math.max(0, ScreenGeometry.blockoutSideFrac)
+    const p = Math.max(0, 1 - f - s)
+    if (f >= 0.995) return { front: total, side: 0, persp: 0, xSide: total, xPersp: total }
+    if (s >= 0.995) return { front: 0, side: total, persp: 0, xSide: 0, xPersp: total }
+    if (p >= 0.995) return { front: 0, side: 0, persp: total, xSide: 0, xPersp: 0 }
+
+    let front = Math.max(0, Math.round(total * f))
+    let side = Math.max(0, Math.round(total * s))
     let persp = total - front - side
-    if (persp < 1) {
-      persp = 1
-      side = Math.max(1, total - front - persp)
+    if (persp < 0) {
+      persp = 0
+      side = Math.max(0, total - front)
     }
     return { front, side, persp, xSide: front, xPersp: front + side }
+  }
+
+  private static collapsedTripleCols(
+    total: number,
+    fc: boolean,
+    sc: boolean,
+    pc: boolean
+  ) {
+    const strip = Math.min(ScreenGeometry.COLLAPSED_PX, Math.max(28, Math.floor(total / 12)))
+    const nCollapsed = (fc ? 1 : 0) + (sc ? 1 : 0) + (pc ? 1 : 0)
+    const rest = Math.max(0, total - nCollapsed * strip)
+    const f = Math.max(0, ScreenGeometry.blockoutFrontFrac)
+    const s = Math.max(0, ScreenGeometry.blockoutSideFrac)
+    const p = Math.max(0, 1 - f - s)
+    const wf = fc ? 0 : Math.max(f, 1e-6)
+    const ws = sc ? 0 : Math.max(s, 1e-6)
+    const wp = pc ? 0 : Math.max(p, 1e-6)
+    const open = wf + ws + wp || 1
+
+    const shares: { key: 'front' | 'side' | 'persp'; w: number }[] = []
+    if (!fc) shares.push({ key: 'front', w: wf })
+    if (!sc) shares.push({ key: 'side', w: ws })
+    if (!pc) shares.push({ key: 'persp', w: wp })
+
+    let front = fc ? strip : 0
+    let side = sc ? strip : 0
+    let persp = pc ? strip : 0
+    let used = 0
+    shares.forEach((share, i) => {
+      const px = i === shares.length - 1 ? rest - used : Math.round(rest * (share.w / open))
+      used += px
+      if (share.key === 'front') front = px
+      else if (share.key === 'side') side = px
+      else persp = px
+    })
+    return { front, side, persp, xSide: front, xPersp: front + side }
+  }
+
+  /**
+   * CSS pixel size used by `renderer.setSize` / `setViewport`.
+   * Prefer this over `getBoundingClientRect().width` — browser zoom and
+   * subpixels make those differ, which throws Poly Draw / Poly Build off.
+   */
+  static viewSize(el: HTMLElement): { width: number; height: number } {
+    const r = el.getBoundingClientRect()
+    return {
+      width: el.clientWidth || Math.max(1, r.width),
+      height: el.clientHeight || Math.max(1, r.height)
+    }
+  }
+
+  /**
+   * Window-space pointer → same pixel space as `viewSize` / WebGL viewports.
+   */
+  static pointerInView(client: ScreenPoint, el: HTMLElement): ScreenPoint {
+    const r = el.getBoundingClientRect()
+    const { width, height } = ScreenGeometry.viewSize(el)
+    if (r.width < 1 || r.height < 1) return { x: 0, y: 0 }
+    return {
+      x: ((client.x - r.left) / r.width) * width,
+      y: ((client.y - r.top) / r.height) * height
+    }
+  }
+
+  static overlayRect(el: HTMLElement): { left: number; top: number; width: number; height: number } {
+    const { width, height } = ScreenGeometry.viewSize(el)
+    return { left: 0, top: 0, width, height }
+  }
+
+  static rayFromClient(
+    client: ScreenPoint,
+    camera: THREE.Camera,
+    el: HTMLElement,
+    quadrant?: ViewQuadrant
+  ): THREE.Ray {
+    return ScreenGeometry.screenToRay(
+      ScreenGeometry.pointerInView(client, el),
+      camera,
+      ScreenGeometry.overlayRect(el),
+      quadrant
+    )
+  }
+
+  static worldToOverlay(
+    worldPos: THREE.Vector3,
+    camera: THREE.Camera,
+    el: HTMLElement,
+    quadrant?: ViewQuadrant
+  ): THREE.Vector2 {
+    return ScreenGeometry.worldToScreen(worldPos, camera, ScreenGeometry.overlayRect(el), quadrant)
+  }
+
+  static isInPane(client: ScreenPoint, el: HTMLElement, quadrant?: ViewQuadrant): boolean {
+    const p = ScreenGeometry.pointerInView(client, el)
+    const pane = ScreenGeometry.paneRect(ScreenGeometry.overlayRect(el), quadrant)
+    if (pane.width < 2 || pane.height < 2) return true
+    return (
+      p.x >= pane.left &&
+      p.x <= pane.left + pane.width &&
+      p.y >= pane.top &&
+      p.y <= pane.top + pane.height
+    )
   }
 
   /**
@@ -82,9 +209,14 @@ export class ScreenGeometry {
 
     if (quadrant === 'col_front' || quadrant === 'col_side' || quadrant === 'col_persp') {
       const cols = ScreenGeometry.tripleCols(width)
-      if (quadrant === 'col_front') return { left, top, width: cols.front, height }
-      if (quadrant === 'col_side') return { left: left + cols.xSide, top, width: cols.side, height }
-      return { left: left + cols.xPersp, top, width: cols.persp, height }
+      const pane =
+        quadrant === 'col_front' ? { left, top, width: cols.front, height }
+        : quadrant === 'col_side' ? { left: left + cols.xSide, top, width: cols.side, height }
+        : { left: left + cols.xPersp, top, width: cols.persp, height }
+      // Maximized (or collapsed) panes can report 0 width for the hidden columns.
+      // A zero-width NDC divide puts Poly Draw / placement off the cursor.
+      if (pane.width < 2) return { left, top, width, height }
+      return pane
     }
     if (quadrant === 'top_left') {
       return { left, top, width: width / 2, height: height / 2 }

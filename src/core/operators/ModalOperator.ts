@@ -42,6 +42,10 @@ export interface OperatorContext {
   onUpdatePreview: () => void
   onCommit: (actionName: string) => void
   onCancel: () => void
+  /** Document id currently bound to `mesh` (Knife / Loop Cut retarget). */
+  targetMeshId?: string
+  /** Rebuild `mesh` + `objectMatrix` for another object. Returns false if skipped. */
+  adoptMesh?: (meshId: string) => boolean
 }
 
 export abstract class ModalOperator {

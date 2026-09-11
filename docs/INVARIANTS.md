@@ -59,8 +59,9 @@ Breaking any of these usually looks like “selection vanished”, “undo corru
 ## Transform gizmo
 
 - `updateTransformGizmo` in `Viewport3D.vue` must attach in object mode **and** in vertex/edge/face when that selection is non-empty. Do not put component-mode centroids inside `if (selectMode === 'object')`.
-- After Blockout/triple-view, restore `transformControls.getHelper().visible = true` in the single-view render path.
+- After Blockout/triple-view, restore `transformControls.getHelper().visible` only when a gizmo target is attached (`object` set). An empty scene or no selection must leave the helper hidden.
 - Blockout gizmos use the pane camera plus pane-local pointer NDC (`getGizmoPointer`). Before each triple-view render, set `transformControls.camera` to that pane and `updateMatrixWorld` so vertex/object handles stay on the selection and match that view’s zoom. Do not set `transformControls.enabled = false` when the hover axis is set. Do not detach the mesh gizmo because a reference image is selected.
+- Vertex edit handles are screen-space squares (`VertexMarkers.ts`), not `gl_PointSize`. Set `uResolution` to the current pane size before each viewport render so they stay the same CSS pixel size when zooming. They use depth test so verts behind the mesh are hidden (X-Ray turns that off).
 
 ## Skinning
 

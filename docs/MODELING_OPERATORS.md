@@ -72,7 +72,7 @@ Live controls sit next to Space / Pivot in the app header. Magnet + chevron: gri
 | **Ctrl+T** | Triangulate | one-shot `MeshTopologyService.triangulateFaces` | Shortest diagonal on selected quads. |
 | **Ctrl+X** | Dissolve | one-shot `DissolveKernel` / `dissolveVertex` | Vertices or edges. |
 | **F** (Blockout) | Poly Draw | `PolyDrawOperator` | Front/Side silhouette; Persp view-plane or mesh face (N = ground). Close, then extrude toward the camera (F flips). MMB orbit. New mesh on commit. |
-| **V** (Blockout) | Poly Build | `PolyBuildOperator` | Reuse front-most verts, or place on a hit face / view plane. After a fill the last edge + that face plane stay; Tab walks around. MMB orbit. |
+| **V** (Blockout) | Poly Build | `PolyBuildOperator` | Draw an outline (new or existing verts), then close to fill **inside** that loop. Concave loops tessellate like Poly Draw. |
 
 ---
 
@@ -96,7 +96,7 @@ Object mode **I** must not inset the whole mesh (`startModalOperator` returns ea
 
 ## Transform gizmo (`updateTransformGizmo`)
 
-Lives in `Viewport3D.vue`. Attaches Three.js `TransformControls` to `transformProxy`.
+Lives in `Viewport3D.vue`. Default is Three.js `TransformControls` (translate / rotate / scale as separate tools) on `transformProxy`. Overlays → **Combined gizmo** switches to `@voluma/three-transform-gizmo` (`TransformGizmo`): Select and Move then show all TRS handles. Rotate / Scale tools still use dedicated modes. Origin edit stays translate-only.
 
 **Do not nest vertex / edge / face centroid logic inside `selectMode === 'object'`.** That made the gizmo stay at the object origin (or detach) in every edit mode. The attach condition is:
 
@@ -105,7 +105,7 @@ Lives in `Viewport3D.vue`. Attaches Three.js `TransformControls` to `transformPr
 
 Empty edit-mode selection → `detach()` and return.
 
-`modelTool` `'select'` (default) still uses translate handles. `'move'` / `'rotate'` / `'scale'` only change `setMode`.
+With combined gizmo off, `'select'` / `'move'` are translate. With it on, they use `setMode('combined')`. `'rotate'` / `'scale'` always change `setMode`.
 
 Single-view render must set `transformControls.getHelper().visible = true`. Triple/Blockout toggles helper visibility per column and can leave it `false` if you forget to restore when leaving that layout.
 
@@ -120,7 +120,7 @@ UI: header magnet chevron (`HeaderMenu.vue`). Flags were historically unused exc
 | Flag | Default | What it does |
 | :--- | :--- | :--- |
 | `grid` | **true** | Visual magnet on. **Does not** round grab delta (that froze small G moves to 0 at 0.5 m). |
-| `gridSize` | `0.5` | Ctrl increment step on grab; vertex-snap threshold uses `max(0.06, gridSize * 0.75)`. |
+| `gridSize` | `0.1` | Ctrl increment step on grab; vertex-snap threshold uses `max(0.06, gridSize * 0.75)`. |
 | `vertex` / `edge` | false | Rigid snap: closest moving point to a **non-moving** vertex or unused-edge midpoint; **one** offset applied to the whole selection (`SnapManager.findRigidSnapOffset`). Wired in `MoveOperator` and gizmo component drag. |
 
 `OperatorContext.snapVertex` / `snapEdge` / `snapGrid` / `gridSize` are copied in `startModalOperator`. Increment snap on **G** is **Ctrl only**.

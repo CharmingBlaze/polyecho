@@ -9,7 +9,6 @@ import Timeline from './components/animation/Timeline.vue'
 import StatusBar from './components/layout/StatusBar.vue'
 import ExportModal from './components/modals/ExportModal.vue'
 import HotkeyModal from './components/modals/HotkeyModal.vue'
-import NewProjectModal from './components/modals/NewProjectModal.vue'
 import AddPrimitivePopout from './components/modals/AddPrimitivePopout.vue'
 import BlenderPieMenu from './components/viewport/BlenderPieMenu.vue'
 import CommandPaletteModal from './components/modals/CommandPaletteModal.vue'
@@ -24,7 +23,7 @@ import { useHistoryStore } from './stores/historyStore'
 import { useLayoutStore } from './stores/layoutStore'
 import { useThemeStore } from './stores/themeStore'
 import { useKeymapStore } from './stores/keymapStore'
-import { loadOpenProject, refreshDesktopTitle, saveOpenProject } from './core/project/projectIo'
+import { loadOpenProject, refreshDesktopTitle, saveOpenProject, startBlankProject } from './core/project/projectIo'
 import { allowDesktopClose, cancelDesktopClose, confirmUnsavedClose, getLaunchProjectPath, isDesktopApp, onDesktopCloseRequest, onOpenExternalProject, openProjectPath } from './core/desktop/desktopApi'
 import { EDITOR_EVENTS, requestCameraView, requestModalTool, requestFillFace, requestPrimitiveMenu, requestOpenPie, requestToggleUvOverlay, requestSmartUvProject } from './core/commands/editorCommands'
 import { setupDefaultActions } from './core/commands/setupDefaultActions'
@@ -97,7 +96,6 @@ function isMeshWorkspace() {
 
 const showExportModal = ref(false)
 const showHotkeyModal = ref(false)
-const showNewProjectModal = ref(false)
 const showPreferencesModal = ref(false)
 
 watch(
@@ -110,9 +108,8 @@ watch(
       layoutStore.showRightSidebar = false
     }
     if (mode === 'blockout') {
-      // The reference inspector is the starting point for a tracing session.
-      // Reopen it when arriving from the roomier UV/Paint workspace.
-      layoutStore.showRightSidebar = true
+      // Tracing uses Front / Side / Persp; keep the inspector docked until needed.
+      layoutStore.showRightSidebar = false
       layoutStore.setInspectorTab('refs', 'blockout')
     }
     if (mode === 'model') {
@@ -345,7 +342,7 @@ function runKeymapAction(id: string) {
       else if (toolStore.appMode === 'rig') animationStore.extrudeBone(animationStore.selectedBoneId)
       return
     case 'extrude_individual':
-      if (isMeshWorkspace()) requestModalTool('extrude')
+      if (isMeshWorkspace()) requestModalTool('extrude', { individual: true })
       return
     case 'inset':
       if (toolStore.appMode === 'animate') animationStore.recordCurrentKeyframe()
@@ -498,7 +495,7 @@ function runKeymapAction(id: string) {
       toolStore.viewport.quadView = !toolStore.viewport.quadView
       return
     case 'new_project':
-      showNewProjectModal.value = true
+      startBlankProject()
       return
     case 'toggle_left_toolbar':
       layoutStore.toggleLeftToolbar()
@@ -669,7 +666,7 @@ onUnmounted(() => {
       @open-export="showExportModal = true"
       @open-hotkeys="showHotkeyModal = true"
       @open-preferences="showPreferencesModal = true"
-      @new-project="showNewProjectModal = true"
+      @new-project="startBlankProject"
     />
 
     <!-- Document Recovery Banner (Microsoft Word / Docs Style) -->
@@ -783,7 +780,6 @@ onUnmounted(() => {
     <!-- Modals & Overlays -->
     <ExportModal v-if="showExportModal" @close="showExportModal = false" />
     <HotkeyModal v-if="showHotkeyModal" @close="showHotkeyModal = false" />
-    <NewProjectModal v-if="showNewProjectModal" @close="showNewProjectModal = false" />
     <PreferencesModal v-if="showPreferencesModal" @close="showPreferencesModal = false" />
     <AddPrimitivePopout />
     <BlenderPieMenu />

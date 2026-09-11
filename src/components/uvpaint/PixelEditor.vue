@@ -6,6 +6,7 @@ import TextureSharePrompt from '../modals/TextureSharePrompt.vue'
 import { useTextureApply } from '../../composables/useTextureApply'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import ImportTextureModal from '../modals/ImportTextureModal.vue'
+import NewTextureModal from '../modals/NewTextureModal.vue'
 import PaletteLibraryModal from '../modals/PaletteLibraryModal.vue'
 import { DEFAULT_PALETTES, loadCustomPalettes, saveCustomPalettes, snapColorToPalette, type Palette } from '../../utils/color'
 import {
@@ -30,8 +31,6 @@ const {
 // ACTIVE MESH, MATERIAL & TEXTURE BINDINGS
 // ----------------------------------------------------
 const showNewTextureModal = ref(false)
-const newTextureName = ref('')
-const newTextureSize = ref<number>(64)
 
 function bindTextureToActiveObject(textureId: string) {
   const mesh = projectStore.activeMesh
@@ -49,14 +48,16 @@ function handleTextureBindingChange(newTexId: string) {
   })
 }
 
-function handleCreateNewTexture() {
-  const name = newTextureName.value.trim() || `Texture_${projectStore.textures.length + 1}`
-  const tex = projectStore.createTexture(name, newTextureSize.value, newTextureSize.value)
+function handleCreateNewTexture(payload: { name: string; width: number; height: number; fill: 'transparent' | 'white' | 'black' | 'primary' }) {
+  const tex = projectStore.createTexture(payload.name, payload.width, payload.height)
+  if (payload.fill === 'white') tex.pixelBuffer.clear('#ffffff')
+  else if (payload.fill === 'black') tex.pixelBuffer.clear('#111111')
+  else if (payload.fill === 'primary') tex.pixelBuffer.clear(toolStore.primaryColor || '#ffffff')
+  if (payload.fill !== 'transparent') projectStore.markTextureUpdated(tex.id)
   if (projectStore.activeMesh) {
     projectStore.applyTextureToMesh(projectStore.activeMesh.id, tex.id, 'this_object')
   }
   showNewTextureModal.value = false
-  newTextureName.value = ''
   nextTick(() => {
     renderCanvas()
   })
@@ -168,20 +169,20 @@ function refreshLayers() {
 }
 
 function addPaintLayer() {
-  projectStore.recordState('Add Paint Layer')
+  projectStore.recordPixels('Add Paint Layer')
   projectStore.pixelBuffer.addLayer()
   refreshLayers()
 }
 
 function duplicatePaintLayer(layerId: string) {
-  projectStore.recordState('Duplicate Paint Layer')
+  projectStore.recordPixels('Duplicate Paint Layer')
   projectStore.pixelBuffer.duplicateLayer(layerId)
   refreshLayers()
 }
 
 function deletePaintLayer(layerId: string) {
   if (projectStore.pixelBuffer.layers.length <= 1) return
-  projectStore.recordState('Delete Paint Layer')
+  projectStore.recordPixels('Delete Paint Layer')
   projectStore.pixelBuffer.deleteLayer(layerId)
   refreshLayers()
 }
@@ -195,7 +196,7 @@ function selectPaintLayer(layerId: string) {
 function toggleLayerVisibility(layerId: string) {
   const layer = projectStore.pixelBuffer.layers.find(item => item.id === layerId)
   if (!layer) return
-  projectStore.recordState('Toggle Paint Layer')
+  projectStore.recordPixels('Toggle Paint Layer')
   layer.visible = !layer.visible
   refreshLayers()
 }
@@ -211,7 +212,7 @@ function renameActivePaintLayer(name: string) {
   const layer = projectStore.pixelBuffer.activeLayer
   const next = name.trim()
   if (!layer || !next || next === layer.name) return
-  projectStore.recordState('Rename Paint Layer')
+  projectStore.recordPixels('Rename Paint Layer')
   layer.name = next
   refreshLayers()
 }
@@ -220,7 +221,7 @@ function setActiveLayerBlendMode(value: string) {
   const layer = projectStore.pixelBuffer.activeLayer
   if (!layer) return
   if (!['normal', 'multiply', 'screen', 'overlay', 'additive'].includes(value)) return
-  projectStore.recordState('Change Layer Blend Mode')
+  projectStore.recordPixels('Change Layer Blend Mode')
   layer.blendMode = value as typeof layer.blendMode
   refreshLayers()
 }
@@ -281,7 +282,7 @@ function quantizeCanvasToCurrentPalette() {
   const colors = projectStore.activePalette?.colors || DEFAULT_PALETTES[0].colors
   if (!pb || colors.length === 0) return
 
-  projectStore.recordState(`Quantize Texture (${projectStore.activePalette.name})`)
+  projectStore.recordPixels(`Quantize Texture (${projectStore.activePalette.name})`)
   pb.suspendComposite()
   for (let y = 0; y < pb.height; y++) {
     for (let x = 0; x < pb.width; x++) {
@@ -343,7 +344,7 @@ function resetRetroAtlas() {
 }
 
 function clearTexture() {
-  projectStore.recordState('Clear Texture')
+  projectStore.recordPixels('Clear Texture')
   projectStore.pixelBuffer.clear()
   projectStore.markTextureUpdated()
   renderCanvas()
@@ -357,7 +358,7 @@ function syncActiveTextureSize(w: number, h: number) {
 }
 
 function applyCustomResize() {
-  projectStore.recordState(`Resize Texture to ${resizeW.value}x${resizeH.value}`)
+  projectStore.recordPixels(`Resize Texture to ${resizeW.value}x${resizeH.value}`)
   projectStore.pixelBuffer.resize(resizeW.value, resizeH.value, resizeMode.value)
   syncActiveTextureSize(resizeW.value, resizeH.value)
   showResizeModal.value = false
@@ -414,7 +415,7 @@ function onKeyUp(e: KeyboardEvent) {
 
 function applyAdjustment(action: string) {
   const pb = projectStore.pixelBuffer
-  projectStore.recordState(`Apply ${action}`)
+  projectStore.recordPixels(`Apply ${action}`)
 
   if (action === 'invert') pb.invertColors()
   else if (action === 'brighten') pb.adjustBrightness(20)
@@ -448,6 +449,55 @@ function getPixelCoords(e: PointerEvent): { x: number; y: number } | null {
 
   if (px < 0 || px >= pb.width || py < 0 || py >= pb.height) return null
   return { x: px, y: py }
+}
+
+let renderPending = false
+let renderRafId: number | null = null
+let checkerTile: HTMLCanvasElement | null = null
+let checkerTileSize = 0
+
+function scheduleRender() {
+  if (renderPending) return
+  renderPending = true
+  renderRafId = requestAnimationFrame(() => {
+    renderRafId = null
+    renderPending = false
+    renderCanvas()
+  })
+}
+
+function fillCheckerboard(
+  ctx: CanvasRenderingContext2D,
+  ox: number,
+  oy: number,
+  texW: number,
+  texH: number,
+  checkSize: number
+) {
+  if (!checkerTile || checkerTileSize !== checkSize) {
+    checkerTile = document.createElement('canvas')
+    checkerTile.width = checkSize * 2
+    checkerTile.height = checkSize * 2
+    checkerTileSize = checkSize
+    const tctx = checkerTile.getContext('2d')
+    if (tctx) {
+      tctx.fillStyle = '#1e2025'
+      tctx.fillRect(0, 0, checkSize * 2, checkSize * 2)
+      tctx.fillStyle = '#141619'
+      tctx.fillRect(0, 0, checkSize, checkSize)
+      tctx.fillRect(checkSize, checkSize, checkSize, checkSize)
+    }
+  }
+  const pattern = ctx.createPattern(checkerTile, 'repeat')
+  if (!pattern) return
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(ox, oy, texW, texH)
+  ctx.clip()
+  ctx.translate(ox, oy)
+  ctx.fillStyle = pattern
+  ctx.fillRect(0, 0, texW, texH)
+  ctx.restore()
 }
 
 function renderCanvas() {
@@ -494,31 +544,21 @@ function renderCanvas() {
   const stageGridSize = 32
   const startX = (ox % stageGridSize + stageGridSize) % stageGridSize
   const startY = (oy % stageGridSize + stageGridSize) % stageGridSize
+  ctx.beginPath()
   for (let x = startX; x < canvas.width; x += stageGridSize) {
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke()
+    ctx.moveTo(x, 0)
+    ctx.lineTo(x, canvas.height)
   }
   for (let y = startY; y < canvas.height; y += stageGridSize) {
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke()
+    ctx.moveTo(0, y)
+    ctx.lineTo(canvas.width, y)
   }
+  ctx.stroke()
 
-  // 2. Draw Checkerboard background for transparency
+  // 2. Checkerboard for transparency, then the pixel buffer
   const checkSize = Math.max(4, Math.min(16, Math.round(zoom.value)))
-  ctx.save()
-  ctx.beginPath()
-  ctx.rect(ox, oy, texW, texH)
-  ctx.clip()
-
-  for (let y = 0; y < texH; y += checkSize) {
-    for (let x = 0; x < texW; x += checkSize) {
-      const isEven = (Math.floor(x / checkSize) + Math.floor(y / checkSize)) % 2 === 0
-      ctx.fillStyle = isEven ? '#1e2025' : '#141619'
-      ctx.fillRect(ox + x, oy + y, checkSize, checkSize)
-    }
-  }
-
-  // 3. Draw actual pixel buffer
+  fillCheckerboard(ctx, ox, oy, texW, texH, checkSize)
   ctx.drawImage(pb.canvas, ox, oy, texW, texH)
-  ctx.restore()
 
   // 4. Draw Canvas Drop Shadow & Border Outline
   ctx.strokeStyle = '#4f46e5'
@@ -580,20 +620,23 @@ function renderCanvas() {
 
   // 6. Pixel Grid (Only show when zoomed in enough)
   if (showPixelGrid.value && zoom.value >= 4 && pb.width <= 512) {
+    const z = zoom.value
+    const visX0 = Math.max(0, Math.floor(-ox / z))
+    const visX1 = Math.min(pb.width, Math.ceil((canvas.width - ox) / z))
+    const visY0 = Math.max(0, Math.floor(-oy / z))
+    const visY1 = Math.min(pb.height, Math.ceil((canvas.height - oy) / z))
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)'
     ctx.lineWidth = 1
-    for (let x = 0; x <= pb.width; x++) {
-      ctx.beginPath()
-      ctx.moveTo(ox + x * zoom.value, oy)
-      ctx.lineTo(ox + x * zoom.value, oy + texH)
-      ctx.stroke()
+    ctx.beginPath()
+    for (let x = visX0; x <= visX1; x++) {
+      ctx.moveTo(ox + x * z, oy + visY0 * z)
+      ctx.lineTo(ox + x * z, oy + visY1 * z)
     }
-    for (let y = 0; y <= pb.height; y++) {
-      ctx.beginPath()
-      ctx.moveTo(ox, oy + y * zoom.value)
-      ctx.lineTo(ox + texW, oy + y * zoom.value)
-      ctx.stroke()
+    for (let y = visY0; y <= visY1; y++) {
+      ctx.moveTo(ox + visX0 * z, oy + y * z)
+      ctx.lineTo(ox + visX1 * z, oy + y * z)
     }
+    ctx.stroke()
   }
 
   // 7. UV Wireframe Overlay
@@ -666,7 +709,7 @@ function onPointerDown(e: PointerEvent) {
     return
   }
 
-  if (tool !== 'picker') projectStore.recordState('Pixel Paint')
+  if (tool !== 'picker') projectStore.recordPixels('Pixel Paint')
   drawPixel(coords.x, coords.y, drawUsesSecondary, e.pressure)
 }
 
@@ -688,7 +731,7 @@ function onPointerMove(e: PointerEvent) {
         x: initialPinchPan.x + (midX - panStart.x),
         y: initialPinchPan.y + (midY - panStart.y)
       }
-      renderCanvas()
+      scheduleRender()
     }
     return
   }
@@ -703,28 +746,36 @@ function onPointerMove(e: PointerEvent) {
       x: e.clientX - panStart.x,
       y: e.clientY - panStart.y
     }
-    renderCanvas()
+    scheduleRender()
     return
   }
 
-  toolStore.currentPointerType = (e.pointerType as any) || 'mouse'
-  toolStore.currentPressure = e.pressure || 1.0
+  if (e.pointerType) {
+    const pointerType = e.pointerType as 'mouse' | 'pen' | 'touch'
+    if (toolStore.currentPointerType !== pointerType) toolStore.currentPointerType = pointerType
+  }
+  if (e.pressure > 0 && toolStore.currentPressure !== e.pressure) {
+    toolStore.currentPressure = e.pressure
+  }
 
   const coords = getPixelCoords(e)
 
-  if (coords) {
-    const pb = projectStore.pixelBuffer
-    const hex = pb.getPixelHex(coords.x, coords.y)
-    cursorCoords.value = { x: coords.x, y: coords.y, hex }
-  } else {
-    cursorCoords.value = null
+  if (!isDrawing) {
+    if (coords) {
+      const prev = cursorCoords.value
+      if (!prev || prev.x !== coords.x || prev.y !== coords.y) {
+        cursorCoords.value = { x: coords.x, y: coords.y, hex: projectStore.pixelBuffer.getPixelHex(coords.x, coords.y) }
+      }
+    } else if (cursorCoords.value) {
+      cursorCoords.value = null
+    }
   }
 
   if (isDrawing && coords) {
     dragCurrentCoords = { ...coords }
     const tool = toolStore.paintTool
     if (tool === 'line' || tool === 'rect' || tool === 'circle') {
-      renderCanvas()
+      scheduleRender()
     } else if (tool !== 'bucket') {
       drawPixel(coords.x, coords.y, drawUsesSecondary, e.pressure)
     }
@@ -754,7 +805,7 @@ function onPointerUp(e: PointerEvent) {
   const shouldPersist = strokeDirty || (coords && dragStartCoords && (tool === 'line' || tool === 'rect' || tool === 'circle'))
 
   if (coords && dragStartCoords && (tool === 'line' || tool === 'rect' || tool === 'circle')) {
-    projectStore.recordState(`Draw ${tool}`)
+    projectStore.recordPixels(`Draw ${tool}`)
     const isSecondary = drawUsesSecondary
     const color = resolveDrawColor(isSecondary)
     const size = toolStore.brushSize
@@ -835,7 +886,7 @@ function drawPixel(x: number, y: number, isSecondary = false, pressure = 1.0) {
   lastDrawCoords = { x, y }
   strokeDirty = true
   projectStore.markTexturePreview()
-  renderCanvas()
+  scheduleRender()
 }
 
 function onWheel(e: WheelEvent) {
@@ -845,7 +896,7 @@ function onWheel(e: WheelEvent) {
   if (e.shiftKey) {
     isFitToView.value = false
     panOffset.value.x -= e.deltaY * 0.8
-    renderCanvas()
+    scheduleRender()
     return
   }
 
@@ -854,7 +905,7 @@ function onWheel(e: WheelEvent) {
     isFitToView.value = false
     panOffset.value.x -= e.deltaX
     panOffset.value.y -= e.deltaY
-    renderCanvas()
+    scheduleRender()
     return
   }
 
@@ -876,7 +927,6 @@ function onWheel(e: WheelEvent) {
     panOffset.value.x = mouseX - (mouseX - panOffset.value.x) * (newZoom / oldZoom)
     panOffset.value.y = mouseY - (mouseY - panOffset.value.y) * (newZoom / oldZoom)
     zoom.value = newZoom
-    renderCanvas()
   }
 }
 
@@ -926,18 +976,18 @@ function resetPanZoom() {
 }
 
 
-watch(() => projectStore.textureRevision, renderCanvas)
-watch(() => projectStore.geometryRevision, renderCanvas)
-watch(() => projectStore.activeMeshId, renderCanvas)
+watch(() => projectStore.textureRevision, scheduleRender)
+watch(() => projectStore.geometryRevision, scheduleRender)
+watch(() => projectStore.activeMeshId, scheduleRender)
 watch(() => projectStore.activeTextureId, () => {
   nextTick(() => {
     resetPanZoom()
-    renderCanvas()
+    scheduleRender()
   })
 })
-watch(zoom, renderCanvas)
-watch(showPixelGrid, renderCanvas)
-watch(showUvOverlay, renderCanvas)
+watch(zoom, scheduleRender)
+watch(showPixelGrid, scheduleRender)
+watch(showUvOverlay, scheduleRender)
 
 onMounted(() => {
   window.addEventListener('click', closeDropdowns)
@@ -961,6 +1011,11 @@ onBeforeUnmount(() => {
   window.removeEventListener('keyup', onKeyUp)
   window.removeEventListener(EDITOR_EVENTS.toggleUvOverlay, onToggleUvOverlay)
   containerResizeObserver?.disconnect()
+  if (renderRafId !== null) {
+    cancelAnimationFrame(renderRafId)
+    renderRafId = null
+    renderPending = false
+  }
 })
 
 defineExpose({
@@ -1023,7 +1078,7 @@ defineExpose({
           <button 
             @click="showNewTextureModal = true"
             class="p-0.5 hover:bg-ui-hover text-emerald-400 rounded-xs transition cursor-pointer"
-            title="Create a new texture and bind it to the active object"
+            title="New image — pick any size"
           >
             <BlenderIcon name="plus" :size="12" />
           </button>
@@ -1064,6 +1119,9 @@ defineExpose({
           </button>
 
           <div v-if="activeDropdown === 'image'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-52 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+            <div class="px-3 py-0.5 text-[9px] font-bold text-ui-textMuted uppercase">File</div>
+            <button @click="showNewTextureModal = true; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover text-amber-300 font-bold">New Image...</button>
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
             <div class="px-3 py-0.5 text-[9px] font-bold text-ui-textMuted uppercase">Adjustments</div>
             <button @click="applyAdjustment('brighten'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Brightness (+10%)</button>
             <button @click="applyAdjustment('darken'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Darkness (-10%)</button>
@@ -1309,50 +1367,12 @@ defineExpose({
       </div>
     </Teleport>
 
-    <div v-if="showNewTextureModal" class="absolute inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-      <div class="bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-3 w-80 space-y-3" @click.stop>
-        <div class="flex items-center justify-between border-b border-ui-borderSubtle pb-1.5">
-          <span class="text-xs font-bold text-amber-300 uppercase">Create New Texture Map</span>
-          <button @click="showNewTextureModal = false" class="text-ui-textMuted hover:text-white transition">✕</button>
-        </div>
-        <div class="space-y-1">
-          <label class="text-[10px] text-ui-textMuted font-bold uppercase">Texture Name:</label>
-          <input
-            v-model="newTextureName"
-            placeholder="e.g. Character_Armor_64"
-            class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-1 text-ui-textPrimary text-xs focus:outline-none focus:border-amber-400 font-mono"
-          />
-        </div>
-        <div class="space-y-1">
-          <label class="text-[10px] text-ui-textMuted font-bold uppercase">Resolution:</label>
-          <div class="grid grid-cols-3 gap-1">
-            <button
-              v-for="s in [16, 32, 64, 128, 256, 512]"
-              :key="s"
-              @click="newTextureSize = s"
-              class="py-1 text-center rounded-xs border text-[10px] font-mono transition cursor-pointer"
-              :class="newTextureSize === s ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-bold' : 'bg-ui-input text-ui-textSecondary border-ui-borderSubtle hover:bg-ui-hover'"
-            >
-              {{ s }} × {{ s }}
-            </button>
-          </div>
-        </div>
-        <div class="flex gap-1 pt-1">
-          <button
-            @click="handleCreateNewTexture"
-            class="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xs text-xs font-bold transition cursor-pointer shadow-xs"
-          >
-            Create
-          </button>
-          <button
-            @click="showNewTextureModal = false"
-            class="px-3 py-1.5 bg-ui-input hover:bg-ui-hover text-ui-textSecondary rounded-xs text-xs transition cursor-pointer"
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-    </div>
+    <NewTextureModal
+      v-if="showNewTextureModal"
+      :bind-hint="projectStore.activeMesh?.name"
+      @close="showNewTextureModal = false"
+      @create="handleCreateNewTexture"
+    />
 
     <!-- 3. MAIN WORKSPACE WITH TOOL RAIL, CANVAS & FLOATING OVERLAYS -->
     <div class="pixel-workspace relative flex-1 min-h-0 flex overflow-hidden">
@@ -1452,7 +1472,7 @@ defineExpose({
                 />
                 <input
                   :value="Math.round(projectStore.pixelBuffer.activeLayer.opacity * 100)"
-                  @pointerdown="projectStore.recordState('Change Layer Opacity')"
+                  @pointerdown="projectStore.recordPixels('Change Layer Opacity')"
                   @input="setActiveLayerOpacity(Number(($event.target as HTMLInputElement).value))"
                   type="range" min="0" max="100" step="1" class="flex-1 h-1 accent-amber-400 cursor-pointer"
                   aria-label="Active layer opacity"

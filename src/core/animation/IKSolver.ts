@@ -20,7 +20,8 @@ export function solveTwoBoneIK(
   allBones: Bone[],
   poleTarget?: THREE.Vector3
 ): { rootRot: THREE.Euler; midRot: THREE.Euler } | null {
-  const pMat = rootBone.parentId ? computeBoneWorldMatrix(allBones.find(b => b.id === rootBone.parentId)!, allBones) : new THREE.Matrix4()
+  const ikCache = new Map<string, THREE.Matrix4>()
+  const pMat = rootBone.parentId ? computeBoneWorldMatrix(allBones.find(b => b.id === rootBone.parentId)!, allBones, false, ikCache) : new THREE.Matrix4()
   const pMatInv = pMat.clone().invert()
 
   // Local positions relative to parent of rootBone
@@ -93,11 +94,12 @@ export function solveCCDIK(
   for (let it = 0; it < iterations; it++) {
     for (let i = 0; i < chain.length; i++) {
       const bone = chain[i]
-      const boneMat = computeBoneWorldMatrix(bone, allBones)
+      const ikCache = new Map<string, THREE.Matrix4>()
+      const boneMat = computeBoneWorldMatrix(bone, allBones, false, ikCache)
       const bonePivotWorld = new THREE.Vector3(bone.head.x, bone.head.y, bone.head.z).applyMatrix4(boneMat)
 
       const endBone = chain[0]
-      const endMat = computeBoneWorldMatrix(endBone, allBones)
+      const endMat = computeBoneWorldMatrix(endBone, allBones, false, ikCache)
       const endPosWorld = new THREE.Vector3(endBone.tail.x, endBone.tail.y, endBone.tail.z).applyMatrix4(endMat)
 
       if (endPosWorld.distanceTo(targetPos) < 0.005) {
@@ -121,9 +123,9 @@ export function solveCCDIK(
       currentQuat.premultiply(weightedDelta)
       const newEuler = new THREE.Euler().setFromQuaternion(currentQuat)
 
-      bone.rotation.x = Number(THREE.MathUtils.radToDeg(newEuler.x).toFixed(2))
-      bone.rotation.y = Number(THREE.MathUtils.radToDeg(newEuler.y).toFixed(2))
-      bone.rotation.z = Number(THREE.MathUtils.radToDeg(newEuler.z).toFixed(2))
+      bone.rotation.x = Math.round(THREE.MathUtils.radToDeg(newEuler.x) * 100) / 100
+      bone.rotation.y = Math.round(THREE.MathUtils.radToDeg(newEuler.y) * 100) / 100
+      bone.rotation.z = Math.round(THREE.MathUtils.radToDeg(newEuler.z) * 100) / 100
     }
   }
 
@@ -132,9 +134,9 @@ export function solveCCDIK(
 
 function eulerDegFromThree(e: THREE.Euler): { x: number; y: number; z: number } {
   return {
-    x: Number(THREE.MathUtils.radToDeg(e.x).toFixed(2)),
-    y: Number(THREE.MathUtils.radToDeg(e.y).toFixed(2)),
-    z: Number(THREE.MathUtils.radToDeg(e.z).toFixed(2))
+    x: Math.round(THREE.MathUtils.radToDeg(e.x) * 100) / 100,
+    y: Math.round(THREE.MathUtils.radToDeg(e.y) * 100) / 100,
+    z: Math.round(THREE.MathUtils.radToDeg(e.z) * 100) / 100
   }
 }
 
@@ -151,7 +153,7 @@ function boneDepth(bone: Bone, allBones: Bone[]): number {
 }
 
 function worldHead(bone: Bone, allBones: Bone[]): THREE.Vector3 {
-  const mat = computeBoneWorldMatrix(bone, allBones)
+  const mat = computeBoneWorldMatrix(bone, allBones, false, new Map())
   return new THREE.Vector3(bone.head.x, bone.head.y, bone.head.z).applyMatrix4(mat)
 }
 

@@ -53,7 +53,7 @@ Blockout uses the same mesh operators as Modeling and a **Front \| Side \| Persp
 | `animation` | `stores/animationStore.ts` | Bones, clips, keys, playback, skinning / weight paint |
 | `history` | `stores/historyStore.ts` | Deep snapshots of project + armature; undo / redo |
 | `layout` | `stores/layoutStore.ts` | Panel visibility, floating chrome, last inspector tab per workspace |
-| `theme` | `stores/themeStore.ts` | Color presets and CSS variables |
+| `theme` | `stores/themeStore.ts` + `core/theme/` | Token engine, presets, custom colors, CSS variables |
 | `keymap` | `stores/keymapStore.ts` | Live chord matching + remaps persisted in `localStorage` (`docs/SYSTEMS.md`) |
 | `runtime` | `stores/runtimeStore.ts` | Last uncaught error (status bar) |
 

@@ -31,9 +31,52 @@ function bump() {
   projectStore.markGeometryUpdated()
 }
 
+function beginModifierEdit() {
+  projectStore.recordState('Edit Modifier')
+}
+
 function setFillRim(on: boolean) {
   if (!activeMesh.value?.solidify) return
+  beginModifierEdit()
   activeMesh.value.solidify.fillRim = on
+  bump()
+}
+
+function toggleMirrorFlag(key: 'axisX' | 'axisY' | 'axisZ' | 'bisect' | 'merge' | 'clipping' | 'flipU' | 'enabled') {
+  const mirror = activeMesh.value?.mirror
+  if (!mirror) return
+  beginModifierEdit()
+  mirror[key] = !mirror[key]
+  bump()
+}
+
+function setSubdivType(type: 'catmull-clark' | 'simple') {
+  if (!activeMesh.value?.subdivision) return
+  if ((activeMesh.value.subdivision.type || 'catmull-clark') === type) return
+  beginModifierEdit()
+  activeMesh.value.subdivision.type = type
+  bump()
+}
+
+function setSubdivLevel(level: number) {
+  if (!activeMesh.value?.subdivision) return
+  if (activeMesh.value.subdivision.level === level) return
+  beginModifierEdit()
+  activeMesh.value.subdivision.level = level
+  bump()
+}
+
+function toggleSubdivEnabled() {
+  if (!activeMesh.value?.subdivision) return
+  beginModifierEdit()
+  activeMesh.value.subdivision.enabled = !activeMesh.value.subdivision.enabled
+  bump()
+}
+
+function toggleSolidifyEnabled() {
+  if (!activeMesh.value?.solidify) return
+  beginModifierEdit()
+  activeMesh.value.solidify.enabled = !activeMesh.value.solidify.enabled
   bump()
 }
 
@@ -128,7 +171,12 @@ const activeModifiersCount = computed(() => {
 
             <div class="flex items-center space-x-1">
               <label class="flex items-center" title="Realtime">
-                <input type="checkbox" v-model="activeMesh.mirror.enabled" class="accent-ui-accent" @change="bump" />
+                <input
+                  type="checkbox"
+                  :checked="activeMesh.mirror.enabled"
+                  class="accent-ui-accent"
+                  @click.prevent="toggleMirrorFlag('enabled')"
+                />
               </label>
               <button
                 @click="projectStore.applyMeshModifier('mirror')"
@@ -152,21 +200,21 @@ const activeModifiersCount = computed(() => {
               <span class="text-ui-textSecondary font-bold">Axis</span>
               <div class="flex items-center space-x-1">
                 <button
-                  @click="activeMesh.mirror.axisX = !activeMesh.mirror.axisX; bump()"
+                  @click="toggleMirrorFlag('axisX')"
                   class="px-2.5 py-0.5 rounded-xs border text-[10px] font-bold transition"
                   :class="activeMesh.mirror.axisX ? 'bg-rose-500/20 text-rose-300 border-rose-500/50' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault'"
                 >
                   X
                 </button>
                 <button
-                  @click="activeMesh.mirror.axisY = !activeMesh.mirror.axisY; bump()"
+                  @click="toggleMirrorFlag('axisY')"
                   class="px-2.5 py-0.5 rounded-xs border text-[10px] font-bold transition"
                   :class="activeMesh.mirror.axisY ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault'"
                 >
                   Y
                 </button>
                 <button
-                  @click="activeMesh.mirror.axisZ = !activeMesh.mirror.axisZ; bump()"
+                  @click="toggleMirrorFlag('axisZ')"
                   class="px-2.5 py-0.5 rounded-xs border text-[10px] font-bold transition"
                   :class="activeMesh.mirror.axisZ ? 'bg-sky-500/20 text-sky-300 border-sky-500/50' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault'"
                 >
@@ -177,26 +225,53 @@ const activeModifiersCount = computed(() => {
 
             <div class="grid grid-cols-2 gap-1 text-[10px]">
               <label class="flex items-center space-x-1.5 cursor-pointer bg-ui-input p-1.5 rounded-xs border border-ui-borderSubtle">
-                <input type="checkbox" v-model="activeMesh.mirror.bisect" class="rounded-xs bg-ui-panel border-ui-borderDefault text-ui-accent" @change="bump" />
+                <input
+                  type="checkbox"
+                  :checked="activeMesh.mirror.bisect"
+                  class="rounded-xs bg-ui-panel border-ui-borderDefault text-ui-accent"
+                  @click.prevent="toggleMirrorFlag('bisect')"
+                />
                 <span>Bisect</span>
               </label>
               <label class="flex items-center space-x-1.5 cursor-pointer bg-ui-input p-1.5 rounded-xs border border-ui-borderSubtle">
-                <input type="checkbox" v-model="activeMesh.mirror.merge" class="rounded-xs bg-ui-panel border-ui-borderDefault text-ui-accent" @change="bump" />
+                <input
+                  type="checkbox"
+                  :checked="activeMesh.mirror.merge"
+                  class="rounded-xs bg-ui-panel border-ui-borderDefault text-ui-accent"
+                  @click.prevent="toggleMirrorFlag('merge')"
+                />
                 <span>Merge</span>
               </label>
               <label class="flex items-center space-x-1.5 cursor-pointer bg-ui-input p-1.5 rounded-xs border border-ui-borderSubtle">
-                <input type="checkbox" v-model="activeMesh.mirror.clipping" class="rounded-xs bg-ui-panel border-ui-borderDefault text-ui-accent" />
+                <input
+                  type="checkbox"
+                  :checked="activeMesh.mirror.clipping"
+                  class="rounded-xs bg-ui-panel border-ui-borderDefault text-ui-accent"
+                  @click.prevent="toggleMirrorFlag('clipping')"
+                />
                 <span>Clipping</span>
               </label>
               <label class="flex items-center space-x-1.5 cursor-pointer bg-ui-input p-1.5 rounded-xs border border-ui-borderSubtle">
-                <input type="checkbox" v-model="activeMesh.mirror.flipU" class="rounded-xs bg-ui-panel border-ui-borderDefault text-ui-accent" @change="bump" />
+                <input
+                  type="checkbox"
+                  :checked="activeMesh.mirror.flipU"
+                  class="rounded-xs bg-ui-panel border-ui-borderDefault text-ui-accent"
+                  @click.prevent="toggleMirrorFlag('flipU')"
+                />
                 <span>Flip U</span>
               </label>
             </div>
 
             <div class="space-y-1">
               <span class="text-[10px] text-ui-textSecondary font-bold">Merge Distance</span>
-              <UiNumberField v-model="activeMesh.mirror.mergeThreshold" :step="0.001" :min="0" :precision="4" @change="bump" />
+              <UiNumberField
+                v-model="activeMesh.mirror.mergeThreshold"
+                :step="0.001"
+                :min="0"
+                :precision="4"
+                @before-change="beginModifierEdit"
+                @change="bump"
+              />
             </div>
           </div>
         </div>
@@ -215,7 +290,12 @@ const activeModifiersCount = computed(() => {
 
             <div class="flex items-center space-x-1">
               <label class="flex items-center" title="Realtime">
-                <input type="checkbox" v-model="activeMesh.subdivision.enabled" class="accent-ui-accent" @change="bump" />
+                <input
+                  type="checkbox"
+                  :checked="activeMesh.subdivision.enabled"
+                  class="accent-ui-accent"
+                  @click.prevent="toggleSubdivEnabled"
+                />
               </label>
               <button
                 @click="projectStore.applyMeshModifier('subdivision')"
@@ -239,14 +319,14 @@ const activeModifiersCount = computed(() => {
               <span class="text-ui-textSecondary font-bold">Type</span>
               <div class="flex items-center space-x-1">
                 <button
-                  @click="activeMesh.subdivision.type = 'catmull-clark'; bump()"
+                  @click="setSubdivType('catmull-clark')"
                   class="px-2 py-0.5 rounded-xs border text-[10px] font-bold"
                   :class="(activeMesh.subdivision.type || 'catmull-clark') === 'catmull-clark' ? 'bg-sky-500/20 text-sky-300 border-sky-500/50' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault'"
                 >
                   Catmull–Clark
                 </button>
                 <button
-                  @click="activeMesh.subdivision.type = 'simple'; bump()"
+                  @click="setSubdivType('simple')"
                   class="px-2 py-0.5 rounded-xs border text-[10px] font-bold"
                   :class="activeMesh.subdivision.type === 'simple' ? 'bg-sky-500/20 text-sky-300 border-sky-500/50' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault'"
                 >
@@ -260,7 +340,7 @@ const activeModifiersCount = computed(() => {
                 <button
                   v-for="lv in [1, 2, 3]"
                   :key="lv"
-                  @click="activeMesh.subdivision.level = lv; bump()"
+                  @click="setSubdivLevel(lv)"
                   class="px-2.5 py-0.5 rounded-xs border text-[10px] font-bold"
                   :class="activeMesh.subdivision.level === lv ? 'bg-sky-500/20 text-sky-300 border-sky-500/50' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault'"
                 >
@@ -285,7 +365,12 @@ const activeModifiersCount = computed(() => {
 
             <div class="flex items-center space-x-1">
               <label class="flex items-center" title="Realtime">
-                <input type="checkbox" v-model="activeMesh.solidify.enabled" class="accent-ui-accent" @change="bump" />
+                <input
+                  type="checkbox"
+                  :checked="activeMesh.solidify.enabled"
+                  class="accent-ui-accent"
+                  @click.prevent="toggleSolidifyEnabled"
+                />
               </label>
               <button
                 @click="projectStore.applyMeshModifier('solidify')"
@@ -307,18 +392,32 @@ const activeModifiersCount = computed(() => {
           <div v-show="openModifiers.solidify" class="p-2.5 space-y-2">
             <div class="space-y-1">
               <span class="text-[10px] text-ui-textSecondary font-bold">Thickness</span>
-              <UiNumberField v-model="activeMesh.solidify.thickness" :step="0.01" :precision="3" @change="bump" />
+              <UiNumberField
+                v-model="activeMesh.solidify.thickness"
+                :step="0.01"
+                :precision="3"
+                @before-change="beginModifierEdit"
+                @change="bump"
+              />
             </div>
             <div class="space-y-1">
               <span class="text-[10px] text-ui-textSecondary font-bold">Offset</span>
-              <UiNumberField v-model="activeMesh.solidify.offset" :step="0.1" :min="-1" :max="1" :precision="2" @change="bump" />
+              <UiNumberField
+                v-model="activeMesh.solidify.offset"
+                :step="0.1"
+                :min="-1"
+                :max="1"
+                :precision="2"
+                @before-change="beginModifierEdit"
+                @change="bump"
+              />
             </div>
             <label class="flex items-center space-x-1.5 cursor-pointer bg-ui-input p-1.5 rounded-xs border border-ui-borderSubtle text-[10px]">
               <input
                 type="checkbox"
                 :checked="activeMesh.solidify.fillRim !== false"
                 class="rounded-xs bg-ui-panel border-ui-borderDefault text-ui-accent"
-                @change="setFillRim(activeMesh.solidify.fillRim === false)"
+                @click.prevent="setFillRim(activeMesh.solidify.fillRim === false)"
               />
               <span>Fill Rim</span>
             </label>

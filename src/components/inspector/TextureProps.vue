@@ -6,6 +6,7 @@ import UiSection from '../ui/UiSection.vue'
 import UiButton from '../ui/UiButton.vue'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import ImportTextureModal from '../modals/ImportTextureModal.vue'
+import NewTextureModal from '../modals/NewTextureModal.vue'
 import TextureSharePrompt from '../modals/TextureSharePrompt.vue'
 import { useTextureApply } from '../../composables/useTextureApply'
 import { saveBlobDocument } from '../../core/desktop/desktopApi'
@@ -56,8 +57,6 @@ const isDraggingFile = ref(false)
 const textureSearchQuery = ref('')
 
 const showNewTextureModal = ref(false)
-const newTextureName = ref('')
-const newTextureSize = ref<number>(64)
 
 const showResizeModal = ref(false)
 const resizeW = ref(64)
@@ -151,12 +150,13 @@ function commitRename() {
 // ----------------------------------------------------
 // TEXTURE ASSET ACTIONS & DRAG AND DROP
 // ----------------------------------------------------
-function handleCreateCustomTexture() {
-  const name = newTextureName.value.trim() || `Texture_${projectStore.textures.length + 1}`
-  const size = newTextureSize.value || 64
-  projectStore.createTexture(name, size, size)
+function handleCreateCustomTexture(payload: { name: string; width: number; height: number; fill: 'transparent' | 'white' | 'black' | 'primary' }) {
+  const tex = projectStore.createTexture(payload.name, payload.width, payload.height)
+  if (payload.fill === 'white') tex.pixelBuffer.clear('#ffffff')
+  else if (payload.fill === 'black') tex.pixelBuffer.clear('#111111')
+  else if (payload.fill === 'primary') tex.pixelBuffer.clear(toolStore.primaryColor || '#ffffff')
+  if (payload.fill !== 'transparent') projectStore.markTextureUpdated(tex.id)
   showNewTextureModal.value = false
-  newTextureName.value = ''
 }
 
 function handleDuplicateTexture() {
@@ -202,7 +202,7 @@ function bakeSceneAtlas() {
 
 function handleQuickResize(size: number) {
   if (!activeTexture.value) return
-  projectStore.recordState(`Resize Texture to ${size}px`)
+  projectStore.recordPixels(`Resize Texture to ${size}px`)
   if (activeTexture.value.pixelBuffer) {
     activeTexture.value.pixelBuffer.resize(size, size, resizeMode.value === 'scale' ? 'resample' : 'crop')
   }
@@ -219,7 +219,7 @@ function handleCustomResize() {
   if (!activeTexture.value) return
   const w = Math.max(8, Math.min(2048, resizeW.value || 64))
   const h = Math.max(8, Math.min(2048, resizeH.value || 64))
-  projectStore.recordState(`Resize Texture to ${w}x${h}px`)
+  projectStore.recordPixels(`Resize Texture to ${w}x${h}px`)
   
   if (activeTexture.value.pixelBuffer) {
     activeTexture.value.pixelBuffer.resize(w, h, resizeMode.value === 'scale' ? 'resample' : 'crop')
@@ -282,7 +282,7 @@ function handleRestoreDefaultTexture() {
 function handleAddLayer() {
   const tex = activeTexture.value
   if (!tex || !tex.pixelBuffer) return
-  projectStore.recordState('Add Texture Layer')
+  projectStore.recordPixels('Add Texture Layer')
   tex.pixelBuffer.addLayer()
   tex.dataUrl = tex.pixelBuffer.toDataURL()
   projectStore.markTextureUpdated(tex.id)
@@ -291,7 +291,7 @@ function handleAddLayer() {
 function handleDeleteLayer(id: string) {
   const tex = activeTexture.value
   if (!tex || !tex.pixelBuffer) return
-  projectStore.recordState('Delete Texture Layer')
+  projectStore.recordPixels('Delete Texture Layer')
   tex.pixelBuffer.deleteLayer(id)
   tex.dataUrl = tex.pixelBuffer.toDataURL()
   projectStore.markTextureUpdated(tex.id)
@@ -300,7 +300,7 @@ function handleDeleteLayer(id: string) {
 function handleDuplicateLayer(id: string) {
   const tex = activeTexture.value
   if (!tex || !tex.pixelBuffer) return
-  projectStore.recordState('Duplicate Texture Layer')
+  projectStore.recordPixels('Duplicate Texture Layer')
   tex.pixelBuffer.duplicateLayer(id)
   tex.dataUrl = tex.pixelBuffer.toDataURL()
   projectStore.markTextureUpdated(tex.id)
@@ -321,11 +321,11 @@ function handleLayerChange() {
 }
 
 function beginLayerMetaEdit(label: string) {
-  projectStore.recordState(label)
+  projectStore.recordPixels(label)
 }
 
 function handleToggleLayerVisible(layer: { visible: boolean }) {
-  projectStore.recordState(layer.visible ? 'Hide Texture Layer' : 'Show Texture Layer')
+  projectStore.recordPixels(layer.visible ? 'Hide Texture Layer' : 'Show Texture Layer')
   layer.visible = !layer.visible
   handleLayerChange()
 }
@@ -352,7 +352,7 @@ function openUvStudio() {
 function flipHorizontal() {
   const tex = activeTexture.value
   if (!tex || !tex.pixelBuffer) return
-  projectStore.recordState('Flip Texture Horizontal')
+  projectStore.recordPixels('Flip Texture Horizontal')
   tex.pixelBuffer.flip(true, false, true)
   projectStore.markTextureUpdated(tex.id)
 }
@@ -360,7 +360,7 @@ function flipHorizontal() {
 function flipVertical() {
   const tex = activeTexture.value
   if (!tex || !tex.pixelBuffer) return
-  projectStore.recordState('Flip Texture Vertical')
+  projectStore.recordPixels('Flip Texture Vertical')
   tex.pixelBuffer.flip(false, true, true)
   projectStore.markTextureUpdated(tex.id)
 }
@@ -368,7 +368,7 @@ function flipVertical() {
 function rotate90CW() {
   const tex = activeTexture.value
   if (!tex || !tex.pixelBuffer) return
-  projectStore.recordState('Rotate Texture 90° CW')
+  projectStore.recordPixels('Rotate Texture 90° CW')
   tex.pixelBuffer.rotate(90)
   tex.width = tex.pixelBuffer.width
   tex.height = tex.pixelBuffer.height
@@ -378,7 +378,7 @@ function rotate90CW() {
 function applyPixelFilter(action: 'invert' | 'grayscale' | 'brighten' | 'darken') {
   const tex = activeTexture.value
   if (!tex || !tex.pixelBuffer) return
-  projectStore.recordState(`Apply Filter: ${action.toUpperCase()}`)
+  projectStore.recordPixels(`Apply Filter: ${action.toUpperCase()}`)
   if (action === 'invert') tex.pixelBuffer.invertColors()
   else if (action === 'grayscale') tex.pixelBuffer.desaturate()
   else if (action === 'brighten') tex.pixelBuffer.adjustBrightness(40)
@@ -389,7 +389,7 @@ function applyPixelFilter(action: 'invert' | 'grayscale' | 'brighten' | 'darken'
 function clearCanvas(transparent: boolean) {
   const tex = activeTexture.value
   if (!tex || !tex.pixelBuffer) return
-  projectStore.recordState(transparent ? 'Clear Texture Transparent' : 'Fill Texture with Color')
+  projectStore.recordPixels(transparent ? 'Clear Texture Transparent' : 'Fill Texture with Color')
   tex.pixelBuffer.clear(transparent ? undefined : (toolStore.primaryColor || '#ffffff'))
   projectStore.markTextureUpdated(tex.id)
 }
@@ -398,7 +398,7 @@ function ditherTextureToPalette(algorithm: 'floyd' | 'atkinson') {
   const tex = activeTexture.value
   if (!tex || !tex.pixelBuffer) return
   const pal = projectStore.activePalette?.colors || ['#ffffff', '#000000', '#ef4444', '#22c55e', '#3b82f6', '#f59e0b']
-  projectStore.recordState(`Dither Texture (${algorithm === 'floyd' ? 'Floyd-Steinberg' : 'Atkinson'})`)
+  projectStore.recordPixels(`Dither Texture (${algorithm === 'floyd' ? 'Floyd-Steinberg' : 'Atkinson'})`)
   tex.pixelBuffer.remapToPalette(pal, algorithm === 'floyd' ? 'floyd-steinberg' : 'atkinson')
   projectStore.markTextureUpdated(tex.id)
 }
@@ -808,37 +808,11 @@ function ditherTextureToPalette(algorithm: 'floyd' | 'atkinson') {
       </div>
     </UiSection>
 
-    <div v-if="showNewTextureModal" class="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-      <div class="bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-3 w-80 space-y-3">
-        <div class="flex items-center justify-between text-xs font-semibold text-ui-textPrimary border-b border-ui-borderSubtle pb-1">
-          <span>New texture</span>
-        </div>
-        <div>
-          <label class="text-[10px] text-ui-textMuted block mb-0.5">Name</label>
-          <input
-            v-model="newTextureName"
-            :placeholder="`Texture_${projectStore.textures.length + 1}`"
-            class="w-full h-6 bg-ui-input border border-ui-borderSubtle rounded-xs px-2 text-ui-textPrimary text-xs focus:outline-none font-mono"
-          />
-        </div>
-        <div class="grid grid-cols-2 gap-1">
-          <UiButton
-            v-for="s in [16, 32, 64, 128]"
-            :key="s"
-            size="xs"
-            :active="newTextureSize === s"
-            @click="newTextureSize = s"
-          >
-            {{ s }}
-          </UiButton>
-        </div>
-        <UiButton size="xs" :active="newTextureSize === 256" class="w-full" @click="newTextureSize = 256">256</UiButton>
-        <div class="flex gap-2">
-          <UiButton size="xs" variant="accent" class="flex-1" @click="handleCreateCustomTexture">Create</UiButton>
-          <UiButton size="xs" @click="showNewTextureModal = false">Cancel</UiButton>
-        </div>
-      </div>
-    </div>
+    <NewTextureModal
+      v-if="showNewTextureModal"
+      @close="showNewTextureModal = false"
+      @create="handleCreateCustomTexture"
+    />
 
     <div v-if="showResizeModal" class="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
       <div class="bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-3 w-72 space-y-3">

@@ -18,92 +18,204 @@ export interface GeometryBundle {
   vertexIndexMap: string[]
 }
 
-export function computeBoneWorldMatrix(bone: Bone, allBones: Bone[], restPose = false): THREE.Matrix4 {
-  const pivot = new THREE.Vector3(bone.head.x, bone.head.y, bone.head.z)
-  const translation = restPose
-    ? new THREE.Vector3(0, 0, 0)
-    : new THREE.Vector3(bone.position.x, bone.position.y, bone.position.z)
-  const euler = restPose
-    ? new THREE.Euler(0, 0, 0)
-    : new THREE.Euler(
-        THREE.MathUtils.degToRad(bone.rotation.x),
-        THREE.MathUtils.degToRad(bone.rotation.y),
-        THREE.MathUtils.degToRad(bone.rotation.z)
-      )
-  const scale = restPose
-    ? new THREE.Vector3(1, 1, 1)
-    : new THREE.Vector3(bone.scale.x, bone.scale.y, bone.scale.z)
+const _bPivot = new THREE.Vector3()
+const _bTrans = new THREE.Vector3()
+const _bEuler = new THREE.Euler()
+const _bScale = new THREE.Vector3()
+const _bQuat = new THREE.Quaternion()
+const _bToPivot = new THREE.Matrix4()
+const _bTrs = new THREE.Matrix4()
+const _bRestInv = new THREE.Matrix4()
 
-  const toPivot = new THREE.Matrix4().makeTranslation(-pivot.x, -pivot.y, -pivot.z)
-  const trs = new THREE.Matrix4().compose(pivot.clone().add(translation), new THREE.Quaternion().setFromEuler(euler), scale)
-  const localMat = new THREE.Matrix4().multiplyMatrices(trs, toPivot)
-
-  if (bone.parentId) {
-    const parent = allBones.find(b => b.id === bone.parentId)
-    if (parent) {
-      const parentMat = computeBoneWorldMatrix(parent, allBones, restPose)
-      return new THREE.Matrix4().multiplyMatrices(parentMat, localMat)
-    }
-  }
-  return localMat
+function boneWorldCacheKey(boneId: string, restPose: boolean) {
+  return restPose ? `${boneId}\0r` : boneId
 }
 
-/** Linear-blend skin matrix: posed world × inverse bind (rest). */
-export function computeBoneSkinMatrix(bone: Bone, allBones: Bone[]): THREE.Matrix4 {
-  const world = computeBoneWorldMatrix(bone, allBones, false)
-  const rest = computeBoneWorldMatrix(bone, allBones, true)
-  return world.multiply(rest.invert())
+function writeLocalBoneMatrix(bone: Bone, restPose: boolean, out: THREE.Matrix4) {
+  _bPivot.set(bone.head.x, bone.head.y, bone.head.z)
+  if (restPose) {
+    _bTrans.set(_bPivot.x, _bPivot.y, _bPivot.z)
+    _bEuler.set(0, 0, 0)
+    _bScale.set(1, 1, 1)
+  } else {
+    _bTrans.set(_bPivot.x + bone.position.x, _bPivot.y + bone.position.y, _bPivot.z + bone.position.z)
+    _bEuler.set(
+      THREE.MathUtils.degToRad(bone.rotation.x),
+      THREE.MathUtils.degToRad(bone.rotation.y),
+      THREE.MathUtils.degToRad(bone.rotation.z)
+    )
+    _bScale.set(bone.scale.x, bone.scale.y, bone.scale.z)
+  }
+  _bQuat.setFromEuler(_bEuler)
+  _bToPivot.makeTranslation(-_bPivot.x, -_bPivot.y, -_bPivot.z)
+  _bTrs.compose(_bTrans, _bQuat, _bScale)
+  out.multiplyMatrices(_bTrs, _bToPivot)
+}
+
+export function computeBoneWorldMatrix(
+  bone: Bone,
+  allBones: Bone[],
+  restPose = false,
+  cache?: Map<string, THREE.Matrix4>
+): THREE.Matrix4 {
+  const key = boneWorldCacheKey(bone.id, restPose)
+  const hit = cache?.get(key)
+  if (hit) return hit
+
+  return computeBoneWorldMatrixWalk(bone, allBones, restPose, cache, new Set())
+}
+
+function computeBoneWorldMatrixWalk(
+  bone: Bone,
+  allBones: Bone[],
+  restPose: boolean,
+  cache: Map<string, THREE.Matrix4> | undefined,
+  seen: Set<string>
+): THREE.Matrix4 {
+  const key = boneWorldCacheKey(bone.id, restPose)
+  const hit = cache?.get(key)
+  if (hit) return hit
+  if (seen.has(key)) return new THREE.Matrix4()
+  seen.add(key)
+
+  const localMat = new THREE.Matrix4()
+  writeLocalBoneMatrix(bone, restPose, localMat)
+
+  let result = localMat
+  if (bone.parentId) {
+    const parent = allBones.find(b => b.id === bone.parentId)
+    if (parent && parent.id !== bone.id) {
+      const parentMat = computeBoneWorldMatrixWalk(parent, allBones, restPose, cache, seen)
+      result = new THREE.Matrix4().multiplyMatrices(parentMat, localMat)
+    }
+  }
+  cache?.set(key, result)
+  return result
+}
+
+/** Linear-blend skin matrix: posed world × inverse bind (rest). Does not mutate cached worlds. */
+export function computeBoneSkinMatrix(
+  bone: Bone,
+  allBones: Bone[],
+  worldCache?: Map<string, THREE.Matrix4>,
+  restCache?: Map<string, THREE.Matrix4>
+): THREE.Matrix4 {
+  const world = computeBoneWorldMatrix(bone, allBones, false, worldCache)
+  const rest = computeBoneWorldMatrix(bone, allBones, true, restCache)
+  return new THREE.Matrix4().copy(world).multiply(_bRestInv.copy(rest).invert())
+}
+
+const _sharedRestCache = new Map<string, THREE.Matrix4>()
+let _sharedRestBindSig = ''
+
+function restBindSignature(bones: Bone[]) {
+  let sig = ''
+  for (const b of bones) {
+    sig += `${b.id}:${b.parentId}:${b.head.x},${b.head.y},${b.head.z};`
+  }
+  return sig
+}
+
+export function buildBoneSkinMatrices(
+  bones: Bone[],
+  worldCache?: Map<string, THREE.Matrix4>
+): Map<string, THREE.Matrix4> {
+  const restSig = restBindSignature(bones)
+  if (restSig !== _sharedRestBindSig) {
+    _sharedRestCache.clear()
+    _sharedRestBindSig = restSig
+  }
+  const worlds = worldCache ?? new Map<string, THREE.Matrix4>()
+  const skin = new Map<string, THREE.Matrix4>()
+  for (const b of bones) {
+    skin.set(b.id, computeBoneSkinMatrix(b, bones, worlds, _sharedRestCache))
+  }
+  return skin
+}
+
+export function faceTriIndexSets(verts: Array<{ position: { x: number; y: number; z: number } }>): number[][] {
+  if (verts.length === 4) {
+    const a = verts[0].position
+    const b = verts[1].position
+    const c = verts[2].position
+    const d = verts[3].position
+    const d02 = (a.x - c.x) ** 2 + (a.y - c.y) ** 2 + (a.z - c.z) ** 2
+    const d13 = (b.x - d.x) ** 2 + (b.y - d.y) ** 2 + (b.z - d.z) ** 2
+    return d13 < d02 ? [[0, 1, 3], [1, 2, 3]] : [[0, 1, 2], [0, 2, 3]]
+  }
+  const out: number[][] = []
+  for (let i = 1; i < verts.length - 1; i++) out.push([0, i, i + 1])
+  return out
+}
+
+export function meshHasSkinWeights(mesh: MeshObject): boolean {
+  for (const v of mesh.vertices) {
+    const weights = v.boneWeights
+    if (!weights) continue
+    for (const bId in weights) {
+      if (weights[bId] > 0.001) return true
+    }
+  }
+  return false
+}
+
+const _skinMeshPos = new THREE.Vector3()
+const _skinWorld = new THREE.Vector3()
+const _skinAccum = new THREE.Vector3()
+const _skinXform = new THREE.Vector3()
+const _skinOut = new THREE.Vector3()
+
+function skinVertexInto(
+  meshPos: THREE.Vector3,
+  v: Vertex,
+  boneMatrixMap: Map<string, THREE.Matrix4>,
+  out: THREE.Vector3
+): boolean {
+  if (!v.boneWeights) return false
+  _skinWorld.set(meshPos.x + v.position.x, meshPos.y + v.position.y, meshPos.z + v.position.z)
+  _skinAccum.set(0, 0, 0)
+  let totalWeight = 0
+  for (const bId in v.boneWeights) {
+    const weight = v.boneWeights[bId]
+    const mat = boneMatrixMap.get(bId)
+    if (mat && weight > 0.001) {
+      _skinXform.copy(_skinWorld).applyMatrix4(mat)
+      _skinAccum.addScaledVector(_skinXform, weight)
+      totalWeight += weight
+    }
+  }
+  if (totalWeight <= 0) return false
+  if (totalWeight < 0.999) {
+    _skinAccum.addScaledVector(_skinWorld, 1 - totalWeight)
+  }
+  out.set(_skinAccum.x - meshPos.x, _skinAccum.y - meshPos.y, _skinAccum.z - meshPos.z)
+  return true
 }
 
 export function evaluateSkinning(mesh: MeshObject, vertices: Vertex[], bones: Bone[]): Vertex[] {
   if (!bones || bones.length === 0) return vertices
 
-  const boneMatrixMap = new Map<string, THREE.Matrix4>()
-  for (const b of bones) {
-    boneMatrixMap.set(b.id, computeBoneSkinMatrix(b, bones))
-  }
-
+  const boneMatrixMap = buildBoneSkinMatrices(bones)
   const deformed: Vertex[] = []
-  const meshPos = new THREE.Vector3(mesh.position.x, mesh.position.y, mesh.position.z)
+  _skinMeshPos.set(mesh.position.x, mesh.position.y, mesh.position.z)
 
   for (const v of vertices) {
-    if (!v.boneWeights || Object.keys(v.boneWeights).length === 0) {
+    if (!skinVertexInto(_skinMeshPos, v, boneMatrixMap, _skinOut)) {
       deformed.push(v)
       continue
     }
-
-    const worldPos = new THREE.Vector3(meshPos.x + v.position.x, meshPos.y + v.position.y, meshPos.z + v.position.z)
-    const accumPos = new THREE.Vector3(0, 0, 0)
-    let totalWeight = 0
-
-    for (const [bId, weight] of Object.entries(v.boneWeights)) {
-      const mat = boneMatrixMap.get(bId)
-      if (mat && weight > 0.001) {
-        const transformed = worldPos.clone().applyMatrix4(mat)
-        accumPos.addScaledVector(transformed, weight)
-        totalWeight += weight
-      }
-    }
-
-    if (totalWeight > 0) {
-      if (totalWeight < 0.999) {
-        accumPos.addScaledVector(worldPos, 1 - totalWeight)
-      }
-      const localPos = accumPos.sub(meshPos)
-      deformed.push({
-        ...v,
-        position: { x: Number(localPos.x.toFixed(4)), y: Number(localPos.y.toFixed(4)), z: Number(localPos.z.toFixed(4)) }
-      })
-    } else {
-      deformed.push(v)
-    }
+    deformed.push({
+      ...v,
+      position: { x: _skinOut.x, y: _skinOut.y, z: _skinOut.z }
+    })
   }
   return deformed
 }
 
-export function weightToHeatmapColor(weight: number): THREE.Color {
+const scratchVertexColor = new THREE.Color()
+
+export function weightToHeatmapColor(weight: number, color = scratchVertexColor): THREE.Color {
   const w = Math.max(0, Math.min(1, weight))
-  const color = new THREE.Color()
   if (w <= 0.0001) {
     // 0.0: Deep Navy/Blue (unweighted)
     color.setRGB(0.04, 0.12, 0.65)
@@ -263,14 +375,24 @@ export function meshToThreeGeometry(
   selectedEdgeIds: string[] = [],
   globalShadeMode: 'flat' | 'smooth' = 'flat',
   skeletalDeformContext?: { isPoseMode: boolean; bones: Bone[] },
-  weightPaintContext?: { isWeightPaint: boolean; activeBoneId?: string }
+  weightPaintContext?: { isWeightPaint: boolean; activeBoneId?: string },
+  selectedVertexIds: string[] = []
 ): GeometryBundle {
   ensureMeshUVs(mesh)
   let { vertices: evalVertices, faces: evalFaces } = evaluateModifiers(mesh)
 
+  const posedPos = new Map<string, { x: number; y: number; z: number }>()
   if (skeletalDeformContext && skeletalDeformContext.isPoseMode && skeletalDeformContext.bones.length > 0) {
-    evalVertices = evaluateSkinning(mesh, evalVertices, skeletalDeformContext.bones)
+    const boneMatrixMap = buildBoneSkinMatrices(skeletalDeformContext.bones)
+    _skinMeshPos.set(mesh.position.x, mesh.position.y, mesh.position.z)
+    for (const v of evalVertices) {
+      if (skinVertexInto(_skinMeshPos, v, boneMatrixMap, _skinOut)) {
+        posedPos.set(v.id, { x: _skinOut.x, y: _skinOut.y, z: _skinOut.z })
+      }
+    }
   }
+  const posOf = (v: { id: string; position: { x: number; y: number; z: number } }) =>
+    posedPos.get(v.id) ?? v.position
 
   const vertMap = new Map<string, Vertex>()
   for (const v of evalVertices) {
@@ -288,7 +410,7 @@ export function meshToThreeGeometry(
       const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
       if (faceVerts.length < 3) continue
 
-      const fn = computeFaceNormal(faceVerts.map(v => v.position))
+      const fn = computeFaceNormal(faceVerts.map(v => posOf(v)))
       const fnVec = new THREE.Vector3(fn.x, fn.y, fn.z)
       for (let i = 0; i < faceVerts.length; i++) {
         const vNormal = vertNormalMap.get(faceVerts[i].id)
@@ -319,45 +441,25 @@ export function meshToThreeGeometry(
   const wireframePositions: number[] = []
   const selectedFacesPositions: number[] = []
   const selectedFacesNormals: number[] = []
+  const selectedFaceSet = selectedFaceIds.length > 0 ? new Set(selectedFaceIds) : null
 
   for (let fIdx = 0; fIdx < evalFaces.length; fIdx++) {
     const face = evalFaces[fIdx]
     const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
     if (faceVerts.length < 3) continue
 
-    const faceNormal = computeFaceNormal(faceVerts.map(v => v.position))
-    const isFaceSelected = selectedFaceIds.includes(face.id)
+    const faceNormal = computeFaceNormal(faceVerts.map(v => posOf(v)))
+    const isFaceSelected = Boolean(selectedFaceSet?.has(face.id))
 
     // Build wireframe edges
     for (let i = 0; i < faceVerts.length; i++) {
       const next = (i + 1) % faceVerts.length
-      const p1 = faceVerts[i].position
-      const p2 = faceVerts[next].position
+      const p1 = posOf(faceVerts[i])
+      const p2 = posOf(faceVerts[next])
       wireframePositions.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z)
     }
 
-    // Triangulate polygon. Quads use the shorter diagonal so a pulled corner
-    // does not shear UVs across the worse split (Blender-style).
-    const triIndexSets: number[][] = []
-    if (faceVerts.length === 4) {
-      const d02 =
-        (faceVerts[0].position.x - faceVerts[2].position.x) ** 2 +
-        (faceVerts[0].position.y - faceVerts[2].position.y) ** 2 +
-        (faceVerts[0].position.z - faceVerts[2].position.z) ** 2
-      const d13 =
-        (faceVerts[1].position.x - faceVerts[3].position.x) ** 2 +
-        (faceVerts[1].position.y - faceVerts[3].position.y) ** 2 +
-        (faceVerts[1].position.z - faceVerts[3].position.z) ** 2
-      if (d13 < d02) {
-        triIndexSets.push([0, 1, 3], [1, 2, 3])
-      } else {
-        triIndexSets.push([0, 1, 2], [0, 2, 3])
-      }
-    } else {
-      for (let i = 1; i < faceVerts.length - 1; i++) {
-        triIndexSets.push([0, i, i + 1])
-      }
-    }
+    const triIndexSets = faceTriIndexSets(faceVerts)
 
     for (const tri of triIndexSets) {
       const v0 = faceVerts[tri[0]]
@@ -376,7 +478,8 @@ export function meshToThreeGeometry(
         const v = triVerts[j]
         const uv = triUVs[j]
 
-        positions.push(v.position.x, v.position.y, v.position.z)
+        const p = posOf(v)
+        positions.push(p.x, p.y, p.z)
 
         if (shade === 'smooth' && vertNormalMap.has(v.id)) {
           const vn = vertNormalMap.get(v.id)!
@@ -396,14 +499,14 @@ export function meshToThreeGeometry(
         let c: THREE.Color
         if (weightPaintContext?.isWeightPaint && weightPaintContext?.activeBoneId) {
           const w = v.boneWeights?.[weightPaintContext.activeBoneId] ?? 0.0
-          c = weightToHeatmapColor(w)
+          c = weightToHeatmapColor(w, scratchVertexColor)
         } else {
-          c = new THREE.Color(v.color || '#ffffff')
+          c = scratchVertexColor.set(v.color || '#ffffff')
         }
         colors.push(c.r, c.g, c.b)
 
         if (isFaceSelected) {
-          selectedFacesPositions.push(v.position.x, v.position.y, v.position.z)
+          selectedFacesPositions.push(p.x, p.y, p.z)
           selectedFacesNormals.push(faceNormal.x, faceNormal.y, faceNormal.z)
         }
       }
@@ -420,15 +523,18 @@ export function meshToThreeGeometry(
   // Selected Edges Highlight lines
   const selectedEdgesPositions: number[] = []
   if (selectedEdgeIds.length > 0) {
+    const selectedEdgeSet = new Set(selectedEdgeIds)
     const allEdges = getMeshEdges(mesh)
     for (const edge of allEdges) {
-      if (selectedEdgeIds.includes(edge.id)) {
+      if (selectedEdgeSet.has(edge.id)) {
         const v1 = vertMap.get(edge.v1)
         const v2 = vertMap.get(edge.v2)
         if (v1 && v2) {
+          const ep1 = posOf(v1)
+          const ep2 = posOf(v2)
           selectedEdgesPositions.push(
-            v1.position.x, v1.position.y, v1.position.z,
-            v2.position.x, v2.position.y, v2.position.z
+            ep1.x, ep1.y, ep1.z,
+            ep2.x, ep2.y, ep2.z
           )
         }
       }
@@ -463,13 +569,15 @@ export function meshToThreeGeometry(
   const vertexPointsColors: number[] = []
   const vertexIndexMap: string[] = []
 
+  const selectedVertSet = selectedVertexIds.length > 0 ? new Set(selectedVertexIds) : null
   for (const v of mesh.vertices) {
-    vertexPointsPositions.push(v.position.x, v.position.y, v.position.z)
+    const vp = posOf(v)
+    vertexPointsPositions.push(vp.x, vp.y, vp.z)
     vertexIndexMap.push(v.id)
-    if (v.selected) {
-      vertexPointsColors.push(1.0, 0.65, 0.0) // Bright Amber for selected
+    if (v.selected || selectedVertSet?.has(v.id)) {
+      vertexPointsColors.push(1.0, 0.62, 0.12)
     } else {
-      vertexPointsColors.push(0.2, 0.8, 1.0) // Cyan blue for unselected
+      vertexPointsColors.push(0.93, 0.93, 0.96)
     }
   }
 
@@ -492,6 +600,62 @@ export function meshToThreeGeometry(
   }
 }
 
+/** Selection overlays only — avoids rebuilding the shaded mesh on face/edge pick. */
+export function buildSelectionOverlayGeometries(
+  mesh: MeshObject,
+  selectedFaceIds: string[],
+  selectedEdgeIds: string[]
+): { selectedFacesGeometry: THREE.BufferGeometry; selectedEdgesGeometry: THREE.BufferGeometry } {
+  const { vertices: evalVertices, faces: evalFaces } = evaluateModifiers(mesh)
+  const vertMap = new Map<string, Vertex>()
+  for (const v of evalVertices) vertMap.set(v.id, v)
+
+  const selectedFacesPositions: number[] = []
+  const selectedFacesNormals: number[] = []
+  if (selectedFaceIds.length > 0) {
+    const faceSet = new Set(selectedFaceIds)
+    for (const face of evalFaces) {
+      if (!faceSet.has(face.id)) continue
+      const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
+      if (faceVerts.length < 3) continue
+      const faceNormal = computeFaceNormal(faceVerts.map(v => v.position))
+      for (const triIdx of faceTriIndexSets(faceVerts)) {
+        const tri = [faceVerts[triIdx[0]], faceVerts[triIdx[1]], faceVerts[triIdx[2]]]
+        for (const v of tri) {
+          selectedFacesPositions.push(v.position.x, v.position.y, v.position.z)
+          selectedFacesNormals.push(faceNormal.x, faceNormal.y, faceNormal.z)
+        }
+      }
+    }
+  }
+
+  const selectedEdgesPositions: number[] = []
+  if (selectedEdgeIds.length > 0) {
+    const edgeSet = new Set(selectedEdgeIds)
+    for (const edge of getMeshEdges(mesh)) {
+      if (!edgeSet.has(edge.id)) continue
+      const v1 = vertMap.get(edge.v1)
+      const v2 = vertMap.get(edge.v2)
+      if (!v1 || !v2) continue
+      selectedEdgesPositions.push(
+        v1.position.x, v1.position.y, v1.position.z,
+        v2.position.x, v2.position.y, v2.position.z
+      )
+    }
+  }
+
+  const selectedFacesGeometry = new THREE.BufferGeometry()
+  if (selectedFacesPositions.length > 0) {
+    selectedFacesGeometry.setAttribute('position', new THREE.Float32BufferAttribute(selectedFacesPositions, 3))
+    selectedFacesGeometry.setAttribute('normal', new THREE.Float32BufferAttribute(selectedFacesNormals, 3))
+  }
+  const selectedEdgesGeometry = new THREE.BufferGeometry()
+  if (selectedEdgesPositions.length > 0) {
+    selectedEdgesGeometry.setAttribute('position', new THREE.Float32BufferAttribute(selectedEdgesPositions, 3))
+  }
+  return { selectedFacesGeometry, selectedEdgesGeometry }
+}
+
 /**
  * High-performance in-place GPU BufferAttribute updater.
  * Mutates existing position/color buffer attributes directly for 60+ FPS animation scrubbing and weight painting.
@@ -499,17 +663,23 @@ export function meshToThreeGeometry(
 export function updateThreeGeometryAttributes(
   meshObj: MeshObject,
   geometry: THREE.BufferGeometry,
-  skeletalContext?: { isPoseMode?: boolean; bones?: Bone[] },
-  weightPaintContext?: { isWeightPaint?: boolean; activeBoneId?: string }
+  skeletalContext?: { isPoseMode?: boolean; bones?: Bone[]; skinMatrices?: Map<string, THREE.Matrix4> },
+  weightPaintContext?: { isWeightPaint?: boolean; activeBoneId?: string },
+  shadeMode: MeshShadeMode = 'flat'
 ): boolean {
   const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute
   const colAttr = geometry.getAttribute('color') as THREE.BufferAttribute | undefined
+  const nrmAttr = geometry.getAttribute('normal') as THREE.BufferAttribute | undefined
   if (!posAttr) return false
 
-  let { vertices: evalVertices, faces: evalFaces } = evaluateModifiers(meshObj)
-
-  if (skeletalContext?.isPoseMode && skeletalContext.bones && skeletalContext.bones.length > 0) {
-    evalVertices = evaluateSkinning(meshObj, evalVertices, skeletalContext.bones)
+  const { vertices: evalVertices, faces: evalFaces } = evaluateModifiers(meshObj)
+  const skinMatrices =
+    skeletalContext?.skinMatrices
+    ?? (skeletalContext?.isPoseMode && skeletalContext.bones && skeletalContext.bones.length > 0
+      ? buildBoneSkinMatrices(skeletalContext.bones)
+      : null)
+  if (skinMatrices) {
+    _skinMeshPos.set(meshObj.position.x, meshObj.position.y, meshObj.position.z)
   }
 
   const vertMap = new Map<string, Vertex>()
@@ -519,8 +689,12 @@ export function updateThreeGeometryAttributes(
 
   const posArray = posAttr.array as Float32Array
   const colArray = colAttr ? (colAttr.array as Float32Array) : null
+  const nrmArray = nrmAttr ? (nrmAttr.array as Float32Array) : null
+  const writeColors = Boolean(colArray && weightPaintContext?.isWeightPaint && weightPaintContext.activeBoneId)
+  const writeFlatNormals = Boolean(nrmArray && skinMatrices && shadeMode === 'flat')
   let pIdx = 0
   let cIdx = 0
+  let nIdx = 0
 
   for (let fIdx = 0; fIdx < evalFaces.length; fIdx++) {
     const face = evalFaces[fIdx]
@@ -529,41 +703,64 @@ export function updateThreeGeometryAttributes(
     const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
     if (faceVerts.length < 3) continue
 
-    for (let i = 1; i < faceVerts.length - 1; i++) {
-      const v0 = faceVerts[0]
-      const v1 = faceVerts[i]
-      const v2 = faceVerts[i + 1]
-
-      const tri = [v0, v1, v2]
+    for (const triIdx of faceTriIndexSets(faceVerts)) {
+      const tri = [faceVerts[triIdx[0]], faceVerts[triIdx[1]], faceVerts[triIdx[2]]]
+      const triStart = pIdx
       for (const v of tri) {
         if (pIdx + 2 < posArray.length) {
-          posArray[pIdx] = v.position.x
-          posArray[pIdx + 1] = v.position.y
-          posArray[pIdx + 2] = v.position.z
+          if (skinMatrices && skinVertexInto(_skinMeshPos, v, skinMatrices, _skinOut)) {
+            posArray[pIdx] = _skinOut.x
+            posArray[pIdx + 1] = _skinOut.y
+            posArray[pIdx + 2] = _skinOut.z
+          } else {
+            posArray[pIdx] = v.position.x
+            posArray[pIdx + 1] = v.position.y
+            posArray[pIdx + 2] = v.position.z
+          }
           pIdx += 3
         }
 
-        if (colArray && cIdx + 2 < colArray.length) {
-          if (weightPaintContext?.isWeightPaint && weightPaintContext.activeBoneId) {
-            const w = v.boneWeights?.[weightPaintContext.activeBoneId] || 0
-            const c = weightToHeatmapColor(w)
-            colArray[cIdx] = c.r
-            colArray[cIdx + 1] = c.g
-            colArray[cIdx + 2] = c.b
-          } else {
-            const c = new THREE.Color(v.color || '#ffffff')
-            colArray[cIdx] = c.r
-            colArray[cIdx + 1] = c.g
-            colArray[cIdx + 2] = c.b
-          }
+        if (writeColors && colArray && cIdx + 2 < colArray.length) {
+          const w = v.boneWeights?.[weightPaintContext!.activeBoneId!] || 0
+          const c = weightToHeatmapColor(w, scratchVertexColor)
+          colArray[cIdx] = c.r
+          colArray[cIdx + 1] = c.g
+          colArray[cIdx + 2] = c.b
           cIdx += 3
+        }
+      }
+
+      if (writeFlatNormals && nrmArray && triStart + 8 < posArray.length && nIdx + 8 < nrmArray.length) {
+        const ax = posArray[triStart + 3] - posArray[triStart]
+        const ay = posArray[triStart + 4] - posArray[triStart + 1]
+        const az = posArray[triStart + 5] - posArray[triStart + 2]
+        const bx = posArray[triStart + 6] - posArray[triStart]
+        const by = posArray[triStart + 7] - posArray[triStart + 1]
+        const bz = posArray[triStart + 8] - posArray[triStart + 2]
+        let nx = ay * bz - az * by
+        let ny = az * bx - ax * bz
+        let nz = ax * by - ay * bx
+        const len = Math.hypot(nx, ny, nz) || 1
+        nx /= len
+        ny /= len
+        nz /= len
+        for (let k = 0; k < 3; k++) {
+          nrmArray[nIdx] = nx
+          nrmArray[nIdx + 1] = ny
+          nrmArray[nIdx + 2] = nz
+          nIdx += 3
         }
       }
     }
   }
 
   posAttr.needsUpdate = true
-  if (colAttr) colAttr.needsUpdate = true
-  geometry.computeVertexNormals()
+  if (writeColors && colAttr) colAttr.needsUpdate = true
+  if (writeFlatNormals && nrmAttr) nrmAttr.needsUpdate = true
+  else if (skinMatrices && (shadeMode === 'smooth' || shadeMode === 'auto')) {
+    geometry.computeVertexNormals()
+  }
+  if (pIdx !== posArray.length) return false
+  if (writeColors && colArray && cIdx !== colArray.length) return false
   return true
 }

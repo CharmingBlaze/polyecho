@@ -1,8 +1,7 @@
 import * as THREE from 'three'
 import { ModalOperator } from './ModalOperator'
-import { ScreenGeometry } from '../geometry/ScreenGeometry'
+import { ScreenGeometry, type ViewQuadrant } from '../geometry/ScreenGeometry'
 import { PolyDrawKernel, DrawPlane, DrawViewKind } from '../mesh/operations/PolyDrawKernel'
-import { MeshTopologyService } from '../mesh/MeshTopologyService'
 
 interface BuildPoint {
   vertId: number
@@ -24,6 +23,7 @@ export class PolyBuildOperator extends ModalOperator {
   public canClose = false
   public canFill = false
   public facesMade = 0
+  public continueStrip = false
   public previewFaceScreen: THREE.Vector2[] = []
   private lastFaceId: number | null = null
 
@@ -34,6 +34,10 @@ export class PolyBuildOperator extends ModalOperator {
   public hoverWorld: THREE.Vector3 | null = null
   private hoverExistingId: number | null = null
   private previewLine: THREE.Line | null = null
+  private previewFill: THREE.Mesh | null = null
+  private mapCamera: THREE.Camera | null = null
+  private mapQuadrant: ViewQuadrant | undefined
+  private sketchMapLocked = false
 
   begin(ctx: any, startPointer: { x: number; y: number }) {
     super.begin(ctx, startPointer)
@@ -43,6 +47,8 @@ export class PolyBuildOperator extends ModalOperator {
     this.planeLock = null
     this.drawPlaneLocked = false
     this.perspMode = 'view'
+    this.sketchMapLocked = false
+    this.syncMapping()
     this.seedFromSelection()
     this.resolvePlane()
     this.updateHover(startPointer)
@@ -57,9 +63,31 @@ export class PolyBuildOperator extends ModalOperator {
     this.isShiftHeld = event.shiftKey
     this.isCtrlHeld = event.ctrlKey
     if (!this.drawPlaneLocked) this.resolvePlane()
+    this.syncMapping()
     this.updateHover(this.currentMouse)
     this.updatePreview()
     this.updateStatus()
+  }
+
+  relayout() {
+    this.updateHover(this.currentMouse)
+    this.updatePreview()
+    this.updateStatus()
+  }
+
+  mappingCamera(): THREE.Camera {
+    return this.mapCamera ?? this.ctx.camera
+  }
+
+  mappingQuadrant(): ViewQuadrant | undefined {
+    return this.mapQuadrant ?? this.ctx.quadrant
+  }
+
+  private syncMapping() {
+    if (this.sketchMapLocked) return
+    this.mapCamera = this.ctx.camera
+    this.mapQuadrant = this.ctx.quadrant
+    if (this.chain.length > 0) this.sketchMapLocked = true
   }
 
   handlePointerDown(button: number): boolean {
@@ -114,6 +142,10 @@ export class PolyBuildOperator extends ModalOperator {
         this.resolvePlane()
         this.updateHover(this.currentMouse)
         this.updatePreview()
+        this.updateStatus()
+        return true
+      }
+      if (this.chain.length >= 3) {
         this.updateStatus()
         return true
       }
@@ -176,14 +208,20 @@ export class PolyBuildOperator extends ModalOperator {
 
   updateStatus() {
     const n = this.chain.length
+    if (n >= 3) {
+      const plan = PolyDrawKernel.planExistingLoop(this.ctx.mesh, this.uniqueChainIds())
+      if (plan.error) {
+        this.statusText = `${plan.error} · RMB undo · Tab reverse`
+        return
+      }
+      const quads = plan.loops.filter(loop => loop.length === 4).length
+      this.statusText = `${quads} quads / ${plan.loops.length - quads} tris · click first / Enter / F to fill · ${this.continueStrip ? 'Continue strip on' : 'Tab reverse'} · ${this.facesMade} faces made`
+      return
+    }
     if (n === 0) {
       this.statusText = this.hoverKind === 'existing'
         ? 'Start on this vert · or click empty space · two selected verts seed an edge'
         : 'New vert on empty · reuse an old vert · hover a face to draw on it · 1/3/7 lock · N view/ground · MMB orbit'
-      return
-    }
-    if (this.hoverKind === 'close') {
-      this.statusText = `Close face (${n} verts) · click first / Enter / F · Tab reverses the strip`
       return
     }
     const kind = this.hoverKind === 'existing' ? 'on existing vert' : 'new vert'
@@ -197,7 +235,6 @@ export class PolyBuildOperator extends ModalOperator {
         : `Edge · ${kind} · third = tri · fourth = quad · click the other vert to swap ends`
       return
     }
-    this.statusText = `${n} verts · ${kind} · ${this.loopIsFillable() ? 'click first / Enter to fill' : 'need coplanar tri or quad on this plane'} · Tab reverse · ${this.facesMade} face${this.facesMade === 1 ? '' : 's'}`
   }
 
   fillFromHud(): boolean {
@@ -276,8 +313,11 @@ export class PolyBuildOperator extends ModalOperator {
       const n = ids.length
       const left = ids[(i + n - 1) % n]
       const right = ids[(i + 1) % n]
-      if (left === awayFrom) return right
-      if (right === awayFrom) return left
+      const candidate = left === awayFrom ? right : right === awayFrom ? left : null
+      if (candidate != null && v.edgeIds.some(id => {
+        const edge = this.ctx.mesh.edges.get(id)
+        return edge && edge.faceIds.length === 1 && (edge.v1 === candidate || edge.v2 === candidate)
+      })) return candidate
     }
     return null
   }
@@ -288,6 +328,8 @@ export class PolyBuildOperator extends ModalOperator {
     if (sel.length < 1 || sel.length > 2) return
     if (sel.length === 1) {
       this.chain = [{ vertId: sel[0], isNew: false }]
+      this.syncMapping()
+      this.sketchMapLocked = true
       const faceId = this.bestFaceTowardCamera(sel[0])
       if (faceId != null) {
         this.lastFaceId = faceId
@@ -301,6 +343,8 @@ export class PolyBuildOperator extends ModalOperator {
       ]
     }
     this.drawPlaneLocked = true
+    this.syncMapping()
+    this.sketchMapLocked = true
     const origin = this.vertWorld(this.chain[0].vertId)
     const shared = this.chain.length === 2 ? this.sharedFaceId(this.chain[0].vertId, this.chain[1].vertId) : null
     if (shared != null && origin) {
@@ -370,16 +414,14 @@ export class PolyBuildOperator extends ModalOperator {
     if (placedId == null) return
     this.chain.push({ vertId: placedId, isNew })
     this.drawPlaneLocked = true
+    this.syncMapping()
+    this.sketchMapLocked = true
     if (this.chain.length === 1 && !isNew) {
       const faceId = this.bestFaceTowardCamera(placedId)
       if (faceId != null) {
         this.lastFaceId = faceId
         this.lockPlaneToLastFace()
       }
-    }
-
-    if (this.uniqueChainIds().length >= 3 && this.loopIsFillable()) {
-      this.tryFillCurrent()
     }
 
     this.ctx.onUpdatePreview()
@@ -397,75 +439,34 @@ export class PolyBuildOperator extends ModalOperator {
     return unique
   }
 
-  private loopPositions(ids: number[]): THREE.Vector3[] {
-    return ids.map(id => this.ctx.mesh.vertices.get(id)!.position)
-  }
-
   private loopIsFillable(ids?: number[]): boolean {
-    const unique = ids ?? this.uniqueChainIds()
-    if (unique.length < 3 || unique.length > 4) return false
-    const worlds: THREE.Vector3[] = []
-    for (const id of unique) {
-      const w = this.vertWorld(id)
-      if (!w) return false
-      worlds.push(w)
-    }
-    if (!PolyDrawKernel.isPlanarLoop(worlds)) return false
-    if (this.ctx.mesh.faces.size === 0) return true
-    const hasBrandNew = this.chain.some(p => p.isNew && unique.includes(p.vertId))
-    if (hasBrandNew) {
-      if (!this.plane) return true
-      const slop = Math.max(0.06, this.snapSize() * 0.55)
-      return worlds.every(w => Math.abs(w.clone().sub(this.plane.origin).dot(this.plane.normal)) <= slop)
-    }
-    return this.liesOnExistingFacePlane(unique)
-  }
-
-  private liesOnExistingFacePlane(vertIds: number[]): boolean {
-    const slop = Math.max(0.05, this.snapSize() * 0.5)
-    const locals = vertIds.map(id => this.ctx.mesh.vertices.get(id)!.position)
-    for (const face of this.ctx.mesh.faces.values()) {
-      const pts = face.vertexIds.map(id => this.ctx.mesh.vertices.get(id)?.position).filter(Boolean) as THREE.Vector3[]
-      if (pts.length < 3) continue
-      const n = PolyDrawKernel.newellNormal(pts)
-      const o = pts[0]
-      if (locals.every(p => Math.abs(p.clone().sub(o).dot(n)) <= slop)) return true
-    }
-    return false
+    return PolyDrawKernel.planExistingLoop(this.ctx.mesh, ids ?? this.uniqueChainIds()).error === null
   }
 
   private tryFillCurrent(): boolean {
     const unique = this.uniqueChainIds()
     if (!this.loopIsFillable(unique)) return false
 
-    const positions = this.loopPositions(unique)
-    const a = positions[1].clone().sub(positions[0])
-    const b = positions[2].clone().sub(positions[0])
-    const n = a.cross(b)
+    const worlds: THREE.Vector3[] = []
+    for (const id of unique) {
+      const w = this.vertWorld(id)
+      if (!w) return false
+      worlds.push(w)
+    }
+    const n = PolyDrawKernel.newellNormal(worlds)
     if (n.lengthSq() < 1e-12) return false
-    n.normalize()
-
     const view = new THREE.Vector3()
     this.ctx.camera.getWorldDirection(view)
-    view.transformDirection(this.worldToLocal)
-    const loop = n.dot(view) > 0 ? [...unique].reverse() : unique
-    const ordered = loop.map(id => this.ctx.mesh.vertices.get(id)!.position)
-
-    const faceId = MeshTopologyService.fillBoundary(this.ctx.mesh, loop, PolyDrawKernel.planarUvs(ordered))
-    if (faceId == null) return false
-    this.ctx.mesh.recalculateNormals()
-    this.facesMade += 1
-    this.lastFaceId = faceId
+    const faceIds = PolyDrawKernel.fillExistingLoop(this.ctx.mesh, unique, n.dot(view) > 0)
+    if (faceIds.length === 0) return false
+    this.facesMade += faceIds.length
+    this.lastFaceId = faceIds[faceIds.length - 1] ?? null
+    // The last drawn edge becomes the next patch's starting edge.
+    this.chain = this.continueStrip
+      ? unique.slice(-2).reverse().map(vertId => ({ vertId, isNew: false }))
+      : []
+    this.sketchMapLocked = false
     this.lockPlaneToLastFace()
-
-    const ids = this.chain.map(p => p.vertId)
-    const last = ids[ids.length - 2]
-    const tip = ids[ids.length - 1]
-    this.chain = last != null && tip != null && last !== tip
-      ? [{ vertId: last, isNew: false }, { vertId: tip, isNew: false }]
-      : tip != null
-        ? [{ vertId: tip, isNew: false }]
-        : []
     return true
   }
 
@@ -475,7 +476,10 @@ export class PolyBuildOperator extends ModalOperator {
       const v = this.ctx.mesh.vertices.get(last.vertId)
       if (v && v.faceIds.length === 0) this.ctx.mesh.removeVertex(last.vertId)
     }
-    if (this.chain.length === 0) this.drawPlaneLocked = false
+    if (this.chain.length === 0) {
+      this.drawPlaneLocked = false
+      this.sketchMapLocked = false
+    }
     this.ctx.onUpdatePreview()
     if (!this.drawPlaneLocked) this.resolvePlane()
     this.updateHover(this.currentMouse)
@@ -582,25 +586,53 @@ export class PolyBuildOperator extends ModalOperator {
     return Math.max(0.02, this.snapSize() * 0.35)
   }
 
+  private mappingEl(): HTMLElement {
+    return this.ctx.viewportElement
+  }
+
+  private pointerRay(pointer: { x: number; y: number }): THREE.Ray {
+    return ScreenGeometry.rayFromClient(
+      pointer,
+      this.mappingCamera(),
+      this.mappingEl(),
+      this.mappingQuadrant()
+    )
+  }
+
+  private toOverlay(world: THREE.Vector3): THREE.Vector2 {
+    return ScreenGeometry.worldToOverlay(world, this.mappingCamera(), this.mappingEl(), this.mappingQuadrant())
+  }
+
   private updateHover(pointer: { x: number; y: number }) {
-    const rect = this.ctx.viewportElement.getBoundingClientRect()
-    const ray = ScreenGeometry.screenToRay(pointer, this.ctx.camera, rect, this.ctx.quadrant)
+    if (
+      this.sketchMapLocked &&
+      this.mappingQuadrant() &&
+      !ScreenGeometry.isInPane(pointer, this.mappingEl(), this.mappingQuadrant())
+    ) {
+      this.hoverKind = 'none'
+      this.hoverSnapped = false
+      this.hoverWorld = null
+      this.hoverScreen = null
+      this.hoverExistingId = null
+      this.refreshChainScreen()
+      return
+    }
+
+    const ray = this.pointerRay(pointer)
     const lastId = this.chain[this.chain.length - 1]?.vertId
     const firstId = this.chain[0]?.vertId
     this.canFill = this.loopIsFillable()
     this.canClose = this.canFill && firstId != null && firstId !== lastId
 
-    const near = this.pickExisting(pointer, rect, lastId)
+    const near = this.pickExisting(pointer, lastId)
     if (near != null) {
       this.hoverExistingId = near
       this.hoverSnapped = true
       this.hoverKind = this.canClose && near === firstId ? 'close' : 'existing'
       const world = this.vertWorld(near)
       this.hoverWorld = world
-      this.hoverScreen = world
-        ? ScreenGeometry.worldToScreen(world, this.ctx.camera, rect, this.ctx.quadrant)
-        : null
-      this.refreshChainScreen(rect)
+      this.hoverScreen = world ? this.toOverlay(world) : null
+      this.refreshChainScreen()
       return
     }
 
@@ -618,12 +650,12 @@ export class PolyBuildOperator extends ModalOperator {
       if (!this.drawPlaneLocked) this.plane = facePlane
     } else {
       const hit = PolyDrawKernel.intersectPlane(ray, this.plane)
-      if (!hit || PolyDrawKernel.isUnreliableHit(ray, this.plane, this.ctx.camera)) {
+      if (!hit || PolyDrawKernel.isUnreliableHit(ray, this.plane, this.mappingCamera())) {
         this.hoverKind = 'none'
         this.hoverSnapped = false
         this.hoverWorld = null
         this.hoverScreen = null
-        this.refreshChainScreen(rect)
+        this.refreshChainScreen()
         return
       }
       snapped = PolyDrawKernel.snapOnPlane(hit, this.plane, this.snapSize())
@@ -636,7 +668,7 @@ export class PolyBuildOperator extends ModalOperator {
     if (!snapped) {
       this.hoverKind = 'none'
       this.hoverWorld = null
-      this.refreshChainScreen(rect)
+      this.refreshChainScreen()
       return
     }
 
@@ -648,23 +680,20 @@ export class PolyBuildOperator extends ModalOperator {
       this.hoverSnapped = true
       this.hoverKind = this.canClose && merged === firstId ? 'close' : 'existing'
       this.hoverWorld = this.vertWorld(merged)
-      this.hoverScreen = this.hoverWorld
-        ? ScreenGeometry.worldToScreen(this.hoverWorld, this.ctx.camera, rect, this.ctx.quadrant)
-        : null
-      this.refreshChainScreen(rect)
+      this.hoverScreen = this.hoverWorld ? this.toOverlay(this.hoverWorld) : null
+      this.refreshChainScreen()
       return
     }
 
     this.hoverKind = 'new'
     this.hoverSnapped = false
     this.hoverWorld = snapped
-    this.hoverScreen = ScreenGeometry.worldToScreen(snapped, this.ctx.camera, rect, this.ctx.quadrant)
-    this.refreshChainScreen(rect)
+    this.hoverScreen = this.toOverlay(snapped)
+    this.refreshChainScreen()
   }
 
   private pickExisting(
     pointer: { x: number; y: number },
-    rect: DOMRect,
     skipLast?: number
   ): number | null {
     let bestId: number | null = null
@@ -673,20 +702,17 @@ export class PolyBuildOperator extends ModalOperator {
     const lastWorld = skipLast != null ? this.vertWorld(skipLast) : null
     const firstId = this.chain[0]?.vertId
     const reach = this.snapReach(lastWorld)
-    const planeSlop = this.drawPlaneLocked ? Math.max(0.06, this.snapSize() * 0.55) : Infinity
+    const local = ScreenGeometry.pointerInView(pointer, this.mappingEl())
+    const cam = this.mappingCamera()
     for (const [id, v] of this.ctx.mesh.vertices) {
       if (id === skipLast) continue
       const world = v.position.clone().applyMatrix4(worldMat)
-      if (!PolyDrawKernel.isInFrontOfCamera(world, this.ctx.camera)) continue
-      if (this.drawPlaneLocked && this.plane) {
-        const off = Math.abs(world.clone().sub(this.plane.origin).dot(this.plane.normal))
-        if (off > planeSlop) continue
-      }
+      if (!PolyDrawKernel.isInFrontOfCamera(world, cam)) continue
       if (lastWorld && id !== firstId && world.distanceTo(lastWorld) > reach) continue
-      const s = ScreenGeometry.worldToScreen(world, this.ctx.camera, rect, this.ctx.quadrant)
-      const d = Math.hypot(s.x - pointer.x, s.y - pointer.y)
+      const s = this.toOverlay(world)
+      const d = Math.hypot(s.x - local.x, s.y - local.y)
       if (d > SNAP_PX) continue
-      const depth = Math.abs(world.clone().applyMatrix4(this.ctx.camera.matrixWorldInverse).z)
+      const depth = Math.abs(world.clone().applyMatrix4(cam.matrixWorldInverse).z)
       const score = d + depth * 0.2
       if (score < bestScore) {
         bestScore = score
@@ -729,8 +755,7 @@ export class PolyBuildOperator extends ModalOperator {
 
   private pickSceneFace(): { point: THREE.Vector3; normal: THREE.Vector3 } | null {
     if (!this.ctx.sceneGroup) return null
-    const rect = this.ctx.viewportElement.getBoundingClientRect()
-    const ray = ScreenGeometry.screenToRay(this.currentMouse, this.ctx.camera, rect, this.ctx.quadrant)
+    const ray = this.pointerRay(this.currentMouse)
     const rc = new THREE.Raycaster()
     rc.ray.copy(ray)
     const hits = rc.intersectObject(this.ctx.sceneGroup, true)
@@ -752,61 +777,81 @@ export class PolyBuildOperator extends ModalOperator {
     return null
   }
 
-  private refreshChainScreen(rect: DOMRect) {
-    this.screenPoints = this.chain.map(p => {
-      const w = this.vertWorld(p.vertId)!
-      return ScreenGeometry.worldToScreen(w, this.ctx.camera, rect, this.ctx.quadrant)
-    })
-    if (this.hoverScreen) this.screenPoints = [...this.screenPoints, this.hoverScreen]
-
-    const loopIds = this.uniqueChainIds()
-    this.previewFaceScreen = []
-    if (loopIds.length >= 2 && this.hoverScreen && this.hoverKind !== 'close') {
-      const extra = this.hoverExistingId
-      const ids = extra != null && !loopIds.includes(extra) ? [...loopIds, extra] : loopIds
-      if (ids.length >= 3) {
-        this.previewFaceScreen = ids.map(id => {
-          const w = this.vertWorld(id)!
-          return ScreenGeometry.worldToScreen(w, this.ctx.camera, rect, this.ctx.quadrant)
-        })
-        if (this.hoverKind === 'new' && this.hoverScreen) {
-          this.previewFaceScreen = [
-            ...loopIds.map(id => ScreenGeometry.worldToScreen(this.vertWorld(id)!, this.ctx.camera, rect, this.ctx.quadrant)),
-            this.hoverScreen
-          ]
-        }
-      }
-    } else if (this.hoverKind === 'close' && loopIds.length >= 3) {
-      this.previewFaceScreen = loopIds.map(id => {
-        const w = this.vertWorld(id)!
-        return ScreenGeometry.worldToScreen(w, this.ctx.camera, rect, this.ctx.quadrant)
-      })
-    }
-  }
-
-  private updatePreview() {
-    if (!this.ctx.previewGroup) return
-    this.disposePreview()
+  private chainWorldPts(): THREE.Vector3[] {
     const pts: THREE.Vector3[] = []
     for (const p of this.chain) {
       const w = this.vertWorld(p.vertId)
       if (w) pts.push(w)
     }
-    if (this.hoverWorld) pts.push(this.hoverWorld)
+    return pts
+  }
+
+  private rubberBandWorld(): THREE.Vector3[] {
+    const pts = this.chainWorldPts()
+    if (this.hoverKind === 'close' && pts.length >= 3) {
+      pts.push(pts[0].clone())
+      return pts
+    }
+    if (this.hoverWorld && this.hoverKind !== 'none') {
+      const last = pts[pts.length - 1]
+      if (!last || last.distanceToSquared(this.hoverWorld) > 1e-10) pts.push(this.hoverWorld.clone())
+    }
+    return pts
+  }
+
+  private refreshChainScreen() {
+    this.screenPoints = this.chainWorldPts().map(w => this.toOverlay(w))
+    if (this.hoverScreen && this.hoverKind !== 'close' && this.hoverKind !== 'none') {
+      this.screenPoints = [...this.screenPoints, this.hoverScreen]
+    }
+    this.previewFaceScreen = this.chainWorldPts().map(w => this.toOverlay(w))
+  }
+
+  private updatePreview() {
+    if (!this.ctx.previewGroup) return
+    this.disposePreview()
+    const pts = this.rubberBandWorld()
 
     if (pts.length >= 2) {
       const positions: number[] = []
       for (let i = 0; i < pts.length - 1; i++) {
-        positions.push(pts[i].x, pts[i].y, pts[i].z, pts[i + 1].x, pts[i + 1].y, pts[i + 1].z)
-      }
-      if (this.hoverKind === 'close' && pts.length >= 3) {
-        const first = pts[0]
-        const last = pts[pts.length - 1]
-        positions.push(last.x, last.y, last.z, first.x, first.y, first.z)
+        const a = pts[i]
+        const b = pts[i + 1]
+        positions.push(a.x, a.y, a.z, b.x, b.y, b.z)
       }
       const color = this.hoverKind === 'close' ? 0x34d399 : this.hoverSnapped ? 0x38bdf8 : 0xf59e0b
       this.previewLine = ScreenGeometry.dashedPreviewLine(positions, color)
       this.ctx.previewGroup.add(this.previewLine)
+    }
+
+    const fillPts = this.chainWorldPts()
+    if (fillPts.length >= 3) {
+      const ids = this.uniqueChainIds()
+      const plan = PolyDrawKernel.planExistingLoop(this.ctx.mesh, ids)
+      const loops = plan.loops.map(loop => loop.map(id => ids.indexOf(id)))
+      const tri: number[] = []
+      for (const loop of loops) {
+        for (let i = 1; i < loop.length - 1; i++) {
+          const a = fillPts[loop[0]]
+          const b = fillPts[loop[i]]
+          const c = fillPts[loop[i + 1]]
+          tri.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z)
+        }
+      }
+      if (tri.length > 0) {
+        const geo = new THREE.BufferGeometry()
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(tri, 3))
+        const mat = new THREE.MeshBasicMaterial({
+          color: this.hoverKind === 'close' ? 0x34d399 : 0x38bdf8,
+          transparent: true,
+          opacity: 0.28,
+          side: THREE.DoubleSide,
+          depthWrite: false
+        })
+        this.previewFill = new THREE.Mesh(geo, mat)
+        this.previewFill.renderOrder = 40
+        this.ctx.previewGroup.add(this.previewFill)
+      }
     }
   }
 
@@ -816,6 +861,12 @@ export class PolyBuildOperator extends ModalOperator {
       ;(this.previewLine.material as THREE.Material).dispose()
       this.previewLine.removeFromParent()
       this.previewLine = null
+    }
+    if (this.previewFill) {
+      this.previewFill.geometry.dispose()
+      ;(this.previewFill.material as THREE.Material).dispose()
+      this.previewFill.removeFromParent()
+      this.previewFill = null
     }
   }
 }

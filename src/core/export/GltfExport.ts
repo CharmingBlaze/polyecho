@@ -127,13 +127,23 @@ export async function exportToGLTF(
     if (texture) {
       texture.magFilter = THREE.NearestFilter
       texture.minFilter = THREE.NearestFilter
+      const blendMode = matObj?.blendMode ?? 'mask'
+      const storedAlphaTest = typeof matObj?.alphaTest === 'number' ? matObj.alphaTest : 0
+      const alphaTest = blendMode === 'mask'
+        ? (storedAlphaTest > 0 ? storedAlphaTest : 0.05)
+        : storedAlphaTest
+      const isBlend = blendMode === 'blend' || blendMode === 'additive'
       material = new THREE.MeshStandardMaterial({
         name: matObj?.name || meshObj.materialId || 'Material',
         map: texture,
         color: baseColor,
         roughness: typeof matObj?.roughness === 'number' ? matObj.roughness : 0.8,
         metalness: typeof matObj?.metalness === 'number' ? matObj.metalness : 0.05,
-        side: THREE.DoubleSide
+        side: THREE.DoubleSide,
+        alphaTest,
+        transparent: isBlend,
+        depthWrite: !isBlend,
+        opacity: typeof matObj?.opacity === 'number' ? matObj.opacity : 1
       })
     } else {
       material = new THREE.MeshStandardMaterial({

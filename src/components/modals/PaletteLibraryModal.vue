@@ -220,7 +220,7 @@ function handleQuantizeTexture(p: Palette, e: MouseEvent) {
   if (!pb || p.colors.length === 0) return
 
   if (confirm(`Remap all pixels on active canvas to "${p.name}" palette (${p.colors.length} colors)?`)) {
-    projectStore.recordState(`Quantize to ${p.name}`)
+    projectStore.recordPixels(`Quantize to ${p.name}`)
     for (let y = 0; y < pb.height; y++) {
       for (let x = 0; x < pb.width; x++) {
         const curHex = pb.getPixelHex(x, y)

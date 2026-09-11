@@ -199,8 +199,7 @@ export class PrimitivePlacementOperator extends ModalOperator {
   }
 
   private resolvePlacementHit(pointer: { x: number; y: number }) {
-    const rect = this.ctx.viewportElement.getBoundingClientRect()
-    const ray = ScreenGeometry.screenToRay(pointer, this.ctx.camera, rect, this.ctx.quadrant)
+    const ray = ScreenGeometry.rayFromClient(pointer, this.ctx.camera, this.ctx.viewportElement, this.ctx.quadrant)
 
     // 1. In CAD Draw Primary Stage (2D footprint on surface): intersect the surface tangent plane
     if (this.state === PrimitivePlacementState.DRAWING_PRIMARY && this.frame) {
@@ -346,18 +345,9 @@ export class PrimitivePlacementOperator extends ModalOperator {
   private updatePlaceGhost() {
     if (!this.placementHit || !this.ghost) return
 
-    const def = PrimitiveRegistry.get(this.primitiveType)
-    if (!def) return
-
-    const halfDims = this.getHalfDimensions(this.currentParams)
-    const pos = SurfacePlacementSolver.calculateRestingPosition(
-      this.placementHit,
-      halfDims,
-      this.placementOrientation
-    )
     const rot = SurfacePlacementSolver.calculateRotation(this.placementHit, this.placementOrientation)
-
-    this.ghost.update(this.primitiveType, this.currentParams, pos, rot)
+    this.ghost.update(this.primitiveType, this.currentParams, this.placementHit.worldPosition, rot)
+    const pos = this.ghost.group.position
     this.dimensionText = `Surface: (${pos.x.toFixed(2)}, ${pos.y.toFixed(2)}, ${pos.z.toFixed(2)})`
   }
 
@@ -390,31 +380,37 @@ export class PrimitivePlacementOperator extends ModalOperator {
           ...this.currentParams, 
           width, 
           depth, 
-          length: width, 
+          length: width,
+          thickness: depth,
           totalRun: depth,
-          height 
+          height,
+          openingWidth: width * 0.55,
+          openingHeight: Math.max(0.08, height * 0.75)
         }
-        const center = this.startPoint.clone()
+        const rest = this.startPoint.clone()
           .addScaledVector(this.frame.axisU, u / 2)
           .addScaledVector(this.frame.axisV, v / 2)
-          .addScaledVector(this.frame.axisW, height / 2)
 
-        this.ghost.update(this.primitiveType, this.currentParams, center, rotation)
+        this.ghost.update(this.primitiveType, this.currentParams, rest, rotation)
         this.dimensionText = `Width: ${width.toFixed(2)}  |  Depth: ${depth.toFixed(2)}`
       } else if (kind === 'RADIAL' || kind === 'RADIAL_HEIGHT') {
         const radius = Math.max(0.05, Math.hypot(u, v))
-        const height = 0.05
-        this.currentParams = { ...this.currentParams, radius, height }
-        const center = this.startPoint.clone().addScaledVector(this.frame.axisW, height / 2)
-
-        this.ghost.update(this.primitiveType, this.currentParams, center, rotation)
+        const height = this.primitiveType === 'CAPSULE' ? Math.max(0.05, radius * 2) : 0.05
+        this.currentParams = {
+          ...this.currentParams,
+          radius,
+          height,
+          outerRadius: radius,
+          innerRadius: radius * 0.65,
+          ...(this.primitiveType === 'CAPSULE' ? { length: height } : {})
+        }
+        this.ghost.update(this.primitiveType, this.currentParams, this.startPoint, rotation)
         this.dimensionText = `Radius: ${radius.toFixed(2)}`
       } else if (kind === 'TORUS') {
         const majorRadius = Math.max(0.1, Math.hypot(u, v))
         const tubeRadius = Math.max(0.02, majorRadius * 0.25)
         this.currentParams = { ...this.currentParams, majorRadius, tubeRadius }
-        const center = this.startPoint.clone().addScaledVector(this.frame.axisW, tubeRadius)
-        this.ghost.update(this.primitiveType, this.currentParams, center, rotation)
+        this.ghost.update(this.primitiveType, this.currentParams, this.startPoint, rotation)
         this.dimensionText = `Radius: ${majorRadius.toFixed(2)}`
       }
     } else if (this.state === PrimitivePlacementState.DRAWING_SECONDARY) {
@@ -422,48 +418,41 @@ export class PrimitivePlacementOperator extends ModalOperator {
       const delta = currentWorld.clone().sub(this.primaryPoint)
       const w = delta.dot(this.frame.axisW)
 
-      const height = Math.max(0.05, Math.abs(w))
+      const dragged = Math.max(0.05, Math.abs(w))
+      const rad = (this.currentParams as any).radius || (this.currentParams as any).outerRadius || 0.5
+      const height = this.primitiveType === 'CAPSULE' ? Math.max(dragged, rad * 2) : dragged
+      const width = (this.currentParams as any).width || 1
       this.currentParams = { 
         ...this.currentParams, 
         height, 
-        totalHeight: height 
+        totalHeight: height,
+        openingHeight: Math.min(height * 0.78, height - 0.05),
+        openingWidth: Math.min((this.currentParams as any).openingWidth || width * 0.55, width * 0.88),
+        ...(this.primitiveType === 'CAPSULE' ? { length: height } : {})
       }
-
-      const halfW = (w >= 0 ? 1 : -1) * (height / 2)
 
       if (kind === 'RECTANGULAR' || kind === 'LINEAR_HEIGHT') {
         const baseDelta = this.primaryPoint.clone().sub(this.startPoint)
         const { u: finalU, v: finalV } = ConstructionFrameResolver.projectToUVW(baseDelta, this.frame)
-        const baseCenter = this.startPoint.clone()
+        const rest = this.startPoint.clone()
           .addScaledVector(this.frame.axisU, finalU / 2)
           .addScaledVector(this.frame.axisV, finalV / 2)
-        const center = baseCenter.clone().addScaledVector(this.frame.axisW, halfW)
 
-        this.ghost.update(this.primitiveType, this.currentParams, center, rotation)
+        this.ghost.update(this.primitiveType, this.currentParams, rest, rotation)
         const u = (this.currentParams as any).width || (this.currentParams as any).length || 1
         const v = (this.currentParams as any).depth || (this.currentParams as any).totalRun || 1
         this.dimensionText = `Height: ${height.toFixed(2)}  |  Width: ${u.toFixed(2)}  |  Depth: ${v.toFixed(2)}`
       } else if (kind === 'TORUS') {
         const tubeRadius = Math.max(0.02, height)
         this.currentParams = { ...this.currentParams, tubeRadius }
-        const center = this.startPoint.clone().addScaledVector(this.frame.axisW, tubeRadius)
-        this.ghost.update(this.primitiveType, this.currentParams, center, rotation)
+        this.ghost.update(this.primitiveType, this.currentParams, this.startPoint, rotation)
         this.dimensionText = `Tube Radius: ${tubeRadius.toFixed(2)}`
       } else {
-        // Radial with height (Cylinder, Cone, Capsule, Tube, Arch, Prism)
-        const center = this.startPoint.clone().addScaledVector(this.frame.axisW, halfW)
-        this.ghost.update(this.primitiveType, this.currentParams, center, rotation)
-        const rad = (this.currentParams as any).radius || 0.5
-        this.dimensionText = `Height: ${height.toFixed(2)}  |  Radius: ${rad.toFixed(2)}`
+        this.ghost.update(this.primitiveType, this.currentParams, this.startPoint, rotation)
+        const shownR = (this.currentParams as any).outerRadius || (this.currentParams as any).radius || 0.5
+        this.dimensionText = `Height: ${height.toFixed(2)}  |  Radius: ${shownR.toFixed(2)}`
       }
     }
-  }
-
-  private getHalfDimensions(params: any): THREE.Vector3 {
-    const w = (params.width || (params.radius ? params.radius * 2 : 1)) / 2
-    const h = (params.height || (params.radius ? params.radius * 2 : 1)) / 2
-    const d = (params.depth || (params.radius ? params.radius * 2 : 1)) / 2
-    return new THREE.Vector3(w, h, d)
   }
 
   private updateGhostAndStatus() {

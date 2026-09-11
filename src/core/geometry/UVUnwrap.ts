@@ -701,6 +701,8 @@ export function packUVIslands(
     }
   })
 
+  if (boxes.length === 0) return newMesh
+
   boxes.sort((a, b) => Math.max(b.w, b.h) - Math.max(a.w, a.h))
 
   interface Placement { box: IslandBox; u: number; v: number; rotated: boolean }
@@ -739,7 +741,11 @@ export function packUVIslands(
 
   let low = 0
   let high = 1
-  while (tryPack(high)) high *= 2
+  let growGuard = 0
+  while (tryPack(high) && growGuard < 32) {
+    high *= 2
+    growGuard++
+  }
   for (let i = 0; i < 28; i++) {
     const mid = (low + high) / 2
     if (tryPack(mid)) low = mid

@@ -24,6 +24,7 @@ export interface PSXShaderUniforms {
   uLightDirection: { value: THREE.Vector3 }
   uAmbientLight: { value: THREE.Color }
   uOpacity: { value: number }
+  uAlphaTest: { value: number }
 }
 
 const vertexShader = /* glsl */ `
@@ -99,6 +100,7 @@ const fragmentShader = /* glsl */ `
   uniform bool uDreamcastCelOutline;
   uniform vec3 uLightDirection;
   uniform float uOpacity;
+  uniform float uAlphaTest;
 
   varying vec2 vUv;
   varying vec3 vColor;
@@ -274,7 +276,7 @@ const fragmentShader = /* glsl */ `
     vec4 texColor = vec4(1.0);
     if (uHasTexture) {
       texColor = texture2D(uTexture, finalUv);
-      if (texColor.a < 0.05) discard;
+      if (uAlphaTest > 0.0 && texColor.a < uAlphaTest) discard;
     }
 
     // ----------------------------------------------------
@@ -364,7 +366,8 @@ export function createPSXMaterial(texture: THREE.Texture | null = null, resoluti
     uDreamcastCelOutline: { value: false },
     uLightDirection: { value: new THREE.Vector3(0.5, 1.0, 0.8).normalize() },
     uAmbientLight: { value: new THREE.Color(0.2, 0.2, 0.25) },
-    uOpacity: { value: 1.0 }
+    uOpacity: { value: 1.0 },
+    uAlphaTest: { value: 0.05 }
   }
 
   return new THREE.ShaderMaterial({

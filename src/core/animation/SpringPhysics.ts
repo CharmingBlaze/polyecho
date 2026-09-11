@@ -20,7 +20,12 @@ export class SpringPhysicsSolver {
    * Evaluates dynamic spring / jiggle physics for all bones with springConstraint enabled.
    * Modifies bone rotation in place to simulate dynamic lag and bounce.
    */
+  static hasEnabled(bones: Bone[]): boolean {
+    return bones.some(bone => bone.springConstraint?.enabled)
+  }
+
   static step(bones: Bone[], dt = 1 / 60) {
+    if (!this.hasEnabled(bones)) return
     const clampedDt = Math.min(0.05, Math.max(0.001, dt))
 
     for (const bone of bones) {
@@ -70,9 +75,9 @@ export class SpringPhysicsSolver {
       state.rotVelocity.z = Math.max(-maxVel, Math.min(maxVel, state.rotVelocity.z))
 
       // Apply dynamic spring rotation
-      bone.rotation.x = Number(state.currentRot.x.toFixed(2))
-      bone.rotation.y = Number(state.currentRot.y.toFixed(2))
-      bone.rotation.z = Number(state.currentRot.z.toFixed(2))
+      bone.rotation.x = Math.round(state.currentRot.x * 100) / 100
+      bone.rotation.y = Math.round(state.currentRot.y * 100) / 100
+      bone.rotation.z = Math.round(state.currentRot.z * 100) / 100
     }
   }
 }

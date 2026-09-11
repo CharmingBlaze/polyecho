@@ -95,7 +95,9 @@ export interface TorusParameters {
 
 export interface CapsuleParameters {
   radius: number
-  length: number
+  /** Total height including hemispherical caps. `length` is accepted as an alias. */
+  height?: number
+  length?: number
   segments?: number
   rings?: number
 }
@@ -108,8 +110,10 @@ export interface WedgeParameters {
 }
 
 export interface TubeParameters {
-  outerRadius: number
-  innerRadius: number
+  outerRadius?: number
+  /** CAD draw writes `radius`; treated as outer radius. */
+  radius?: number
+  innerRadius?: number
   height: number
   sides?: number
 }
@@ -118,12 +122,15 @@ export interface WallParameters {
   length: number
   thickness: number
   height: number
+  width?: number
+  depth?: number
 }
 
 export interface StairsParameters {
   width: number
   totalRun: number
-  totalHeight: number
+  totalHeight?: number
+  height?: number
   steps: number
 }
 

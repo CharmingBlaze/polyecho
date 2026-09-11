@@ -1,11 +1,11 @@
 import { defineStore } from 'pinia'
-import { ref, computed, markRaw } from 'vue'
+import { ref, computed, markRaw, onScopeDispose } from 'vue'
 import { MeshObject, Vertex, Face, MeshShadeMode } from '../types/mesh'
 import { Material, Palette, TextureMap, TextureApplyPolicy } from '../types/texture'
 import { SelectMode } from '../types/tools'
 import { createCube } from '../core/geometry/Primitives'
 import { 
-  extrudeFaces, 
+  extrudeSelection, 
   insetFaces, 
   bevelFaces, 
   subdivideFaces,
@@ -30,6 +30,8 @@ import { PrimitiveType, PrimitiveParameters } from '../core/primitives/Primitive
 import { PrimitiveBuilder } from '../core/primitives/PrimitiveBuilder'
 import { MeshBridge } from '../core/mesh/MeshBridge'
 import { EditableMesh } from '../core/mesh/MeshKernel'
+import { placeOriginAtBoundsCenter } from '../core/geometry/MeshOrigin'
+import { addObjectRotation, flipMeshGeometry, type SymmetryAxis } from '../core/geometry/ObjectSymmetry'
 import { SeamUnwrapper } from '../core/uv/SeamUnwrapper'
 import { AtlasBaker } from '../core/uv/AtlasBaker'
 import { clampAtlasGrid, mapFacesToAtlasCell, sliceBufferIntoTiles } from '../core/uv/AtlasCells'
@@ -162,7 +164,9 @@ export const useProjectStore = defineStore('project', () => {
       psxAffine: false,
       dither: false,
       ditherLevel: 32,
-      wireframe: false
+      wireframe: false,
+      blendMode: 'mask',
+      alphaTest: 0.05
     }
   ])
 
@@ -222,8 +226,12 @@ export const useProjectStore = defineStore('project', () => {
   })
 
   // History Helper
-  function recordState(desc: string) {
-    historyStore.recordState(desc)
+  function recordState(desc: string, options?: { includeTextures?: boolean }) {
+    historyStore.recordState(desc, { includeTextures: options?.includeTextures === true })
+  }
+
+  function recordPixels(desc: string) {
+    historyStore.recordState(desc, { includeTextures: true })
   }
 
   // ----------------------------------------------------
@@ -263,7 +271,10 @@ export const useProjectStore = defineStore('project', () => {
 
   function isDescendantOf(childId: string, potentialAncestorId: string): boolean {
     let cur = meshes.value.find(m => m.id === potentialAncestorId)
+    const seen = new Set<string>()
     while (cur && cur.parentId) {
+      if (seen.has(cur.id)) return false
+      seen.add(cur.id)
       if (cur.parentId === childId) return true
       cur = meshes.value.find(m => m.id === cur!.parentId)
     }
@@ -348,11 +359,19 @@ export const useProjectStore = defineStore('project', () => {
   function addEditableMesh(mesh: EditableMesh, name: string): MeshObject {
     recordState(name)
     const obj = MeshBridge.editableMeshToMeshObject(mesh, name)
+    placeOriginAtBoundsCenter(obj)
     meshes.value.push(obj)
     selectMesh(obj.id)
     clearSubSelections()
     markGeometryUpdated()
     return obj
+  }
+
+  function centerMeshOrigin(meshId: string, options?: { record?: boolean }) {
+    const mesh = meshes.value.find(m => m.id === meshId)
+    if (!mesh) return
+    if (options?.record !== false) recordState('Origin to Center')
+    if (placeOriginAtBoundsCenter(mesh)) markGeometryUpdated()
   }
 
   function addReferenceImage(plane: ReferencePlane, dataUrl: string, name?: string): ReferenceImage {
@@ -433,9 +452,14 @@ export const useProjectStore = defineStore('project', () => {
 
   // Modeling operations on active mesh
   function performExtrude(distance = 0.5) {
-    if (!activeMesh.value || selectedFaceIds.value.length === 0) return
-    recordState('Extrude Face(s)')
-    const result = extrudeFaces(activeMesh.value, selectedFaceIds.value, distance)
+    if (!activeMesh.value) return
+    recordState('Extrude')
+    const result = extrudeSelection(activeMesh.value, {
+      faceIds: selectedFaceIds.value,
+      edgeIds: selectedEdgeIds.value,
+      vertexIds: selectedFaceIds.value.length || selectedEdgeIds.value.length ? [] : selectedVertexIds.value,
+      distance,
+    })
     selectedFaceIds.value = result.selectedFaceIds
     selectedVertexIds.value = result.selectedVertexIds
     replaceMesh(result.mesh)
@@ -1142,10 +1166,91 @@ export const useProjectStore = defineStore('project', () => {
     return false
   }
 
+  function objectMeshesForEdit(): MeshObject[] {
+    const selected = meshes.value.filter(m => selectedMeshIds.value.includes(m.id) && !m.locked)
+    if (selected.length > 0) return selected
+    if (activeMesh.value && !activeMesh.value.locked) return [activeMesh.value]
+    return []
+  }
+
+  function cloneMeshObject(source: MeshObject, suffix: string): MeshObject {
+    const mesh: MeshObject = JSON.parse(JSON.stringify(source))
+    const newId = `mesh_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+    mesh.id = newId
+    mesh.name = `${source.name}${suffix}`
+    const vertIdMap = new Map<string, string>()
+    mesh.vertices.forEach((v, idx) => {
+      const newVId = `v_${newId}_${idx}`
+      vertIdMap.set(v.id, newVId)
+      v.id = newVId
+    })
+    mesh.faces.forEach((f, idx) => {
+      f.id = `f_${newId}_${idx}`
+      f.vertexIds = f.vertexIds.map(vId => vertIdMap.get(vId) || vId)
+    })
+    return mesh
+  }
+
+  function performFlipAxis(axis: SymmetryAxis) {
+    const targets = objectMeshesForEdit()
+    if (targets.length === 0) return
+    const label = axis === 'x' ? 'H / X' : axis === 'y' ? 'V / Y' : 'Z'
+    recordState(`Flip ${label}`)
+    for (const mesh of targets) flipMeshGeometry(mesh, axis)
+    markGeometryUpdated()
+  }
+
+  function performRotateObject(axis: SymmetryAxis, degrees: number) {
+    const targets = objectMeshesForEdit()
+    if (targets.length === 0 || !degrees) return
+    recordState(`Rotate ${axis.toUpperCase()} ${degrees}°`)
+    for (const mesh of targets) addObjectRotation(mesh, axis, degrees)
+    markGeometryUpdated()
+  }
+
+  function performDuplicateMirror(axis: SymmetryAxis) {
+    const sources = objectMeshesForEdit()
+    if (sources.length === 0) return
+    recordState(`Mirror Copy ${axis.toUpperCase()}`)
+    const copies = sources.map(src => {
+      const copy = cloneMeshObject(src, `_M${axis.toUpperCase()}`)
+      flipMeshGeometry(copy, axis)
+      return copy
+    })
+    meshes.value.push(...copies)
+    selectedMeshIds.value = copies.map(m => m.id)
+    activeMeshId.value = copies[0]?.id || ''
+    clearSubSelections()
+    markGeometryUpdated()
+  }
+
   const hasAutosaveSession = ref<boolean>(false)
   const autosaveRecord = ref<ProjectStorageData | null>(null)
   const showRecoveryBanner = ref<boolean>(false)
   const isRestoringSession = ref<boolean>(false)
+  const DOCUMENT_RECOVERY_KEY = 'polyecho.documentRecovery'
+  const documentRecoveryEnabled = ref(false)
+  if (typeof localStorage !== 'undefined') {
+    try {
+      documentRecoveryEnabled.value = localStorage.getItem(DOCUMENT_RECOVERY_KEY) === '1'
+    } catch {
+      documentRecoveryEnabled.value = false
+    }
+  }
+
+  function persistDocumentRecoveryPref() {
+    try {
+      localStorage.setItem(DOCUMENT_RECOVERY_KEY, documentRecoveryEnabled.value ? '1' : '0')
+    } catch {
+      /* ignore quota / private mode */
+    }
+  }
+
+  function setDocumentRecoveryEnabled(on: boolean) {
+    documentRecoveryEnabled.value = on
+    persistDocumentRecoveryPref()
+    showRecoveryBanner.value = on && !!autosaveRecord.value
+  }
   let autosaveTimer: any = null
 
   function triggerAutosave() {
@@ -1153,6 +1258,10 @@ export const useProjectStore = defineStore('project', () => {
     if (autosaveTimer) clearTimeout(autosaveTimer)
     autosaveTimer = setTimeout(async () => {
       if (isRestoringSession.value) return
+      if (useAnimationStore().isPlaying) {
+        triggerAutosave()
+        return
+      }
       try {
         const animationStore = useAnimationStore()
         const textureData = textures.value.map(t => ({
@@ -1179,12 +1288,19 @@ export const useProjectStore = defineStore('project', () => {
     }, 1200)
   }
 
+  onScopeDispose(() => {
+    if (autosaveTimer) {
+      clearTimeout(autosaveTimer)
+      autosaveTimer = null
+    }
+  })
+
   async function checkAutosaveSession(): Promise<boolean> {
     const data = await ProjectStorage.loadProject()
     if (data && Array.isArray(data.meshes) && data.meshes.length > 0) {
       hasAutosaveSession.value = true
       autosaveRecord.value = data
-      showRecoveryBanner.value = true
+      showRecoveryBanner.value = documentRecoveryEnabled.value
       return true
     }
     hasAutosaveSession.value = false
@@ -1301,6 +1417,9 @@ export const useProjectStore = defineStore('project', () => {
       clearSubSelections()
       markGeometryUpdated()
       markTextureUpdated()
+      historyStore.clearHistory()
+      historyStore.markDirty()
+      showRecoveryBanner.value = false
       return true
     } finally {
       isRestoringSession.value = false
@@ -1312,9 +1431,18 @@ export const useProjectStore = defineStore('project', () => {
     triggerAutosave()
   }
 
+  let texturePreviewRaf: number | null = null
+
   /** Live stroke preview: bump revision so CanvasTextures refresh. No toDataURL / autosave. */
   function markTexturePreview() {
-    textureRevision.value++
+    if (texturePreviewRaf != null) return
+    const schedule = typeof requestAnimationFrame === 'function'
+      ? requestAnimationFrame
+      : (cb: () => void) => setTimeout(cb, 16) as unknown as number
+    texturePreviewRaf = schedule(() => {
+      texturePreviewRaf = null
+      textureRevision.value++
+    })
   }
 
   function markTextureUpdated(textureId?: string) {
@@ -1345,7 +1473,7 @@ export const useProjectStore = defineStore('project', () => {
   ): TextureMap {
     const record = options?.record !== false
     const shouldSelect = options?.select !== false
-    if (record) recordState(`Add Texture (${name || 'untitled'})`)
+    if (record) recordPixels(`Add Texture (${name || 'untitled'})`)
 
     const id = `tex_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
     const buf = markRaw(customBuffer || new PixelBuffer(width, height))
@@ -1387,7 +1515,7 @@ export const useProjectStore = defineStore('project', () => {
   function duplicateTexture(id: string): TextureMap | null {
     const src = textures.value.find(t => t.id === id)
     if (!src) return null
-    recordState(`Duplicate Texture (${src.name})`)
+    recordPixels(`Duplicate Texture (${src.name})`)
     const clonedBuf = src.pixelBuffer
       ? src.pixelBuffer.clone()
       : new PixelBuffer(src.width, src.height)
@@ -1409,14 +1537,14 @@ export const useProjectStore = defineStore('project', () => {
   function renameTexture(id: string, newName: string) {
     const tex = textures.value.find(t => t.id === id)
     if (tex && newName.trim()) {
-      recordState('Rename Texture')
+      recordPixels('Rename Texture')
       tex.name = newName.trim()
     }
   }
 
   function deleteTexture(id: string) {
     if (textures.value.length <= 1) return
-    recordState('Delete Texture')
+    recordPixels('Delete Texture')
     textures.value = textures.value.filter(t => t.id !== id)
     for (const mat of materials.value) {
       if (mat.textureId === id) {
@@ -1452,7 +1580,7 @@ export const useProjectStore = defineStore('project', () => {
     if (!tex?.pixelBuffer) return
     const grid = clampAtlasGrid(cols ?? tex.atlas?.cols ?? 2, rows ?? tex.atlas?.rows ?? 2)
     if (grid.cols * grid.rows < 2) return
-    recordState(`Slice Atlas ${tex.name} (${grid.cols}×${grid.rows})`)
+    recordPixels(`Slice Atlas ${tex.name} (${grid.cols}×${grid.rows})`)
     tex.atlas = grid
     const tiles = sliceBufferIntoTiles(tex.pixelBuffer, grid.cols, grid.rows)
     for (const tile of tiles) {
@@ -1574,7 +1702,9 @@ export const useProjectStore = defineStore('project', () => {
       psxAffine: false,
       dither: false,
       ditherLevel: 32,
-      wireframe: false
+      wireframe: false,
+      blendMode: 'mask',
+      alphaTest: 0.05
     }
     materials.value.push(newMat)
     if (shouldSelect) selectMaterial(newMat.id)
@@ -1697,7 +1827,7 @@ export const useProjectStore = defineStore('project', () => {
     const src = textures.value.find(t => t.id === mat?.textureId) || activeTexture.value
     if (!src?.pixelBuffer) return null
 
-    recordState(`Fork Texture for ${mesh.name}`)
+    recordPixels(`Fork Texture for ${mesh.name}`)
     const clonedBuf = src.pixelBuffer.clone()
     const newTex = createTexture(
       `${mesh.name}_Texture`,
@@ -1769,7 +1899,7 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   function restoreDefaultTexture(): TextureMap {
-    recordState('Restore Default Texture')
+    recordPixels('Restore Default Texture')
     const defBuf = new PixelBuffer(64, 64)
     generateRetroAtlas(defBuf)
 
@@ -1840,7 +1970,7 @@ export const useProjectStore = defineStore('project', () => {
     const pal = palettes.value.find(p => p.id === paletteId)
     if (!tex || !tex.pixelBuffer || !pal || pal.colors.length === 0) return
 
-    recordState(`Apply Palette (${pal.name}) to ${tex.name}`)
+    recordPixels(`Apply Palette (${pal.name}) to ${tex.name}`)
     tex.pixelBuffer.remapToPalette(pal.colors, ditherMode)
     selectPalette(paletteId)
     markTextureUpdated(textureId)
@@ -1854,7 +1984,7 @@ export const useProjectStore = defineStore('project', () => {
     const pal = palettes.value.find(p => p.id === paletteId)
     if (!pal || pal.colors.length === 0) return
 
-    recordState(`Apply Palette (${pal.name}) to All Textures`)
+    recordPixels(`Apply Palette (${pal.name}) to All Textures`)
     for (const tex of textures.value) {
       if (tex.pixelBuffer) {
         tex.pixelBuffer.remapToPalette(pal.colors, ditherMode)
@@ -1884,7 +2014,7 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   function resetToDefaultProject() {
-    recordState('New Project')
+    recordPixels('New Project')
     const defBuf = new PixelBuffer(64, 64)
     generateRetroAtlas(defBuf)
 
@@ -1922,7 +2052,9 @@ export const useProjectStore = defineStore('project', () => {
         psxAffine: false,
         dither: false,
         ditherLevel: 32,
-        wireframe: false
+        wireframe: false,
+        blendMode: 'mask',
+        alphaTest: 0.05
       }
     ]
 
@@ -1956,8 +2088,8 @@ export const useProjectStore = defineStore('project', () => {
     markGeometryUpdated()
   }
 
-  function setAutoSmoothAngle(angle: number) {
-    recordState('Set Auto Smooth Angle')
+  function setAutoSmoothAngle(angle: number, options?: { record?: boolean }) {
+    if (options?.record !== false) recordState('Set Auto Smooth Angle')
     const clamped = Math.max(0, Math.min(180, angle))
     for (const mesh of meshes.value) {
       if (selectedMeshIds.value.includes(mesh.id) || mesh.id === activeMeshId.value) {
@@ -2147,7 +2279,7 @@ export const useProjectStore = defineStore('project', () => {
 
   function bakeSceneAtlas(padding = 2) {
     if (meshes.value.length === 0) return
-    recordState('Bake Scene Texture Atlas')
+    recordPixels('Bake Scene Texture Atlas')
     try {
       const result = AtlasBaker.bakeSceneAtlas(
         meshes.value,
@@ -2170,10 +2302,10 @@ export const useProjectStore = defineStore('project', () => {
   // ----------------------------------------------------
   // OBJECT ORIGIN / PIVOT OPERATIONS
   // ----------------------------------------------------
-  function offsetMeshOrigin(meshId: string, dx: number, dy: number, dz: number, actionName = 'Set Origin') {
+  function offsetMeshOrigin(meshId: string, dx: number, dy: number, dz: number, actionName = 'Set Origin', options?: { record?: boolean }) {
     const mesh = meshes.value.find(m => m.id === meshId)
     if (!mesh) return
-    recordState(actionName)
+    if (options?.record !== false) recordState(actionName)
 
     for (const v of mesh.vertices) {
       v.position.x -= dx
@@ -2356,6 +2488,9 @@ export const useProjectStore = defineStore('project', () => {
     copySelection,
     pasteClipboard,
     duplicateSelection,
+    performFlipAxis,
+    performRotateObject,
+    performDuplicateMirror,
     performExtrude,
     performInset,
     performBevel,
@@ -2445,15 +2580,19 @@ export const useProjectStore = defineStore('project', () => {
     performGridifyUvQuads,
     bakeSceneAtlas,
     offsetMeshOrigin,
+    centerMeshOrigin,
     setOriginToPreset,
     setGeometryToOrigin,
     selectEdgeLoop,
     selectEdgeRing,
     performAutoMerge,
     recordState,
+    recordPixels,
     hasAutosaveSession,
     autosaveRecord,
     showRecoveryBanner,
+    documentRecoveryEnabled,
+    setDocumentRecoveryEnabled,
     checkAutosaveSession,
     restoreAutosaveSession,
     dismissRecoverySession,

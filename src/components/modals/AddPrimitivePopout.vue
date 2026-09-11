@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { PrimitiveType } from '../../core/primitives/PrimitiveTypes'
 import { PrimitivePlacementMode } from '../../core/operators/placement/PrimitivePlacementOperator'
+import { useLayoutStore } from '../../stores/layoutStore'
 import { useFloatingDrag } from '../../composables/useFloatingDrag'
 import { PlacementOrientation } from '../../core/placement/SurfacePlacementSolver'
 import BlenderIcon from '../icons/BlenderIcon.vue'
@@ -17,6 +18,7 @@ import {
   Plus 
 } from 'lucide-vue-next'
 
+const layoutStore = useLayoutStore()
 const visible = ref(false)
 const isMinimized = ref(false)
 const position = ref({ x: 120, y: 70 })
@@ -76,21 +78,26 @@ function openAt(x?: number, y?: number) {
     const clampedX = Math.min(x, window.innerWidth - panelWidth - 20)
     const clampedY = Math.min(y, window.innerHeight - panelHeight - 20)
     position.value = { x: Math.max(20, clampedX), y: Math.max(40, clampedY) }
+  } else if (!visible.value) {
+    position.value = { x: 56, y: 42 }
   }
   searchQuery.value = ''
+  isMinimized.value = false
   visible.value = true
+  layoutStore.showPrimitivePanel = true
 }
 
 function toggle() {
-  visible.value = !visible.value
+  if (visible.value) close()
+  else openAt()
 }
 
 function close() {
   visible.value = false
+  layoutStore.showPrimitivePanel = false
 }
 
 function selectPrimitive(type: PrimitiveType) {
-  close()
   requestPrimitivePlacement({
     type,
     mode: placementMode.value,
@@ -101,32 +108,29 @@ function selectPrimitive(type: PrimitiveType) {
 function handleGlobalKeyDown(e: KeyboardEvent) {
   if (e.key === 'Escape' && visible.value) {
     close()
-    return
-  }
-  if (e.shiftKey && (e.key === 'A' || e.key === 'a') && !e.ctrlKey && !e.altKey) {
-    const target = e.target as HTMLElement
-    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
-    e.preventDefault()
-    e.stopPropagation()
-    toggle()
   }
 }
 
 function handleOpenEvent(e: any) {
-  if (e && e.detail) {
-    openAt(e.detail.x, e.detail.y)
+  if (visible.value) {
+    isMinimized.value = false
+    return
+  }
+  const pos = e?.detail
+  if (pos && typeof pos.x === 'number' && typeof pos.y === 'number') {
+    openAt(pos.x, pos.y)
   } else {
-    toggle()
+    openAt()
   }
 }
 
 onMounted(() => {
-  window.addEventListener('keydown', handleGlobalKeyDown, true)
+  window.addEventListener('keydown', handleGlobalKeyDown)
   window.addEventListener(EDITOR_EVENTS.openPrimitiveMenu, handleOpenEvent)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', handleGlobalKeyDown, true)
+  window.removeEventListener('keydown', handleGlobalKeyDown)
   window.removeEventListener(EDITOR_EVENTS.openPrimitiveMenu, handleOpenEvent)
 })
 
@@ -292,9 +296,9 @@ defineExpose({
       <!-- Footer Info -->
       <div class="pt-1.5 border-t border-ui-borderSubtle text-[10px] text-ui-textMuted font-mono flex items-center justify-between">
         <span class="flex items-center gap-1">
-          <kbd class="px-1 py-0.5 bg-ui-input rounded-xs border border-ui-borderSubtle text-ui-textSecondary">Shift+A</kbd> toggle panel
+          <kbd class="px-1 py-0.5 bg-ui-input rounded-xs border border-ui-borderSubtle text-ui-textSecondary">Esc</kbd> or × to close
         </span>
-        <span class="text-ui-textMuted">Click surface to draw</span>
+        <span class="text-ui-textMuted">Stays open while you place</span>
       </div>
     </div>
   </div>

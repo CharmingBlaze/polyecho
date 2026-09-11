@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, toRaw } from 'vue'
+import { computed, ref, toRaw } from 'vue'
 import { useProjectStore } from '../../stores/projectStore'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useToolStore } from '../../stores/toolStore'
@@ -11,7 +11,8 @@ import { MeshBridge } from '../../core/mesh/MeshBridge'
 import { MeshValidator } from '../../core/mesh/MeshValidator'
 import { 
   Copy, 
-  FlipHorizontal, 
+  FlipHorizontal,
+  FlipVertical,
   Crosshair, 
   Move,
   RotateCw,
@@ -33,6 +34,13 @@ const activeItem = computed(() => {
   if (toolStore.appMode === 'animate') {
     return animationStore.selectedBone
   }
+  if (
+    (toolStore.appMode === 'model' || toolStore.appMode === 'blockout') &&
+    toolStore.selectMode === 'object' &&
+    projectStore.selectedMeshIds.length === 0
+  ) {
+    return undefined
+  }
   return projectStore.activeMesh
 })
 
@@ -53,35 +61,24 @@ const meshHealth = computed(() => {
 })
 
 
-function updateTransform() {
+function beginTransformEdit() {
   projectStore.recordState('Transform Input')
+}
+
+function updateTransform() {
   projectStore.markGeometryUpdated()
 }
 
 function handleDuplicateMesh() {
-  if (!activeMesh.value) return
-  projectStore.recordState('Duplicate Mesh')
-  const cloned = JSON.parse(JSON.stringify(activeMesh.value))
-  cloned.id = `mesh_${Math.random().toString(36).substring(2, 8)}`
-  cloned.name = `${activeMesh.value.name}_Copy`
-  cloned.position.x += 0.5
-  projectStore.meshes.push(cloned)
-  projectStore.activeMeshId = cloned.id
-  projectStore.markGeometryUpdated()
+  projectStore.duplicateSelection('object')
 }
 
-function handleMirrorX() {
-  if (!activeMesh.value) return
-  projectStore.recordState('Mirror X')
-  for (const v of activeMesh.value.vertices) {
-    v.position.x = -v.position.x
-  }
-  for (const f of activeMesh.value.faces) {
-    f.vertexIds.reverse()
-    f.uvs.reverse()
-  }
-  projectStore.markGeometryUpdated()
-}
+const rotateAxis = ref<'x' | 'y' | 'z'>('y')
+const rotateAmount = ref(90)
+
+const showObjectSymmetry = computed(() =>
+  !!activeMesh.value && (toolStore.appMode === 'model' || toolStore.appMode === 'blockout')
+)
 
 function handleCleanMesh() {
   if (!activeMesh.value) return
@@ -118,13 +115,17 @@ function setParent(parentId: string) {
   else projectStore.parentMesh(activeMesh.value.id, parentId)
 }
 
+function beginOriginNumericEdit() {
+  projectStore.recordState('Edit Origin')
+}
+
 function handleOriginNumericChange(axis: 'x' | 'y' | 'z', newPos: number) {
   if (!activeMesh.value) return
   const currentPos = activeMesh.value.position[axis]
   const delta = newPos - currentPos
-  if (axis === 'x') projectStore.offsetMeshOrigin(activeMesh.value.id, delta, 0, 0, 'Edit Origin X')
-  else if (axis === 'y') projectStore.offsetMeshOrigin(activeMesh.value.id, 0, delta, 0, 'Edit Origin Y')
-  else if (axis === 'z') projectStore.offsetMeshOrigin(activeMesh.value.id, 0, 0, delta, 'Edit Origin Z')
+  if (axis === 'x') projectStore.offsetMeshOrigin(activeMesh.value.id, delta, 0, 0, 'Edit Origin X', { record: false })
+  else if (axis === 'y') projectStore.offsetMeshOrigin(activeMesh.value.id, 0, delta, 0, 'Edit Origin Y', { record: false })
+  else if (axis === 'z') projectStore.offsetMeshOrigin(activeMesh.value.id, 0, 0, delta, 'Edit Origin Z', { record: false })
 }
 
 function handleShade(mode: 'flat' | 'smooth' | 'auto') {
@@ -132,7 +133,7 @@ function handleShade(mode: 'flat' | 'smooth' | 'auto') {
 }
 
 function handleAutoSmoothAngle(angle: number) {
-  projectStore.setAutoSmoothAngle(angle)
+  projectStore.setAutoSmoothAngle(angle, { record: false })
 }
 
 const objectShade = computed(() => activeMesh.value?.shadeMode || 'flat')
@@ -172,9 +173,9 @@ function toggleOriginMode() {
             <span>Location</span>
           </div>
           <div class="grid grid-cols-3 gap-1">
-            <UiNumberField v-model="activeItem.position.x" label="X" label-color="text-rose-400" @change="updateTransform" />
-            <UiNumberField v-model="activeItem.position.y" label="Y" label-color="text-emerald-400" @change="updateTransform" />
-            <UiNumberField v-model="activeItem.position.z" label="Z" label-color="text-sky-400" @change="updateTransform" />
+            <UiNumberField v-model="activeItem.position.x" label="X" label-color="text-rose-400" @before-change="beginTransformEdit" @change="updateTransform" />
+            <UiNumberField v-model="activeItem.position.y" label="Y" label-color="text-emerald-400" @before-change="beginTransformEdit" @change="updateTransform" />
+            <UiNumberField v-model="activeItem.position.z" label="Z" label-color="text-sky-400" @before-change="beginTransformEdit" @change="updateTransform" />
           </div>
         </div>
 
@@ -185,9 +186,9 @@ function toggleOriginMode() {
             <span>Rotation (°)</span>
           </div>
           <div class="grid grid-cols-3 gap-1">
-            <UiNumberField v-model="activeItem.rotation.x" label="X" label-color="text-rose-400" :step="1" :precision="1" @change="updateTransform" />
-            <UiNumberField v-model="activeItem.rotation.y" label="Y" label-color="text-emerald-400" :step="1" :precision="1" @change="updateTransform" />
-            <UiNumberField v-model="activeItem.rotation.z" label="Z" label-color="text-sky-400" :step="1" :precision="1" @change="updateTransform" />
+            <UiNumberField v-model="activeItem.rotation.x" label="X" label-color="text-rose-400" :step="1" :precision="1" @before-change="beginTransformEdit" @change="updateTransform" />
+            <UiNumberField v-model="activeItem.rotation.y" label="Y" label-color="text-emerald-400" :step="1" :precision="1" @before-change="beginTransformEdit" @change="updateTransform" />
+            <UiNumberField v-model="activeItem.rotation.z" label="Z" label-color="text-sky-400" :step="1" :precision="1" @before-change="beginTransformEdit" @change="updateTransform" />
           </div>
         </div>
 
@@ -198,10 +199,58 @@ function toggleOriginMode() {
             <span>Scale</span>
           </div>
           <div class="grid grid-cols-3 gap-1">
-            <UiNumberField v-model="activeItem.scale.x" label="X" label-color="text-rose-400" :step="0.05" @change="updateTransform" />
-            <UiNumberField v-model="activeItem.scale.y" label="Y" label-color="text-emerald-400" :step="0.05" @change="updateTransform" />
-            <UiNumberField v-model="activeItem.scale.z" label="Z" label-color="text-sky-400" :step="0.05" @change="updateTransform" />
+            <UiNumberField v-model="activeItem.scale.x" label="X" label-color="text-rose-400" :step="0.05" @before-change="beginTransformEdit" @change="updateTransform" />
+            <UiNumberField v-model="activeItem.scale.y" label="Y" label-color="text-emerald-400" :step="0.05" @before-change="beginTransformEdit" @change="updateTransform" />
+            <UiNumberField v-model="activeItem.scale.z" label="Z" label-color="text-sky-400" :step="0.05" @before-change="beginTransformEdit" @change="updateTransform" />
           </div>
+        </div>
+      </UiSection>
+
+      <UiSection v-if="showObjectSymmetry" title="Flip & rotate" :icon="FlipHorizontal" hint="object" :default-open="true">
+        <p class="text-[10px] text-ui-textMuted leading-snug mb-1.5">
+          Flip mirrors verts through the object origin. Mirror copy duplicates in place, then flips.
+        </p>
+        <div class="text-[9.5px] text-ui-textMuted font-semibold mb-1">Flip</div>
+        <div class="grid grid-cols-3 gap-1">
+          <UiButton size="xs" title="Flip left/right through origin" @click="projectStore.performFlipAxis('x')">
+            <FlipHorizontal class="w-3 h-3 text-ui-textMuted" />
+            <span>H / X</span>
+          </UiButton>
+          <UiButton size="xs" title="Flip up/down through origin" @click="projectStore.performFlipAxis('y')">
+            <FlipVertical class="w-3 h-3 text-ui-textMuted" />
+            <span>V / Y</span>
+          </UiButton>
+          <UiButton size="xs" title="Flip front/back through origin" @click="projectStore.performFlipAxis('z')">
+            <span>Z</span>
+          </UiButton>
+        </div>
+
+        <div class="text-[9.5px] text-ui-textMuted font-semibold mt-2 mb-1">Rotate</div>
+        <div class="grid grid-cols-3 gap-1 mb-1">
+          <UiButton size="xs" :active="rotateAxis === 'x'" @click="rotateAxis = 'x'">X</UiButton>
+          <UiButton size="xs" :active="rotateAxis === 'y'" @click="rotateAxis = 'y'">Y</UiButton>
+          <UiButton size="xs" :active="rotateAxis === 'z'" @click="rotateAxis = 'z'">Z</UiButton>
+        </div>
+        <div class="grid grid-cols-4 gap-1 mb-1">
+          <UiButton size="xs" @click="projectStore.performRotateObject(rotateAxis, -90)">−90°</UiButton>
+          <UiButton size="xs" @click="projectStore.performRotateObject(rotateAxis, 90)">+90°</UiButton>
+          <UiButton size="xs" @click="projectStore.performRotateObject(rotateAxis, 180)">180°</UiButton>
+          <UiButton size="xs" title="Apply the amount below" @click="projectStore.performRotateObject(rotateAxis, rotateAmount)">
+            Apply
+          </UiButton>
+        </div>
+        <UiNumberField
+          v-model="rotateAmount"
+          label="°"
+          :step="15"
+          :precision="1"
+        />
+
+        <div class="text-[9.5px] text-ui-textMuted font-semibold mt-2 mb-1">Mirror copy</div>
+        <div class="grid grid-cols-3 gap-1">
+          <UiButton size="xs" title="Duplicate then flip X" @click="projectStore.performDuplicateMirror('x')">X</UiButton>
+          <UiButton size="xs" title="Duplicate then flip Y" @click="projectStore.performDuplicateMirror('y')">Y</UiButton>
+          <UiButton size="xs" title="Duplicate then flip Z" @click="projectStore.performDuplicateMirror('z')">Z</UiButton>
         </div>
       </UiSection>
 
@@ -247,6 +296,7 @@ function toggleOriginMode() {
             :max="180"
             :step="1"
             :precision="0"
+            @before-change="projectStore.recordState('Set Auto Smooth Angle')"
             @update:model-value="handleAutoSmoothAngle"
           />
           <p class="text-[9.5px] text-ui-textMuted mt-1 leading-snug">
@@ -297,18 +347,21 @@ function toggleOriginMode() {
               :model-value="activeMesh.position.x" 
               label="X" 
               label-color="text-rose-400" 
+              @before-change="beginOriginNumericEdit"
               @update:model-value="handleOriginNumericChange('x', $event)" 
             />
             <UiNumberField 
               :model-value="activeMesh.position.y" 
               label="Y" 
               label-color="text-emerald-400" 
+              @before-change="beginOriginNumericEdit"
               @update:model-value="handleOriginNumericChange('y', $event)" 
             />
             <UiNumberField 
               :model-value="activeMesh.position.z" 
               label="Z" 
               label-color="text-sky-400" 
+              @before-change="beginOriginNumericEdit"
               @update:model-value="handleOriginNumericChange('z', $event)" 
             />
           </div>
@@ -370,15 +423,11 @@ function toggleOriginMode() {
         </select>
       </UiSection>
 
-      <UiSection v-if="toolStore.appMode === 'model'" title="Actions" :icon="Wrench" :default-open="false">
+      <UiSection v-if="showObjectSymmetry" title="Actions" :icon="Wrench" :default-open="false">
         <div class="grid grid-cols-2 gap-1">
-          <UiButton @click="handleDuplicateMesh" size="xs">
+          <UiButton @click="handleDuplicateMesh" size="xs" title="Duplicate with a small offset (Shift+D)">
             <Copy class="w-3 h-3 text-ui-textMuted" />
             <span>Duplicate</span>
-          </UiButton>
-          <UiButton @click="handleMirrorX" size="xs">
-            <FlipHorizontal class="w-3 h-3 text-ui-textMuted" />
-            <span>Mirror X</span>
           </UiButton>
           <UiButton @click="handleCleanMesh" size="xs" title="Remove duplicate vertices and unusable geometry">
             <Wrench class="w-3 h-3 text-emerald-400" />
@@ -412,6 +461,15 @@ function toggleOriginMode() {
         <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
           <span>X-Ray (Alt+Z)</span>
           <input type="checkbox" v-model="toolStore.viewport.xray" class="accent-amber-500" />
+        </label>
+        <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle mt-1">
+          <span>Document Recovery</span>
+          <input
+            type="checkbox"
+            :checked="projectStore.documentRecoveryEnabled"
+            class="accent-amber-500"
+            @change="projectStore.setDocumentRecoveryEnabled(($event.target as HTMLInputElement).checked)"
+          />
         </label>
       </UiSection>
 

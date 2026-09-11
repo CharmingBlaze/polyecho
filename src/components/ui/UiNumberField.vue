@@ -25,11 +25,19 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: 'update:modelValue', value: number): void
   (e: 'change', value: number): void
+  (e: 'beforeChange'): void
 }>()
 
 const isDragging = ref(false)
 let startX = 0
 let startVal = 0
+let emittedBeforeChange = false
+
+function emitBeforeChangeOnce() {
+  if (emittedBeforeChange) return
+  emittedBeforeChange = true
+  emit('beforeChange')
+}
 
 function handleMouseDown(e: MouseEvent) {
   if (props.disabled) return
@@ -39,6 +47,7 @@ function handleMouseDown(e: MouseEvent) {
   if ((e.target as HTMLElement).tagName === 'INPUT') return
 
   isDragging.value = true
+  emittedBeforeChange = false
   startX = e.clientX
   startVal = props.modelValue
   document.body.style.cursor = 'ew-resize'
@@ -51,12 +60,14 @@ function handleMouseDown(e: MouseEvent) {
     if (props.min !== undefined) newVal = Math.max(props.min, newVal)
     if (props.max !== undefined) newVal = Math.min(props.max, newVal)
 
+    emitBeforeChangeOnce()
     emit('update:modelValue', newVal)
     emit('change', newVal)
   }
 
   const onMouseUp = () => {
     isDragging.value = false
+    emittedBeforeChange = false
     document.body.style.cursor = ''
     window.removeEventListener('mousemove', onMouseMove)
     window.removeEventListener('mouseup', onMouseUp)
@@ -72,6 +83,7 @@ function handleInput(event: Event) {
     let clamped = val
     if (props.min !== undefined) clamped = Math.max(props.min, clamped)
     if (props.max !== undefined) clamped = Math.min(props.max, clamped)
+    emitBeforeChangeOnce()
     emit('update:modelValue', clamped)
     emit('change', clamped)
   }
@@ -100,6 +112,7 @@ function handleInput(event: Event) {
       :value="modelValue"
       :disabled="disabled"
       class="w-full bg-transparent text-right text-ui-textPrimary font-mono tabular-nums text-xs focus:outline-none cursor-text selection:bg-ui-accent/40"
+      @focus="emittedBeforeChange = false"
       @change="handleInput"
     />
 

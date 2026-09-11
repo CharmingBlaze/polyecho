@@ -30,8 +30,7 @@ export function setupDefaultActions(
       icon: 'extrude',
       handler: () => {
         if (projectStore.activeMesh && projectStore.selectedFaceIds.length > 0) {
-          projectStore.recordState('Extrude Individual Faces')
-          requestModalTool('extrude')
+          requestModalTool('extrude', { individual: true })
         }
       }
     },
@@ -110,6 +109,60 @@ export function setupDefaultActions(
       shortcut: 's',
       icon: 'scale',
       handler: () => requestModalTool('scale')
+    },
+    {
+      id: 'flip_object_h',
+      label: 'Flip Horizontal (X)',
+      category: 'Transform',
+      handler: () => projectStore.performFlipAxis('x')
+    },
+    {
+      id: 'flip_object_v',
+      label: 'Flip Vertical (Y)',
+      category: 'Transform',
+      handler: () => projectStore.performFlipAxis('y')
+    },
+    {
+      id: 'flip_object_z',
+      label: 'Flip Z',
+      category: 'Transform',
+      handler: () => projectStore.performFlipAxis('z')
+    },
+    {
+      id: 'rotate_object_90_y',
+      label: 'Rotate Object 90° Y',
+      category: 'Transform',
+      handler: () => projectStore.performRotateObject('y', 90)
+    },
+    {
+      id: 'rotate_object_neg90_y',
+      label: 'Rotate Object -90° Y',
+      category: 'Transform',
+      handler: () => projectStore.performRotateObject('y', -90)
+    },
+    {
+      id: 'rotate_object_180_y',
+      label: 'Rotate Object 180° Y',
+      category: 'Transform',
+      handler: () => projectStore.performRotateObject('y', 180)
+    },
+    {
+      id: 'mirror_copy_x',
+      label: 'Mirror Copy X',
+      category: 'Transform',
+      handler: () => projectStore.performDuplicateMirror('x')
+    },
+    {
+      id: 'mirror_copy_y',
+      label: 'Mirror Copy Y',
+      category: 'Transform',
+      handler: () => projectStore.performDuplicateMirror('y')
+    },
+    {
+      id: 'mirror_copy_z',
+      label: 'Mirror Copy Z',
+      category: 'Transform',
+      handler: () => projectStore.performDuplicateMirror('z')
     },
 
     // 2. TOPOLOGY
@@ -427,6 +480,13 @@ export function setupDefaultActions(
       shortcut: 'Alt+z',
       icon: 'xray',
       handler: () => { toolStore.viewport.xray = !toolStore.viewport.xray }
+    },
+    {
+      id: 'toggle_combined_gizmo',
+      label: 'Toggle Combined Gizmo',
+      category: 'Viewport',
+      icon: 'gizmo-combined',
+      handler: () => { toolStore.viewport.combinedGizmo = !toolStore.viewport.combinedGizmo }
     },
     {
       id: 'toggle_symmetry',

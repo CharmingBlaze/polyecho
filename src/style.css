@@ -36,6 +36,30 @@
   --ui-icon-hover: #c5cad1;
   --ui-icon-active: #818cf8;
 
+  --ui-bg-toolbar: #181a1f;
+  --ui-bg-status: #181a1f;
+  --ui-bg-overlay: #07080a;
+  --ui-danger: #e05555;
+  --ui-warning: #e0a030;
+  --ui-success: #4caf70;
+  --ui-info: #6366f1;
+  --ui-selection: #f59e0b;
+  --ui-selection-fill: rgba(245, 158, 11, 0.28);
+  --ui-viewport-bg: #121418;
+  --ui-grid-major: #6366f1;
+  --ui-grid-minor: #222631;
+  --ui-gizmo-x: #ef4444;
+  --ui-gizmo-y: #22c55e;
+  --ui-gizmo-z: #3b82f6;
+  --ui-gizmo-accent: #f59e0b;
+  --ui-vertex: #f59e0b;
+  --ui-edge: #f59e0b;
+  --ui-face: #f59e0b;
+  --ui-wire: #707782;
+  --ui-outline: #d8dbe0;
+  --ui-seam: #6366f1;
+  --ui-bone: #22c55e;
+
   --ui-radius-xs: 2px;
   --ui-radius-sm: 3px;
   --ui-radius-md: 4px;

@@ -38,7 +38,8 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/stores/animationStore.ts` | Rig, clips, playback, weights |
 | `src/stores/historyStore.ts` | Undo / redo + dirty epoch (`isDirty` / `markClean`) |
 | `src/stores/layoutStore.ts` | Panel chrome, inspector tab per workspace, Blockout pane split fractions |
-| `src/stores/themeStore.ts` | Themes. `applyCurrentTheme` remaps selected wells away from the accent if contrast would hide text/icons, and sets `--ui-on-accent` for buttons. |
+| `src/core/theme/` | Theme engine: tokens, color math, CSS apply, builtin presets. |
+| `src/stores/themeStore.ts` | Theme persistence, custom token edits, user presets, UI scale. Apply remaps wells away from the accent and sets `--ui-on-accent`. |
 | `src/stores/keymapStore.ts` | Live shortcut chords + Preferences remaps (`App.vue` matches events here) |
 | `src/stores/runtimeStore.ts` | Last uncaught error for the status bar |
 
@@ -51,11 +52,15 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/core/mesh/HalfEdgeTopology.ts` | Half-edge helpers |
 | `src/core/mesh/MeshTopologyService.ts` | Topology queries + one-shot bridge / grid-fill / cleanup / subdivide / poke / triangulate |
 | `src/core/mesh/MeshValidator.ts` | Sanity checks |
-| `src/core/mesh/operations/*Kernel.ts` | Interactive + one-shot kernels (extrude/inset/bevel/merge/dissolve/…) |
-| `src/core/geometry/Operations.ts` | One-shot `MeshObject` ops (fill loop/winding, 2-vert connect, merge, dissolve, …) |
+| `src/core/mesh/operations/*Kernel.ts` | Interactive + one-shot kernels (extrude/inset/bevel/merge/dissolve/…). Poly Draw box-unwraps the solid on confirm. |
+| `src/core/geometry/MeshOrigin.ts` | Place object origin at local AABB center (Poly Draw / Poly Build) |
+| `src/core/geometry/MeshTransform.ts` | `MeshObject` world matrix (degrees → radians) |
+| `src/core/geometry/ObjectPick.ts` | Ray / overlay pick among visible meshes (Knife / Loop Cut retarget) |
+| `src/core/geometry/ObjectSymmetry.ts` | Flip mesh through origin (H/V/Z), wrap Euler degrees, used by inspector Flip / Rotate / Mirror Copy |
 | `src/core/geometry/Primitives.ts` | Legacy cube / plane helpers |
 | `src/core/geometry/Converters.ts` | Three.js `BufferGeometry`, including object shade flat/smooth/auto-smooth normals |
-| `src/core/geometry/ScreenGeometry.ts` | Screen rays, pane rects, Blockout column splits, dashed Poly Draw / Poly Build preview |
+| `src/core/render/VertexMarkers.ts` | Screen-space vertex squares (Blockbench-style outline, constant pixel size at any zoom) |
+| `src/core/geometry/ScreenGeometry.ts` | Screen rays, overlay mapping (`rayFromClient` / `worldToOverlay` match renderer `clientWidth`), Blockout column splits (including maximized pane = full canvas), dashed Poly Draw / Poly Build preview |
 | `src/core/geometry/EdgeUtils.ts` | Loops / rings; `undirectedEdgeId` / `parseUndirectedEdgeId` (ids may contain `_`) |
 | `src/core/geometry/UVUnwrap.ts` | Planar / box / cylindrical / Smart UV + pack |
 | `src/core/geometry/Modifiers.ts` | Stack (`Mirror` → `Subdiv` → `Solidify`) + defaults + apply |
@@ -78,7 +83,10 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/core/operators/InsetOperator.ts` | Inset |
 | `src/core/operators/BevelOperator.ts` | Bevel |
 | `src/core/operators/knife/KnifeOperator.ts` | Knife |
+| `src/core/mesh/operations/KnifeKernel.ts` | Knife splits, surface poke, cut-through |
 | `src/core/operators/loopCut/LoopCutOperator.ts` | Loop cut |
+| `src/core/mesh/operations/LoopCutKernel.ts` | Edge-ring loop cut (any even n-gon strip / tri edge) |
+| `src/core/operators/adoptEditMesh.ts` | Retarget Knife / Loop Cut to the mesh under the pointer |
 | `src/core/operators/placement/PrimitivePlacementOperator.ts` | Shift+A placement |
 | `src/core/operators/PolyDrawOperator.ts` | Blockout / Modeling outline + extrude |
 | `src/core/operators/PolyBuildOperator.ts` | Blockout: snap to existing mesh verts, then fill quads |
@@ -125,7 +133,7 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/components/uvpaint/` | UV editor, pixel editor (`PixelCanvas.vue` is the UV/Paint tab router), palettes |
 | `src/components/animation/` | Timeline (no separate DopeSheet component) |
 | `src/components/rigging/` | Rig inspector: Skel (`SkeletonPanel` + `BoneTreeNode`), Bone (`RiggingPanel`), Bind, Weights |
-| `src/components/modals/` | Export, import, prefs, palette, command search |
+| `src/components/modals/` | Export, import, **new image** (`NewTextureModal`), prefs, palette, command search |
 | `src/components/ui/` | Shared buttons, menus, fields |
 | `src/components/icons/BlenderIcon.vue` | Editor glyphs — add names here (`docs/ICONS.md`) |
 | `src/utils/` | Vectors, color, dither, gradients |

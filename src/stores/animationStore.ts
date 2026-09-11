@@ -365,8 +365,11 @@ export const useAnimationStore = defineStore('animation', () => {
 
     // A bone cannot become a child of itself or any of its descendants.
     let cursor = parentBoneId
+    const seen = new Set<string>()
     while (cursor) {
       if (cursor === boneId) return false
+      if (seen.has(cursor)) return false
+      seen.add(cursor)
       cursor = armature.value.bones.find(item => item.id === cursor)?.parentId || null
     }
 
@@ -408,7 +411,7 @@ export const useAnimationStore = defineStore('animation', () => {
     // Strip trailing _Ext or .001, etc.
     const base = parentName.replace(/(_Ext|\.\d+)+$/g, '')
     let idx = 1
-    while (true) {
+    while (idx < 10000) {
       const suffix = String(idx).padStart(3, '0')
       const candidate = `${base}.${suffix}`
       if (!existingNames.has(candidate)) {
@@ -416,6 +419,7 @@ export const useAnimationStore = defineStore('animation', () => {
       }
       idx++
     }
+    return `${base}.${Date.now()}`
   }
 
   function selectParentBone() {
@@ -636,7 +640,6 @@ export const useAnimationStore = defineStore('animation', () => {
       mode?: 'replace' | 'add'
     }
   ) {
-    projectStore.recordState('Bind Geometry to Bone')
     const boneId = targetBoneId || selectedBoneId.value
     if (!boneId) return { success: false, message: 'No target bone selected' }
     const bone = armature.value.bones.find(b => b.id === boneId)
@@ -644,6 +647,7 @@ export const useAnimationStore = defineStore('animation', () => {
 
     const activeMesh = projectStore.activeMesh
     if (!activeMesh) return { success: false, message: 'No mesh selected' }
+    projectStore.recordState('Bind Geometry to Bone')
 
     const weightVal = typeof options?.weight === 'number' ? Math.max(0, Math.min(1, options.weight)) : 1.0
     const mode = options?.mode || 'replace'
@@ -651,12 +655,14 @@ export const useAnimationStore = defineStore('animation', () => {
     // 1. Direct Object Node Parenting
     if (targetType === 'object') {
       setMeshBoneParent(activeMesh, boneId, armature.value.id)
+      projectStore.markGeometryUpdated()
       return { success: true, message: `Parented ${activeMesh.name} to ${bone.name} (Object Node)` }
     }
 
     // 2. Smooth Proximity Falloff Skinning
     if (targetType === 'smooth_auto' || targetType === 'smooth_vertex') {
       autoWeightMeshToBones(activeMesh)
+      projectStore.markGeometryUpdated()
       return { success: true, message: `Auto-calculated smooth weights for ${activeMesh.name}` }
     }
 
@@ -764,6 +770,7 @@ export const useAnimationStore = defineStore('animation', () => {
       }
     }
 
+    projectStore.markGeometryUpdated()
     return { 
       success: true, 
       message: `Bound ${targetVertexIds.length} vertices to ${bone.name} (${Math.round(weightVal * 100)}%)` 
@@ -814,6 +821,7 @@ export const useAnimationStore = defineStore('animation', () => {
         v.boneWeights = { [boneId]: 1.0 }
       }
     }
+    projectStore.markGeometryUpdated()
   }
 
   function unbindGeometry(meshId: string, boneId?: string) {
@@ -837,6 +845,7 @@ export const useAnimationStore = defineStore('animation', () => {
         v.boneWeights = {}
       }
     }
+    projectStore.markGeometryUpdated()
   }
 
   function assignVertexWeight(meshId: string, vertexIds: string[], boneId: string, weight: number) {
@@ -854,6 +863,7 @@ export const useAnimationStore = defineStore('animation', () => {
         }
       }
     }
+    projectStore.markGeometryUpdated()
   }
 
   function normalizeVertexWeights(meshId: string, vertexIds: string[]) {
@@ -871,6 +881,7 @@ export const useAnimationStore = defineStore('animation', () => {
         }
       }
     }
+    projectStore.markGeometryUpdated()
   }
 
   // ----------------------------------------------------
@@ -1059,6 +1070,7 @@ export const useAnimationStore = defineStore('animation', () => {
         normalizeSingleVertex(v)
       }
     }
+    projectStore.markGeometryUpdated()
   }
 
   function normalizeAllMeshWeights(meshId: string) {
@@ -1068,6 +1080,7 @@ export const useAnimationStore = defineStore('animation', () => {
     for (const v of mesh.vertices) {
       normalizeSingleVertex(v)
     }
+    projectStore.markGeometryUpdated()
   }
 
   function smoothMeshBoneWeights(meshId: string, boneId?: string) {
@@ -1102,6 +1115,7 @@ export const useAnimationStore = defineStore('animation', () => {
         normalizeSingleVertex(v)
       }
     }
+    projectStore.markGeometryUpdated()
   }
 
   function clearBoneWeights(meshId: string, boneId: string) {
@@ -1113,6 +1127,7 @@ export const useAnimationStore = defineStore('animation', () => {
         delete v.boneWeights[boneId]
       }
     }
+    projectStore.markGeometryUpdated()
   }
 
   function invertBoneWeights(meshId: string, boneId: string) {
@@ -1127,6 +1142,7 @@ export const useAnimationStore = defineStore('animation', () => {
         normalizeSingleVertex(v)
       }
     }
+    projectStore.markGeometryUpdated()
   }
 
   function addSocket(boneId: string, name = 'Socket'): BoneSocket | null {
@@ -1847,11 +1863,14 @@ export const useAnimationStore = defineStore('animation', () => {
       // speed/FPS changes take effect immediately without restarting playback.
       playbackAccumulator += Math.min(250, now - playbackLastTime)
       playbackLastTime = now
-      const frameMs = 1000 / ((activeClip.value?.fps || 12) * Math.max(0.1, playbackSpeed.value))
+      const fps = Math.max(1, activeClip.value?.fps || 12)
+      const frameMs = 1000 / (fps * Math.max(0.1, playbackSpeed.value))
       let changed = false
+      let steps = 0
 
-      while (playbackAccumulator >= frameMs) {
+      while (playbackAccumulator >= frameMs && steps < 8) {
         playbackAccumulator -= frameMs
+        steps++
         const lastFrame = activeClip.value?.durationFrames || 24
         if (loopMode.value === 'pingpong') {
           let next = currentFrame.value + playDirection

@@ -325,8 +325,12 @@ export class TorusBuilder implements IPrimitiveBuilder<TorusParameters> {
 export class TubeBuilder implements IPrimitiveBuilder<TubeParameters> {
   create(params: TubeParameters): EditableMesh {
     const mesh = new EditableMesh()
-    const rOut = Math.abs(params.outerRadius) || 0.5
-    const rIn = Math.min(rOut * 0.9, Math.abs(params.innerRadius) || 0.3)
+    const rOut = Math.abs(params.outerRadius ?? params.radius ?? 0) || 0.5
+    const requestedIn = params.innerRadius
+    const rIn = Math.min(
+      rOut * 0.92,
+      requestedIn != null && requestedIn > 0 ? requestedIn : rOut * 0.65
+    )
     const h = Math.abs(params.height) || 1.0
     const sides = Math.max(3, params.sides || 8)
     const hy = h / 2
@@ -375,40 +379,92 @@ export class CapsuleBuilder implements IPrimitiveBuilder<CapsuleParameters> {
   create(params: CapsuleParameters): EditableMesh {
     const mesh = new EditableMesh()
     const r = Math.abs(params.radius) || 0.4
-    const length = Math.abs(params.length) || 1.0
     const sides = Math.max(4, params.segments || 8)
-    const hl = length / 2
+    const capRings = Math.max(2, params.rings || 3)
+    const requested = Math.abs(
+      typeof params.height === 'number' ? params.height : (params.length ?? 0)
+    ) || (r * 2 + 0.4)
+    const totalH = Math.max(requested, r * 2)
+    const bodyH = totalH - 2 * r
+    const hy = bodyH / 2
 
-    // Builds cylinder body + hemispherical caps
-    const cyl = new CylinderBuilder().create({ radius: r, height: length, sides, capTop: false, capBottom: false })
-    for (const [, v] of cyl.vertices) {
-      mesh.addVertex(v.position)
-    }
-    for (const [, f] of cyl.faces) {
-      mesh.addFace([...f.vertexIds], [...f.uvs], f.materialIndex)
+    const addRing = (y: number, ringRadius: number): number[] => {
+      const ids: number[] = []
+      for (let i = 0; i < sides; i++) {
+        const theta = (i / sides) * Math.PI * 2
+        ids.push(mesh.addVertex(new THREE.Vector3(
+          Math.cos(theta) * ringRadius,
+          y,
+          Math.sin(theta) * ringRadius
+        )).id)
+      }
+      return ids
     }
 
-    const topCenter = mesh.addVertex(new THREE.Vector3(0, hl + r, 0)).id
-    const botCenter = mesh.addVertex(new THREE.Vector3(0, -hl - r, 0)).id
-
-    const topRing: number[] = []
-    const botRing: number[] = []
-    for (let i = 0; i < sides; i++) {
-      topRing.push(i * 2)
-      botRing.push(i * 2 + 1)
+    const stitch = (upper: number[], lower: number[], vUpper: number, vLower: number) => {
+      for (let i = 0; i < sides; i++) {
+        const next = (i + 1) % sides
+        mesh.addFace([lower[i], lower[next], upper[next], upper[i]], [
+          new THREE.Vector2(i / sides, vLower),
+          new THREE.Vector2((i + 1) / sides, vLower),
+          new THREE.Vector2((i + 1) / sides, vUpper),
+          new THREE.Vector2(i / sides, vUpper)
+        ], 0)
+      }
     }
+
+    const topPole = mesh.addVertex(new THREE.Vector3(0, hy + r, 0)).id
+    const topRings: number[][] = []
+    for (let lat = 1; lat <= capRings; lat++) {
+      const phi = (lat / capRings) * (Math.PI / 2)
+      topRings.push(addRing(hy + Math.cos(phi) * r, Math.sin(phi) * r))
+    }
+
+    const hasBody = bodyH > 1e-4
+    const botRings: number[][] = []
+    const startLat = hasBody ? capRings : capRings - 1
+    for (let lat = startLat; lat >= 1; lat--) {
+      const phi = (lat / capRings) * (Math.PI / 2)
+      botRings.push(addRing(-hy - Math.cos(phi) * r, Math.sin(phi) * r))
+    }
+    const botPole = mesh.addVertex(new THREE.Vector3(0, -hy - r, 0)).id
+
+    const vStep = 1 / (capRings * 2 + (hasBody ? 1 : 0))
+    let v = 1
 
     for (let i = 0; i < sides; i++) {
       const next = (i + 1) % sides
-      mesh.addFace([topCenter, topRing[i], topRing[next]], [
-        new THREE.Vector2(0.5, 1),
-        new THREE.Vector2(0, 0),
-        new THREE.Vector2(1, 0)
+      mesh.addFace([topPole, topRings[0][i], topRings[0][next]], [
+        new THREE.Vector2((i + 0.5) / sides, 1),
+        new THREE.Vector2(i / sides, 1 - vStep),
+        new THREE.Vector2((i + 1) / sides, 1 - vStep)
       ], 0)
-      mesh.addFace([botCenter, botRing[next], botRing[i]], [
-        new THREE.Vector2(0.5, 0),
-        new THREE.Vector2(1, 1),
-        new THREE.Vector2(0, 1)
+    }
+    v -= vStep
+
+    for (let rIdx = 0; rIdx < topRings.length - 1; rIdx++) {
+      stitch(topRings[rIdx], topRings[rIdx + 1], v, v - vStep)
+      v -= vStep
+    }
+
+    const topEquator = topRings[topRings.length - 1]
+    if (botRings.length) {
+      stitch(topEquator, botRings[0], v, v - vStep)
+      v -= vStep
+    }
+
+    for (let rIdx = 0; rIdx < botRings.length - 1; rIdx++) {
+      stitch(botRings[rIdx], botRings[rIdx + 1], v, v - vStep)
+      v -= vStep
+    }
+
+    const lastBot = botRings[botRings.length - 1]
+    for (let i = 0; i < sides; i++) {
+      const next = (i + 1) % sides
+      mesh.addFace([botPole, lastBot[next], lastBot[i]], [
+        new THREE.Vector2((i + 0.5) / sides, 0),
+        new THREE.Vector2((i + 1) / sides, vStep),
+        new THREE.Vector2(i / sides, vStep)
       ], 0)
     }
 

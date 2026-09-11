@@ -6,6 +6,7 @@ export const useLayoutStore = defineStore('layout', () => {
   const showLeftToolbar = ref<boolean>(true)
   const showRightSidebar = ref<boolean>(true)
   const showStatusBar = ref<boolean>(true)
+  const showPrimitivePanel = ref(false)
 
   // Left Toolbar States (Floating by default)
   const leftToolbarFloating = ref<boolean>(true)
@@ -45,12 +46,121 @@ export const useLayoutStore = defineStore('layout', () => {
     rig: 'skeleton'
   })
 
+  type BlockoutPane = 'front' | 'side' | 'persp'
+
   const blockoutFrontFrac = ref(1 / 3)
   const blockoutSideFrac = ref(1 / 3)
+  const blockoutFrontCollapsed = ref(false)
+  const blockoutSideCollapsed = ref(false)
+  const blockoutPerspCollapsed = ref(false)
+  const blockoutMaximized = ref<'none' | BlockoutPane>('none')
+
+  const BLOCKOUT_COLLAPSED_FRAC = 0.045
+  const BLOCKOUT_VISIBLE_MIN_FRAC = 0.14
+
+  function perspFrac() {
+    return 1 - blockoutFrontFrac.value - blockoutSideFrac.value
+  }
+
+  function applyFrontSide(front: number, side: number) {
+    blockoutFrontFrac.value = front
+    blockoutSideFrac.value = side
+  }
 
   function resetBlockoutSplits() {
-    blockoutFrontFrac.value = 1 / 3
-    blockoutSideFrac.value = 1 / 3
+    applyFrontSide(1 / 3, 1 / 3)
+    blockoutFrontCollapsed.value = false
+    blockoutSideCollapsed.value = false
+    blockoutPerspCollapsed.value = false
+    blockoutMaximized.value = 'none'
+  }
+
+  function restoreBlockoutPane(pane: BlockoutPane) {
+    if (pane === 'front') {
+      blockoutFrontCollapsed.value = false
+      const keepPersp = blockoutPerspCollapsed.value ? BLOCKOUT_COLLAPSED_FRAC : BLOCKOUT_VISIBLE_MIN_FRAC
+      const maxThis = 1 - blockoutSideFrac.value - keepPersp
+      applyFrontSide(Math.min(1 / 3, Math.max(BLOCKOUT_VISIBLE_MIN_FRAC, maxThis)), blockoutSideFrac.value)
+      return
+    }
+    if (pane === 'side') {
+      blockoutSideCollapsed.value = false
+      const keepPersp = blockoutPerspCollapsed.value ? BLOCKOUT_COLLAPSED_FRAC : BLOCKOUT_VISIBLE_MIN_FRAC
+      const maxThis = 1 - blockoutFrontFrac.value - keepPersp
+      applyFrontSide(blockoutFrontFrac.value, Math.min(1 / 3, Math.max(BLOCKOUT_VISIBLE_MIN_FRAC, maxThis)))
+      return
+    }
+    blockoutPerspCollapsed.value = false
+    const others = 1 - 1 / 3
+    const front = blockoutFrontFrac.value
+    const side = blockoutSideFrac.value
+    const sum = front + side
+    if (sum < 1e-6) applyFrontSide(others / 2, others / 2)
+    else applyFrontSide((front / sum) * others, (side / sum) * others)
+  }
+
+  function minimizeBlockoutPane(pane: BlockoutPane) {
+    if (blockoutMaximized.value !== 'none') {
+      resetBlockoutSplits()
+    }
+
+    const already =
+      (pane === 'front' && blockoutFrontCollapsed.value)
+      || (pane === 'side' && blockoutSideCollapsed.value)
+      || (pane === 'persp' && blockoutPerspCollapsed.value)
+    if (already) {
+      restoreBlockoutPane(pane)
+      return
+    }
+
+    const othersCollapsed = (['front', 'side', 'persp'] as const)
+      .filter((p) => p !== pane)
+      .every((p) => (
+        p === 'front' ? blockoutFrontCollapsed.value
+        : p === 'side' ? blockoutSideCollapsed.value
+        : blockoutPerspCollapsed.value
+      ))
+    if (othersCollapsed) return
+
+    if (blockoutMaximized.value === pane) blockoutMaximized.value = 'none'
+
+    if (pane === 'front') {
+      blockoutFrontCollapsed.value = true
+      applyFrontSide(BLOCKOUT_COLLAPSED_FRAC, blockoutSideFrac.value)
+      return
+    }
+    if (pane === 'side') {
+      blockoutSideCollapsed.value = true
+      applyFrontSide(blockoutFrontFrac.value, BLOCKOUT_COLLAPSED_FRAC)
+      return
+    }
+    blockoutPerspCollapsed.value = true
+    const need = 1 - BLOCKOUT_COLLAPSED_FRAC
+    const front = Math.max(BLOCKOUT_COLLAPSED_FRAC, blockoutFrontFrac.value)
+    const side = Math.max(BLOCKOUT_COLLAPSED_FRAC, blockoutSideFrac.value)
+    const sum = front + side
+    applyFrontSide((front / sum) * need, (side / sum) * need)
+  }
+
+  function maximizeBlockoutPane(pane: BlockoutPane) {
+    if (blockoutMaximized.value === pane) {
+      resetBlockoutSplits()
+      return
+    }
+    blockoutMaximized.value = pane
+    blockoutFrontCollapsed.value = false
+    blockoutSideCollapsed.value = false
+    blockoutPerspCollapsed.value = false
+    if (pane === 'front') applyFrontSide(1, 0)
+    else if (pane === 'side') applyFrontSide(0, 1)
+    else applyFrontSide(0, 0)
+  }
+
+  function noteBlockoutSplitDrag() {
+    blockoutMaximized.value = 'none'
+    blockoutFrontCollapsed.value = blockoutFrontFrac.value <= BLOCKOUT_COLLAPSED_FRAC + 0.012
+    blockoutSideCollapsed.value = blockoutSideFrac.value <= BLOCKOUT_COLLAPSED_FRAC + 0.012
+    blockoutPerspCollapsed.value = perspFrac() <= BLOCKOUT_COLLAPSED_FRAC + 0.012
   }
 
   function visibleInspectorTabs(mode: string): InspectorTab[] {
@@ -116,6 +226,7 @@ export const useLayoutStore = defineStore('layout', () => {
     showLeftToolbar,
     showRightSidebar,
     showStatusBar,
+    showPrimitivePanel,
     leftToolbarFloating,
     leftToolbarMinimized,
     leftToolbarColumns,
@@ -132,7 +243,15 @@ export const useLayoutStore = defineStore('layout', () => {
     lastInspectorTabByMode,
     blockoutFrontFrac,
     blockoutSideFrac,
+    blockoutFrontCollapsed,
+    blockoutSideCollapsed,
+    blockoutPerspCollapsed,
+    blockoutMaximized,
     resetBlockoutSplits,
+    minimizeBlockoutPane,
+    maximizeBlockoutPane,
+    restoreBlockoutPane,
+    noteBlockoutSplitDrag,
     visibleInspectorTabs,
     setInspectorTab,
     restoreInspectorTab,

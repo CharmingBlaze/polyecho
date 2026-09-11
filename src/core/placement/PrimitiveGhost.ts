@@ -40,17 +40,22 @@ export class PrimitiveGhost {
   }
 
   /**
-   * Updates the ghost geometry, transform, and dimensions in real time.
+   * `restPosition` is the footprint on the construction surface.
+   * Local Y is lifted so `boundingBox.min.y` sits on that plane (CAD boxes
+   * are centered; stairs/arches sit on y=0 — both land on the ground).
    */
   update(
     type: PrimitiveType,
     params: PrimitiveParameters,
-    position: THREE.Vector3,
+    restPosition: THREE.Vector3,
     rotation = new THREE.Quaternion(),
     scale = new THREE.Vector3(1, 1, 1)
   ) {
     const editableMesh = PrimitiveBuilder.create(type, params)
     const geom = MeshBridge.editableMeshToThreeGeometry(editableMesh)
+    geom.computeBoundingBox()
+    const minY = geom.boundingBox?.min.y ?? 0
+    const lift = Number.isFinite(minY) ? -minY : 0
 
     this.meshInstance.geometry.dispose()
     this.meshInstance.geometry = geom
@@ -58,9 +63,10 @@ export class PrimitiveGhost {
     this.wireframeInstance.geometry.dispose()
     this.wireframeInstance.geometry = new THREE.WireframeGeometry(geom)
 
-    this.group.position.copy(position)
     this.group.quaternion.copy(rotation)
     this.group.scale.copy(scale)
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(rotation)
+    this.group.position.copy(restPosition).addScaledVector(up, lift)
     this.group.visible = true
   }
 

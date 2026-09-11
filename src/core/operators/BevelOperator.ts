@@ -1,10 +1,11 @@
 import { ModalOperator } from './ModalOperator'
-import { BevelKernel, BevelResult } from '../mesh/operations/BevelKernel'
+import { BevelKernel, BevelResult, bevelProfileLabel, bevelProfileValue } from '../mesh/operations/BevelKernel'
 
 export class BevelOperator extends ModalOperator {
   readonly name = 'Bevel'
 
   private segments = 1
+  private profile = 0
   private lastResult: BevelResult | null = null
 
   wheel(event: WheelEvent): boolean {
@@ -20,11 +21,35 @@ export class BevelOperator extends ModalOperator {
     return true
   }
 
+  keyDown(event: KeyboardEvent): boolean {
+    if (event.key.toLowerCase() === 'p') {
+      event.preventDefault()
+      this.cycleProfile()
+      this.evaluate()
+      this.ctx.onUpdatePreview()
+      this.updateStatus()
+      return true
+    }
+    return super.keyDown(event)
+  }
+
+  private cycleProfile() {
+    const mode = bevelProfileLabel(this.profile)
+    if (mode === 'chamfer') {
+      this.profile = bevelProfileValue('convex')
+      if (this.segments < 3) this.segments = 3
+    } else if (mode === 'convex') {
+      this.profile = bevelProfileValue('concave')
+      if (this.segments < 3) this.segments = 3
+    } else {
+      this.profile = bevelProfileValue('chamfer')
+    }
+  }
+
   evaluate() {
     this.restoreSnapshot()
 
     const numWidth = this.numericInput.getValue()
-
     const startDist = Math.hypot(this.startMouse.x - this.pivotScreen.x, this.startMouse.y - this.pivotScreen.y) || 50
     const curDist = Math.hypot(this.currentMouse.x - this.pivotScreen.x, this.currentMouse.y - this.pivotScreen.y)
 
@@ -39,7 +64,8 @@ export class BevelOperator extends ModalOperator {
     this.lastResult = BevelKernel.bevelFaces(this.ctx.mesh, this.ctx.selectedFaceIds, {
       width,
       segments: this.segments,
-      clampOverlap: true
+      profile: this.profile,
+      clampOverlap: true,
     })
   }
 
@@ -53,6 +79,7 @@ export class BevelOperator extends ModalOperator {
 
   updateStatus() {
     const num = this.numericInput.text ? ` Width: ${this.numericInput.text}` : ''
-    this.statusText = `Bevel${num} | Segments: ${this.segments}`
+    const shape = bevelProfileLabel(this.profile)
+    this.statusText = `Bevel${num} | Profile: ${shape} (P) | Segments: ${this.segments} (scroll)`
   }
 }

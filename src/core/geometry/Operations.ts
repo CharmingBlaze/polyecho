@@ -8,7 +8,7 @@ import { MergeKernel } from '../mesh/operations/MergeKernel'
 import { DissolveKernel } from '../mesh/operations/DissolveKernel'
 import { MeshTopologyService } from '../mesh/MeshTopologyService'
 import { TopologyOps } from '../mesh/operations/TopologyOps'
-import { parseUndirectedEdgeId } from './EdgeUtils'
+import { parseUndirectedEdgeId, getMeshEdges } from './EdgeUtils'
 import * as THREE from 'three'
 
 export interface OperationResult {
@@ -22,19 +22,53 @@ export interface OperationResult {
  * creating connecting side quad faces and moving the front face outward.
  */
 export function extrudeFaces(mesh: MeshObject, faceIds: string[], distance = 0.5): OperationResult {
-  if (faceIds.length === 0) {
-    return { mesh, selectedFaceIds: faceIds, selectedVertexIds: [] }
-  }
+  return extrudeSelection(mesh, { faceIds, distance })
+}
 
+export function extrudeSelection(
+  mesh: MeshObject,
+  options: {
+    faceIds?: string[]
+    edgeIds?: string[]
+    vertexIds?: string[]
+    distance?: number
+    individual?: boolean
+  }
+): OperationResult {
+  const distance = options.distance ?? 0.5
   const bridge = MeshBridge.meshObjectToEditableMesh(mesh)
-  const numFaces = faceIds
-    .map(id => bridge.strToNumFaceId.get(id))
+  const faceIds = (options.faceIds ?? [])
+    .map((id) => bridge.strToNumFaceId.get(id))
     .filter((id): id is number => id !== undefined)
-  if (numFaces.length === 0) {
-    return { mesh, selectedFaceIds: faceIds, selectedVertexIds: [] }
+
+  const edgeIds: number[] = []
+  if (options.edgeIds?.length) {
+    const docEdges = getMeshEdges(mesh)
+    for (const key of options.edgeIds) {
+      const de = docEdges.find((e) => e.id === key)
+      if (!de) continue
+      const a = bridge.strToNumVertId.get(de.v1)
+      const b = bridge.strToNumVertId.get(de.v2)
+      if (a == null || b == null) continue
+      for (const ke of bridge.mesh.edges.values()) {
+        if ((ke.v1 === a && ke.v2 === b) || (ke.v1 === b && ke.v2 === a)) {
+          edgeIds.push(ke.id)
+          break
+        }
+      }
+    }
   }
 
-  const result = ExtrudeKernel.extrudeFaces(bridge.mesh, numFaces)
+  const vertexIds = (options.vertexIds ?? [])
+    .map((id) => bridge.strToNumVertId.get(id))
+    .filter((id): id is number => id !== undefined)
+
+  const result = ExtrudeKernel.extrude(bridge.mesh, {
+    individual: options.individual,
+    faceIds,
+    edgeIds,
+    vertexIds,
+  })
   const offset = result.regionNormal.clone().multiplyScalar(distance)
   for (const vid of result.newVertexIds) {
     bridge.mesh.vertices.get(vid)?.position.add(offset)

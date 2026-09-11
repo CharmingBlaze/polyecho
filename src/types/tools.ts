@@ -82,4 +82,6 @@ export interface ViewportSettings {
   symmetryY: boolean
   symmetryZ: boolean
   invertZoom: boolean // Invert trackpad / wheel zoom direction
+  /** All-in-one translate/rotate/scale widget instead of TransformControls. */
+  combinedGizmo: boolean
 }

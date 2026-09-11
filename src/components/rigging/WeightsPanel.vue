@@ -99,37 +99,31 @@ function handleAssign100() {
 
 function handleFloodFillMesh() {
   if (!activeMesh.value || !selectedBone.value) return
-  projectStore.recordState(`Flood Fill ${selectedBone.value.name} Weight`)
   animationStore.floodFillBoneWeight(activeMesh.value.id, selectedBone.value.id, animationStore.weightBrushWeight, false)
 }
 
 function handleFloodFillSelection() {
   if (!activeMesh.value || !selectedBone.value || selectedVertexIds.value.length === 0) return
-  projectStore.recordState(`Fill Selection ${selectedBone.value.name} Weight`)
   animationStore.floodFillBoneWeight(activeMesh.value.id, selectedBone.value.id, animationStore.weightBrushWeight, true)
 }
 
 function handleSmoothMesh() {
   if (!activeMesh.value) return
-  projectStore.recordState('Smooth Bone Weights')
   animationStore.smoothMeshBoneWeights(activeMesh.value.id, selectedBone.value?.id)
 }
 
 function handleNormalizeAll() {
   if (!activeMesh.value) return
-  projectStore.recordState('Normalize All Weights')
   animationStore.normalizeAllMeshWeights(activeMesh.value.id)
 }
 
 function handleInvertWeights() {
   if (!activeMesh.value || !selectedBone.value) return
-  projectStore.recordState(`Invert ${selectedBone.value.name} Weights`)
   animationStore.invertBoneWeights(activeMesh.value.id, selectedBone.value.id)
 }
 
 function handleClearWeights() {
   if (!activeMesh.value || !selectedBone.value) return
-  projectStore.recordState(`Clear ${selectedBone.value.name} Weights`)
   animationStore.clearBoneWeights(activeMesh.value.id, selectedBone.value.id)
 }
 

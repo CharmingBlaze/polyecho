@@ -37,16 +37,16 @@ export interface PrimitivePlacementCommand {
   parameters?: PrimitiveParameters
 }
 
-export function requestModalTool(tool: ModalToolCommand) {
-  window.dispatchEvent(new CustomEvent(EDITOR_EVENTS.modalTool, { detail: { tool } }))
+export function requestModalTool(tool: ModalToolCommand, extra?: { individual?: boolean }) {
+  window.dispatchEvent(new CustomEvent(EDITOR_EVENTS.modalTool, { detail: { tool, ...extra } }))
 }
 
 export function requestCameraView(view: CameraViewCommand) {
   window.dispatchEvent(new CustomEvent(EDITOR_EVENTS.cameraView, { detail: view }))
 }
 
-export function requestPrimitiveMenu(position = { x: 100, y: 150 }) {
-  window.dispatchEvent(new CustomEvent(EDITOR_EVENTS.openPrimitiveMenu, { detail: position }))
+export function requestPrimitiveMenu(position?: { x: number; y: number }) {
+  window.dispatchEvent(new CustomEvent(EDITOR_EVENTS.openPrimitiveMenu, { detail: position ?? null }))
 }
 
 export function requestPrimitivePlacement(detail: PrimitivePlacementCommand) {

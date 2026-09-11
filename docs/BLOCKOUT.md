@@ -4,7 +4,7 @@ Blockout is a dedicated `appMode` for low-poly volume sketching. It is not a sec
 
 ## Layout
 
-Three vertical panes on the same WebGL canvas: **Front** (ortho) | **Side / Right** (ortho) | **Perspective**. Drag the vertical bars between them to resize. Double-click a bar to reset equal thirds. Modeling still uses single or 2×2 quad view.
+Three vertical panes on the same WebGL canvas: **Front** (ortho) | **Side / Right** (ortho) | **Perspective**. Drag the vertical bars between them to resize. Double-click a bar to reset equal thirds. Front, Side, and Persp can each **maximize** (that pane fills the whole viewport; click again to restore the three-pane split) or **minimize** (slim restore strip). The right inspector starts **closed**; **N** or the dock strip reopens Refs. Modeling still uses single or 2×2 quad view.
 
 Front and Side show **XY / ZY grids** (the floor grid is edge-on in those cameras). Persp keeps the ground grid. Toggle with Viewport Nav **Show Grid**.
 
@@ -12,7 +12,7 @@ Front and Side show **XY / ZY grids** (the floor grid is edge-on in those camera
 
 1. Drop a tracing photo on Front or Side (inspector **Refs**), or skip refs and sketch freehand.
 2. **F** or the amber outline button: **Poly Draw** — a new volume from a silhouette. Click on Front/Side (or Persp ground/face) to drop verts. **Shift** locks 45° from the last point. Close by clicking the dashed first-vert ring, double-click, **C / F / Enter**, or **Close loop**. Thickness starts **toward the camera** whether you wound the outline clockwise or the other way; drag toward or away, **F / C** or **Flip** if you meant the other direction. **N** before the first vert flips the draw plane. RMB / Backspace undoes a point. Confirm keeps a new `Block_N` mesh.
-3. **V** or the cyan vertex button: **Poly Build** — faces on the **active mesh**. Empty click = new vert, cyan snap = reuse. One or two selected verts seed the strip. Click the first vert (green) / **C / F / Enter** to fill; a fourth unique vert fills a quad and keeps the last edge so you can keep stripping. Click empty space on **either side** of that edge to grow a tri the other way. After a fill, **Tab / R / Reverse** walks around the last face onto the next boundary edge; clicking the other endpoint of the kept edge grows from that end. Esc cancels; **Done** keeps new verts (even before a face). Preview rubber-bands are dashed.
+3. **V** or the cyan vertex button: **Poly Build** — faces on the **active mesh**. Click to draw an outline (empty = new vert, cyan = reuse). The preview fill stays **inside** that loop. Click the first vert (green) / **C / F / Enter** to fill; concave shapes are ear-clipped into quads/tris like Poly Draw. Then draw the next outline. **Tab / R** reverses the current chain. Esc cancels; **Done** keeps new verts. Preview rubber-bands are dashed.
 4. **Shift+A** for a box/cylinder when you need a stock volume.
 5. **G / R / S** to place the block. Repeat for the next volume.
 
@@ -32,9 +32,17 @@ Vertices snap to the viewport grid size (Ctrl = half step). **Shift** constrains
 
 The 3D gizmo is rebuilt per column (that pane’s camera and zoom) so a selected vertex keeps a handle on the vert in Front, Side, and Persp. Hover a pane, then drag. **Right-drag** pans that pane (orbit pan in Persp). Selecting a reference photo does not hide the mesh gizmo (use **Alt-drag** for the photo). **Shift-drag** or **Alt-wheel** scales a ref. Lock a ref in the inspector to keep it still.
 
-Poly Draw commits a new mesh (`Block_N`) through `MeshBridge`. Cancel restores the empty kernel snapshot (no undo step). Drop on Persp still applies a **mesh texture**, not a lightbox.
+Poly Draw commits a new mesh (`Block_N`) through `MeshBridge`. Concave silhouettes are ear-clipped into convex quads/tris so the cap is not one n-gon with a fan “cut”. Cancel restores the empty kernel snapshot (no undo step). Drop on Persp still applies a **mesh texture**, not a lightbox.
 
-## Files
+## Topology for game assets
+
+Poly Draw and Poly Build choose well-shaped triangles and merge compatible pairs into convex, planar quads. Bent quads stay triangulated. Both tools report the planned quad/triangle count and reject crossed, repeated, or collapsed outlines before filling. The silhouette and boundary vertices are preserved; no subdivision vertices are added.
+
+Poly Build can connect vertices across angled surfaces, including character limbs, torsos, props, and architectural forms. Shared boundary edges determine winding, so new patches follow neighboring normals. Fills that duplicate a face, overfill an edge, or conflict with neighboring winding are rejected with an explanation. UV coordinates are shared across each filled patch.
+
+Enable **Continue strip** beside **Fill face** to keep the last drawn edge as the start of the next patch. Draw two more corners and fill to extend a quad strip. Leave it off for independent outlines. These controls improve newly created geometry; existing models are not automatically retopologized.
+
+## Implementation files
 
 - `src/core/operators/PolyDrawOperator.ts`
 - `src/core/mesh/operations/PolyDrawKernel.ts`

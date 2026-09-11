@@ -28,10 +28,18 @@ export interface AppSnapshot {
   activePalette: any
   activeTextureId: string
   textures: TextureSnapshot[]
+  /** Project textureRevision at capture time. Same number on apply means pixels were not edited. */
+  textureRevision: number
+  referenceRevision?: number
   armature: any
   selectedBoneId: string | null
   currentFrame: number
   referenceImages?: any[]
+}
+
+export type CaptureSnapshotOptions = {
+  /** When false, skip cloning PixelBuffers (mesh / selection undos). Default true. */
+  includeTextures?: boolean
 }
 
 export interface HistoryRecord {
@@ -57,25 +65,34 @@ export const useHistoryStore = defineStore('history', () => {
     savedEpoch.value = documentEpoch.value
   }
 
+  function markDirty() {
+    if (savedEpoch.value === documentEpoch.value) {
+      documentEpoch.value += 1
+    }
+  }
+
   function isDirty() {
     return documentEpoch.value !== savedEpoch.value
   }
 
-  function captureSnapshot(description: string): AppSnapshot {
+  function captureSnapshot(description: string, options?: CaptureSnapshotOptions): AppSnapshot {
     const projectStore = useProjectStore()
     const animationStore = useAnimationStore()
+    const includeTextures = options?.includeTextures !== false
 
-    const texturesSnapshot: TextureSnapshot[] = projectStore.textures.map(t => {
-      const buf = t.pixelBuffer ? t.pixelBuffer.clone() : new PixelBuffer(t.width, t.height)
-      return {
-        id: t.id,
-        name: t.name,
-        width: t.width,
-        height: t.height,
-        atlas: t.atlas ? { ...t.atlas } : undefined,
-        pixelBuffer: markRaw(buf) as PixelBuffer
-      }
-    })
+    const texturesSnapshot: TextureSnapshot[] = includeTextures
+      ? projectStore.textures.map(t => {
+          const buf = t.pixelBuffer ? t.pixelBuffer.clone() : new PixelBuffer(t.width, t.height)
+          return {
+            id: t.id,
+            name: t.name,
+            width: t.width,
+            height: t.height,
+            atlas: t.atlas ? { ...t.atlas } : undefined,
+            pixelBuffer: markRaw(buf) as PixelBuffer
+          }
+        })
+      : []
 
     return {
       description,
@@ -90,6 +107,8 @@ export const useHistoryStore = defineStore('history', () => {
       activePalette: JSON.parse(JSON.stringify(projectStore.activePalette)),
       activeTextureId: projectStore.activeTextureId,
       textures: texturesSnapshot,
+      textureRevision: projectStore.textureRevision,
+      referenceRevision: projectStore.referenceRevision,
       armature: JSON.parse(JSON.stringify(animationStore.armature)),
       selectedBoneId: animationStore.selectedBoneId,
       currentFrame: animationStore.currentFrame,
@@ -123,19 +142,29 @@ export const useHistoryStore = defineStore('history', () => {
       }
       projectStore.activeTextureId = snapshot.activeTextureId
 
-      // Restore textures with fresh PixelBuffers
-      projectStore.textures = snapshot.textures.map(t => {
-        const clonedBuf = t.pixelBuffer.clone()
-        return {
-          id: t.id,
-          name: t.name,
-          width: t.width,
-          height: t.height,
-          atlas: t.atlas ? { ...t.atlas } : undefined,
-          pixelBuffer: markRaw(clonedBuf) as PixelBuffer
-        }
-      })
-      projectStore.textureRevision++
+      const hasTexturePayload = snapshot.textures.length > 0
+      const texturesUntouched =
+        typeof snapshot.textureRevision === 'number' &&
+        snapshot.textureRevision === projectStore.textureRevision &&
+        (!hasTexturePayload || (
+          snapshot.textures.length === projectStore.textures.length &&
+          snapshot.textures.every((t, i) => projectStore.textures[i]?.id === t.id)
+        ))
+
+      if (!texturesUntouched && hasTexturePayload) {
+        projectStore.textures = snapshot.textures.map(t => {
+          const clonedBuf = t.pixelBuffer.clone()
+          return {
+            id: t.id,
+            name: t.name,
+            width: t.width,
+            height: t.height,
+            atlas: t.atlas ? { ...t.atlas } : undefined,
+            pixelBuffer: markRaw(clonedBuf) as PixelBuffer
+          }
+        })
+        projectStore.textureRevision++
+      }
 
       // Restore animation & rigging
       if (snapshot.armature) {
@@ -143,17 +172,22 @@ export const useHistoryStore = defineStore('history', () => {
         animationStore.selectedBoneId = snapshot.selectedBoneId
         animationStore.currentFrame = snapshot.currentFrame
       }
-      projectStore.referenceImages = JSON.parse(JSON.stringify(snapshot.referenceImages || []))
-      projectStore.referenceRevision++
+      const refsUntouched =
+        typeof snapshot.referenceRevision === 'number' &&
+        snapshot.referenceRevision === projectStore.referenceRevision
+      if (!refsUntouched) {
+        projectStore.referenceImages = JSON.parse(JSON.stringify(snapshot.referenceImages || []))
+        projectStore.referenceRevision++
+      }
     } finally {
       isApplyingHistory.value = false
       projectStore.markGeometryUpdated()
     }
   }
 
-  function recordState(description: string) {
+  function recordState(description: string, options?: CaptureSnapshotOptions) {
     if (isApplyingHistory.value) return
-    const snapshot = captureSnapshot(description)
+    const snapshot = captureSnapshot(description, options)
     undoStack.value.push({
       description,
       timestamp: Date.now(),
@@ -243,6 +277,7 @@ export const useHistoryStore = defineStore('history', () => {
     clearHistory,
     documentEpoch,
     markClean,
+    markDirty,
     isDirty
   }
 })

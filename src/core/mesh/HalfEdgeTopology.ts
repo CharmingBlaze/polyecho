@@ -156,75 +156,103 @@ export class HalfEdgeTopology {
   }
 
   /**
-   * Edge Loop traversal: steps across quad faces to find contiguous parallel edge chains.
+   * Edge loop: consecutive edges along valence-4 vertices.
    */
   static findEdgeLoop(mesh: EditableMesh, startEdgeId: number): number[] {
+    const start = mesh.edges.get(startEdgeId)
+    if (!start) return []
+
     const loop: number[] = [startEdgeId]
     const visited = new Set<number>([startEdgeId])
 
-    // Traverse in both half-edge directions
-    for (const startHeId of mesh.edges.get(startEdgeId)?.halfEdgeIds || []) {
-      let curHe = mesh.halfEdges.get(startHeId)
-
-      while (curHe) {
-        const face = mesh.faces.get(curHe.faceId)
-        if (!face || face.vertexIds.length !== 4) break // Only quad topology supports pure loops
-
-        // Opposite edge in a quad is next.next
-        const next1 = mesh.halfEdges.get(curHe.nextId)
-        const next2 = next1 ? mesh.halfEdges.get(next1.nextId) : null
-        if (!next2) break
-
-        const oppEdgeId = next2.edgeId
-        if (visited.has(oppEdgeId)) break
-
-        loop.push(oppEdgeId)
-        visited.add(oppEdgeId)
-
-        // Step through twin to continue into next face
-        if (next2.twinId !== null) {
-          curHe = mesh.halfEdges.get(next2.twinId)
-        } else {
-          break
-        }
+    const walk = (fromEdge: number, fromVertex: number) => {
+      let edgeId = fromEdge
+      let vertexId = fromVertex
+      while (true) {
+        const nextId = HalfEdgeTopology.nextLoopEdge(mesh, edgeId, vertexId)
+        if (nextId === null || visited.has(nextId)) break
+        visited.add(nextId)
+        loop.push(nextId)
+        const next = mesh.edges.get(nextId)
+        if (!next) break
+        edgeId = nextId
+        vertexId = next.v1 === vertexId ? next.v2 : next.v1
       }
     }
 
+    walk(startEdgeId, start.v1)
+    walk(startEdgeId, start.v2)
     return loop
   }
 
+  /** At a valence-4 vertex, the loop continues on the edge that shares no face with `edgeId`. */
+  static nextLoopEdge(mesh: EditableMesh, edgeId: number, vertexId: number): number | null {
+    const vertex = mesh.vertices.get(vertexId)
+    const edge = mesh.edges.get(edgeId)
+    if (!vertex || !edge || vertex.edgeIds.length !== 4) return null
+    const startFaces = new Set(edge.faceIds)
+    for (const candidateId of vertex.edgeIds) {
+      if (candidateId === edgeId) continue
+      const candidate = mesh.edges.get(candidateId)
+      if (!candidate) continue
+      if (candidate.faceIds.some((fId) => startFaces.has(fId))) continue
+      return candidateId
+    }
+    return null
+  }
+
   /**
-   * Edge Ring traversal: parallel edges traversing across adjacent quad strips.
+   * Edge ring: opposite sides of even n-gons, walking by face loops (no twin required).
+   * Loop Cut splits every edge in this ring.
    */
   static findEdgeRing(mesh: EditableMesh, startEdgeId: number): number[] {
+    if (!mesh.edges.has(startEdgeId)) return []
     const ring: number[] = [startEdgeId]
     const visited = new Set<number>([startEdgeId])
+    const queue = [startEdgeId]
 
-    for (const startHeId of mesh.edges.get(startEdgeId)?.halfEdgeIds || []) {
-      let curHe = mesh.halfEdges.get(startHeId)
-
-      while (curHe) {
-        const face = mesh.faces.get(curHe.faceId)
-        if (!face || face.vertexIds.length !== 4) break
-
-        // Next edge in quad ring is next
-        const nextHe = mesh.halfEdges.get(curHe.nextId)
-        if (!nextHe) break
-
-        const nextEdgeId = nextHe.edgeId
-        if (visited.has(nextEdgeId)) break
-
-        ring.push(nextEdgeId)
-        visited.add(nextEdgeId)
-
-        if (nextHe.twinId !== null) {
-          curHe = mesh.halfEdges.get(nextHe.twinId)
-        } else {
-          break
-        }
+    while (queue.length > 0) {
+      const eId = queue.shift()!
+      const edge = mesh.edges.get(eId)
+      if (!edge) continue
+      for (const fId of edge.faceIds) {
+        const face = mesh.faces.get(fId)
+        if (!face) continue
+        const opp = this.oppositeEdgeOnFace(mesh, face, eId)
+        if (opp === null || visited.has(opp)) continue
+        visited.add(opp)
+        ring.push(opp)
+        queue.push(opp)
       }
     }
 
     return ring
+  }
+
+  /** Opposite side of an even n-gon, or null on tris / odd n-gons. */
+  static oppositeEdgeOnFace(mesh: EditableMesh, face: { vertexIds: number[] }, edgeId: number): number | null {
+    const n = face.vertexIds.length
+    if (n < 4 || n % 2 !== 0) return null
+    const verts = face.vertexIds
+    let side = -1
+    for (let i = 0; i < n; i++) {
+      const id = this.edgeIdBetween(mesh, verts[i]!, verts[(i + 1) % n]!)
+      if (id === edgeId) {
+        side = i
+        break
+      }
+    }
+    if (side < 0) return null
+    const j = (side + n / 2) % n
+    return this.edgeIdBetween(mesh, verts[j]!, verts[(j + 1) % n]!)
+  }
+
+  private static edgeIdBetween(mesh: EditableMesh, a: number, b: number): number | null {
+    const minV = Math.min(a, b)
+    const maxV = Math.max(a, b)
+    for (const edge of mesh.edges.values()) {
+      if (edge.v1 === minV && edge.v2 === maxV) return edge.id
+    }
+    return null
   }
 }

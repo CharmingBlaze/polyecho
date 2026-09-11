@@ -72,6 +72,15 @@ export async function loadOpenProject(text: string, filePath?: string | null): P
   await refreshDesktopTitle()
 }
 
+export function startBlankProject() {
+  useProjectStore().resetToDefaultProject()
+  const historyStore = useHistoryStore()
+  historyStore.clearHistory()
+  historyStore.markClean()
+  setLastProjectPath(null)
+  void refreshDesktopTitle()
+}
+
 export async function refreshDesktopTitle(): Promise<void> {
   const projectStore = useProjectStore()
   const dirty = useHistoryStore().isDirty()

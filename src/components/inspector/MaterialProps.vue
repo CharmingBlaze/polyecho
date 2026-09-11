@@ -470,6 +470,10 @@ function pickPaletteColor(hex: string) {
   }
 }
 
+function beginMaterialEdit() {
+  projectStore.recordState('Edit Material')
+}
+
 function createNewCustomPalette() {
   const name = newPaletteName.value.trim() || `Custom Set ${customPalettes.value.length + 1}`
   const newPal: Palette = {
@@ -1053,6 +1057,7 @@ function rgbToHex(r: number, g: number, b: number): string {
         <select
           v-if="activeMaterial"
           v-model="activeMaterial.shading"
+          @mousedown="beginMaterialEdit"
           class="w-full h-5.5 bg-ui-surface border border-ui-borderDefault rounded-xs px-2 text-[11px] text-ui-textPrimary focus:outline-none focus:border-ui-accent cursor-pointer"
         >
           <option value="pbr">PBR</option>
@@ -1072,6 +1077,7 @@ function rgbToHex(r: number, g: number, b: number): string {
           <input
             type="color"
             v-model="activeMaterial.color"
+            @mousedown="beginMaterialEdit"
             @change="projectStore.markGeometryUpdated()"
             class="w-6 h-6 rounded-xs cursor-pointer border border-ui-borderDefault bg-transparent p-0 shrink-0"
           />
@@ -1090,19 +1096,19 @@ function rgbToHex(r: number, g: number, b: number): string {
           <span class="text-ui-textSecondary">Roughness</span>
           <span class="font-mono text-amber-400">{{ ((activeMaterial.roughness ?? 0.7) * 100).toFixed(0) }}%</span>
         </div>
-        <input type="range" min="0" max="1" step="0.01" v-model.number="activeMaterial.roughness" class="w-full accent-amber-500 bg-ui-input h-1 rounded cursor-pointer" />
+        <input type="range" min="0" max="1" step="0.01" v-model.number="activeMaterial.roughness" @mousedown="beginMaterialEdit" class="w-full accent-amber-500 bg-ui-input h-1 rounded cursor-pointer" />
         <div class="flex items-center justify-between text-[10px] pt-1">
           <span class="text-ui-textSecondary">Metallic</span>
           <span class="font-mono text-sky-400">{{ ((activeMaterial.metalness ?? 0.05) * 100).toFixed(0) }}%</span>
         </div>
-        <input type="range" min="0" max="1" step="0.01" v-model.number="activeMaterial.metalness" class="w-full accent-sky-500 bg-ui-input h-1 rounded cursor-pointer" />
+        <input type="range" min="0" max="1" step="0.01" v-model.number="activeMaterial.metalness" @mousedown="beginMaterialEdit" class="w-full accent-sky-500 bg-ui-input h-1 rounded cursor-pointer" />
         <div class="flex items-center justify-between text-[10px] pt-1">
           <span class="text-ui-textSecondary">Emissive</span>
           <span class="font-mono text-emerald-400">{{ (activeMaterial.emissiveIntensity || 0).toFixed(1) }}×</span>
         </div>
         <div class="flex items-center gap-1.5">
-          <input type="color" v-model="activeMaterial.emissive" class="w-4 h-4 rounded-xs cursor-pointer border border-ui-borderDefault bg-transparent p-0 shrink-0" />
-          <input type="range" min="0" max="5" step="0.1" v-model.number="activeMaterial.emissiveIntensity" class="flex-1 accent-emerald-500 bg-ui-input h-1 rounded cursor-pointer" />
+          <input type="color" v-model="activeMaterial.emissive" @mousedown="beginMaterialEdit" class="w-4 h-4 rounded-xs cursor-pointer border border-ui-borderDefault bg-transparent p-0 shrink-0" />
+          <input type="range" min="0" max="5" step="0.1" v-model.number="activeMaterial.emissiveIntensity" @mousedown="beginMaterialEdit" class="flex-1 accent-emerald-500 bg-ui-input h-1 rounded cursor-pointer" />
         </div>
       </UiSection>
 
@@ -1139,11 +1145,16 @@ function rgbToHex(r: number, g: number, b: number): string {
           <span class="text-ui-textSecondary">Opacity</span>
           <span class="font-mono text-ui-textAccent">{{ Math.round((activeMaterial.opacity ?? 1.0) * 100) }}%</span>
         </div>
-        <input type="range" min="0" max="1" step="0.01" v-model.number="activeMaterial.opacity" class="w-full accent-ui-accent bg-ui-surface h-1 rounded cursor-pointer" />
+        <input type="range" min="0" max="1" step="0.01" v-model.number="activeMaterial.opacity" @mousedown="beginMaterialEdit" class="w-full accent-ui-accent bg-ui-surface h-1 rounded cursor-pointer" />
         <div class="grid grid-cols-2 gap-1.5 pt-1">
           <div>
             <label class="text-[9px] text-ui-textMuted block mb-0.5">Mode</label>
-            <select v-model="activeMaterial.blendMode" class="w-full h-5.5 bg-ui-surface border border-ui-borderSubtle rounded-xs px-1.5 text-ui-textPrimary text-[10px] focus:outline-none cursor-pointer">
+            <select
+              :value="activeMaterial.blendMode || (activeMaterial.textureId ? 'mask' : 'opaque')"
+              @change="activeMaterial.blendMode = ($event.target as HTMLSelectElement).value as typeof activeMaterial.blendMode"
+              @mousedown="beginMaterialEdit"
+              class="w-full h-5.5 bg-ui-surface border border-ui-borderSubtle rounded-xs px-1.5 text-ui-textPrimary text-[10px] focus:outline-none cursor-pointer"
+            >
               <option value="opaque">Opaque</option>
               <option value="mask">Mask</option>
               <option value="blend">Blend</option>
@@ -1158,7 +1169,8 @@ function rgbToHex(r: number, g: number, b: number): string {
               max="1"
               step="0.05"
               v-model.number="activeMaterial.alphaTest"
-              :disabled="activeMaterial.blendMode !== 'mask'"
+              @mousedown="beginMaterialEdit"
+              :disabled="(activeMaterial.blendMode || (activeMaterial.textureId ? 'mask' : 'opaque')) !== 'mask'"
               class="w-full accent-amber-500 bg-ui-surface h-1 rounded cursor-pointer disabled:opacity-30 mt-2"
             />
           </div>
@@ -1171,11 +1183,11 @@ function rgbToHex(r: number, g: number, b: number): string {
         </template>
         <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
           <span class="text-ui-textSecondary text-[10px]">Double-sided</span>
-          <input type="checkbox" v-model="activeMaterial.doubleSided" class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
+          <input type="checkbox" v-model="activeMaterial.doubleSided" @mousedown="beginMaterialEdit" class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
         </label>
         <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
           <span class="text-ui-textSecondary text-[10px]">Wireframe</span>
-          <input type="checkbox" v-model="activeMaterial.wireframe" class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
+          <input type="checkbox" v-model="activeMaterial.wireframe" @mousedown="beginMaterialEdit" class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
         </label>
       </UiSection>
     </div>
@@ -1200,6 +1212,7 @@ function rgbToHex(r: number, g: number, b: number): string {
           <input 
             type="checkbox" 
             v-model="activeMaterial.psxJitter"
+            @mousedown="beginMaterialEdit"
             @change="projectStore.markGeometryUpdated()"
             class="rounded-xs text-rose-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" 
           />
@@ -1209,6 +1222,7 @@ function rgbToHex(r: number, g: number, b: number): string {
           <input 
             type="checkbox" 
             v-model="activeMaterial.psxAffine"
+            @mousedown="beginMaterialEdit"
             @change="projectStore.markGeometryUpdated()"
             class="rounded-xs text-rose-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" 
           />
@@ -1218,6 +1232,7 @@ function rgbToHex(r: number, g: number, b: number): string {
           <input 
             type="checkbox" 
             v-model="activeMaterial.dither"
+            @mousedown="beginMaterialEdit"
             @change="projectStore.markGeometryUpdated()"
             class="rounded-xs text-rose-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" 
           />
@@ -1227,26 +1242,26 @@ function rgbToHex(r: number, g: number, b: number): string {
       <UiSection v-if="activeMaterial && activeMaterial.shading === 'saturn'" title="Saturn" :icon="Tv" :default-open="true">
         <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
           <span class="text-ui-textSecondary text-[10px]">Mesh alpha</span>
-          <input type="checkbox" v-model="activeMaterial.saturnMeshAlpha" @change="projectStore.markGeometryUpdated()" class="rounded-xs text-sky-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
+          <input type="checkbox" v-model="activeMaterial.saturnMeshAlpha" @mousedown="beginMaterialEdit" @change="projectStore.markGeometryUpdated()" class="rounded-xs text-sky-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
         </label>
         <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
           <span class="text-ui-textSecondary text-[10px]">Affine quads</span>
-          <input type="checkbox" v-model="activeMaterial.psxAffine" @change="projectStore.markGeometryUpdated()" class="rounded-xs text-sky-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
+          <input type="checkbox" v-model="activeMaterial.psxAffine" @mousedown="beginMaterialEdit" @change="projectStore.markGeometryUpdated()" class="rounded-xs text-sky-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
         </label>
       </UiSection>
 
       <UiSection v-if="activeMaterial && activeMaterial.shading === 'dreamcast'" title="Dreamcast" :icon="Tv" :default-open="true">
         <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
           <span class="text-ui-textSecondary text-[10px]">VQ look</span>
-          <input type="checkbox" v-model="activeMaterial.dreamcastVQ" @change="projectStore.markGeometryUpdated()" class="rounded-xs text-amber-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
+          <input type="checkbox" v-model="activeMaterial.dreamcastVQ" @mousedown="beginMaterialEdit" @change="projectStore.markGeometryUpdated()" class="rounded-xs text-amber-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
         </label>
         <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
           <span class="text-ui-textSecondary text-[10px]">Specular</span>
-          <input type="checkbox" v-model="activeMaterial.dreamcastSpecular" @change="projectStore.markGeometryUpdated()" class="rounded-xs text-amber-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
+          <input type="checkbox" v-model="activeMaterial.dreamcastSpecular" @mousedown="beginMaterialEdit" @change="projectStore.markGeometryUpdated()" class="rounded-xs text-amber-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
         </label>
         <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
           <span class="text-ui-textSecondary text-[10px]">Cel outline</span>
-          <input type="checkbox" v-model="activeMaterial.dreamcastCelOutline" @change="projectStore.markGeometryUpdated()" class="rounded-xs text-amber-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
+          <input type="checkbox" v-model="activeMaterial.dreamcastCelOutline" @mousedown="beginMaterialEdit" @change="projectStore.markGeometryUpdated()" class="rounded-xs text-amber-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
         </label>
       </UiSection>
 
@@ -1268,6 +1283,7 @@ function rgbToHex(r: number, g: number, b: number): string {
           <input
             type="checkbox"
             v-model="activeMaterial.dither"
+            @mousedown="beginMaterialEdit"
             @change="projectStore.markGeometryUpdated()"
             class="rounded-xs text-amber-500 bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer"
           />
@@ -1284,6 +1300,7 @@ function rgbToHex(r: number, g: number, b: number): string {
           <select
             v-model="activeMaterial.ditherPattern"
             class="w-full h-5.5 bg-ui-surface border border-ui-borderSubtle rounded-xs px-2 text-ui-textPrimary text-[10px] focus:outline-none cursor-pointer"
+            @mousedown="beginMaterialEdit"
             @change="projectStore.markGeometryUpdated(); updateDitherPreview()"
           >
             <option value="bayer4x4">Bayer 4×4</option>
@@ -1303,6 +1320,7 @@ function rgbToHex(r: number, g: number, b: number): string {
             <select
               v-model="activeMaterial.ditherSpace"
               class="h-5.5 bg-ui-surface border border-ui-borderSubtle rounded-xs px-1.5 text-ui-textPrimary text-[10px] focus:outline-none cursor-pointer"
+              @mousedown="beginMaterialEdit"
               @change="projectStore.markGeometryUpdated()"
             >
               <option value="screen">Screen</option>
@@ -1312,6 +1330,7 @@ function rgbToHex(r: number, g: number, b: number): string {
             <select
               v-model="activeMaterial.ditherChannel"
               class="h-5.5 bg-ui-surface border border-ui-borderSubtle rounded-xs px-1.5 text-ui-textPrimary text-[10px] focus:outline-none cursor-pointer"
+              @mousedown="beginMaterialEdit"
               @change="projectStore.markGeometryUpdated(); updateDitherPreview()"
             >
               <option value="rgb">RGB</option>
@@ -1331,12 +1350,14 @@ function rgbToHex(r: number, g: number, b: number): string {
             step="1"
             v-model.number="activeMaterial.ditherLevel"
             class="w-full accent-amber-500 bg-ui-surface h-1 rounded cursor-pointer"
+            @mousedown="beginMaterialEdit"
             @input="projectStore.markGeometryUpdated(); updateDitherPreview()"
           />
 
           <select
             v-model.number="activeMaterial.colorDepth"
             class="w-full h-5.5 bg-ui-surface border border-ui-borderSubtle rounded-xs px-2 text-ui-textPrimary text-[10px] focus:outline-none cursor-pointer"
+            @mousedown="beginMaterialEdit"
             @change="projectStore.markGeometryUpdated(); updateDitherPreview()"
           >
             <option :value="32">15-bit (32)</option>

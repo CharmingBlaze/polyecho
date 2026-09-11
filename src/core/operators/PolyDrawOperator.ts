@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { ModalOperator, OperatorContext } from './ModalOperator'
-import { ScreenGeometry } from '../geometry/ScreenGeometry'
+import { ScreenGeometry, type ViewQuadrant } from '../geometry/ScreenGeometry'
 import { ExtrudeKernel, ExtrudeResult } from '../mesh/operations/ExtrudeKernel'
 import { PolyDrawKernel, DrawPlane, DrawViewKind } from '../mesh/operations/PolyDrawKernel'
 import { TransformSolver } from '../transform/TransformSolver'
@@ -33,6 +33,9 @@ export class PolyDrawOperator extends ModalOperator {
   private previewSolid: THREE.Mesh | null = null
   private lastClickAt = 0
   private isAltHeld = false
+  private mapCamera: THREE.Camera | null = null
+  private mapQuadrant: ViewQuadrant | undefined
+  private sketchMapLocked = false
 
   begin(ctx: OperatorContext, startPointer: { x: number; y: number }) {
     super.begin(ctx, startPointer)
@@ -44,6 +47,8 @@ export class PolyDrawOperator extends ModalOperator {
     this.planeLocked = false
     this.perspMode = 'view'
     this.lastViewportKind = ctx.viewportKind
+    this.sketchMapLocked = false
+    this.syncMapping()
     this.resolvePlane()
     this.updateHover(startPointer)
     this.updateDrawPreview()
@@ -63,6 +68,7 @@ export class PolyDrawOperator extends ModalOperator {
         this.lastViewportKind = kind
       }
       if (!this.planeLocked) this.resolvePlane()
+      this.syncMapping()
       this.updateHover(this.currentMouse)
       this.updateDrawPreview()
       this.updateStatus()
@@ -72,6 +78,29 @@ export class PolyDrawOperator extends ModalOperator {
     this.evaluate()
     this.ctx.onUpdatePreview()
     this.updateStatus()
+  }
+
+  relayout() {
+    if (this.phase === 'draw') {
+      this.updateHover(this.currentMouse)
+      this.updateDrawPreview()
+      this.updateStatus()
+    }
+  }
+
+  mappingCamera(): THREE.Camera {
+    return this.mapCamera ?? this.ctx.camera
+  }
+
+  mappingQuadrant(): ViewQuadrant | undefined {
+    return this.mapQuadrant ?? this.ctx.quadrant
+  }
+
+  private syncMapping() {
+    if (this.sketchMapLocked) return
+    this.mapCamera = this.ctx.camera
+    this.mapQuadrant = this.ctx.quadrant
+    if (this.points.length > 0) this.sketchMapLocked = true
   }
 
   evaluate() {
@@ -118,7 +147,10 @@ export class PolyDrawOperator extends ModalOperator {
     if (button === 2) {
       if (this.phase === 'draw' && this.points.length > 0) {
         this.points.pop()
-        if (this.points.length === 0) this.planeLocked = false
+        if (this.points.length === 0) {
+          this.planeLocked = false
+          this.sketchMapLocked = false
+        }
         this.updateDrawPreview()
         this.updateStatus()
         return true
@@ -148,6 +180,8 @@ export class PolyDrawOperator extends ModalOperator {
 
     if (this.points.length === 0) this.resolvePlane()
     this.points.push(this.hoverPoint.clone())
+    this.syncMapping()
+    this.sketchMapLocked = true
     if (!this.planeLocked) {
       this.plane = PolyDrawKernel.rebaseOrigin(this.plane, this.points[0])
       this.planeLocked = true
@@ -162,7 +196,10 @@ export class PolyDrawOperator extends ModalOperator {
     if (event.ctrlKey && key === 'z' && this.phase === 'draw') {
       event.preventDefault()
       this.points.pop()
-      if (this.points.length === 0) this.planeLocked = false
+      if (this.points.length === 0) {
+        this.planeLocked = false
+        this.sketchMapLocked = false
+      }
       this.updateDrawPreview()
       this.updateStatus()
       return true
@@ -192,7 +229,10 @@ export class PolyDrawOperator extends ModalOperator {
     if (key === 'backspace' && this.phase === 'draw') {
       event.preventDefault()
       this.points.pop()
-      if (this.points.length === 0) this.planeLocked = false
+      if (this.points.length === 0) {
+        this.planeLocked = false
+        this.sketchMapLocked = false
+      }
       this.updateDrawPreview()
       this.updateStatus()
       return true
@@ -232,6 +272,8 @@ export class PolyDrawOperator extends ModalOperator {
       this.ctx.onCancel()
       return
     }
+    this.ctx.mesh.recalculateNormals()
+    PolyDrawKernel.applyBoxUvs(this.ctx.mesh)
     this.ctx.onCommit(this.name)
   }
 
@@ -243,6 +285,15 @@ export class PolyDrawOperator extends ModalOperator {
 
   updateStatus() {
     if (this.phase === 'draw') {
+      if (this.points.length >= 3) {
+        const error = PolyDrawKernel.loopError(this.points)
+        const loops = PolyDrawKernel.tessellateLoopIndices(this.points)
+        const quads = loops.filter(loop => loop.length === 4).length
+        this.statusText = error
+          ? `${error} · RMB undo`
+          : `Poly Draw · ${quads} quads / ${loops.length - quads} tris per cap · close on first / C / Enter · Shift = 45° · RMB undo`
+        return
+      }
       this.statusText = this.points.length === 0
         ? `Poly Draw · ${this.planeLabel()} · click to drop verts · N view/ground · 1/3/7 lock Front/Side/Ground · MMB orbit`
         : `Poly Draw · ${this.planeLabel()} · ${this.points.length} verts · close on first / double-click / C / Enter · Shift = 45° · RMB undo · MMB orbit`
@@ -261,7 +312,7 @@ export class PolyDrawOperator extends ModalOperator {
   }
 
   get canClose(): boolean {
-    return this.phase === 'draw' && this.points.length >= 3
+    return this.phase === 'draw' && PolyDrawKernel.tessellateLoopIndices(this.points).length > 0
   }
 
   closeFromHud() {
@@ -276,12 +327,11 @@ export class PolyDrawOperator extends ModalOperator {
     const view = new THREE.Vector3()
     this.ctx.camera.getWorldDirection(view)
     const loop = PolyDrawKernel.orientLoopTowardViewer(this.points, view)
-    const faceId = PolyDrawKernel.createPlanarFace(this.ctx.mesh, loop)
-    if (faceId == null) return
-    const baseVerts = [...(this.ctx.mesh.faces.get(faceId)?.vertexIds ?? [])]
+    const cap = PolyDrawKernel.createPlanarCaps(this.ctx.mesh, loop)
+    if (!cap) return
 
-    this.extrudeResult = ExtrudeKernel.extrudeFaces(this.ctx.mesh, [faceId])
-    PolyDrawKernel.capDrawBase(this.ctx.mesh, baseVerts)
+    this.extrudeResult = ExtrudeKernel.extrudeFaces(this.ctx.mesh, cap.faceIds)
+    PolyDrawKernel.capDrawBase(this.ctx.mesh, cap.outlineVertIds)
     this.extrudeNormal.copy(this.extrudeResult.regionNormal)
     if (this.extrudeNormal.dot(view) > 0) this.extrudeNormal.negate()
     this.phase = 'extrude'
@@ -400,6 +450,17 @@ export class PolyDrawOperator extends ModalOperator {
   }
 
   private updateHover(pointer: { x: number; y: number }) {
+    if (
+      this.sketchMapLocked &&
+      this.mappingQuadrant() &&
+      !ScreenGeometry.isInPane(pointer, this.ctx.viewportElement, this.mappingQuadrant())
+    ) {
+      this.hoverPoint = null
+      this.hoverScreen = null
+      this.screenPoints = this.points.map(p => this.toOverlay(p))
+      this.isClosing = false
+      return
+    }
     const ray = this.pointerRay(pointer)
     const hit = PolyDrawKernel.intersectPlane(ray, this.plane)
     if (!hit) {
@@ -411,9 +472,8 @@ export class PolyDrawOperator extends ModalOperator {
     if (this.isShiftHeld && this.points.length > 0) {
       this.hoverPoint = PolyDrawKernel.constrainFromLast(this.points[this.points.length - 1], this.hoverPoint, this.plane, this.snapSize())
     }
-    const rect = this.ctx.viewportElement.getBoundingClientRect()
-    this.hoverScreen = ScreenGeometry.worldToScreen(this.hoverPoint, this.ctx.camera, rect, this.ctx.quadrant)
-    this.screenPoints = this.points.map(p => ScreenGeometry.worldToScreen(p, this.ctx.camera, rect, this.ctx.quadrant))
+    this.hoverScreen = this.toOverlay(this.hoverPoint)
+    this.screenPoints = this.points.map(p => this.toOverlay(p))
     this.isClosing = this.points.length >= 3 && this.isNearFirst()
   }
 
@@ -422,9 +482,19 @@ export class PolyDrawOperator extends ModalOperator {
     return this.hoverScreen.distanceTo(this.screenPoints[0]) <= CLOSE_PX
   }
 
+  private toOverlay(world: THREE.Vector3): THREE.Vector2 {
+    return ScreenGeometry.worldToOverlay(
+      world,
+      this.mappingCamera(),
+      this.ctx.viewportElement,
+      this.mappingQuadrant()
+    )
+  }
+
   private pointerRay(pointer: { x: number; y: number }): THREE.Ray {
-    const rect = this.ctx.viewportElement.getBoundingClientRect()
-    return ScreenGeometry.screenToRay(pointer, this.ctx.camera, rect, this.ctx.quadrant)
+    const cam = this.phase === 'extrude' ? this.ctx.camera : this.mappingCamera()
+    const q = this.phase === 'extrude' ? this.ctx.quadrant : this.mappingQuadrant()
+    return ScreenGeometry.rayFromClient(pointer, cam, this.ctx.viewportElement, q)
   }
 
   private updateDrawPreview() {

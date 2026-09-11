@@ -68,6 +68,7 @@ function handleRemoveSocket(socketId: string) {
 
 function startScrubVector(e: MouseEvent, targetObj: { x: number; y: number; z: number }, axis: 'x' | 'y' | 'z', step = 0.05, precision = 2) {
   e.preventDefault()
+  projectStore.recordState(`Adjust ${axis.toUpperCase()}`)
   const startX = e.clientX
   const startVal = Number(targetObj[axis]) || 0
 
@@ -80,7 +81,6 @@ function startScrubVector(e: MouseEvent, targetObj: { x: number; y: number; z: n
   const onMouseUp = () => {
     window.removeEventListener('mousemove', onMouseMove)
     window.removeEventListener('mouseup', onMouseUp)
-    projectStore.recordState(`Adjust ${axis.toUpperCase()}`)
   }
 
   window.addEventListener('mousemove', onMouseMove)

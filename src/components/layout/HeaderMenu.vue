@@ -4,6 +4,8 @@ import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import { useHistoryStore } from '../../stores/historyStore'
 import { useAnimationStore } from '../../stores/animationStore'
+import { useLayoutStore } from '../../stores/layoutStore'
+import { useKeymapStore } from '../../stores/keymapStore'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import PolyEchoLogo from '../icons/PolyEchoLogo.vue'
 import ImportTextureModal from '../modals/ImportTextureModal.vue'
@@ -26,13 +28,22 @@ import {
 } from '../../core/desktop/desktopApi'
 import { EDITOR_EVENTS, requestCameraView, requestFillFace, requestModalTool, requestPrimitiveMenu } from '../../core/commands/editorCommands'
 
-type NavMenu = 'file' | 'edit' | 'mesh' | 'add' | 'workspace' | 'space' | 'view' | 'snap' | 'overlays' | 'shade' | null
+type NavMenu = 'file' | 'edit' | 'mesh' | 'workspace' | 'space' | 'view' | 'snap' | 'overlays' | 'shade' | null
 type CameraView = 'persp' | 'top' | 'front' | 'right' | 'iso'
 
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
 const historyStore = useHistoryStore()
 const animationStore = useAnimationStore()
+const layoutStore = useLayoutStore()
+const keymapStore = useKeymapStore()
+
+const undoDescription = computed(() =>
+  historyStore.undoStack[historyStore.undoStack.length - 1]?.description || ''
+)
+const redoDescription = computed(() =>
+  historyStore.redoStack[historyStore.redoStack.length - 1]?.description || ''
+)
 
 const isImporting = ref(false)
 const recentProjects = ref<string[]>([])
@@ -65,6 +76,12 @@ function closeDropdowns() {
   activeDropdown.value = null
 }
 
+function openPrimitivesPanel(e: MouseEvent) {
+  closeDropdowns()
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  requestPrimitiveMenu({ x: rect.left, y: rect.bottom + 6 })
+}
+
 function setCameraView(view: CameraView) {
   cameraView.value = view
   toolStore.viewport.quadView = false
@@ -94,6 +111,21 @@ const viewLabel: Record<CameraView, string> = {
 
 const objectShade = computed(() => projectStore.activeMesh?.shadeMode || toolStore.viewport.shadeMode)
 const snapTargetOn = computed(() => toolStore.snapping.vertex || toolStore.snapping.edge || toolStore.snapping.face)
+const snapToggleChord = computed(() => keymapStore.bindings.find(b => b.id === 'toggle_snap')?.currentKey || 'Shift+Tab')
+const gridSnapOn = computed(() => toolStore.snapping.grid)
+
+function setGridSnap(on: boolean) {
+  toolStore.snapping.grid = on
+}
+
+function toggleGridSnap() {
+  toolStore.snapping.grid = !toolStore.snapping.grid
+}
+
+function setGridStep(size: number) {
+  toolStore.snapping.gridSize = size
+  toolStore.snapping.grid = true
+}
 const overlayOn = computed(() =>
   toolStore.viewport.faceOrientation || !toolStore.viewport.showGrid || !toolStore.viewport.showAxes
 )
@@ -222,13 +254,13 @@ async function importObjText(text: string, fileName: string) {
   try {
     const result = ObjImport.parse(text, fileName.replace('.obj', ''))
     if (result.meshes.length > 0) {
+      projectStore.recordPixels(`Import OBJ (${fileName})`)
       for (const m of result.meshes) {
         projectStore.meshes.push(m)
       }
       projectStore.activeMeshId = result.meshes[0].id
       projectStore.selectedMeshIds = [result.meshes[0].id]
       projectStore.markGeometryUpdated()
-      projectStore.recordState(`Import OBJ (${fileName})`)
     }
   } catch {
     alert('Failed to import OBJ')
@@ -264,6 +296,7 @@ async function importGltfBuffer(buffer: ArrayBuffer, fileName: string) {
   isImporting.value = true
   try {
     const result = await GltfImport.loadFromArrayBuffer(buffer, fileName)
+    projectStore.recordPixels(`Import GLTF (${fileName})`)
     const texIdMap = new Map<string, string>()
     for (const tex of result.textures ?? []) {
       const created = projectStore.createTexture(
@@ -299,7 +332,6 @@ async function importGltfBuffer(buffer: ArrayBuffer, fileName: string) {
       animationStore.armature = result.armature
     }
     projectStore.markGeometryUpdated()
-    projectStore.recordState(`Import GLTF (${fileName})`)
   } catch {
     alert('Failed to import GLTF')
   } finally {
@@ -465,13 +497,21 @@ onUnmounted(() => {
           Edit
         </button>
 
-        <div v-if="activeDropdown === 'edit'" class="absolute left-0 top-full mt-0.5 w-52 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
-          <button @click="historyStore.undo(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
-            <span class="flex items-center gap-2"><BlenderIcon name="undo" :size="14" /> Undo</span>
+        <div v-if="activeDropdown === 'edit'" class="absolute left-0 top-full mt-0.5 w-56 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+          <button
+            :disabled="historyStore.undoStack.length === 0"
+            @click="historyStore.undo(); closeDropdowns()"
+            class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between disabled:opacity-40 disabled:pointer-events-none"
+          >
+            <span class="flex items-center gap-2"><BlenderIcon name="undo" :size="14" /> {{ undoDescription ? `Undo ${undoDescription}` : 'Undo' }}</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+Z</span>
           </button>
-          <button @click="historyStore.redo(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
-            <span class="flex items-center gap-2"><BlenderIcon name="redo" :size="14" /> Redo</span>
+          <button
+            :disabled="historyStore.redoStack.length === 0"
+            @click="historyStore.redo(); closeDropdowns()"
+            class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between disabled:opacity-40 disabled:pointer-events-none"
+          >
+            <span class="flex items-center gap-2"><BlenderIcon name="redo" :size="14" /> {{ redoDescription ? `Redo ${redoDescription}` : 'Redo' }}</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+Y</span>
           </button>
           <div class="h-px bg-ui-borderSubtle my-1"></div>
@@ -554,6 +594,34 @@ onUnmounted(() => {
             <span class="flex items-center gap-2"><BlenderIcon name="flip-normals" :size="14" /> Flip Normals</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Shift+N</span>
           </button>
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+          <button @click="projectStore.performFlipAxis('x'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
+            Flip Horizontal (X)
+          </button>
+          <button @click="projectStore.performFlipAxis('y'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
+            Flip Vertical (Y)
+          </button>
+          <button @click="projectStore.performFlipAxis('z'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
+            Flip Z
+          </button>
+          <button @click="projectStore.performDuplicateMirror('x'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
+            Mirror Copy X
+          </button>
+          <button @click="projectStore.performDuplicateMirror('y'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
+            Mirror Copy Y
+          </button>
+          <button @click="projectStore.performDuplicateMirror('z'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
+            Mirror Copy Z
+          </button>
+          <button @click="projectStore.performRotateObject('y', 90); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
+            Rotate +90° Y
+          </button>
+          <button @click="projectStore.performRotateObject('y', -90); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
+            Rotate −90° Y
+          </button>
+          <button @click="projectStore.performRotateObject('y', 180); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
+            Rotate 180° Y
+          </button>
           <button
             @click="(toolStore.selectMode === 'edge' ? projectStore.performDissolve('edge') : projectStore.performDissolve('vertex')); closeDropdowns()"
             class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between"
@@ -564,23 +632,19 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Add Menu -->
-      <div class="relative">
-        <button 
-          class="px-1.5 py-0.5 text-[11.5px] font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition"
-          :class="{ 'bg-ui-hover text-ui-textPrimary font-bold': activeDropdown === 'add' }"
-          @click="toggleDropdown('add')"
-        >
-          Add
-        </button>
-
-        <div v-if="activeDropdown === 'add'" class="absolute left-0 top-full mt-0.5 w-48 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
-          <button @click="requestPrimitiveMenu(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between font-semibold text-amber-400">
-            <span>3D Mesh Primitives...</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">Shift+A</span>
-          </button>
-        </div>
-      </div>
+      <!-- Add: open primitives panel and leave it up until closed -->
+      <button
+        type="button"
+        class="h-6 px-2 rounded-xs flex items-center gap-1 text-[11.5px] font-semibold border transition cursor-pointer"
+        :class="layoutStore.showPrimitivePanel
+          ? 'bg-ui-accentSubtle text-ui-textAccent border-ui-accent/40'
+          : 'bg-amber-500/15 text-amber-200 border-amber-500/40 hover:bg-amber-500/25 hover:text-amber-100'"
+        title="Add primitives (Shift+A). Stays open until you close it."
+        @click="openPrimitivesPanel"
+      >
+        <BlenderIcon name="mesh-cube" :size="13" />
+        Add
+      </button>
 
       <div class="w-px h-3.5 bg-ui-borderSubtle mx-0.5 shrink-0"></div>
 
@@ -633,23 +697,36 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Snapping Toggle + Targets -->
-      <div class="relative flex items-center h-6 rounded-xs bg-ui-input border border-ui-borderDefault">
+      <!-- Grid snap: on/off is the left button; step + element targets in the chevron menu -->
+      <div
+        class="relative flex items-center h-6 rounded-xs border"
+        :class="gridSnapOn
+          ? 'bg-ui-accentSubtle border-ui-accent/50'
+          : 'bg-ui-input border-ui-borderDefault'"
+      >
         <button
           type="button"
-          class="h-full px-1.5 flex items-center gap-1 rounded-l-xs text-[10.5px] transition cursor-pointer"
-          :class="toolStore.snapping.grid ? 'text-ui-textAccent font-bold' : 'text-ui-textMuted hover:text-ui-textPrimary'"
-          title="Toggle Grid Snap"
-          @click="toolStore.snapping.grid = !toolStore.snapping.grid"
+          class="h-full px-1.5 flex items-center gap-1 rounded-l-xs text-[10.5px] transition cursor-pointer min-w-[4.25rem]"
+          :class="gridSnapOn ? 'text-ui-textAccent font-bold' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          :aria-pressed="gridSnapOn"
+          :aria-label="gridSnapOn ? `Grid snap on, step ${toolStore.snapping.gridSize}. Click to turn off.` : 'Grid snap off. Click to turn on.'"
+          :title="gridSnapOn
+            ? `Grid snap ON · step ${toolStore.snapping.gridSize}. Click to turn off (${snapToggleChord}).`
+            : `Grid snap OFF. Click to turn on (${snapToggleChord}).`"
+          @click="toggleGridSnap"
         >
           <BlenderIcon name="snap" :size="12" />
-          <span class="tabular-nums">{{ toolStore.snapping.gridSize }}</span>
+          <span class="leading-none">{{ gridSnapOn ? 'On' : 'Off' }}</span>
+          <span v-if="gridSnapOn" class="tabular-nums font-mono text-[10px]">{{ toolStore.snapping.gridSize }}</span>
         </button>
         <button
           type="button"
-          class="h-full px-1 border-l border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary relative cursor-pointer"
-          :class="{ 'bg-ui-hover text-ui-textPrimary': activeDropdown === 'snap' }"
-          title="Snap increment and targets"
+          class="h-full px-1 border-l text-ui-textMuted hover:text-ui-textPrimary relative cursor-pointer"
+          :class="[
+            gridSnapOn ? 'border-ui-accent/30' : 'border-ui-borderSubtle',
+            { 'bg-ui-hover text-ui-textPrimary': activeDropdown === 'snap' }
+          ]"
+          title="Grid step and snap-to vertices / edges / faces"
           @click="toggleDropdown('snap')"
         >
           <BlenderIcon name="chevron-down" :size="12" />
@@ -658,22 +735,53 @@ onUnmounted(() => {
             class="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-ui-accent"
           />
         </button>
-        <div v-if="activeDropdown === 'snap'" class="absolute left-0 top-full mt-0.5 w-48 bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-2 z-50 text-[11px] font-mono space-y-2">
-          <div class="text-[9px] font-bold uppercase tracking-wider text-ui-textMuted">Increment</div>
-          <div class="grid grid-cols-4 gap-1">
+        <div v-if="activeDropdown === 'snap'" class="absolute left-0 top-full mt-0.5 w-56 bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-2 z-50 text-[11px] font-mono space-y-2">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-[9px] font-bold uppercase tracking-wider text-ui-textMuted">Grid snap</span>
+            <span class="text-[9px] text-ui-textMuted font-sans">{{ snapToggleChord }}</span>
+          </div>
+          <div class="grid grid-cols-2 gap-1">
             <button
-              v-for="sz in [0.1, 0.25, 0.5, 1.0]"
-              :key="sz"
               type="button"
-              class="py-1 rounded-xs border text-[10px] cursor-pointer"
-              :class="toolStore.snapping.gridSize === sz
-                ? 'bg-ui-accentSubtle text-ui-textAccent border-ui-accent/40 font-semibold'
+              class="py-1.5 rounded-xs border text-[10px] font-bold cursor-pointer"
+              :class="gridSnapOn
+                ? 'bg-ui-accentSubtle text-ui-textAccent border-ui-accent/40'
                 : 'border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary'"
-              @click="toolStore.snapping.gridSize = sz"
-            >{{ sz }}</button>
+              @click="setGridSnap(true)"
+            >
+              On
+            </button>
+            <button
+              type="button"
+              class="py-1.5 rounded-xs border text-[10px] font-bold cursor-pointer"
+              :class="!gridSnapOn
+                ? 'bg-ui-hover text-ui-textPrimary border-ui-borderDefault'
+                : 'border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary'"
+              @click="setGridSnap(false)"
+            >
+              Off
+            </button>
+          </div>
+          <p class="text-[9px] leading-snug text-ui-textMuted font-sans">
+            {{ gridSnapOn ? 'Moves snap to the grid step below.' : 'Snap is off. Turn on, or pick a step to enable it.' }}
+          </p>
+          <div class="border-t border-ui-borderSubtle pt-1.5">
+            <div class="text-[9px] font-bold uppercase tracking-wider text-ui-textMuted mb-1">Grid step</div>
+            <div class="grid grid-cols-4 gap-1">
+              <button
+                v-for="sz in [0.1, 0.25, 0.5, 1.0]"
+                :key="sz"
+                type="button"
+                class="py-1 rounded-xs border text-[10px] cursor-pointer"
+                :class="toolStore.snapping.gridSize === sz
+                  ? 'bg-ui-accentSubtle text-ui-textAccent border-ui-accent/40 font-semibold'
+                  : 'border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary'"
+                @click="setGridStep(sz)"
+              >{{ sz }}</button>
+            </div>
           </div>
           <div class="border-t border-ui-borderSubtle pt-1.5 space-y-1">
-            <div class="text-[9px] font-bold uppercase tracking-wider text-ui-textMuted">Snap to</div>
+            <div class="text-[9px] font-bold uppercase tracking-wider text-ui-textMuted">Also snap to</div>
             <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5">
               <span>Vertex</span>
               <input type="checkbox" v-model="toolStore.snapping.vertex" class="rounded-xs accent-ui-accent" />
@@ -812,6 +920,13 @@ onUnmounted(() => {
           <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5 hover:bg-ui-hover rounded-xs">
             <span>World axes</span>
             <input type="checkbox" v-model="toolStore.viewport.showAxes" class="rounded-xs accent-ui-accent" />
+          </label>
+          <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5 hover:bg-ui-hover rounded-xs">
+            <span class="flex items-center gap-1.5">
+              <BlenderIcon name="gizmo-combined" :size="12" />
+              Combined gizmo
+            </span>
+            <input type="checkbox" v-model="toolStore.viewport.combinedGizmo" class="rounded-xs accent-ui-accent" />
           </label>
           <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5 hover:bg-ui-hover rounded-xs">
             <span>Bones</span>

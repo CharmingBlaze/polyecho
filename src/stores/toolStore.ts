@@ -56,7 +56,7 @@ export const useToolStore = defineStore('tool', () => {
   // Snapping & Precision
   const snapping = ref<SnappingSettings>({
     grid: true,
-    gridSize: 0.5,
+    gridSize: 0.1,
     vertex: false,
     edge: false,
     face: false,
@@ -88,6 +88,7 @@ export const useToolStore = defineStore('tool', () => {
     symmetryY: false,
     symmetryZ: false,
     invertZoom: false,
+    combinedGizmo: false,
   })
 
   function isMeshWorkspace() {

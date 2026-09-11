@@ -316,6 +316,12 @@ async function handleImport() {
   const targetW = targetDimensions.value.width
   const targetH = targetDimensions.value.height
   const texName = props.file.name.replace(/\.[^/.]+$/, '')
+  const atlasDims = isAtlasMode.value ? computedTileDimensions.value : null
+  projectStore.recordPixels(
+    atlasDims
+      ? `Import & Slice Atlas (${texName}: ${atlasDims.cols}x${atlasDims.rows})`
+      : `Import Texture Map (${texName})`
+  )
 
   // Extract Retro Palette if requested
   if (extractPalette.value) {
@@ -337,7 +343,6 @@ async function handleImport() {
   // If Atlas Slicing Mode is enabled:
   if (isAtlasMode.value) {
     const { cols, rows, tileW, tileH } = computedTileDimensions.value
-    projectStore.recordState(`Import & Slice Atlas (${texName}: ${cols}x${rows})`)
 
     // Add Master Atlas texture
     const masterTex = projectStore.createTexture(
@@ -376,7 +381,6 @@ async function handleImport() {
     return
   }
 
-  projectStore.recordState(`Import Texture Map (${texName})`)
   const newTex = projectStore.createTexture(
     texName,
     targetW,

@@ -88,5 +88,9 @@
     "vue": "^3.5.13",
     "vue-tsc": "^2.2.0",
     "wait-on": "^9.1.0"
+  },
+  "dependencies": {
+    "@voluma/three-transform-gizmo": "^1.0.0",
+    "cad-camera-controls": "^0.2.0"
   }
 }

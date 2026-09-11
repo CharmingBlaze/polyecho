@@ -132,7 +132,7 @@ export class PrimitiveRegistry {
       label: 'Capsule',
       category: 'SHAPES',
       creationKind: 'RADIAL_HEIGHT',
-      defaultParameters: { radius: 0.4, length: 1.0, segments: 8 },
+      defaultParameters: { radius: 0.4, height: 1.2, length: 1.2, segments: 8, rings: 3 },
       builder: new CapsuleBuilder()
     })
 
@@ -180,7 +180,7 @@ export class PrimitiveRegistry {
       label: 'Arch',
       category: 'BUILD',
       creationKind: 'RECTANGULAR',
-      defaultParameters: { width: 2.0, depth: 0.4, height: 2.5, openingWidth: 1.2, openingHeight: 1.8 },
+      defaultParameters: { width: 2.0, depth: 0.4, height: 2.5, openingWidth: 1.1, openingHeight: 1.8, segments: 8 },
       builder: new ArchBuilder()
     })
   }

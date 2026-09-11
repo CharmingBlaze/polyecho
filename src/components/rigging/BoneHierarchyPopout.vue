@@ -87,7 +87,9 @@ const flattenedBoneTree = computed<FlattenedTreeNode[]>(() => {
       if (matchBone || matchSocket) {
         matchSet.add(b.id)
         let cur = b
-        while (cur.parentId) {
+        const seen = new Set<string>()
+        while (cur.parentId && !seen.has(cur.id)) {
+          seen.add(cur.id)
           const parent = boneMap.get(cur.parentId)
           if (!parent) break
           matchSet.add(parent.id)
@@ -259,7 +261,6 @@ function handleAddRoot() {
 }
 
 function handleAddChild(parentId: string) {
-  projectStore.recordState('Add Child Bone')
   const pBone = animationStore.armature.bones.find(b => b.id === parentId)
   animationStore.addChildBone(parentId, animationStore.generateSmartBoneName(pBone?.name))
 }
@@ -269,7 +270,6 @@ function handleExtrude() {
     handleAddRoot()
     return
   }
-  projectStore.recordState('Extrude Bone')
   animationStore.extrudeBone(animationStore.selectedBoneId)
 }
 
@@ -278,7 +278,6 @@ function handleToggleDrawBone() {
 }
 
 function handleAddSocket(boneId: string) {
-  projectStore.recordState('Add Bone Socket')
   const s = animationStore.addSocket(boneId, `Socket_${Date.now().toString(36).slice(-3)}`)
   if (s) {
     animationStore.selectSocket(s.id)
@@ -286,7 +285,6 @@ function handleAddSocket(boneId: string) {
 }
 
 function handleRemoveSocket(boneId: string, socketId: string) {
-  projectStore.recordState('Remove Bone Socket')
   animationStore.removeSocket(boneId, socketId)
   if (animationStore.selectedSocketId === socketId) {
     animationStore.selectedSocketId = null
@@ -294,12 +292,10 @@ function handleRemoveSocket(boneId: string, socketId: string) {
 }
 
 function handleDeleteBone(id: string) {
-  projectStore.recordState('Delete Bone')
   animationStore.deleteBone(id)
 }
 
 function handleSymmetrize() {
-  projectStore.recordState('Symmetrize Skeleton')
   animationStore.symmetrizeArmature()
 }
 

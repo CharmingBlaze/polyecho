@@ -12,6 +12,7 @@ const props = withDefaults(defineProps<{
     | 'tool-move' 
     | 'tool-rotate' 
     | 'tool-scale'
+    | 'gizmo-combined'
     // Modeling tools
     | 'tool-extrude' 
     | 'tool-inset' 
@@ -110,7 +111,10 @@ const props = withDefaults(defineProps<{
     | 'zoom-in'
     | 'zoom-out'
     | 'grid'
+    | 'quad-view'
     | 'view-fit'
+    | 'maximize'
+    | 'minimize'
     | 'pack-islands'
     | 'uv-smart'
     | 'cursor-select'
@@ -213,6 +217,15 @@ const sizePx = computed(() => typeof props.size === 'number' ? `${props.size}px`
       <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.6" stroke-dasharray="14 3" />
       <path d="M12 4L15 7L12 10" stroke="#f59e0b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
       <path d="M12 4C16.4183 4 20 7.58172 20 12" stroke="#f59e0b" stroke-width="1.8" stroke-linecap="round" />
+    </g>
+
+    <!-- COMBINED TRS GIZMO (readable at 12px header size) -->
+    <g v-else-if="name === 'gizmo-combined'">
+      <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.5" fill="none" />
+      <line x1="12" y1="3.5" x2="12" y2="20.5" stroke="#10b981" stroke-width="1.7" stroke-linecap="round" />
+      <line x1="3.5" y1="12" x2="20.5" y2="12" stroke="#ef4444" stroke-width="1.7" stroke-linecap="round" />
+      <line x1="6.2" y1="17.8" x2="17.8" y2="6.2" stroke="#38bdf8" stroke-width="1.5" stroke-linecap="round" />
+      <rect x="10.2" y="10.2" width="3.6" height="3.6" rx="0.4" fill="currentColor" />
     </g>
 
     <!-- TRANSFORM SCALE (Blender Box Scale Gizmo) -->
@@ -727,9 +740,23 @@ const sizePx = computed(() => typeof props.size === 'number' ? `${props.size}px`
       <path d="M9.2 3.5V20.5M14.8 3.5V20.5M3.5 9.2H20.5M3.5 14.8H20.5" stroke="currentColor" stroke-width="1.3" />
     </g>
 
+    <g v-else-if="name === 'quad-view'">
+      <rect x="3.5" y="3.5" width="17" height="17" rx="1" stroke="currentColor" stroke-width="1.5" fill="none" />
+      <path d="M12 3.5V20.5M3.5 12H20.5" stroke="currentColor" stroke-width="1.5" />
+    </g>
+
     <g v-else-if="name === 'view-fit'">
       <rect x="6" y="6" width="12" height="12" rx="1" stroke="currentColor" stroke-width="1.4" fill="none" />
       <path d="M3 8V3H8M16 3H21V8M21 16V21H16M8 21H3V16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+    </g>
+
+    <g v-else-if="name === 'maximize'">
+      <path d="M8 4H4V8M16 4H20V8M20 16V20H16M8 20H4V16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+    </g>
+
+    <g v-else-if="name === 'minimize'">
+      <path d="M8 4H4V8M16 4H20V8M20 16V20H16M8 20H4V16" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.35" />
+      <rect x="7" y="7" width="10" height="10" rx="1" stroke="currentColor" stroke-width="1.5" fill="none" />
     </g>
 
     <g v-else-if="name === 'pack-islands'">

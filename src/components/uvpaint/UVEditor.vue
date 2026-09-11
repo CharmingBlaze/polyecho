@@ -14,6 +14,7 @@ import { undirectedEdgeId } from '../../core/geometry/EdgeUtils'
 import { EDITOR_EVENTS } from '../../core/commands/editorCommands'
 import TextureSharePrompt from '../modals/TextureSharePrompt.vue'
 import ImportTextureModal from '../modals/ImportTextureModal.vue'
+import NewTextureModal from '../modals/NewTextureModal.vue'
 import { useTextureApply } from '../../composables/useTextureApply'
 import { saveBlobDocument } from '../../core/desktop/desktopApi'
 
@@ -1579,8 +1580,6 @@ function exportTexturePng() {
 // ACTIVE MESH, MATERIAL & TEXTURE BINDINGS
 // ----------------------------------------------------
 const showNewTextureModal = ref(false)
-const newTextureName = ref('')
-const newTextureSize = ref<number>(64)
 
 function bindTextureToActiveObject(textureId: string) {
   const mesh = projectStore.activeMesh
@@ -1596,14 +1595,16 @@ function handleTextureBindingChange(newTexId: string) {
   scheduleRender()
 }
 
-function handleCreateNewTexture() {
-  const name = newTextureName.value.trim() || `Texture_${projectStore.textures.length + 1}`
-  const tex = projectStore.createTexture(name, newTextureSize.value, newTextureSize.value)
+function handleCreateNewTexture(payload: { name: string; width: number; height: number; fill: 'transparent' | 'white' | 'black' | 'primary' }) {
+  const tex = projectStore.createTexture(payload.name, payload.width, payload.height)
+  if (payload.fill === 'white') tex.pixelBuffer.clear('#ffffff')
+  else if (payload.fill === 'black') tex.pixelBuffer.clear('#111111')
+  else if (payload.fill === 'primary') tex.pixelBuffer.clear(toolStore.primaryColor || '#ffffff')
+  if (payload.fill !== 'transparent') projectStore.markTextureUpdated(tex.id)
   if (projectStore.activeMesh) {
     projectStore.applyTextureToMesh(projectStore.activeMesh.id, tex.id, 'this_object')
   }
   showNewTextureModal.value = false
-  newTextureName.value = ''
   scheduleRender()
 }
 
@@ -2001,16 +2002,13 @@ watch(() => projectStore.activeMeshId, () => {
     scheduleRender()
   })
 })
-watch(() => projectStore.meshes, scheduleRender, { deep: true })
-watch(
-  [() => projectStore.activeMeshId, () => projectStore.geometryRevision],
-  () => {
-    const mesh = activeMesh.value
-    if (mesh && ensureMeshUVs(mesh)) {
-      projectStore.markGeometryUpdated()
-    }
+watch(() => projectStore.meshes.length, scheduleRender)
+watch(() => projectStore.activeMeshId, () => {
+  const mesh = activeMesh.value
+  if (mesh && ensureMeshUVs(mesh)) {
+    projectStore.markGeometryUpdated()
   }
-)
+})
 watch(() => projectStore.selectedFaceIds, scheduleRender)
 watch(() => projectStore.selectedVertexIds, scheduleRender)
 watch(() => projectStore.selectedEdgeIds, scheduleRender)
@@ -2192,7 +2190,7 @@ defineExpose({
           <button 
             @click="showNewTextureModal = true"
             class="p-0.5 hover:bg-ui-hover text-emerald-400 rounded-xs transition cursor-pointer"
-            title="Create a new texture (paint target only)"
+            title="New image — pick any size"
           >
             <BlenderIcon name="plus" :size="12" />
           </button>
@@ -2245,7 +2243,7 @@ defineExpose({
             </button>
             <div class="h-px bg-ui-borderSubtle my-1"></div>
             <button @click="showNewTextureModal = true; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-amber-300 font-medium">
-              <span>+ New Texture Map...</span>
+              <span>New Image...</span>
             </button>
             <button @click="projectStore.bakeSceneAtlas(2); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-amber-400 font-bold">
               <span>Bake Scene Atlas</span>
@@ -2549,54 +2547,12 @@ defineExpose({
       </div>
     </Teleport>
 
-    <!-- Mini-Modal: Create New Texture -->
-    <div v-if="showNewTextureModal" class="absolute inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-      <div class="bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-3 w-80 space-y-3" @click.stop>
-        <div class="flex items-center justify-between border-b border-ui-borderSubtle pb-1.5">
-          <span class="text-xs font-bold text-amber-300 uppercase">Create New Texture Map</span>
-          <button @click="showNewTextureModal = false" class="text-ui-textMuted hover:text-white transition">✕</button>
-        </div>
-
-        <div class="space-y-1">
-          <label class="text-[10px] text-ui-textMuted font-bold uppercase">Texture Name:</label>
-          <input 
-            v-model="newTextureName" 
-            placeholder="e.g. Character_Armor_64" 
-            class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-1 text-ui-textPrimary text-xs focus:outline-none focus:border-amber-400 font-mono"
-          />
-        </div>
-
-        <div class="space-y-1">
-          <label class="text-[10px] text-ui-textMuted font-bold uppercase">Resolution:</label>
-          <div class="grid grid-cols-3 gap-1">
-            <button 
-              v-for="s in [16, 32, 64, 128, 256, 512]" 
-              :key="s"
-              @click="newTextureSize = s"
-              class="py-1 text-center rounded-xs border text-[10px] font-mono transition cursor-pointer"
-              :class="newTextureSize === s ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-bold' : 'bg-ui-input text-ui-textSecondary border-ui-borderSubtle hover:bg-ui-hover'"
-            >
-              {{ s }} × {{ s }}
-            </button>
-          </div>
-        </div>
-
-        <div class="flex gap-1 pt-1">
-          <button 
-            @click="handleCreateNewTexture"
-            class="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xs text-xs font-bold transition cursor-pointer shadow-xs"
-          >
-            Create
-          </button>
-          <button 
-            @click="showNewTextureModal = false"
-            class="px-3 py-1.5 bg-ui-input hover:bg-ui-hover text-ui-textSecondary rounded-xs text-xs transition cursor-pointer"
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-    </div>
+    <NewTextureModal
+      v-if="showNewTextureModal"
+      :bind-hint="projectStore.activeMesh?.name"
+      @close="showNewTextureModal = false"
+      @create="handleCreateNewTexture"
+    />
 
     <!-- 3. INFINITE STAGING CANVAS VIEWPORT -->
     <div 
