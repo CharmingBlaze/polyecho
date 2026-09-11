@@ -332,8 +332,8 @@ export function setupDefaultActions(
       id: 'select_all',
       label: 'Select All',
       category: 'Selection',
-      shortcut: 'a',
-      handler: () => projectStore.selectAll()
+      shortcut: 'Ctrl+a',
+      handler: () => projectStore.selectAll(toolStore.selectMode)
     },
     {
       id: 'deselect_all',

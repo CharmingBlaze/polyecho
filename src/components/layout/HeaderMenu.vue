@@ -515,6 +515,15 @@ onUnmounted(() => {
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+Y</span>
           </button>
           <div class="h-px bg-ui-borderSubtle my-1"></div>
+          <button @click="projectStore.selectAll(toolStore.selectMode); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Select All</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+A</span>
+          </button>
+          <button @click="projectStore.deselectAll(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Deselect All</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Alt+A</span>
+          </button>
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
           <button @click="$emit('open-preferences'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
             <BlenderIcon name="material" :size="14" color="#f59e0b" /> Preferences & Themes
           </button>

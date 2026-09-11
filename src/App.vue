@@ -279,6 +279,7 @@ function runKeymapAction(id: string) {
       requestCameraView('iso')
       return
     case 'select_all':
+      if (toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'uv') return
       projectStore.selectAll(toolStore.selectMode)
       return
     case 'deselect_all':

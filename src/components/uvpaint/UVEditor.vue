@@ -2061,6 +2061,11 @@ function onUvKeyDown(e: KeyboardEvent) {
     scheduleRender()
     return
   }
+  if ((e.key === 'a' || e.key === 'A') && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+    e.preventDefault()
+    selectAllUv()
+    return
+  }
   if ((e.key === 'a' || e.key === 'A') && !e.ctrlKey && !e.metaKey) {
     e.preventDefault()
     selectAllUv()

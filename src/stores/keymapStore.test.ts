@@ -18,4 +18,10 @@ describe('keymapStore', () => {
     expect(store.matchingActionIds(flipped)).toContain('paste_flipped_pose')
     expect(store.matchingActionIds(flipped)).not.toContain('paste_clipboard')
   })
+
+  it('matches Ctrl+A to select all', () => {
+    const store = useKeymapStore()
+    const chord = new KeyboardEvent('keydown', { key: 'a', code: 'KeyA', ctrlKey: true })
+    expect(store.matchingActionIds(chord)).toContain('select_all')
+  })
 })

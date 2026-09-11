@@ -44,7 +44,7 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { id: 'toggle_snap', label: 'Toggle Snapping', category: 'Transform', defaultKey: 'Shift+Tab', currentKey: 'Shift+Tab' },
 
   // SELECTION
-  { id: 'select_all', label: 'Select All', category: 'Selection', defaultKey: 'a', currentKey: 'a' },
+  { id: 'select_all', label: 'Select All', category: 'Selection', defaultKey: 'Ctrl+a / a', currentKey: 'Ctrl+a / a' },
   { id: 'deselect_all', label: 'Deselect All', category: 'Selection', defaultKey: 'Alt+a', currentKey: 'Alt+a' },
   { id: 'box_select', label: 'Box Select (Marquee)', category: 'Selection', defaultKey: 'b', currentKey: 'b' },
   { id: 'mode_vertex', label: 'Vertex Mode', category: 'Selection', defaultKey: '1', currentKey: '1' },
@@ -120,6 +120,11 @@ export const useKeymapStore = defineStore('keymap', () => {
             b.currentKey = parsed[b.id]
           }
         })
+        const selectAll = bindings.value.find(b => b.id === 'select_all')
+        if (selectAll && selectAll.currentKey.toLowerCase() === 'a') {
+          selectAll.currentKey = selectAll.defaultKey
+          saveKeymaps()
+        }
       }
     } catch {
       // Ignore
@@ -255,6 +260,9 @@ export const useKeymapStore = defineStore('keymap', () => {
     }
     if ((e.key === 'y' || e.key === 'Y') && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && !list.includes('redo')) {
       list.push('redo')
+    }
+    if ((e.key === 'a' || e.key === 'A') && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && !list.includes('select_all')) {
+      list.push('select_all')
     }
     return list
   }
