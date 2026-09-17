@@ -14,6 +14,14 @@ release
 *.local
 samples/*.glb
 
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# Emitted config artifacts. vite.config.ts is the source of truth: a stray
+# vite.config.js in the root would be resolved first and silently shadow it.
+vite.config.js
+vite.config.d.ts
+
 # Local Blockbench reference scrapes (do not commit)
 .tmp_bb/
 

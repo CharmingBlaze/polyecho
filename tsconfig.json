@@ -11,8 +11,10 @@
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "moduleDetection": "force",
     "noEmit": true,
     "jsx": "preserve",
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.tsbuildinfo",
 
     /* Linting */
     "strict": true,

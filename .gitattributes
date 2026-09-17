@@ -1,0 +1,15 @@
+# Line endings are LF everywhere, matching .editorconfig. Without this file the
+# convention depends on each contributor's core.autocrlf, and CI runs on both
+# ubuntu and windows — a single CRLF checkout produces whole-file diffs.
+* text=auto eol=lf
+
+# Binary assets: never normalize or diff as text.
+*.png binary
+*.ico binary
+*.icns binary
+*.glb binary
+*.gltf binary
+*.exe binary
+*.blockmap binary
+*.woff binary
+*.woff2 binary
