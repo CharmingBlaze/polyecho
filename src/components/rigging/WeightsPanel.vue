@@ -2,6 +2,8 @@
 import { computed } from 'vue'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useProjectStore } from '../../stores/projectStore'
+import { useToolStore } from '../../stores/toolStore'
+import { resolveMeshBoneParentId } from '../../core/animation/Armature'
 import UiSection from '../ui/UiSection.vue'
 import UiButton from '../ui/UiButton.vue'
 import { 
@@ -19,10 +21,12 @@ import {
 
 const animationStore = useAnimationStore()
 const projectStore = useProjectStore()
+const toolStore = useToolStore()
 
 const activeMesh = computed(() => projectStore.activeMesh)
 const selectedBone = computed(() => animationStore.selectedBone)
 const selectedVertexIds = computed(() => projectStore.selectedVertexIds)
+const canPaint = computed(() => !!activeMesh.value && !!selectedBone.value && !resolveMeshBoneParentId(activeMesh.value, animationStore.armature.bones))
 
 // Quick numeric presets
 const weightPresets = [0.0, 0.25, 0.5, 0.75, 1.0]
@@ -82,7 +86,7 @@ const aggregateWeights = computed(() => {
     result.push({
       boneId: bId,
       boneName: b ? b.name : bId,
-      avgWeight: Number((data.total / data.count).toFixed(3)),
+      avgWeight: Number((data.total / selectedVertexIds.value.length).toFixed(3)),
       isSelected: bId === selectedBone.value?.id
     })
   }
@@ -148,9 +152,9 @@ function handleRemoveWeight(boneId: string) {
 
     <UiSection title="Mode" :icon="Paintbrush" :default-open="true">
       <div class="grid grid-cols-3 gap-1">
-        <UiButton size="xs" :variant="!animationStore.isWeightPaintActive && !animationStore.isTestPoseActive ? 'accent' : 'default'" @click="animationStore.toggleWeightPaint(false); animationStore.toggleTestPose(false)">Edit</UiButton>
+        <UiButton size="xs" :variant="!animationStore.isWeightPaintActive && !animationStore.isTestPoseActive ? 'accent' : 'default'" @click="animationStore.toggleWeightPaint(false); animationStore.toggleTestPose(false); toolStore.setSelectMode('vertex')">Select verts</UiButton>
         <UiButton size="xs" :variant="animationStore.isTestPoseActive ? 'accent' : 'default'" @click="animationStore.toggleWeightPaint(false); animationStore.toggleTestPose(true)">Pose</UiButton>
-        <UiButton size="xs" :variant="animationStore.isWeightPaintActive ? 'accent' : 'default'" @click="animationStore.toggleWeightPaint(true)">Paint</UiButton>
+        <UiButton size="xs" :disabled="!canPaint" :variant="animationStore.isWeightPaintActive ? 'accent' : 'default'" @click="animationStore.toggleWeightPaint(true)">Paint</UiButton>
       </div>
     </UiSection>
 
@@ -164,16 +168,16 @@ function handleRemoveWeight(boneId: string) {
         <option value="" class="bg-ui-panel">Select bone</option>
         <option v-for="b in animationStore.armature.bones" :key="b.id" :value="b.id" class="bg-ui-panel">{{ b.name }}</option>
       </select>
-      <p v-else class="text-[9px] text-ui-textMuted">Add bones on the Skel tab first.</p>
+      <p v-else class="text-[11px] text-ui-textMuted">Add bones in Skeleton first.</p>
     </UiSection>
 
     <UiSection title="Brush" :icon="Wand2" :default-open="true">
-      <div class="grid grid-cols-5 gap-1">
-        <UiButton size="xs" :variant="animationStore.weightPaintTool === 'draw' ? 'accent' : 'default'" title="Draw" @click="animationStore.weightPaintTool = 'draw'"><Paintbrush class="w-3 h-3" /></UiButton>
-        <UiButton size="xs" :variant="animationStore.weightPaintTool === 'subtract' ? 'accent' : 'default'" title="Subtract" @click="animationStore.weightPaintTool = 'subtract'"><Eraser class="w-3 h-3" /></UiButton>
-        <UiButton size="xs" :variant="animationStore.weightPaintTool === 'smooth' ? 'accent' : 'default'" title="Smooth" @click="animationStore.weightPaintTool = 'smooth'"><Sparkles class="w-3 h-3" /></UiButton>
-        <UiButton size="xs" :variant="animationStore.weightPaintTool === 'fill' ? 'accent' : 'default'" title="Fill" @click="animationStore.weightPaintTool = 'fill'"><Layers class="w-3 h-3" /></UiButton>
-        <UiButton size="xs" :variant="animationStore.weightPaintTool === 'sample' ? 'accent' : 'default'" title="Sample" @click="animationStore.weightPaintTool = 'sample'"><Pipette class="w-3 h-3" /></UiButton>
+      <div class="grid grid-cols-2 gap-1">
+        <UiButton :variant="animationStore.weightPaintTool === 'draw' ? 'accent' : 'default'" title="Blend toward the target weight" @click="animationStore.weightPaintTool = 'draw'"><Paintbrush class="w-3 h-3" /> Draw</UiButton>
+        <UiButton :variant="animationStore.weightPaintTool === 'subtract' ? 'accent' : 'default'" title="Reduce this bone's influence" @click="animationStore.weightPaintTool = 'subtract'"><Eraser class="w-3 h-3" /> Subtract</UiButton>
+        <UiButton :variant="animationStore.weightPaintTool === 'smooth' ? 'accent' : 'default'" title="Blend neighboring weights" @click="animationStore.weightPaintTool = 'smooth'"><Sparkles class="w-3 h-3" /> Smooth</UiButton>
+        <UiButton :variant="animationStore.weightPaintTool === 'fill' ? 'accent' : 'default'" title="Set all vertices inside the brush to the target weight" @click="animationStore.weightPaintTool = 'fill'"><Layers class="w-3 h-3" /> Fill brush</UiButton>
+        <UiButton class="col-span-2" :variant="animationStore.weightPaintTool === 'sample' ? 'accent' : 'default'" title="Pick a weight from the model" @click="animationStore.weightPaintTool = 'sample'"><Pipette class="w-3 h-3" /> Sample weight</UiButton>
       </div>
       <div class="flex items-center justify-between text-[10px]">
         <span class="text-ui-textMuted cursor-ew-resize" @mousedown="startScrubNumeric($event, () => animationStore.weightBrushWeight, val => animationStore.weightBrushWeight = val, 0, 1, 0.02, 2)">Weight</span>
@@ -195,7 +199,7 @@ function handleRemoveWeight(boneId: string) {
       </div>
     </UiSection>
 
-    <UiSection title="Selection" :icon="Layers" :badge="selectedVertexIds.length" :default-open="true">
+    <UiSection title="Selected vertices" :icon="Layers" :badge="selectedVertexIds.length" :default-open="false">
       <div class="grid grid-cols-2 gap-1">
         <UiButton size="xs" :disabled="!selectedVertexIds.length || !selectedBone" @click="handleFloodFillSelection">Fill sel</UiButton>
         <UiButton size="xs" :disabled="!selectedVertexIds.length || !selectedBone" @click="handleAssign100">Assign 100</UiButton>

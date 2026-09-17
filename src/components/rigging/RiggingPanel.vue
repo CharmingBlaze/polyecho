@@ -34,11 +34,16 @@ const boneLength = computed({
 })
 
 function setBoneLength(bone: { head: { x: number; y: number; z: number }; tail: { x: number; y: number; z: number } }, newLen: number) {
+  if (!Number.isFinite(newLen)) return
   if (newLen <= 0.05) newLen = 0.05
   const dx = bone.tail.x - bone.head.x
   const dy = bone.tail.y - bone.head.y
   const dz = bone.tail.z - bone.head.z
-  const cur = Math.hypot(dx, dy, dz) || 1.0
+  const cur = Math.hypot(dx, dy, dz)
+  if (cur < 1e-6) {
+    bone.tail = { x: bone.head.x, y: bone.head.y + newLen, z: bone.head.z }
+    return
+  }
   const factor = newLen / cur
   bone.tail.x = Number((bone.head.x + dx * factor).toFixed(3))
   bone.tail.y = Number((bone.head.y + dy * factor).toFixed(3))
@@ -89,6 +94,7 @@ function startScrubVector(e: MouseEvent, targetObj: { x: number; y: number; z: n
 
 function toggleIk(on: boolean) {
   if (!selectedBone.value) return
+  projectStore.recordState('Toggle Inverse Kinematics')
   if (!selectedBone.value.ikConstraint) {
     selectedBone.value.ikConstraint = { enabled: on, chainLength: 2, iterations: 10, weight: 1 }
   } else {
@@ -98,6 +104,7 @@ function toggleIk(on: boolean) {
 
 function toggleSpring(on: boolean) {
   if (!selectedBone.value) return
+  projectStore.recordState('Toggle Spring')
   if (!selectedBone.value.springConstraint) {
     selectedBone.value.springConstraint = { enabled: on, stiffness: 0.3, damping: 0.25, gravity: 0 }
   } else {
@@ -131,7 +138,9 @@ function toggleSpring(on: boolean) {
     <template v-if="selectedBone">
       <UiSection title="Identity" :icon="GitCommitVertical" :default-open="true">
         <input
-          v-model="selectedBone.name"
+          :value="selectedBone.name"
+          aria-label="Bone name"
+          @change="animationStore.renameBone(selectedBone.id, ($event.target as HTMLInputElement).value)"
           class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-xs"
         />
         <select
@@ -157,46 +166,46 @@ function toggleSpring(on: boolean) {
         <div class="grid grid-cols-3 gap-1">
           <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
             <span class="text-[9px] text-rose-400 cursor-ew-resize" @mousedown="startScrubVector($event, selectedBone.head, 'x')">X</span>
-            <input type="number" step="0.1" v-model.number="selectedBone.head.x" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
+            <input type="number" step="0.1" @focus="projectStore.recordState('Edit Joint Position')" v-model.number="selectedBone.head.x" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
           </div>
           <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
             <span class="text-[9px] text-emerald-400 cursor-ew-resize" @mousedown="startScrubVector($event, selectedBone.head, 'y')">Y</span>
-            <input type="number" step="0.1" v-model.number="selectedBone.head.y" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
+            <input type="number" step="0.1" @focus="projectStore.recordState('Edit Joint Position')" v-model.number="selectedBone.head.y" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
           </div>
           <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
             <span class="text-[9px] text-sky-400 cursor-ew-resize" @mousedown="startScrubVector($event, selectedBone.head, 'z')">Z</span>
-            <input type="number" step="0.1" v-model.number="selectedBone.head.z" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
+            <input type="number" step="0.1" @focus="projectStore.recordState('Edit Joint Position')" v-model.number="selectedBone.head.z" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
           </div>
         </div>
         <div class="text-[9px] text-ui-textMuted">Tail</div>
         <div class="grid grid-cols-3 gap-1">
           <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
             <span class="text-[9px] text-rose-400 cursor-ew-resize" @mousedown="startScrubVector($event, selectedBone.tail, 'x')">X</span>
-            <input type="number" step="0.1" v-model.number="selectedBone.tail.x" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
+            <input type="number" step="0.1" @focus="projectStore.recordState('Edit Joint Position')" v-model.number="selectedBone.tail.x" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
           </div>
           <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
             <span class="text-[9px] text-emerald-400 cursor-ew-resize" @mousedown="startScrubVector($event, selectedBone.tail, 'y')">Y</span>
-            <input type="number" step="0.1" v-model.number="selectedBone.tail.y" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
+            <input type="number" step="0.1" @focus="projectStore.recordState('Edit Joint Position')" v-model.number="selectedBone.tail.y" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
           </div>
           <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
             <span class="text-[9px] text-sky-400 cursor-ew-resize" @mousedown="startScrubVector($event, selectedBone.tail, 'z')">Z</span>
-            <input type="number" step="0.1" v-model.number="selectedBone.tail.z" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
+            <input type="number" step="0.1" @focus="projectStore.recordState('Edit Joint Position')" v-model.number="selectedBone.tail.z" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
           </div>
         </div>
         <div class="flex items-center justify-between text-[10px] text-ui-textMuted">
           <span>Length</span>
           <span class="font-mono text-ui-textPrimary">{{ boneLength }}</span>
         </div>
-        <input type="range" min="0.1" max="5" step="0.05" v-model.number="boneLength" class="w-full accent-ui-accent h-1" />
+        <input type="range" aria-label="Bone length" min="0.1" max="5" step="0.05" @pointerdown="projectStore.recordState('Change Bone Length')" @keydown="projectStore.recordState('Change Bone Length')" v-model.number="boneLength" class="w-full accent-ui-accent h-1" />
         <div class="grid grid-cols-4 gap-1">
           <UiButton size="xs" @click="adjustBoneLength(-0.1)">−</UiButton>
           <UiButton size="xs" @click="adjustBoneLength(0.1)">+</UiButton>
-          <UiButton size="xs" @click="boneLength = 1">1</UiButton>
-          <UiButton size="xs" @click="boneLength = 2">2</UiButton>
+          <UiButton size="xs" @click="projectStore.recordState('Change Bone Length'); boneLength = 1">1</UiButton>
+          <UiButton size="xs" @click="projectStore.recordState('Change Bone Length'); boneLength = 2">2</UiButton>
         </div>
       </UiSection>
 
-      <UiSection title="IK" :icon="Sparkles" hint="Pose drag" :default-open="true">
+      <UiSection title="Inverse kinematics (IK)" :icon="Sparkles" :default-open="false">
         <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
           <span>Enabled</span>
           <input

@@ -21,7 +21,7 @@ const projectStore = useProjectStore()
 const toolStore = useToolStore()
 
 // Target Selection Mode
-const targetMode = ref<'object' | 'vertices' | 'edges' | 'faces' | 'all_vertices'>('faces')
+const targetMode = ref<'object' | 'vertices' | 'edges' | 'faces' | 'all_vertices'>('object')
 
 // Binding Algorithm & Weight
 const bindingAlgorithm = ref<'rigid' | 'smooth'>('rigid')
@@ -52,10 +52,10 @@ const selectedBone = computed(() => animationStore.selectedBone)
 
 // Sync targetMode with current toolStore.selectMode
 function syncTargetWithMode() {
-  if (toolStore.selectMode === 'object') targetMode.value = 'object'
-  else if (toolStore.selectMode === 'vertex') targetMode.value = 'vertices'
+  if (toolStore.selectMode === 'vertex') targetMode.value = 'vertices'
   else if (toolStore.selectMode === 'edge') targetMode.value = 'edges'
   else if (toolStore.selectMode === 'face') targetMode.value = 'faces'
+  else targetMode.value = 'object'
 }
 syncTargetWithMode()
 watch(() => toolStore.selectMode, syncTargetWithMode)

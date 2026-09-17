@@ -6,6 +6,7 @@ import { useToolStore } from '../../stores/toolStore'
 import UiSection from '../ui/UiSection.vue'
 import UiButton from '../ui/UiButton.vue'
 import BoneTreeNode from './BoneTreeNode.vue'
+import { fitRigPreset } from '../../core/animation/RiggingWorkflow'
 import { 
   Plus, 
   Trash2, 
@@ -37,24 +38,9 @@ function handleAddRoot() {
   let head = { x: 0, y: 0, z: 0 }
   let tail = { x: 0, y: 1.2, z: 0 }
   if (mesh && mesh.vertices.length > 0) {
-    let minX = Infinity, minY = Infinity, minZ = Infinity
-    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
-    for (const v of mesh.vertices) {
-      const wx = mesh.position.x + v.position.x
-      const wy = mesh.position.y + v.position.y
-      const wz = mesh.position.z + v.position.z
-      if (wx < minX) minX = wx
-      if (wy < minY) minY = wy
-      if (wz < minZ) minZ = wz
-      if (wx > maxX) maxX = wx
-      if (wy > maxY) maxY = wy
-      if (wz > maxZ) maxZ = wz
-    }
-    const cx = (minX + maxX) / 2
-    const cz = (minZ + maxZ) / 2
-    const h = Math.max(0.4, maxY - minY)
-    head = { x: Number(cx.toFixed(3)), y: Number(minY.toFixed(3)), z: Number(cz.toFixed(3)) }
-    tail = { x: Number(cx.toFixed(3)), y: Number((minY + h).toFixed(3)), z: Number(cz.toFixed(3)) }
+    const joint = fitRigPreset(mesh, 'single')[0]
+    head = { x: joint.head[0], y: joint.head[1], z: joint.head[2] }
+    tail = { x: joint.tail[0], y: joint.tail[1], z: joint.tail[2] }
   }
   const bone = animationStore.addBoneFromPoints(head, tail, null, `Bone_Root_${animationStore.armature.bones.length + 1}`)
   animationStore.selectedBoneId = bone.id
@@ -117,13 +103,13 @@ function handleAttachActiveMeshToSocket(socketId: string) {
     <UiSection title="Add" :icon="Plus" hint="E · B" :default-open="true">
       <div class="grid grid-cols-2 gap-1">
         <UiButton size="xs" variant="primary" @click="handleAddRoot">
-          <Plus class="w-3 h-3" /> Add
+          <Plus class="w-3 h-3" /> Add root
         </UiButton>
         <UiButton size="xs" :variant="animationStore.clickToPlaceMode ? 'accent' : 'default'" @click="handleToggleDrawBone">
           <Crosshair class="w-3 h-3" /> Draw
         </UiButton>
         <UiButton size="xs" @click="handleExtrude">
-          <GitBranch class="w-3 h-3" /> Extrude
+          <GitBranch class="w-3 h-3" /> Extend joint
         </UiButton>
         <UiButton size="xs" @click="handleSymmetrize">
           <FlipHorizontal class="w-3 h-3" /> Mirror X
@@ -132,7 +118,11 @@ function handleAttachActiveMeshToSocket(socketId: string) {
       <p class="text-[9px] text-ui-textMuted leading-snug">Draw places in the viewport. First bone can auto-weight; later clicks only add joints.</p>
     </UiSection>
 
-    <UiSection title="Display" :icon="Eye" :default-open="true">
+    <UiSection title="Display" :icon="Eye" :default-open="false">
+      <label class="block text-[11px] text-ui-textMuted">Bone size <input v-model.number="animationStore.boneDisplaySize" aria-label="Bone display size" type="range" min="0.5" max="2" step="0.1" class="w-full accent-ui-accent" /></label>
+      <p class="text-[10px] text-ui-textMuted">Blue: left · rose: right · amber: selected</p>
+      <label class="block text-[11px] text-ui-textMuted">Bone size <input v-model.number="animationStore.boneDisplaySize" aria-label="Bone display size" type="range" min="0.5" max="2" step="0.1" class="w-full accent-ui-accent" /></label>
+      <p class="text-[10px] text-ui-textMuted">Blue: left · rose: right · amber: selected</p>
       <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
         <span>X-Ray mesh (Alt+Z)</span>
         <input type="checkbox" v-model="toolStore.viewport.xray" class="accent-amber-500" />
@@ -161,138 +151,7 @@ function handleAttachActiveMeshToSocket(socketId: string) {
     >
       <div class="bg-ui-input/50 rounded-xs border border-ui-borderSubtle p-1 space-y-0.5 overflow-y-auto max-h-[280px]">
         <BoneTreeNode v-for="root in rootBones" :key="root.id" :bone-id="root.id" />
-        <div v-pre class="hidden">
-        <template v-for="root in rootBones" :key="root.id">
-          <!-- Root Bone Row -->
-          <div 
-            @click="selectBone(root.id)"
-            class="flex items-center justify-between px-2 py-1 rounded-xs cursor-pointer text-[11px] transition group"
-            :class="animationStore.selectedBoneId === root.id && !animationStore.selectedSocketId ? 'bg-ui-active text-ui-textAccent font-semibold border border-ui-accent/40 shadow-xs' : 'hover:bg-ui-hover text-ui-textSecondary'"
-          >
-            <div class="flex items-center gap-1.5 truncate flex-1 min-w-0">
-              <GitCommitVertical class="w-3.5 h-3.5 shrink-0" :class="animationStore.selectedBoneId === root.id && !animationStore.selectedSocketId ? 'text-ui-accent' : 'text-ui-textMuted'" />
-              <input 
-                v-if="editingBoneId === root.id"
-                v-model="editingName"
-                @blur="commitRename(root.id)"
-                @keydown.enter="commitRename(root.id)"
-                class="bg-ui-input text-ui-textPrimary px-1 py-0.5 rounded-xs text-[11px] w-full border border-ui-accent focus:outline-none"
-                autoFocus
-              />
-              <span v-else class="truncate select-none" @dblclick="startRename(root.id, root.name)">
-                {{ root.name }}
-              </span>
-            </div>
 
-            <!-- Row Actions -->
-            <div class="flex items-center gap-1 opacity-60 group-hover:opacity-100">
-              <button @click.stop="handleAddSocket(root.id)" class="p-0.5 text-ui-textMuted hover:text-sky-300" title="Add Socket (+S)">
-                <Wrench class="w-3 h-3" />
-              </button>
-              <button @click.stop="handleAddChild(root.id)" class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary" title="Add Child Bone">
-                <Plus class="w-3 h-3" />
-              </button>
-              <button @click.stop="handleDeleteBone(root.id)" class="p-0.5 text-ui-textMuted hover:text-rose-400" title="Delete Bone">
-                <Trash2 class="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-
-          <!-- Sockets on Root -->
-          <div 
-            v-for="s in root.sockets || []" 
-            :key="s.id" 
-            @click.stop="selectSocket(s.id)"
-            class="flex items-center justify-between pl-6 pr-2 py-0.5 rounded-xs cursor-pointer text-[10px] transition group"
-            :class="animationStore.selectedSocketId === s.id ? 'bg-sky-500/20 text-sky-300 font-semibold border border-sky-500/50 shadow-xs' : 'text-sky-400 hover:bg-ui-hover'"
-          >
-            <div class="flex items-center gap-1.5 truncate flex-1 min-w-0">
-              <Wrench class="w-2.5 h-2.5 shrink-0" />
-              <input 
-                v-if="editingSocketId === s.id"
-                v-model="editingSocketName"
-                @blur="commitSocketRename(root.id, s.id)"
-                @keydown.enter="commitSocketRename(root.id, s.id)"
-                class="bg-ui-input text-sky-200 px-1 py-0.5 rounded-xs text-[10px] w-full border border-sky-400 focus:outline-none"
-                autoFocus
-              />
-              <span v-else class="truncate select-none" @dblclick="startSocketRename(s.id, s.name)">
-                [S] {{ s.name }}
-              </span>
-            </div>
-            <div class="flex items-center gap-1 opacity-60 group-hover:opacity-100">
-              <button @click.stop="handleRemoveSocket(root.id, s.id)" class="p-0.5 text-ui-textMuted hover:text-rose-400" title="Delete Socket">
-                <Trash2 class="w-2.5 h-2.5" />
-              </button>
-            </div>
-          </div>
-
-          <!-- Nested Child Bones -->
-          <template v-for="child in getChildBones(root.id)" :key="child.id">
-            <div 
-              @click="selectBone(child.id)"
-              class="flex items-center justify-between pl-5 pr-2 py-1 rounded-xs cursor-pointer text-[11px] transition group"
-              :class="animationStore.selectedBoneId === child.id && !animationStore.selectedSocketId ? 'bg-ui-active text-ui-textAccent font-semibold border border-ui-accent/40 shadow-xs' : 'hover:bg-ui-hover text-ui-textSecondary'"
-            >
-              <div class="flex items-center gap-1.5 truncate flex-1 min-w-0">
-                <span class="text-ui-borderSubtle">└</span>
-                <GitCommitVertical class="w-3 h-3 shrink-0" :class="animationStore.selectedBoneId === child.id && !animationStore.selectedSocketId ? 'text-ui-accent' : 'text-ui-textMuted'" />
-                <input 
-                  v-if="editingBoneId === child.id"
-                  v-model="editingName"
-                  @blur="commitRename(child.id)"
-                  @keydown.enter="commitRename(child.id)"
-                  class="bg-ui-input text-ui-textPrimary px-1 py-0.5 rounded-xs text-[11px] w-full border border-ui-accent focus:outline-none"
-                  autoFocus
-                />
-                <span v-else class="truncate select-none" @dblclick="startRename(child.id, child.name)">
-                  {{ child.name }}
-                </span>
-              </div>
-
-              <div class="flex items-center gap-1 opacity-60 group-hover:opacity-100">
-                <button @click.stop="handleAddSocket(child.id)" class="p-0.5 text-ui-textMuted hover:text-sky-300" title="Add Socket (+S)">
-                  <Wrench class="w-3 h-3" />
-                </button>
-                <button @click.stop="handleAddChild(child.id)" class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary" title="Add Child Bone">
-                  <Plus class="w-3 h-3" />
-                </button>
-                <button @click.stop="handleDeleteBone(child.id)" class="p-0.5 text-ui-textMuted hover:text-rose-400" title="Delete Bone">
-                  <Trash2 class="w-3 h-3" />
-                </button>
-              </div>
-            </div>
-
-            <!-- Sockets on Child -->
-            <div 
-              v-for="s in child.sockets || []" 
-              :key="s.id" 
-              @click.stop="selectSocket(s.id)"
-              class="flex items-center justify-between pl-10 pr-2 py-0.5 rounded-xs cursor-pointer text-[10px] transition group"
-              :class="animationStore.selectedSocketId === s.id ? 'bg-sky-500/20 text-sky-300 font-semibold border border-sky-500/50 shadow-xs' : 'text-sky-400 hover:bg-ui-hover'"
-            >
-              <div class="flex items-center gap-1.5 truncate flex-1 min-w-0">
-                <Wrench class="w-2.5 h-2.5 shrink-0" />
-                <input 
-                  v-if="editingSocketId === s.id"
-                  v-model="editingSocketName"
-                  @blur="commitSocketRename(child.id, s.id)"
-                  @keydown.enter="commitSocketRename(child.id, s.id)"
-                  class="bg-ui-input text-sky-200 px-1 py-0.5 rounded-xs text-[10px] w-full border border-sky-400 focus:outline-none"
-                  autoFocus
-                />
-                <span v-else class="truncate select-none" @dblclick="startSocketRename(s.id, s.name)">
-                  [S] {{ s.name }}
-                </span>
-              </div>
-              <div class="flex items-center gap-1 opacity-60 group-hover:opacity-100">
-                <button @click.stop="handleRemoveSocket(child.id, s.id)" class="p-0.5 text-ui-textMuted hover:text-rose-400" title="Delete Socket">
-                  <Trash2 class="w-2.5 h-2.5" />
-                </button>
-              </div>
-            </div>
-          </template>
-        </template></div>
       </div>
 
     </UiSection>
@@ -328,7 +187,7 @@ function handleAttachActiveMeshToSocket(socketId: string) {
           class="bg-ui-panel"
         >{{ b.name }}</option>
       </select>
-      <p class="text-[9px] text-ui-textMuted">Rest pose, IK, and spring are on the Bone tab.</p>
+      <p class="text-[9px] text-ui-textMuted">Rest pose, IK, and spring are in joint settings below.</p>
     </UiSection>
   </div>
 </template>
