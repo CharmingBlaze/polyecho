@@ -30,7 +30,7 @@ export class LoopCutKernel {
         const forward = vs[i] === a.from
         const from = vs[(i + (forward ? 3 : 2)) % 4]
         const to = vs[(i + (forward ? 2 : 3)) % 4]
-        const opposite = [...mesh.edges.values()].find(e => e.v1 === Math.min(from,to) && e.v2 === Math.max(from,to))
+        const opposite = mesh.findEdge(from, to)
         if (!opposite || opposite.faceIds.length > 2) continue
         visited.add(faceId)
         let b = edges.get(opposite.id)
@@ -60,7 +60,7 @@ export class LoopCutKernel {
     const newVertexIds: number[] = [], newEdgeIds: number[] = []
     const cuts = new Map<number, number[]>()
     for (const edge of edges.values()) {
-      const live = [...mesh.edges.values()].find(e => e.v1 === Math.min(edge.from,edge.to) && e.v2 === Math.max(edge.from,edge.to))
+      const live = mesh.findEdge(edge.from, edge.to)
       if (!live) continue
       const localParams = params.map(t => live.v1 === edge.from ? t : 1-t)
       const inserted = KnifeKernel.splitEdgeAtParameters(mesh,live.id,localParams)

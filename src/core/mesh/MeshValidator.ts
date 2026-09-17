@@ -19,7 +19,18 @@ export interface MeshValidationResult {
   nonPlanarFaces: number[]
 }
 
-const sameIds = (a: number[], b: number[]) => a.length === b.length && new Set(a).size === a.length && a.every(id => b.includes(id))
+// Adjacency lists here are tiny (valence ~4-8), so scanning beats allocating a
+// Set per call: validate invokes this twice per vertex and twice per edge.
+const sameIds = (a: number[], b: number[]) => {
+  const n = a.length
+  if (n !== b.length) return false
+  for (let i = 0; i < n; i++) {
+    const id = a[i]!
+    if (!b.includes(id)) return false
+    for (let j = i + 1; j < n; j++) if (a[j] === id) return false
+  }
+  return true
+}
 
 export class MeshValidator {
   static validate(mesh: EditableMesh): MeshValidationResult {

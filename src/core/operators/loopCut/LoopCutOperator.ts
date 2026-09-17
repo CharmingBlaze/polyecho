@@ -209,12 +209,7 @@ export class LoopCutOperator extends ModalOperator {
   }
 
   private edgeIdBetween(a: number, b: number): number | null {
-    const minV = Math.min(a, b)
-    const maxV = Math.max(a, b)
-    for (const edge of this.ctx.mesh.edges.values()) {
-      if (edge.v1 === minV && edge.v2 === maxV) return edge.id
-    }
-    return null
+    return this.ctx.mesh.findEdge(a, b)?.id ?? null
   }
 
   private pointerParameter(): number {

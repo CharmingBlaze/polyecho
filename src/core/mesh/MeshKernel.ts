@@ -110,6 +110,12 @@ export class EditableMesh {
     this.vertices.delete(id)
   }
 
+  /** O(1) undirected edge lookup backed by the same index getOrCreateEdge maintains. */
+  findEdge(v1: number, v2: number): MeshEdge | undefined {
+    const id = this.edgeByVertices.get(`${Math.min(v1, v2)},${Math.max(v1, v2)}`)
+    return id === undefined ? undefined : this.edges.get(id)
+  }
+
   getOrCreateEdge(v1: number, v2: number, customId?: number): MeshEdge {
     if (v1 === v2 || !this.vertices.has(v1) || !this.vertices.has(v2)) throw new Error('An edge needs two existing, distinct vertices')
     const minV = Math.min(v1, v2)
