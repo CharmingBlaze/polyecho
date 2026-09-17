@@ -1,9 +1,16 @@
 import { MeshObject, Vertex, Face, Vector3D } from '../../types/mesh'
 import { computeFaceNormal } from '../../utils/math'
 import { ensureMeshUVs, boxUnwrap } from '../geometry/UVUnwrap'
+import {
+  inferShadeModeFromTriangles,
+  parseObjShadeComment,
+  type ShadeExtras,
+  type ShadeTriangle
+} from '../geometry/MeshShading'
 
 export interface ObjImportResult {
   meshes: MeshObject[]
+  materialNames: string[]
 }
 
 export class ObjImport {
@@ -13,7 +20,7 @@ export class ObjImport {
   static parse(objText: string, defaultName = 'Imported_Mesh'): ObjImportResult {
     const lines = objText.split(/\r?\n/)
 
-    const rawVertices: Vector3D[] = []
+    const rawVertices: Array<Vector3D & { color?: string }> = []
     const rawUVs: { u: number; v: number }[] = []
     const rawNormals: Vector3D[] = []
 
@@ -22,11 +29,16 @@ export class ObjImport {
       uvIndices: number[]
       normalIndices: number[]
       materialIndex?: number
+      smoothing: number
     }
 
     const meshes: MeshObject[] = []
+    const materialNames = new Set<string>()
     let currentMeshName = defaultName
+    let currentMaterial = 'default_material'
     let currentFaces: RawFace[] = []
+    let currentSmoothing = 0
+    let pendingShade: ShadeExtras | null = null
 
     function flushCurrentMesh() {
       if (currentFaces.length === 0) return
@@ -53,7 +65,8 @@ export class ObjImport {
 
             meshVertices.push({
               id: vertId,
-              position: { x: rawV.x, y: rawV.y, z: rawV.z }
+              position: { x: rawV.x, y: rawV.y, z: rawV.z },
+              color: rawV.color
             })
           }
 
@@ -85,6 +98,24 @@ export class ObjImport {
       }
 
       if (meshVertices.length > 0 && meshFaces.length > 0) {
+        const samples: ShadeTriangle[] = []
+        for (const f of currentFaces) {
+          for (let i = 1; i < f.vertexIndices.length - 1; i++) {
+            const idxs = [0, i, i + 1]
+            const positions = idxs.map(k => {
+              const raw = rawVertices[f.vertexIndices[k] - 1]
+              return raw ? { x: raw.x, y: raw.y, z: raw.z } : { x: 0, y: 0, z: 0 }
+            }) as ShadeTriangle['positions']
+            const normals = idxs.every(k => f.normalIndices[k] && rawNormals[f.normalIndices[k] - 1])
+              ? idxs.map(k => rawNormals[f.normalIndices[k] - 1]) as ShadeTriangle['normals']
+              : undefined
+            samples.push({ positions, normals })
+          }
+        }
+        const smoothingOn = currentFaces.some(f => f.smoothing > 0)
+        const inferred = pendingShade ?? {
+          shadeMode: smoothingOn ? inferShadeModeFromTriangles(samples) : 'flat'
+        }
         const objMesh: MeshObject = {
           id: `mesh_obj_${Date.now()}_${meshes.length + 1}`,
           name: currentMeshName,
@@ -93,8 +124,9 @@ export class ObjImport {
           position: { x: 0, y: 0, z: 0 },
           rotation: { x: 0, y: 0, z: 0 },
           scale: { x: 1, y: 1, z: 1 },
-          materialId: 'default_material',
-          shadeMode: 'flat',
+          materialId: currentMaterial,
+          shadeMode: inferred.shadeMode,
+          autoSmoothAngle: inferred.autoSmoothAngle,
           vertices: meshVertices,
           faces: meshFaces
         }
@@ -111,21 +143,33 @@ export class ObjImport {
       }
 
       currentFaces = []
+      pendingShade = null
     }
 
     for (let line of lines) {
       line = line.trim()
-      if (!line || line.startsWith('#')) continue
+      if (!line) continue
+      if (line.startsWith('#')) {
+        const shadeHint = parseObjShadeComment(line)
+        if (shadeHint) pendingShade = shadeHint
+        continue
+      }
 
       const parts = line.split(/\s+/)
       const tag = parts[0]
 
       if (tag === 'v') {
-        // Vertex position: v x y z
         const x = parseFloat(parts[1]) || 0
         const y = parseFloat(parts[2]) || 0
         const z = parseFloat(parts[3]) || 0
-        rawVertices.push({ x, y, z })
+        const vertex: Vector3D & { color?: string } = { x, y, z }
+        if (parts.length >= 7) {
+          const r = Math.round(Math.min(1, Math.max(0, parseFloat(parts[4]) || 0)) * 255)
+          const g = Math.round(Math.min(1, Math.max(0, parseFloat(parts[5]) || 0)) * 255)
+          const b = Math.round(Math.min(1, Math.max(0, parseFloat(parts[6]) || 0)) * 255)
+          vertex.color = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
+        }
+        rawVertices.push(vertex)
       } else if (tag === 'vt') {
         // Vertex UV: vt u v
         const u = parseFloat(parts[1]) || 0
@@ -169,26 +213,34 @@ export class ObjImport {
         }
 
         if (vertexIndices.length >= 3) {
-          currentFaces.push({ vertexIndices, uvIndices, normalIndices })
+          currentFaces.push({ vertexIndices, uvIndices, normalIndices, smoothing: currentSmoothing })
         }
+      } else if (tag === 's') {
+        const token = (parts[1] || 'off').toLowerCase()
+        currentSmoothing = token === 'off' || token === '0' ? 0 : (parseInt(token, 10) || 1)
       } else if (tag === 'o' || tag === 'g') {
-        // Object or Group declaration
         if (currentFaces.length > 0) {
           flushCurrentMesh()
         }
         if (parts[1]) {
           currentMeshName = parts.slice(1).join('_')
         }
+      } else if (tag === 'usemtl' && parts[1]) {
+        const nextMat = parts[1]
+        if (currentFaces.length > 0 && nextMat !== currentMaterial) {
+          flushCurrentMesh()
+        }
+        currentMaterial = nextMat
+        materialNames.add(nextMat)
       }
     }
 
     flushCurrentMesh()
 
     if (meshes.length === 0 && rawVertices.length > 0) {
-      // Fallback if no groups were defined
       flushCurrentMesh()
     }
 
-    return { meshes }
+    return { meshes, materialNames: [...materialNames] }
   }
 }

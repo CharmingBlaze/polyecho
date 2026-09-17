@@ -1,9 +1,10 @@
 import * as THREE from 'three'
 import { MeshObject, Vertex, Face } from '../../types/mesh'
-import { Armature, Bone, AnimationClip, AnimationTrack } from '../../types/animation'
+import { Armature, Bone, AnimationClip, AnimationTrack, AnimationMarker } from '../../types/animation'
 import { Material, TextureMap } from '../../types/texture'
 import { computeFaceNormal } from '../../utils/math'
 import { ensureMeshUVs, boxUnwrap } from '../geometry/UVUnwrap'
+import { DEFAULT_AUTO_SMOOTH_ANGLE, readImportedShade } from '../geometry/MeshShading'
 
 export interface GltfImportResult {
   meshes: MeshObject[]
@@ -52,28 +53,30 @@ export class GltfImport {
     const boneIdMap = new Map<string, string>()
 
     if (threeBones.length > 0) {
+      const usedBoneIds = new Set<string>()
       for (const tb of threeBones) {
-        const boneId = tb.name || `bone_${bones.length + 1}`
+        let boneId = tb.name || `bone_${bones.length + 1}`
+        if (usedBoneIds.has(boneId)) boneId = `${boneId}_${bones.length + 1}`
+        usedBoneIds.add(boneId)
         boneIdMap.set(tb.uuid, boneId)
+      }
 
+      for (const tb of threeBones) {
+        const boneId = boneIdMap.get(tb.uuid)!
         const worldPos = new THREE.Vector3()
         tb.getWorldPosition(worldPos)
 
         const childBone = threeBones.find(b => b.parent === tb)
         const tailPos = childBone ? new THREE.Vector3() : worldPos.clone().add(new THREE.Vector3(0, 0.5, 0))
-        if (childBone) {
-          childBone.getWorldPosition(tailPos)
-        }
+        if (childBone) childBone.getWorldPosition(tailPos)
 
-        const parentId = (tb.parent && (tb.parent as any).isBone)
-          ? (tb.parent.name || (tb.parent as any).uuid)
+        const parentId = (tb.parent && (tb.parent as THREE.Bone).isBone)
+          ? (boneIdMap.get(tb.parent.uuid) ?? null)
           : null
 
-        if (!parentId) {
-          rootBoneIds.push(boneId)
-        }
+        if (!parentId) rootBoneIds.push(boneId)
 
-        const bone: Bone = {
+        bones.push({
           id: boneId,
           name: tb.name || boneId,
           parentId,
@@ -87,18 +90,13 @@ export class GltfImport {
           },
           scale: { x: tb.scale.x, y: tb.scale.y, z: tb.scale.z },
           childrenIds: []
-        }
-
-        bones.push(bone)
+        })
       }
 
-      // Populate childrenIds
       for (const bone of bones) {
         if (bone.parentId) {
           const parent = bones.find(b => b.id === bone.parentId)
-          if (parent && !parent.childrenIds.includes(bone.id)) {
-            parent.childrenIds.push(bone.id)
-          }
+          if (parent && !parent.childrenIds.includes(bone.id)) parent.childrenIds.push(bone.id)
         }
       }
     }
@@ -112,22 +110,36 @@ export class GltfImport {
 
         const posAttr = geom.getAttribute('position')
         const uvAttr = geom.getAttribute('uv')
+        const colAttr = geom.getAttribute('color')
+        const skinIndexAttr = geom.getAttribute('skinIndex')
+        const skinWeightAttr = geom.getAttribute('skinWeight')
         const indexAttr = geom.getIndex()
 
         if (!posAttr) return
 
+        const worldPos = new THREE.Vector3()
+        const worldQuat = new THREE.Quaternion()
+        const worldScale = new THREE.Vector3()
+        threeMesh.matrixWorld.decompose(worldPos, worldQuat, worldScale)
+        const worldEuler = new THREE.Euler().setFromQuaternion(worldQuat)
+
+        const skeleton = (threeMesh as THREE.SkinnedMesh).skeleton
         const meshVertices: Vertex[] = []
         const meshFaces: Face[] = []
 
-        // Extract vertices
         for (let i = 0; i < posAttr.count; i++) {
-          const vPos = new THREE.Vector3(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i))
-          vPos.applyMatrix4(threeMesh.matrixWorld)
-
-          meshVertices.push({
+          const vertex: Vertex = {
             id: `v_${i + 1}`,
-            position: { x: vPos.x, y: vPos.y, z: vPos.z }
-          })
+            position: { x: posAttr.getX(i), y: posAttr.getY(i), z: posAttr.getZ(i) }
+          }
+          if (colAttr) {
+            vertex.color = colorAttrHex(colAttr, i)
+          }
+          if (skinIndexAttr && skinWeightAttr && skeleton) {
+            const weights = skinWeightsFromAttrs(skinIndexAttr, skinWeightAttr, i, skeleton, boneIdMap)
+            if (weights) vertex.boneWeights = weights
+          }
+          meshVertices.push(vertex)
         }
 
         // Extract Triangles into Faces
@@ -174,16 +186,26 @@ export class GltfImport {
             importedMaterials,
             textureByUuid
           )
+          const parentBone = threeMesh.parent && (threeMesh.parent as THREE.Bone).isBone
+            ? boneIdMap.get(threeMesh.parent.uuid)
+            : undefined
+          const shade = readImportedShade(threeMesh, geom)
           const gltfMesh: MeshObject = {
-            id: `mesh_gltf_${Date.now()}_${meshes.length + 1}`,
+            id: `mesh_gltf_${meshes.length + 1}_${Math.random().toString(36).slice(2, 8)}`,
             name: threeMesh.name || `${fileName}_Mesh_${meshes.length + 1}`,
-            visible: true,
+            visible: threeMesh.visible,
             locked: false,
-            position: { x: 0, y: 0, z: 0 },
-            rotation: { x: 0, y: 0, z: 0 },
-            scale: { x: 1, y: 1, z: 1 },
+            position: { x: worldPos.x, y: worldPos.y, z: worldPos.z },
+            rotation: {
+              x: THREE.MathUtils.radToDeg(worldEuler.x),
+              y: THREE.MathUtils.radToDeg(worldEuler.y),
+              z: THREE.MathUtils.radToDeg(worldEuler.z)
+            },
+            scale: { x: worldScale.x, y: worldScale.y, z: worldScale.z },
             materialId: bound,
-            shadeMode: 'flat',
+            shadeMode: shade.shadeMode,
+            autoSmoothAngle: shade.autoSmoothAngle ?? (shade.shadeMode === 'auto' ? DEFAULT_AUTO_SMOOTH_ANGLE : undefined),
+            parentBoneId: parentBone,
             vertices: meshVertices,
             faces: meshFaces
           }
@@ -212,12 +234,13 @@ export class GltfImport {
           const trackName = track.name
           const boneName = trackName.split('.')[0]
           const prop = trackName.split('.')[1] // 'position' | 'quaternion' | 'scale'
+          const isBoneTarget = bones.some(b => b.id === boneName || b.name === boneName)
 
           let animTrack = trackMap.get(boneName)
           if (!animTrack) {
             animTrack = {
               targetId: boneName,
-              targetType: 'bone',
+              targetType: isBoneTarget ? 'bone' : 'mesh',
               targetName: boneName,
               positionKeys: [],
               rotationKeys: [],
@@ -268,12 +291,13 @@ export class GltfImport {
         }
 
         animations.push({
-          id: `clip_${clip.name || 'Action'}_${Date.now()}`,
+          id: `clip_${clip.name || 'Action'}_${Date.now()}_${animations.length}`,
           name: clip.name || 'Action',
           fps: 24,
           durationFrames: Math.round(clip.duration * 24) || 24,
           loop: true,
-          tracks: Array.from(trackMap.values())
+          tracks: Array.from(trackMap.values()),
+          markers: markersFromGltfClip(gltf, clip.name)
         })
       }
     }
@@ -348,6 +372,7 @@ function bindImportedMaterial(
   const color = threeMat && 'color' in threeMat && (threeMat as THREE.MeshStandardMaterial).color
     ? `#${(threeMat as THREE.MeshStandardMaterial).color.getHexString()}`
     : '#ffffff'
+  const std = threeMat as THREE.MeshStandardMaterial
   const matId = `mat_gltf_${materials.length + 1}`
   materials.push({
     id: matId,
@@ -355,12 +380,62 @@ function bindImportedMaterial(
     textureId,
     color,
     shading: 'textured',
+    roughness: typeof std.roughness === 'number' ? std.roughness : undefined,
+    metalness: typeof std.metalness === 'number' ? std.metalness : undefined,
+    opacity: typeof std.opacity === 'number' ? std.opacity : undefined,
+    alphaTest: typeof std.alphaTest === 'number' ? std.alphaTest : undefined,
+    blendMode: std?.transparent ? ((std.alphaTest ?? 0) > 0 ? 'mask' : 'blend') : 'opaque',
+    doubleSided: std?.side === THREE.DoubleSide,
     psxJitter: false,
     psxJitterResolution: 240,
     psxAffine: false,
     dither: false,
     ditherLevel: 32,
-    wireframe: false
+    wireframe: Boolean(std?.wireframe)
   })
   return matId
+}
+
+type AttrXYZW = {
+  getX(index: number): number
+  getY(index: number): number
+  getZ(index: number): number
+  getW?(index: number): number
+}
+
+function colorAttrHex(attr: AttrXYZW, i: number): string {
+  const color = new THREE.Color().setRGB(attr.getX(i), attr.getY(i), attr.getZ(i), THREE.LinearSRGBColorSpace)
+  return `#${color.getHexString()}`
+}
+
+function skinWeightsFromAttrs(
+  skinIndex: AttrXYZW,
+  skinWeight: AttrXYZW,
+  i: number,
+  skeleton: THREE.Skeleton,
+  boneIdMap: Map<string, string>
+): Record<string, number> | undefined {
+  const idx = [skinIndex.getX(i), skinIndex.getY(i), skinIndex.getZ(i), skinIndex.getW?.(i) ?? 0]
+  const w = [skinWeight.getX(i), skinWeight.getY(i), skinWeight.getZ(i), skinWeight.getW?.(i) ?? 0]
+  const weights: Record<string, number> = {}
+  for (let k = 0; k < 4; k++) {
+    if (w[k] <= 0.001) continue
+    const bone = skeleton.bones[idx[k]]
+    if (!bone) continue
+    const id = boneIdMap.get(bone.uuid) || bone.name
+    if (!id) continue
+    weights[id] = (weights[id] || 0) + w[k]
+  }
+  return Object.keys(weights).length ? weights : undefined
+}
+
+function markersFromGltfClip(gltf: { parser?: { json?: { animations?: Array<{ name?: string; extras?: { events?: Array<{ name?: string; frame?: number; time?: number }> } }> } } }, clipName: string): AnimationMarker[] | undefined {
+  const raw = gltf.parser?.json?.animations?.find(a => a.name === clipName)
+  const events = raw?.extras?.events
+  if (!events?.length) return undefined
+  return events.map((ev, i) => ({
+    id: `mk_${clipName}_${i}`,
+    name: ev.name || `Marker_${i + 1}`,
+    frame: typeof ev.frame === 'number' ? ev.frame : Math.round((ev.time || 0) * 24)
+  }))
 }

@@ -51,6 +51,29 @@ export const useToolStore = defineStore('tool', () => {
     localStorage.setItem(STYLUS_MODE_NOTIFICATIONS_KEY, on ? '1' : '0')
   })
 
+  /** Click LightWave pan/orbit/zoom to lock that view tool until click-again or Esc. On by default. */
+  const STICKY_VIEWPORT_CONTROLS_KEY = 'polyecho_sticky_viewport_controls'
+  const stickyViewportControls = ref(true)
+  const stickyViewNav = ref<'pan' | 'orbit' | 'zoom' | null>(null)
+  if (typeof localStorage !== 'undefined') {
+    stickyViewportControls.value = localStorage.getItem(STICKY_VIEWPORT_CONTROLS_KEY) !== '0'
+  }
+  watch(stickyViewportControls, (on) => {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(STICKY_VIEWPORT_CONTROLS_KEY, on ? '1' : '0')
+    }
+    if (!on) stickyViewNav.value = null
+  }, { flush: 'sync' })
+
+  function toggleStickyViewNav(mode: 'pan' | 'orbit' | 'zoom') {
+    if (!stickyViewportControls.value) return
+    stickyViewNav.value = stickyViewNav.value === mode ? null : mode
+  }
+
+  function clearStickyViewNav() {
+    stickyViewNav.value = null
+  }
+
   // Vertex Painting settings
   const vertexPaintColor = ref<string>('#ffffff')
   const uvWorkspaceTab = ref<'uv' | 'paint'>('uv')
@@ -171,11 +194,13 @@ export const useToolStore = defineStore('tool', () => {
   }
 
   function setModelTool(tool: ModelToolType) {
+    if (tool !== modelTool.value) stickyViewNav.value = null
     modelTool.value = tool
     if (tool !== 'select') isBoxSelectActive.value = false
   }
 
   function toggleBoxSelect() {
+    stickyViewNav.value = null
     isBoxSelectActive.value = !isBoxSelectActive.value
   }
 
@@ -190,10 +215,12 @@ export const useToolStore = defineStore('tool', () => {
   }, { flush: 'sync' })
 
   function setPaintTool(tool: PaintToolType) {
+    if (tool !== paintTool.value) stickyViewNav.value = null
     paintTool.value = tool
   }
 
   function setRigTool(tool: RigToolType) {
+    if (tool !== rigTool.value) stickyViewNav.value = null
     rigTool.value = tool
   }
 
@@ -225,6 +252,10 @@ export const useToolStore = defineStore('tool', () => {
     paletteSnapEnabled,
     stylusPressureEnabled,
     stylusModeNotifications,
+    stickyViewportControls,
+    stickyViewNav,
+    toggleStickyViewNav,
+    clearStickyViewNav,
     currentPressure,
     currentPointerType,
     vertexPaintColor,

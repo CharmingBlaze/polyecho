@@ -50,6 +50,32 @@ describe('toolStore.setAppMode', () => {
     expect(tools.stylusModeNotifications).toBe(false)
   })
 
+  it('defaults sticky viewport controls on and locks pan/orbit/zoom until toggled off', () => {
+    localStorage.removeItem('polyecho_sticky_viewport_controls')
+    setActivePinia(createPinia())
+    const tools = useToolStore()
+    expect(tools.stickyViewportControls).toBe(true)
+    tools.toggleStickyViewNav('orbit')
+    expect(tools.stickyViewNav).toBe('orbit')
+    tools.toggleStickyViewNav('pan')
+    expect(tools.stickyViewNav).toBe('pan')
+    tools.toggleStickyViewNav('pan')
+    expect(tools.stickyViewNav).toBeNull()
+    tools.toggleStickyViewNav('zoom')
+    tools.setModelTool('move')
+    expect(tools.stickyViewNav).toBeNull()
+    tools.toggleStickyViewNav('orbit')
+    tools.stickyViewportControls = false
+    expect(tools.stickyViewNav).toBeNull()
+  })
+
+  it('treats stored sticky viewport controls 0 as off', () => {
+    localStorage.setItem('polyecho_sticky_viewport_controls', '0')
+    setActivePinia(createPinia())
+    expect(useToolStore().stickyViewportControls).toBe(false)
+    localStorage.removeItem('polyecho_sticky_viewport_controls')
+  })
+
   it('treats bone and object selection as rigid object binding', () => {
     const tools = useToolStore()
     tools.setAppMode('rig')

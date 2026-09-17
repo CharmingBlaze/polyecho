@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { embedPngImages, injectClipExtras, readGlb, writeGlb } from './gltfBinary'
+import { embedPngImages, injectClipExtras, injectNodeExtras, readGlb, writeGlb } from './gltfBinary'
 import { encodePngRgba, findPngOffset, readPngIhdr } from '../painting/encodePng'
 
 describe('gltfBinary', () => {
@@ -23,6 +23,16 @@ describe('gltfBinary', () => {
     expect(animations[0].extras?.events[0].name).toBe('footstep')
     expect(animations[1].extras).toBeUndefined()
     expect(new Uint8Array(outBin!).slice(0, 4)).toEqual(new Uint8Array([9, 8, 7, 6]))
+  })
+
+  it('injects node shade extras', () => {
+    const bin = new Uint8Array([1, 2, 3, 4]).buffer
+    const glb = writeGlb({ asset: { version: '2.0' }, nodes: [{ name: 'Hero' }, { name: 'Prop' }] }, bin)
+    const patched = injectNodeExtras(glb, { Hero: { shadeMode: 'smooth' } })
+    const { json } = readGlb(patched)
+    const nodes = json.nodes as Array<{ name: string; extras?: { shadeMode: string } }>
+    expect(nodes[0].extras?.shadeMode).toBe('smooth')
+    expect(nodes[1].extras).toBeUndefined()
   })
 
   it('appends a real PNG image when the GLB has none', () => {

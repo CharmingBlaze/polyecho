@@ -23,6 +23,14 @@ While `operatorManager` is active, RMB is Blender-style **back / cancel / undo l
 
 The floating Move / Rotate / Scale (and Loop Cut) panel is **Stylus mode notifications**: File → Properties → Input. **Off by default.** Status stays in the status bar. Poly Draw / Shape Draw / Add Primitive keep their own panels.
 
+## Sticky viewport controls (classic CAD)
+
+File → Properties → Viewport (also on Input). **On by default.** A lock on the LightWave Pan / Orbit / Zoom cluster toggles the same setting.
+
+When on, a click on a LightWave Pan / Orbit / Zoom control **locks** that view tool. The 3D cursor matches the control (move / grab / ns-resize). LMB drag uses the locked tool. Click a different control to switch. Click the same control again, or **Esc**, to return to select/orbit. Switching modeling tools (Move, Grab, Box Select, …) also drops the lock.
+
+When off, those buttons stay click-and-hold, and idle LMB drag still orbits the perspective view.
+
 ## Adding a new view
 
 1. LMB does the tool. In a 3D perspective pane, LMB drag orbits unless the tool owns the click.

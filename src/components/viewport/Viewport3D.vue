@@ -2204,6 +2204,15 @@ function updateTransformGizmo() {
 
 function applyTransformGizmoTarget() {
   if (!transformControls || !scene) return
+  if (toolStore.stickyViewNav) {
+    transformControls.enabled = false
+    transformControls.detach()
+    const helper = transformControls.getHelper?.()
+    if (helper) helper.visible = false
+    if (transformControls instanceof TransformGizmo) transformControls.visible = false
+    return
+  }
+  if (transformControls instanceof TransformGizmo) transformControls.visible = true
   if (animationStore.jointPlacementActive && toolStore.appMode === 'rig') {
     transformControls.detach()
     return
@@ -3418,6 +3427,72 @@ function endViewNavigation() {
   if (orbitControls && (!isSplitView() || isPerspQuadrant()) && !isGizmoDragging && !transformControls?.dragging) {
     orbitControls.enabled = true
   }
+  applyViewportCursor()
+}
+
+function stickyNavCursor(): string | null {
+  if (!toolStore.stickyViewportControls || !toolStore.stickyViewNav) return null
+  if (toolStore.stickyViewNav === 'pan') return 'move'
+  if (toolStore.stickyViewNav === 'zoom') return 'ns-resize'
+  return isViewNavigating ? 'grabbing' : 'grab'
+}
+
+function applyViewportCursor(hasHover = false) {
+  if (!renderer?.domElement) return
+  const sticky = stickyNavCursor()
+  const nextCursor = sticky
+    ?? (toolStore.appMode === 'uvpaint' && tilesetImageId.value && tilesetUseMode.value === 'stamp'
+      ? 'copy'
+      : toolStore.appMode === 'uvpaint' ? 'crosshair' : (hasHover ? 'pointer' : 'default'))
+  if (lastViewportCursor !== nextCursor) {
+    lastViewportCursor = nextCursor
+    renderer.domElement.style.cursor = nextCursor
+  }
+}
+
+function isStickyNav(mode: 'pan' | 'orbit' | 'zoom') {
+  return toolStore.stickyViewportControls && toolStore.stickyViewNav === mode
+}
+
+function lightWaveNavTitle(mode: 'pan' | 'orbit' | 'zoom', idle: string) {
+  if (!toolStore.stickyViewportControls) return idle
+  const names = { pan: 'Pan', orbit: 'Orbit', zoom: 'Zoom' } as const
+  if (toolStore.stickyViewNav === mode) return `${names[mode]} (sticky) — click again or Esc to exit`
+  return `${names[mode]} (click to lock)`
+}
+
+function stickyCadLockTitle() {
+  return toolStore.stickyViewportControls
+    ? 'Sticky CAD view on — click Pan / Orbit / Zoom to lock. Click to use click-and-hold'
+    : 'Sticky CAD view off — click to enable CAD tool lock'
+}
+
+function onLightWaveNavButton(mode: 'pan' | 'orbit' | 'zoom', camType: 'persp' | 'top' | 'front' | 'right', e: MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  if (toolStore.stickyViewportControls) {
+    if (toolStore.stickyViewNav === mode) {
+      toolStore.clearStickyViewNav()
+      return
+    }
+    toolStore.toggleStickyViewNav(mode)
+  }
+  isViewNavigating = true
+  if (!viewNavPane) viewNavPane = isSplitView() ? activeQuadrant.value : 'main'
+  if (mode === 'pan') startLightWavePan(camType, e)
+  else if (mode === 'orbit') startLightWaveRotate(e)
+  else startLightWaveZoom(camType, e)
+}
+
+function beginStickyViewNav(event: PointerEvent) {
+  isViewNavigating = true
+  updateActiveCameraAndQuadrant(event)
+  viewNavPane = isSplitView() ? activeQuadrant.value : 'main'
+  const kind = viewportKindFromQuadrant()
+  const nav = toolStore.stickyViewNav
+  if (nav === 'pan') startLightWavePan(kind, event)
+  else if (nav === 'orbit') startLightWaveRotate(event)
+  else if (nav === 'zoom') startLightWaveZoom(kind, event)
 }
 
 function isPolySketchOperator() {
@@ -3552,6 +3627,8 @@ function updateActiveCameraAndQuadrant(event: PointerEvent | MouseEvent) {
 function startLightWavePan(camType: 'persp' | 'top' | 'front' | 'right', e: MouseEvent) {
   e.preventDefault()
   e.stopPropagation()
+  isViewNavigating = true
+  applyViewportCursor()
   let prevX = e.clientX
   let prevY = e.clientY
 
@@ -3598,6 +3675,7 @@ function startLightWaveRotate(e: MouseEvent) {
   e.preventDefault()
   e.stopPropagation()
   isViewNavigating = true
+  applyViewportCursor()
   if (!viewNavPane) viewNavPane = isSplitView() ? activeQuadrant.value : 'main'
   if (orbitControls) orbitControls.enabled = false
   let prevX = e.clientX
@@ -3632,6 +3710,8 @@ function startLightWaveRotate(e: MouseEvent) {
 function startLightWaveZoom(camType: 'persp' | 'top' | 'front' | 'right', e: MouseEvent) {
   e.preventDefault()
   e.stopPropagation()
+  isViewNavigating = true
+  applyViewportCursor()
   let prevY = e.clientY
 
   const onMove = (moveEvt: MouseEvent) => {
@@ -3808,6 +3888,12 @@ function onPointerDown(event: PointerEvent) {
   }
 
   if (event.button !== 0) return
+  if (toolStore.stickyViewportControls && toolStore.stickyViewNav) {
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    beginStickyViewNav(event)
+    return
+  }
   if (transformControls.dragging || isGizmoDragging || (transformControls as any).axis !== null) {
     orbitControls.enabled = false
     pointerDownHitMesh = true
@@ -4474,6 +4560,7 @@ function knifeAction(action: 'toggleCutThrough' | 'toggleAngleSnap' | 'cycleAngl
 }
 
 function startModalOperator(tool: string, options?: any) {
+  toolStore.clearStickyViewNav()
   if (!toolStore.isMeshWorkspace()) return
   if (tool === 'shapedraw' && !options?.fresh && projectStore.activeMesh?.locked) return
   if (operatorManager.state.value.active) operatorManager.cancel()
@@ -5132,13 +5219,7 @@ function updateHoverState() {
   }
 
   if (renderer && renderer.domElement) {
-    const nextCursor = toolStore.appMode === 'uvpaint' && tilesetImageId.value && tilesetUseMode.value === 'stamp'
-      ? 'copy'
-      : toolStore.appMode === 'uvpaint' ? 'crosshair' : (hasHover ? 'pointer' : 'default')
-    if (lastViewportCursor !== nextCursor) {
-      lastViewportCursor = nextCursor
-      renderer.domElement.style.cursor = nextCursor
-    }
+    applyViewportCursor(hasHover)
   }
 }
 
@@ -5726,6 +5807,13 @@ watch(
   }
 )
 watch(() => toolStore.viewport.combinedGizmo, syncActiveGizmo)
+watch(() => toolStore.stickyViewNav, (nav) => {
+  applyViewportCursor()
+  if (!nav && transformControls) {
+    transformControls.enabled = !operatorManager.state.value.active
+  }
+  updateTransformGizmo()
+})
 watch(() => [toolStore.snapping.gridSize, toolStore.snapping.angle] as const, () => {
   if (combinedControls) applyThemeToTransformGizmo(combinedControls)
 })
@@ -5870,6 +5958,14 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
       skipGizmoCommit = true
       transformControls.reset()
       finishGizmoGesture()
+      return
+    }
+    if (toolStore.stickyViewNav) {
+      e.preventDefault()
+      e.stopPropagation()
+      toolStore.clearStickyViewNav()
+      applyViewportCursor()
+      updateTransformGizmo()
       return
     }
   }
@@ -6332,25 +6428,40 @@ onUnmounted(() => {
         <!-- Top-Right LightWave Nav Cluster (Move, Rotate, Zoom, Center) -->
         <div class="absolute top-2.5 right-2.5 z-20 flex items-center bg-ui-panel/95 backdrop-blur-xs text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-lg divide-x divide-ui-borderSubtle select-none">
           <button 
-            @pointerdown="startLightWavePan('persp', $event)" 
-            class="p-1.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-move transition"
-            title="Pan View (Drag to pan)"
+            type="button"
+            @pointerdown="onLightWaveNavButton('pan', 'persp', $event)" 
+            class="p-1.5 hover:bg-ui-hover cursor-move transition"
+            :class="isStickyNav('pan') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'"
+            :title="lightWaveNavTitle('pan', 'Pan View (Drag to pan)')"
           >
             <BlenderIcon name="tool-move" :size="14" />
           </button>
           <button 
-            @pointerdown="startLightWaveRotate($event)" 
-            class="p-1.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-grab transition"
-            title="Orbit View (Drag to rotate)"
+            type="button"
+            @pointerdown="onLightWaveNavButton('orbit', 'persp', $event)" 
+            class="p-1.5 hover:bg-ui-hover cursor-grab transition"
+            :class="isStickyNav('orbit') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'"
+            :title="lightWaveNavTitle('orbit', 'Orbit View (Drag to rotate)')"
           >
             <BlenderIcon name="tool-rotate" :size="14" />
           </button>
           <button 
-            @pointerdown="startLightWaveZoom('persp', $event)" 
-            class="p-1.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-ns-resize transition"
-            title="Zoom View (Drag up/down to zoom)"
+            type="button"
+            @pointerdown="onLightWaveNavButton('zoom', 'persp', $event)" 
+            class="p-1.5 hover:bg-ui-hover cursor-ns-resize transition"
+            :class="isStickyNav('zoom') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'"
+            :title="lightWaveNavTitle('zoom', 'Zoom View (Drag up/down to zoom)')"
           >
             <BlenderIcon name="zoom-in" :size="14" />
+          </button>
+          <button
+            type="button"
+            @click.stop="toolStore.stickyViewportControls = !toolStore.stickyViewportControls"
+            class="p-1.5 hover:bg-ui-hover transition cursor-pointer"
+            :class="toolStore.stickyViewportControls ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'"
+            :title="stickyCadLockTitle()"
+          >
+            <BlenderIcon :name="toolStore.stickyViewportControls ? 'lock' : 'unlock'" :size="14" />
           </button>
           <button 
             @click="centerViewOnContents('persp')" 
@@ -6480,10 +6591,10 @@ onUnmounted(() => {
                 class="pointer-events-auto relative z-40 flex items-center bg-ui-panel/95 border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle shrink-0"
                 @pointerdown.stop
               >
-                <button type="button" @pointerdown="startLightWavePan('front', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-move" title="Pan Front">
+                <button type="button" @pointerdown="onLightWaveNavButton('pan', 'front', $event)" class="p-1 hover:bg-ui-hover cursor-move" :class="isStickyNav('pan') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'" :title="lightWaveNavTitle('pan', 'Pan Front')">
                   <BlenderIcon name="tool-move" :size="12" />
                 </button>
-                <button type="button" @pointerdown="startLightWaveZoom('front', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-ns-resize" title="Zoom Front">
+                <button type="button" @pointerdown="onLightWaveNavButton('zoom', 'front', $event)" class="p-1 hover:bg-ui-hover cursor-ns-resize" :class="isStickyNav('zoom') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'" :title="lightWaveNavTitle('zoom', 'Zoom Front')">
                   <BlenderIcon name="zoom-in" :size="12" />
                 </button>
                 <button type="button" @click="centerViewOnContents('front')" class="p-1 hover:bg-ui-hover text-ui-textSecondary" title="Frame Front">
@@ -6538,10 +6649,10 @@ onUnmounted(() => {
                 class="pointer-events-auto relative z-40 flex items-center bg-ui-panel/95 border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle shrink-0"
                 @pointerdown.stop
               >
-                <button type="button" @pointerdown="startLightWavePan('right', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-move" title="Pan Side">
+                <button type="button" @pointerdown="onLightWaveNavButton('pan', 'right', $event)" class="p-1 hover:bg-ui-hover cursor-move" :class="isStickyNav('pan') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'" :title="lightWaveNavTitle('pan', 'Pan Side')">
                   <BlenderIcon name="tool-move" :size="12" />
                 </button>
-                <button type="button" @pointerdown="startLightWaveZoom('right', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-ns-resize" title="Zoom Side">
+                <button type="button" @pointerdown="onLightWaveNavButton('zoom', 'right', $event)" class="p-1 hover:bg-ui-hover cursor-ns-resize" :class="isStickyNav('zoom') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'" :title="lightWaveNavTitle('zoom', 'Zoom Side')">
                   <BlenderIcon name="zoom-in" :size="12" />
                 </button>
                 <button type="button" @click="centerViewOnContents('right')" class="p-1 hover:bg-ui-hover text-ui-textSecondary" title="Frame Side">
@@ -6595,14 +6706,23 @@ onUnmounted(() => {
                 class="pointer-events-auto relative z-40 flex items-center bg-ui-panel/95 border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle shrink-0"
                 @pointerdown.stop
               >
-                <button type="button" @pointerdown="startLightWavePan('persp', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-move" title="Pan">
+                <button type="button" @pointerdown="onLightWaveNavButton('pan', 'persp', $event)" class="p-1 hover:bg-ui-hover cursor-move" :class="isStickyNav('pan') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'" :title="lightWaveNavTitle('pan', 'Pan')">
                   <BlenderIcon name="tool-move" :size="12" />
                 </button>
-                <button type="button" @pointerdown="startLightWaveRotate($event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-grab" title="Orbit">
+                <button type="button" @pointerdown="onLightWaveNavButton('orbit', 'persp', $event)" class="p-1 hover:bg-ui-hover cursor-grab" :class="isStickyNav('orbit') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'" :title="lightWaveNavTitle('orbit', 'Orbit')">
                   <BlenderIcon name="tool-rotate" :size="12" />
                 </button>
-                <button type="button" @pointerdown="startLightWaveZoom('persp', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-ns-resize" title="Zoom">
+                <button type="button" @pointerdown="onLightWaveNavButton('zoom', 'persp', $event)" class="p-1 hover:bg-ui-hover cursor-ns-resize" :class="isStickyNav('zoom') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'" :title="lightWaveNavTitle('zoom', 'Zoom')">
                   <BlenderIcon name="zoom-in" :size="12" />
+                </button>
+                <button
+                  type="button"
+                  @click.stop="toolStore.stickyViewportControls = !toolStore.stickyViewportControls"
+                  class="p-1 hover:bg-ui-hover cursor-pointer"
+                  :class="toolStore.stickyViewportControls ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'"
+                  :title="stickyCadLockTitle()"
+                >
+                  <BlenderIcon :name="toolStore.stickyViewportControls ? 'lock' : 'unlock'" :size="12" />
                 </button>
                 <button type="button" @click="centerViewOnContents('persp')" class="p-1 hover:bg-ui-hover text-ui-textSecondary" title="Frame">
                   <BlenderIcon name="view-fit" :size="12" />
@@ -6689,10 +6809,10 @@ onUnmounted(() => {
 
           <!-- LightWave Nav Buttons (Pan, Zoom, Center, Maximize for 2D Ortho) -->
           <div class="flex items-center bg-ui-panel/95 text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle">
-            <button @pointerdown="startLightWavePan('top', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-move transition" title="Pan Top View (Drag to pan)">
+            <button type="button" @pointerdown="onLightWaveNavButton('pan', 'top', $event)" class="p-1 hover:bg-ui-hover cursor-move transition" :class="isStickyNav('pan') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('pan', 'Pan Top View (Drag to pan)')">
               <BlenderIcon name="tool-move" :size="12" />
             </button>
-            <button @pointerdown="startLightWaveZoom('top', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-ns-resize transition" title="Zoom Top View (Drag up/down to zoom)">
+            <button type="button" @pointerdown="onLightWaveNavButton('zoom', 'top', $event)" class="p-1 hover:bg-ui-hover cursor-ns-resize transition" :class="isStickyNav('zoom') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('zoom', 'Zoom Top View (Drag up/down to zoom)')">
               <BlenderIcon name="zoom-in" :size="12" />
             </button>
             <button @click="centerViewOnContents('top')" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Center Top View on Model">
@@ -6719,14 +6839,23 @@ onUnmounted(() => {
 
           <!-- Full 3D Nav Buttons (Pan, Rotate, Zoom, Center, X-Ray, Maximize) -->
           <div class="flex items-center bg-ui-panel/95 text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle">
-            <button @pointerdown="startLightWavePan('persp', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-move transition" title="Pan View">
+            <button type="button" @pointerdown="onLightWaveNavButton('pan', 'persp', $event)" class="p-1 hover:bg-ui-hover cursor-move transition" :class="isStickyNav('pan') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('pan', 'Pan View')">
               <BlenderIcon name="tool-move" :size="12" />
             </button>
-            <button @pointerdown="startLightWaveRotate($event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-grab transition" title="Orbit 3D View">
+            <button type="button" @pointerdown="onLightWaveNavButton('orbit', 'persp', $event)" class="p-1 hover:bg-ui-hover cursor-grab transition" :class="isStickyNav('orbit') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('orbit', 'Orbit 3D View')">
               <BlenderIcon name="tool-rotate" :size="12" />
             </button>
-            <button @pointerdown="startLightWaveZoom('persp', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-ns-resize transition" title="Zoom View">
+            <button type="button" @pointerdown="onLightWaveNavButton('zoom', 'persp', $event)" class="p-1 hover:bg-ui-hover cursor-ns-resize transition" :class="isStickyNav('zoom') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('zoom', 'Zoom View')">
               <BlenderIcon name="zoom-in" :size="12" />
+            </button>
+            <button
+              type="button"
+              @click.stop="toolStore.stickyViewportControls = !toolStore.stickyViewportControls"
+              class="p-1 hover:bg-ui-hover cursor-pointer transition"
+              :class="toolStore.stickyViewportControls ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'"
+              :title="stickyCadLockTitle()"
+            >
+              <BlenderIcon :name="toolStore.stickyViewportControls ? 'lock' : 'unlock'" :size="12" />
             </button>
             <button @click="centerViewOnContents('persp')" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Center View on Model">
               <BlenderIcon name="view-fit" :size="12" />
@@ -6761,10 +6890,10 @@ onUnmounted(() => {
 
           <!-- LightWave Nav Buttons (Pan, Zoom, Center, Maximize for 2D Ortho) -->
           <div class="flex items-center bg-ui-panel/95 text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle">
-            <button @pointerdown="startLightWavePan('front', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-move transition" title="Pan Front View (Drag to pan)">
+            <button type="button" @pointerdown="onLightWaveNavButton('pan', 'front', $event)" class="p-1 hover:bg-ui-hover cursor-move transition" :class="isStickyNav('pan') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('pan', 'Pan Front View (Drag to pan)')">
               <BlenderIcon name="tool-move" :size="12" />
             </button>
-            <button @pointerdown="startLightWaveZoom('front', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-ns-resize transition" title="Zoom Front View (Drag up/down to zoom)">
+            <button type="button" @pointerdown="onLightWaveNavButton('zoom', 'front', $event)" class="p-1 hover:bg-ui-hover cursor-ns-resize transition" :class="isStickyNav('zoom') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('zoom', 'Zoom Front View (Drag up/down to zoom)')">
               <BlenderIcon name="zoom-in" :size="12" />
             </button>
             <button @click="centerViewOnContents('front')" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Center Front View on Model">
@@ -6791,10 +6920,10 @@ onUnmounted(() => {
 
           <!-- LightWave Nav Buttons (Pan, Zoom, Center, Maximize for 2D Ortho) -->
           <div class="flex items-center bg-ui-panel/95 text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle">
-            <button @pointerdown="startLightWavePan('right', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-move transition" title="Pan Right View (Drag to pan)">
+            <button type="button" @pointerdown="onLightWaveNavButton('pan', 'right', $event)" class="p-1 hover:bg-ui-hover cursor-move transition" :class="isStickyNav('pan') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('pan', 'Pan Right View (Drag to pan)')">
               <BlenderIcon name="tool-move" :size="12" />
             </button>
-            <button @pointerdown="startLightWaveZoom('right', $event)" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent cursor-ns-resize transition" title="Zoom Right View (Drag up/down to zoom)">
+            <button type="button" @pointerdown="onLightWaveNavButton('zoom', 'right', $event)" class="p-1 hover:bg-ui-hover cursor-ns-resize transition" :class="isStickyNav('zoom') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('zoom', 'Zoom Right View (Drag up/down to zoom)')">
               <BlenderIcon name="zoom-in" :size="12" />
             </button>
             <button @click="centerViewOnContents('right')" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Center Right View on Model">

@@ -553,6 +553,14 @@ onUnmounted(() => {
             <div class="space-y-3">
               <div class="flex items-center justify-between py-1 border-b border-ui-borderSubtle/40">
                 <div>
+                  <span class="text-ui-textPrimary font-medium">Sticky CAD Viewport Controls</span>
+                  <p class="text-[10px] text-ui-textMuted">Click Pan, Orbit, or Zoom to lock that view tool until you click it again or press Esc. Off uses click-and-hold.</p>
+                </div>
+                <input type="checkbox" v-model="toolStore.stickyViewportControls" class="rounded-xs text-amber-500" />
+              </div>
+
+              <div class="flex items-center justify-between py-1 border-b border-ui-borderSubtle/40">
+                <div>
                   <span class="text-ui-textPrimary font-medium">Default Shading Model</span>
                   <p class="text-[10px] text-ui-textMuted">Initial viewport shading when loading scenes.</p>
                 </div>
@@ -665,6 +673,14 @@ onUnmounted(() => {
                   <p class="text-[10px] text-ui-textMuted">Show the floating Move / Rotate / Scale panel. Off by default. Tool status stays in the status bar.</p>
                 </div>
                 <input type="checkbox" v-model="toolStore.stylusModeNotifications" class="rounded-xs text-amber-500" />
+              </div>
+
+              <div class="flex items-center justify-between py-1 border-b border-ui-borderSubtle/40">
+                <div>
+                  <span class="text-ui-textPrimary font-medium">Sticky CAD Viewport Controls</span>
+                  <p class="text-[10px] text-ui-textMuted">Same as File → Properties → Viewport. Click Pan, Orbit, or Zoom to lock that view tool until you click it again or press Esc.</p>
+                </div>
+                <input type="checkbox" v-model="toolStore.stickyViewportControls" class="rounded-xs text-amber-500" />
               </div>
 
               <div class="flex items-center justify-between py-1 border-b border-ui-borderSubtle/40">

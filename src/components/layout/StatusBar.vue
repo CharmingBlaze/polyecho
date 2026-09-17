@@ -27,6 +27,9 @@ const profileIssues = computed(() => {
 
 const statusModeLabel = computed(() => {
   if (operatorState.value.active && operatorState.value.operatorName) return operatorState.value.operatorName
+  if (toolStore.stickyViewNav === 'pan') return 'Pan View'
+  if (toolStore.stickyViewNav === 'orbit') return 'Orbit View'
+  if (toolStore.stickyViewNav === 'zoom') return 'Zoom View'
   if (toolStore.isBoxSelectActive) return 'Box Select'
   return toolStore.appMode
 })
@@ -34,6 +37,15 @@ const statusModeLabel = computed(() => {
 const contextualHints = computed(() => {
   if (operatorState.value.active && operatorState.value.statusText) {
     return operatorState.value.statusText
+  }
+  if (toolStore.stickyViewNav === 'pan') {
+    return 'LMB drag: Pan · click Pan again or Esc to exit'
+  }
+  if (toolStore.stickyViewNav === 'orbit') {
+    return 'LMB drag: Orbit 3D · click Orbit again or Esc to exit'
+  }
+  if (toolStore.stickyViewNav === 'zoom') {
+    return 'LMB drag up/down: Zoom · click Zoom again or Esc to exit'
   }
   if (toolStore.isBoxSelectActive) {
     return 'Drag a rectangle · Shift add · Esc cancel'
@@ -74,7 +86,7 @@ const contextualHints = computed(() => {
 <template>
   <footer class="h-6 bg-ui-header border-t border-ui-borderSubtle px-2.5 flex items-center justify-between text-[11px] font-sans text-ui-textMuted select-none shrink-0 z-30">
     <!-- Left: Contextual Shortcut Hints -->
-    <div class="flex items-center space-x-2 truncate" :class="operatorState.active || toolStore.isBoxSelectActive ? 'max-w-[62%]' : 'max-w-[45%]'">
+    <div class="flex items-center space-x-2 truncate" :class="operatorState.active || toolStore.isBoxSelectActive || toolStore.stickyViewNav ? 'max-w-[62%]' : 'max-w-[45%]'">
       <span class="font-semibold text-[10px] uppercase text-ui-textSecondary shrink-0">{{ statusModeLabel }}:</span>
       <button v-if="projectStore.meshEditError" type="button"
         class="text-amber-300 truncate text-[10px]" :title="projectStore.meshEditError.reason + ' (click to dismiss)'"

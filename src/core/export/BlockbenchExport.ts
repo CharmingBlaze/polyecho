@@ -40,13 +40,16 @@ export function exportToBlockbench(
     let minX = Infinity, minY = Infinity, minZ = Infinity
     let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
 
+    const sx = mesh.scale?.x ?? 1
+    const sy = mesh.scale?.y ?? 1
+    const sz = mesh.scale?.z ?? 1
     for (const v of mesh.vertices) {
-      minX = Math.min(minX, v.position.x * 16)
-      minY = Math.min(minY, v.position.y * 16)
-      minZ = Math.min(minZ, v.position.z * 16)
-      maxX = Math.max(maxX, v.position.x * 16)
-      maxY = Math.max(maxY, v.position.y * 16)
-      maxZ = Math.max(maxZ, v.position.z * 16)
+      minX = Math.min(minX, v.position.x * sx * 16)
+      minY = Math.min(minY, v.position.y * sy * 16)
+      minZ = Math.min(minZ, v.position.z * sz * 16)
+      maxX = Math.max(maxX, v.position.x * sx * 16)
+      maxY = Math.max(maxY, v.position.y * sy * 16)
+      maxZ = Math.max(maxZ, v.position.z * sz * 16)
     }
 
     if (minX === Infinity) {
@@ -136,30 +139,7 @@ export function exportToBlockbench(
 }
 
 /**
- * Parses a Blockbench .bbmodel JSON string into PolyEcho data objects.
+ * Parses a Blockbench .bbmodel JSON string into PolyEcho meshes and textures.
+ * @deprecated Use `importBlockbench` from `src/core/import/BlockbenchImport.ts`.
  */
-export function importFromBlockbench(jsonString: string): {
-  projectName: string
-  elements: any[]
-  textures: Array<{ name: string; dataUrl: string; width: number; height: number }>
-  animations: any[]
-} {
-  const data = JSON.parse(jsonString)
-  const projectName = data.name || 'Blockbench_Model'
-  const width = data.resolution?.width || 64
-  const height = data.resolution?.height || 64
-
-  const textures = (data.textures || []).map((t: any, idx: number) => ({
-    name: t.name || `Texture_${idx}`,
-    dataUrl: t.source || '',
-    width,
-    height
-  }))
-
-  return {
-    projectName,
-    elements: data.elements || [],
-    textures,
-    animations: data.animations || []
-  }
-}
+export { importBlockbench as importFromBlockbench } from '../import/BlockbenchImport'

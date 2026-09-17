@@ -1,11 +1,12 @@
 import * as THREE from 'three'
 import { MeshObject } from '../../types/mesh'
 import { AnimationClip, Armature } from '../../types/animation'
-import { meshToThreeGeometry } from '../geometry/Converters'
+import { meshToThreeGeometry, resolveMeshShadeMode } from '../geometry/Converters'
+import { DEFAULT_AUTO_SMOOTH_ANGLE, shadeUserData } from '../geometry/MeshShading'
 import { resolveMeshBoneParentId } from '../animation/Armature'
 
 import { Material, TextureMap } from '../../types/texture'
-import { embedPngImages, injectClipExtras } from './gltfBinary'
+import { embedPngImages, injectClipExtras, injectNodeExtras } from './gltfBinary'
 import { pngFromCanvas } from '../painting/encodePng'
 
 function uniqueNamer() {
@@ -18,6 +19,16 @@ function uniqueNamer() {
     used.add(name)
     return name
   }
+}
+
+function stampShadeExtras(target: THREE.Object3D, geometry: THREE.BufferGeometry, meshObj: MeshObject) {
+  const extras = shadeUserData({
+    shadeMode: resolveMeshShadeMode(meshObj),
+    autoSmoothAngle: meshObj.autoSmoothAngle ?? DEFAULT_AUTO_SMOOTH_ANGLE
+  })
+  delete geometry.userData.renderCornerKeys
+  Object.assign(geometry.userData, extras)
+  Object.assign(target.userData, extras)
 }
 
 /** CanvasTexture per library texture id. Caller must dispose values. */
@@ -123,6 +134,8 @@ export async function exportToGLTF(
 
     let material: THREE.Material
     const baseColor = matObj?.color ? new THREE.Color(matObj.color) : new THREE.Color(0xffffff)
+    const useVertexColors = meshObj.vertices.some(v => v.color)
+    const side = matObj?.doubleSided === false ? THREE.FrontSide : THREE.DoubleSide
     if (texture) {
       texture.magFilter = THREE.NearestFilter
       texture.minFilter = THREE.NearestFilter
@@ -138,19 +151,31 @@ export async function exportToGLTF(
         color: baseColor,
         roughness: typeof matObj?.roughness === 'number' ? matObj.roughness : 0.8,
         metalness: typeof matObj?.metalness === 'number' ? matObj.metalness : 0.05,
-        side: THREE.DoubleSide,
+        side,
+        alphaTest,
+        transparent: isBlend,
+        depthWrite: !isBlend,
+        opacity: typeof matObj?.opacity === 'number' ? matObj.opacity : 1,
+        vertexColors: useVertexColors
+      })
+    } else {
+      const blendMode = matObj?.blendMode ?? 'opaque'
+      const storedAlphaTest = typeof matObj?.alphaTest === 'number' ? matObj.alphaTest : 0
+      const alphaTest = blendMode === 'mask'
+        ? (storedAlphaTest > 0 ? storedAlphaTest : 0.05)
+        : storedAlphaTest
+      const isBlend = blendMode === 'blend' || blendMode === 'additive'
+      material = new THREE.MeshStandardMaterial({
+        name: matObj?.name || meshObj.materialId || 'Material',
+        color: baseColor,
+        vertexColors: useVertexColors,
+        roughness: typeof matObj?.roughness === 'number' ? matObj.roughness : 0.8,
+        metalness: typeof matObj?.metalness === 'number' ? matObj.metalness : 0.05,
+        side,
         alphaTest,
         transparent: isBlend,
         depthWrite: !isBlend,
         opacity: typeof matObj?.opacity === 'number' ? matObj.opacity : 1
-      })
-    } else {
-      material = new THREE.MeshStandardMaterial({
-        name: matObj?.name || meshObj.materialId || 'Material',
-        color: baseColor,
-        roughness: typeof matObj?.roughness === 'number' ? matObj.roughness : 0.8,
-        metalness: typeof matObj?.metalness === 'number' ? matObj.metalness : 0.05,
-        side: THREE.DoubleSide
       })
     }
 
@@ -225,6 +250,7 @@ export async function exportToGLTF(
       skinnedMesh.scale.set(meshObj.scale.x, meshObj.scale.y, meshObj.scale.z)
 
       skinnedMesh.bind(skeleton)
+      stampShadeExtras(skinnedMesh, geometry, meshObj)
       scene.add(skinnedMesh)
     } else {
       const threeMesh = new THREE.Mesh(geometry, material)
@@ -238,6 +264,7 @@ export async function exportToGLTF(
       )
       threeMesh.scale.set(meshObj.scale.x, meshObj.scale.y, meshObj.scale.z)
 
+      stampShadeExtras(threeMesh, geometry, meshObj)
       scene.add(threeMesh)
     }
   }
@@ -245,6 +272,16 @@ export async function exportToGLTF(
   // 3. Convert AnimationClips to Three.js AnimationClips targeting bones and meshes
   const threeClips: THREE.AnimationClip[] = []
   const extrasByClipName: Record<string, Record<string, unknown>> = {}
+  const extrasByNodeName: Record<string, Record<string, unknown>> = {}
+  for (const meshObj of meshes) {
+    if (!meshObj.visible) continue
+    const exportName = meshExportNames.get(meshObj.id)
+    if (!exportName) continue
+    extrasByNodeName[exportName] = shadeUserData({
+      shadeMode: resolveMeshShadeMode(meshObj),
+      autoSmoothAngle: meshObj.autoSmoothAngle ?? DEFAULT_AUTO_SMOOTH_ANGLE
+    })
+  }
 
   for (const clip of clips) {
     const tracks: THREE.KeyframeTrack[] = []
@@ -356,16 +393,25 @@ export async function exportToGLTF(
           if (Object.keys(extrasByClipName).length > 0) {
             buffer = injectClipExtras(buffer, extrasByClipName)
           }
+          if (Object.keys(extrasByNodeName).length > 0) {
+            buffer = injectNodeExtras(buffer, extrasByNodeName)
+          }
           if (pngs.length > 0) {
             buffer = embedPngImages(buffer, pngs)
           }
           resolve(new Blob([buffer], { type: 'model/gltf-binary' }))
         } else {
-          const doc = gltf as { animations?: Array<Record<string, unknown>> }
+          const doc = gltf as { animations?: Array<Record<string, unknown>>; nodes?: Array<Record<string, unknown>> }
           if (Array.isArray(doc.animations)) {
             for (const anim of doc.animations) {
               const extra = typeof anim.name === 'string' ? extrasByClipName[anim.name] : undefined
               if (extra) anim.extras = { ...(anim.extras as object || {}), ...extra }
+            }
+          }
+          if (Array.isArray(doc.nodes)) {
+            for (const node of doc.nodes) {
+              const extra = typeof node.name === 'string' ? extrasByNodeName[node.name] : undefined
+              if (extra) node.extras = { ...(node.extras as object || {}), ...extra }
             }
           }
           resolve(new Blob([JSON.stringify(gltf, null, 2)], { type: 'model/gltf+json' }))

@@ -136,6 +136,24 @@ export function injectClipExtras(
   return writeGlb(json, bin)
 }
 
+export function injectNodeExtras(
+  buffer: ArrayBuffer,
+  extrasByNodeName: Record<string, Record<string, unknown>>
+): ArrayBuffer {
+  const { json, bin } = readGlb(buffer)
+  const nodes = json.nodes
+  if (!Array.isArray(nodes)) return buffer
+  for (const node of nodes) {
+    if (!node || typeof node !== 'object') continue
+    const rec = node as Record<string, unknown>
+    const name = typeof rec.name === 'string' ? rec.name : ''
+    const extra = extrasByNodeName[name]
+    if (!extra) continue
+    rec.extras = { ...(typeof rec.extras === 'object' && rec.extras ? rec.extras as object : {}), ...extra }
+  }
+  return writeGlb(json, bin)
+}
+
 function padChunk(data: Uint8Array, fill: number): Uint8Array {
   const pad = (4 - (data.length % 4)) % 4
   if (pad === 0) return data

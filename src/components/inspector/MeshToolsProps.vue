@@ -169,6 +169,14 @@ function deleteSel() {
             <BlenderIcon name="flip-normals" :size="12" />
             <span>Flip Normals</span>
           </UiButton>
+          <UiButton size="xs" :active="activeMesh?.shadeMode === 'smooth'" title="Shade Smooth — interpolate vertex normals" @click="projectStore.setShadeMode('smooth')">
+            <BlenderIcon name="shading-solid" :size="12" />
+            <span>Smooth</span>
+          </UiButton>
+          <UiButton size="xs" :active="activeMesh?.shadeMode === 'flat' || !activeMesh?.shadeMode" title="Shade Flat — one normal per face" @click="projectStore.setShadeMode('flat')">
+            <BlenderIcon name="shading-wire" :size="12" />
+            <span>Flat</span>
+          </UiButton>
         </div>
       </UiSection>
 

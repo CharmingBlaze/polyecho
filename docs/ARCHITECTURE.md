@@ -92,7 +92,7 @@ Interactive topology (extrude / inset / bevel / loop cut / knife) belongs in a k
 
 - `.psxproj` — `ProjectSerializer` + `ProjectStorage` (autosave).
 - Export — `GltfExport.ts` (GLB via Three `GLTFExporter`), `ObjExport.ts`, `BlockbenchExport.ts`, `SpriteSheet.ts`, `TurntableRecorder.ts`.
-- Import — `GltfImport.ts`, `ObjImport.ts`, `ImageImport.ts`.
+- Import — `GltfImport.ts`, `ObjImport.ts`, `BlockbenchImport.ts`, `ImageImport.ts`.
 
 ## Extensibility (where to add things)
 
@@ -110,7 +110,7 @@ Right sidebar (`RightSidebar.vue`): Tools / List / context (Object, UV, or Anim)
 
 Left toolbar (`LeftToolbar.vue`) is a docked icon shelf: Object/Vertex/Edge/Face plus the workspace tools. T to toggle. Hidden in UV/Paint (those editors keep in-canvas tool strips). Hover labels use `useFastTitleTips` (not OS `title` delay).
 
-`HeaderMenu.vue` is the app chrome: File/Edit/Mesh, space+pivot, snap, live mirror X/Y/Z, workspace tabs, then view/overlays/shading/object shade/x-ray/command search. Add primitives with Shift+A (or Scene Add / the command palette). The floating LightWave cluster is pan / orbit / zoom / frame only.
+`HeaderMenu.vue` is the app chrome: File/Edit/Mesh, space+pivot, snap, live mirror X/Y/Z, workspace tabs, then view/overlays/shading/object shade/x-ray/command search. Add primitives with Shift+A (or Scene Add / the command palette). The floating LightWave cluster is pan / orbit / zoom / frame; with Sticky Viewport Controls (on by default) a click locks pan/orbit/zoom until click-again or Esc.
 
 Pointer conventions: `docs/INPUT.md`. Icon conventions: `docs/ICONS.md`.
 

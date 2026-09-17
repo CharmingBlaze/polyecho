@@ -125,6 +125,8 @@ describe('GLB I/O', () => {
       textureId: 'tex_paint',
       color: '#ffffff',
       shading: 'textured',
+      roughness: 0.35,
+      metalness: 0.6,
       psxJitter: false,
       psxJitterResolution: 240,
       psxAffine: false,
@@ -141,7 +143,69 @@ describe('GLB I/O', () => {
     const imported = await GltfImport.loadFromArrayBuffer(await blob.arrayBuffer(), 'Tex')
     expect(imported.meshes[0].materialId).not.toBe('default_material')
     expect(imported.materials?.length).toBeGreaterThanOrEqual(1)
+    expect(imported.materials?.[0].roughness).toBeCloseTo(0.35, 2)
+    expect(imported.materials?.[0].metalness).toBeCloseTo(0.6, 2)
     for (const tex of texMap.values()) tex.dispose()
+  }, 20000)
+
+  it('preserves object-mode TRS instead of baking world verts', async () => {
+    const cube = createCube('MovedCube', 2)
+    cube.position = { x: 1.5, y: 2, z: -0.25 }
+    cube.rotation = { x: 0, y: 45, z: 0 }
+    cube.scale = { x: 2, y: 1, z: 0.5 }
+    const blob = await exportToGLTF([cube], new Map(), [], true)
+    const { meshes } = await GltfImport.loadFromArrayBuffer(await blob.arrayBuffer(), 'TRS')
+    expect(meshes.length).toBeGreaterThanOrEqual(1)
+    const imported = meshes[0]
+    expect(imported.position.x).toBeCloseTo(1.5, 3)
+    expect(imported.position.y).toBeCloseTo(2, 3)
+    expect(imported.position.z).toBeCloseTo(-0.25, 3)
+    expect(imported.rotation.y).toBeCloseTo(45, 1)
+    expect(imported.scale.x).toBeCloseTo(2, 3)
+    expect(imported.scale.y).toBeCloseTo(1, 3)
+    expect(imported.scale.z).toBeCloseTo(0.5, 3)
+    const maxLocal = Math.max(...imported.vertices.map(v => Math.abs(v.position.x)))
+    expect(maxLocal).toBeLessThan(1.2)
+  }, 20000)
+
+  it('round-trips vertex colors and skin weights', async () => {
+    const cube = createCube('WeightedCube', 2)
+    cube.vertices[0].color = '#ff0000'
+    const bones = [bone('root', null, 0), bone('child', 'root', 1)]
+    bones[1].childrenIds = []
+    autoWeightMeshToArmature(cube, bones, { maxInfluences: 4 })
+    const armature: Armature = {
+      id: 'arm_weights',
+      name: 'Armature',
+      bones,
+      rootBoneIds: ['root'],
+      clips: [],
+      activeClipId: null
+    }
+    const blob = await exportToGLTF([cube], new Map(), [], true, armature)
+    const { meshes, armature: imported } = await GltfImport.loadFromArrayBuffer(await blob.arrayBuffer(), 'Weights')
+    expect(imported?.bones.length).toBeGreaterThanOrEqual(2)
+    const boneIds = new Set((imported?.bones ?? []).map(b => b.id))
+    const weighted = meshes[0].vertices.filter(v => v.boneWeights && Object.keys(v.boneWeights).length > 0)
+    expect(weighted.length).toBeGreaterThan(0)
+    expect(Object.keys(weighted[0].boneWeights!).some(id => boneIds.has(id))).toBe(true)
+    expect(meshes[0].vertices.some(v => v.color?.toLowerCase() === '#ff0000')).toBe(true)
+  }, 20000)
+
+  it('round-trips Shade Smooth and Smooth by Angle extras', async () => {
+    const smooth = createCube('SmoothCube', 2)
+    smooth.shadeMode = 'smooth'
+    const smoothBlob = await exportToGLTF([smooth], new Map(), [], true)
+    const smoothImported = await GltfImport.loadFromArrayBuffer(await smoothBlob.arrayBuffer(), 'Smooth')
+    expect(smoothImported.meshes[0].shadeMode).toBe('smooth')
+
+    const auto = createCube('AutoCube', 2)
+    auto.shadeMode = 'auto'
+    auto.autoSmoothAngle = 45
+    const autoBlob = await exportToGLTF([auto], new Map(), [], true)
+    const autoImported = await GltfImport.loadFromArrayBuffer(await autoBlob.arrayBuffer(), 'Auto')
+    expect(autoImported.meshes[0].shadeMode).toBe('auto')
+    expect(autoImported.meshes[0].autoSmoothAngle).toBe(45)
   }, 20000)
 })
 

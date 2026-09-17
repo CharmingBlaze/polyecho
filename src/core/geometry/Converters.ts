@@ -5,6 +5,7 @@ import { Bone } from '../../types/animation'
 import { computeFaceNormal } from '../../utils/math'
 import { getMeshEdges } from './EdgeUtils'
 import { evaluateModifiers } from './Modifiers'
+import { DEFAULT_AUTO_SMOOTH_ANGLE } from './MeshShading'
 import { ensureMeshUVs } from './UVUnwrap'
 import { surfaceTriangles } from './SurfaceGeometry'
 import { VERTEX_COLOR_IDLE, VERTEX_COLOR_SELECTED } from '../render/VertexMarkers'
@@ -248,7 +249,7 @@ export function weightToHeatmapColor(weight: number, color = scratchVertexColor)
   return color
 }
 
-export const DEFAULT_AUTO_SMOOTH_ANGLE = 30
+export { DEFAULT_AUTO_SMOOTH_ANGLE } from './MeshShading'
 
 export function resolveMeshShadeMode(
   mesh: MeshObject,
@@ -360,6 +361,18 @@ function buildAutoSmoothCornerNormals(
     }
   }
   return result
+}
+
+export function meshCornerNormals(
+  faces: Face[],
+  vertices: Vertex[],
+  shade: MeshShadeMode,
+  autoSmoothAngle: number = DEFAULT_AUTO_SMOOTH_ANGLE
+): Map<string, THREE.Vector3> | null {
+  if (shade === 'flat') return null
+  const vertMap = new Map<string, Vertex>()
+  for (const v of vertices) vertMap.set(v.id, v)
+  return buildAutoSmoothCornerNormals(faces, vertMap, shade === 'smooth' ? 180 : autoSmoothAngle)
 }
 
 export function meshToThreeGeometry(

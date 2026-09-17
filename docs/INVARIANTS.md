@@ -35,6 +35,7 @@ Breaking any of these usually looks like “selection vanished”, “undo corru
 
 - Idle **RMB** pans (or scrolls) the active view: 3D (`startLightWavePan`), UV/paint canvas, timeline dope sheet, graph editor. Suppress `contextmenu` on those surfaces.
 - Idle **LMB drag** in a 3D perspective pane orbits (`startLightWaveRotate`). A short LMB click still selects (or paints). Modal operators, the gizmo, 3D paint, and box select keep LMB.
+- **Sticky Viewport Controls** (File → Properties → Viewport, on by default; lock on the LightWave cluster): a click on LightWave Pan / Orbit / Zoom locks that tool and cursor until click-again, Esc, or another modeling tool. Off keeps click-and-hold.
 - Modal operators may use RMB for cancel / step back. Swatches may use RMB for secondary color. Canvas RMB is not a paint or select button.
 - See `docs/INPUT.md`.
 
@@ -74,7 +75,7 @@ Breaking any of these usually looks like “selection vanished”, “undo corru
 - Smooth skin: at most four influences per vertex, weights normalized.
 - Rigid parts: mesh `parentBoneId` + `parentType: 'bone'`. Do not store a bone id in `parentId` (that is mesh-to-mesh).
 - Viewport skin uses posed world × inverse bind (rest pose channels = identity).
-- GLB export builds a Three.js skeleton from `animationStore.armature`, `calculateInverses()`, and `resolveMeshBoneParentId` for unweighted verts.
+- GLB export builds a Three.js skeleton from `animationStore.armature`, `calculateInverses()`, and `resolveMeshBoneParentId` for unweighted verts. GLB import keeps mesh vertices in object space and writes node `matrixWorld` into MeshObject TRS — do not bake world positions into verts.
 
 ## Project files
 

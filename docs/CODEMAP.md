@@ -65,6 +65,7 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/core/geometry/ObjectSymmetry.ts` | Flip mesh through origin (H/V/Z), wrap Euler degrees, used by inspector Flip / Rotate / Mirror Copy |
 | `src/core/geometry/Primitives.ts` | Legacy cube / plane helpers |
 | `src/core/geometry/Converters.ts` | Three.js `BufferGeometry`, including object shade flat/smooth/auto-smooth normals |
+| `src/core/geometry/MeshShading.ts` | Infer and persist Blender Shade Flat / Smooth / Smooth by Angle (`shadeMode`) for GLB / OBJ |
 | `src/core/geometry/PolygonGeometry.ts` | Polygon area / planarity helpers used by validation and n-gon picking |
 | `src/core/geometry/SurfaceGeometry.ts` | Concave-aware surface triangles and perspective edge parameters |
 | `src/core/geometry/ComponentPicking.ts` | Vertex / edge / face hit tests with consistent pixel thresholds |
@@ -134,7 +135,7 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/core/animation/IKSolver.ts` | Two-bone + CCD; `applyIKConstraints` |
 | `src/core/animation/SpringPhysics.ts` | Spring bones |
 | `src/core/export/` | GLB, OBJ, Blockbench, sprites, turntable. Texture maps keyed by **texture id** (`buildExportTextureMap`). `gltfBinary.ts` reads/writes GLB chunks, injects clip marker `extras`, and embeds painted PNGs. `engineHandoffScene.ts` is the character fixture; `npm run handoff:glb` writes `samples/engine-handoff.glb`. The handoff test also runs the Khronos `gltf-validator`. |
-| `src/core/import/` | GLB (meshes, armature, clips, materials/textures when present), OBJ, images |
+| `src/core/import/` | GLB (object TRS, skins, clips, materials/textures), OBJ (geometry, `usemtl`, vertex colors), Blockbench `.bbmodel` cubes (`BlockbenchImport.ts`), images |
 | `src/core/project/ProjectSerializer.ts` | `.psxproj` JSON (optional `referenceImages`); deserialize validates version and face UVs |
 | `src/core/history/applyMeshDocument.ts` | Clone/apply mesh + selection slices for undo |
 | `src/core/desktop/desktopApi.ts` | Native save/open when hosted in Electron; browser download fallback |
@@ -150,7 +151,7 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/components/layout/` | Header, toolbars, status; `RightSidebar.vue` (flush inspector chrome) |
 | `src/components/viewport/` | 3D view (`Viewport3D`: picking, gizmo, fill camera, modal start). Space/pivot/snap/shade/overlays/x-ray live in `HeaderMenu.vue`. `ShapeDrawPanel.vue` / `PolyDrawPanel.vue` are Blockout overlays. |
 | `src/components/inspector/MeshToolsProps.vue` | Modeling Tools tab: mode readout, Subdivide cuts/smooth, Faces / Edges / Vertices, Mesh |
-| `src/components/inspector/TransformProps.vue` | Object tab: TRS, shade, flip/rotate, origin, parent; workspace jumps (UV / Rig) |
+| `src/components/inspector/TransformProps.vue` | Object tab: TRS, Normals (Shade Smooth / Flat / Smooth by Angle), flip/rotate, origin, parent; workspace jumps (UV / Rig) |
 | `src/components/inspector/AnimationInspector.vue` | Animate sheet: clip readout, keys, pose, playback |
 | `src/components/outliner/` | Object tree |
 | `src/components/uvpaint/` | UV editor, pixel editor (`PixelCanvas.vue` is the UV/Paint tab router), palettes, `PaintLayers.vue` (`inspector-head`), `TilesetEditor.vue` (floating atlas / tilemap panel) |

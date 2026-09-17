@@ -13,6 +13,7 @@ import type { PivotPoint } from '../../types/tools'
 import { loadOpenProject, saveOpenProject } from '../../core/project/projectIo'
 import { ObjImport } from '../../core/import/ObjImport'
 import { GltfImport } from '../../core/import/GltfImport'
+import { importBlockbench } from '../../core/import/BlockbenchImport'
 import {
   getLastProjectPath,
   isDesktopApp,
@@ -60,6 +61,7 @@ defineEmits<{
 const loadProjectInput = ref<HTMLInputElement | null>(null)
 const importObjInput = ref<HTMLInputElement | null>(null)
 const importGltfInput = ref<HTMLInputElement | null>(null)
+const importBbInput = ref<HTMLInputElement | null>(null)
 const importTextureInput = ref<HTMLInputElement | null>(null)
 const showImportModal = ref(false)
 const pendingImportFile = ref<File | null>(null)
@@ -124,7 +126,6 @@ const overlayOn = computed(() =>
 
 function applyObjectShade(mode: 'flat' | 'smooth' | 'auto') {
   projectStore.setShadeMode(mode)
-  if (mode !== 'auto') toolStore.viewport.shadeMode = mode
   closeDropdowns()
 }
 
@@ -247,6 +248,14 @@ async function importObjText(text: string, fileName: string) {
     const result = ObjImport.parse(text, fileName.replace('.obj', ''))
     if (result.meshes.length > 0) {
       projectStore.recordPixels(`Import OBJ (${fileName})`)
+      for (const name of result.materialNames) {
+        if (name === 'default_material') continue
+        if (projectStore.materials.some(m => m.id === name || m.name === name)) continue
+        const created = projectStore.createMaterial(name, '#ffffff', null, { record: false, select: false })
+        for (const mesh of result.meshes) {
+          if (mesh.materialId === name) mesh.materialId = created.id
+        }
+      }
       for (const m of result.meshes) {
         projectStore.meshes.push(m)
       }
@@ -309,6 +318,14 @@ async function importGltfBuffer(buffer: ArrayBuffer, fileName: string) {
         mat.textureId ? (texIdMap.get(mat.textureId) ?? null) : null,
         { record: false, select: false }
       )
+      created.roughness = mat.roughness
+      created.metalness = mat.metalness
+      created.opacity = mat.opacity
+      created.alphaTest = mat.alphaTest
+      created.blendMode = mat.blendMode
+      created.doubleSided = mat.doubleSided
+      created.wireframe = mat.wireframe
+      if (mat.shading) created.shading = mat.shading
       matIdMap.set(mat.id, created.id)
     }
     if (result.meshes.length > 0) {
@@ -322,6 +339,8 @@ async function importGltfBuffer(buffer: ArrayBuffer, fileName: string) {
     }
     if (result.armature) {
       animationStore.armature = result.armature
+    } else if (result.animations?.length) {
+      animationStore.armature.clips.push(...result.animations)
     }
     projectStore.markGeometryUpdated()
   } catch {
@@ -338,6 +357,64 @@ async function handleImportGltf(e: Event) {
     await importGltfBuffer(await file.arrayBuffer(), file.name)
   } finally {
     if (importGltfInput.value) importGltfInput.value.value = ''
+    closeDropdowns()
+  }
+}
+
+async function importBlockbenchFile() {
+  closeDropdowns()
+  if (isDesktopApp()) {
+    const file = await openTextFile([{ name: 'Blockbench', extensions: ['bbmodel', 'json'] }])
+    if (!file) return
+    await importBlockbenchText(file.text, file.name)
+    return
+  }
+  importBbInput.value?.click()
+}
+
+async function importBlockbenchText(text: string, fileName: string) {
+  if (isImporting.value) return
+  isImporting.value = true
+  try {
+    const result = importBlockbench(text)
+    projectStore.recordPixels(`Import Blockbench (${fileName})`)
+    let boundMatId: string | undefined
+    for (const tex of result.textures) {
+      if (!tex.dataUrl) continue
+      const created = projectStore.createTexture(tex.name, tex.width, tex.height, tex.dataUrl, undefined, { record: false, select: false })
+      if (!boundMatId) {
+        const mat = projectStore.createMaterial(
+          result.projectName || tex.name,
+          '#ffffff',
+          created.id,
+          { record: false, select: false }
+        )
+        boundMatId = mat.id
+      }
+    }
+    for (const m of result.meshes) {
+      if (boundMatId) m.materialId = boundMatId
+      projectStore.meshes.push(m)
+    }
+    if (result.meshes[0]) {
+      projectStore.activeMeshId = result.meshes[0].id
+      projectStore.selectedMeshIds = [result.meshes[0].id]
+    }
+    projectStore.markGeometryUpdated()
+  } catch {
+    alert('Failed to import Blockbench model')
+  } finally {
+    isImporting.value = false
+  }
+}
+
+async function handleImportBlockbench(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  try {
+    await importBlockbenchText(await file.text(), file.name)
+  } finally {
+    if (importBbInput.value) importBbInput.value.value = ''
     closeDropdowns()
   }
 }
@@ -381,6 +458,7 @@ onUnmounted(() => {
     <input ref="loadProjectInput" type="file" accept=".psxproj" class="hidden" @change="handleLoadProject" />
     <input ref="importObjInput" type="file" accept=".obj" class="hidden" @change="handleImportObj" />
     <input ref="importGltfInput" type="file" accept=".gltf,.glb" class="hidden" @change="handleImportGltf" />
+    <input ref="importBbInput" type="file" accept=".bbmodel,.json" class="hidden" @change="handleImportBlockbench" />
     <input ref="importTextureInput" type="file" accept="image/*" class="hidden" @change="handleImportTexture" />
 
     <!-- 1. LEFT: Logo + File, Edit, Mesh + Space/Snap/Symmetry -->
@@ -444,8 +522,18 @@ onUnmounted(() => {
           <button @click="importGltf" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
             <BlenderIcon name="import" :size="14" /> GLTF / GLB (.glb)
           </button>
+          <button @click="importBlockbenchFile" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
+            <BlenderIcon name="import" :size="14" /> Blockbench (.bbmodel)
+          </button>
           <button @click="importTexture" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
             <BlenderIcon name="image" :size="14" /> Texture (PNG, JPG)
+          </button>
+
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+          <div class="px-3 py-1 text-[9.5px] font-bold text-ui-textMuted uppercase tracking-wider">Export</div>
+          <button @click="$emit('open-export'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span class="flex items-center gap-2"><BlenderIcon name="export" :size="14" /> Game Assets…</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">GLB · OBJ · BB</span>
           </button>
 
           <div class="h-px bg-ui-borderSubtle my-1"></div>
@@ -594,6 +682,15 @@ onUnmounted(() => {
           <button @click="projectStore.performFlipNormals(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2"><BlenderIcon name="flip-normals" :size="14" /> Flip Normals</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Shift+N</span>
+          </button>
+          <button @click="projectStore.setShadeMode('smooth'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span class="flex items-center gap-2"><BlenderIcon name="shading-solid" :size="14" /> Shade Smooth</span>
+          </button>
+          <button @click="projectStore.setShadeMode('flat'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span class="flex items-center gap-2"><BlenderIcon name="shading-wire" :size="14" /> Shade Flat</span>
+          </button>
+          <button @click="projectStore.setShadeMode('auto'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Shade Smooth by Angle</span>
           </button>
           <div class="h-px bg-ui-borderSubtle my-1"></div>
           <button @click="projectStore.performFlipAxis('x'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
@@ -949,7 +1046,7 @@ onUnmounted(() => {
           title="Object shade"
           @click="toggleDropdown('shade')"
         >
-          <span class="capitalize">{{ objectShade }}</span>
+          <span class="capitalize">{{ objectShade === 'auto' ? 'Angle' : objectShade }}</span>
           <BlenderIcon name="chevron-down" :size="12" />
         </button>
         <div v-if="activeDropdown === 'shade'" class="absolute right-0 top-full mt-0.5 w-40 bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-1 z-50 text-[11px] font-mono">
@@ -973,7 +1070,7 @@ onUnmounted(() => {
             :class="{ 'text-ui-textAccent font-semibold': objectShade === 'auto' }"
             title="Smooth, keep sharp edges by angle"
             @click="applyObjectShade('auto')"
-          >Auto smooth</button>
+          >Smooth by Angle</button>
         </div>
       </div>
 

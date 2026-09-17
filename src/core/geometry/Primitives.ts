@@ -34,6 +34,7 @@ export function createCube(name = 'Cube', size = 2): MeshObject {
     position: { x: 0, y: h, z: 0 },
     rotation: { x: 0, y: 0, z: 0 },
     scale: { x: 1, y: 1, z: 1 },
+    shadeMode: 'flat',
     vertices: [v0, v1, v2, v3, v4, v5, v6, v7],
     faces: [
       // Front (Wood Crate: 0.5..1.0, 0.5..1.0)
@@ -99,6 +100,7 @@ export function createPlane(name = 'Plane', size = 2): MeshObject {
     position: { x: 0, y: 0, z: 0 },
     rotation: { x: 0, y: 0, z: 0 },
     scale: { x: 1, y: 1, z: 1 },
+    shadeMode: 'flat',
     vertices: [v0, v1, v2, v3],
     faces: [
       {
@@ -172,6 +174,7 @@ export function createCylinder(name = 'Cylinder', radius = 1, height = 2, segmen
     position: { x: 0, y: halfH, z: 0 },
     rotation: { x: 0, y: 0, z: 0 },
     scale: { x: 1, y: 1, z: 1 },
+    shadeMode: 'flat',
     vertices,
     faces
   }
@@ -222,6 +225,7 @@ export function createCone(name = 'Cone', radius = 1, height = 2, segments = 8):
     position: { x: 0, y: halfH, z: 0 },
     rotation: { x: 0, y: 0, z: 0 },
     scale: { x: 1, y: 1, z: 1 },
+    shadeMode: 'flat',
     vertices,
     faces
   }
@@ -309,6 +313,7 @@ export function createSphere(name = 'Sphere', radius = 1, rings = 6, segments = 
     position: { x: 0, y: radius, z: 0 },
     rotation: { x: 0, y: 0, z: 0 },
     scale: { x: 1, y: 1, z: 1 },
+    shadeMode: 'flat',
     vertices,
     faces
   }

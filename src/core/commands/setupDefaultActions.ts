@@ -283,6 +283,27 @@ export function setupDefaultActions(
       }
     },
     {
+      id: 'shade_smooth',
+      label: 'Shade Smooth',
+      category: 'Shading',
+      handler: () => projectStore.setShadeMode('smooth'),
+      disabled: () => !projectStore.activeMesh
+    },
+    {
+      id: 'shade_flat',
+      label: 'Shade Flat',
+      category: 'Shading',
+      handler: () => projectStore.setShadeMode('flat'),
+      disabled: () => !projectStore.activeMesh
+    },
+    {
+      id: 'shade_smooth_by_angle',
+      label: 'Shade Smooth by Angle',
+      category: 'Shading',
+      handler: () => projectStore.setShadeMode('auto'),
+      disabled: () => !projectStore.activeMesh
+    },
+    {
       id: 'delete_element',
       label: 'Delete Selected',
       category: 'Topology',

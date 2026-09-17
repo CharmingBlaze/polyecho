@@ -2140,14 +2140,14 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   function setShadeMode(mode: MeshShadeMode) {
-    const label = mode === 'flat' ? 'Shade Flat' : mode === 'smooth' ? 'Shade Smooth' : 'Shade Auto Smooth'
+    const targets = meshes.value.filter(m => selectedMeshIds.value.includes(m.id) || m.id === activeMeshId.value)
+    if (targets.length === 0) return
+    const label = mode === 'flat' ? 'Shade Flat' : mode === 'smooth' ? 'Shade Smooth' : 'Shade Smooth by Angle'
     recordState(label)
-    for (const mesh of meshes.value) {
-      if (selectedMeshIds.value.includes(mesh.id) || mesh.id === activeMeshId.value) {
-        mesh.shadeMode = mode
-        if (mode === 'auto' && mesh.autoSmoothAngle === undefined) {
-          mesh.autoSmoothAngle = 30
-        }
+    for (const mesh of targets) {
+      mesh.shadeMode = mode
+      if (mode === 'auto' && mesh.autoSmoothAngle === undefined) {
+        mesh.autoSmoothAngle = 30
       }
     }
     markGeometryUpdated()

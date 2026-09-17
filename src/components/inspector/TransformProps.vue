@@ -202,43 +202,44 @@ function toggleOriginMode() {
             <UiNumberField v-model="activeItem.scale.z" label="Z" label-color="text-sky-400" :step="0.05" @before-change="beginTransformEdit" @change="updateTransform" />
           </div>
         </div>
+      </UiSection>
 
-        <div v-if="activeMesh" class="space-y-1 pt-1.5">
-          <div class="flex items-center text-[10px] text-ui-textSecondary font-medium gap-1">
-            <Box class="w-3 h-3 text-ui-textMuted" />
-            <span>Shade</span>
-          </div>
-          <div class="grid grid-cols-3 gap-1">
-            <UiButton
-              size="xs"
-              :active="objectShade === 'smooth'"
-              title="Interpolate vertex normals across the whole mesh"
-              @click="handleShade('smooth')"
-            >
-              Smooth
-            </UiButton>
-            <UiButton
-              size="xs"
-              :active="objectShade === 'auto'"
-              title="Smooth faces, keep edges sharper than the angle threshold"
-              @click="handleShade('auto')"
-            >
-              Auto
-            </UiButton>
-            <UiButton
-              size="xs"
-              :active="objectShade === 'flat'"
-              title="One normal per face (faceted)"
-              @click="handleShade('flat')"
-            >
-              Flat
-            </UiButton>
-          </div>
+      <UiSection v-if="activeMesh" title="Normals" blender-icon="flip-normals" :default-open="true">
+        <div class="inspector-seg is-stretch">
+          <button
+            type="button"
+            class="inspector-seg-btn"
+            :class="{ 'is-active': objectShade === 'smooth' }"
+            title="Interpolate vertex normals across the whole mesh (Object → Shade Smooth)"
+            @click="handleShade('smooth')"
+          >
+            Shade Smooth
+          </button>
+          <button
+            type="button"
+            class="inspector-seg-btn"
+            :class="{ 'is-active': objectShade === 'flat' }"
+            title="One normal per face (Object → Shade Flat)"
+            @click="handleShade('flat')"
+          >
+            Shade Flat
+          </button>
+        </div>
+        <div class="flex items-center gap-1">
+          <button
+            type="button"
+            class="inspector-seg-btn flex-1"
+            :class="{ 'is-active': objectShade === 'auto' }"
+            title="Smooth faces, keep edges sharper than the angle threshold (Object → Shade Smooth by Angle)"
+            @click="handleShade('auto')"
+          >
+            Smooth by Angle
+          </button>
           <UiNumberField
             v-if="objectShade === 'auto'"
+            class="w-[4.5rem] shrink-0"
             :model-value="autoSmoothAngle"
-            label="Angle"
-            unit="°"
+            label="°"
             :min="0"
             :max="180"
             :step="1"
@@ -247,6 +248,9 @@ function toggleOriginMode() {
             @update:model-value="handleAutoSmoothAngle"
           />
         </div>
+        <p class="text-[10px] leading-snug text-ui-textMuted">
+          Stored on the object and written into GLB / OBJ normals on export.
+        </p>
       </UiSection>
 
       <UiSection
@@ -417,7 +421,7 @@ function toggleOriginMode() {
         <UiButton size="xs" class="w-full" @click="handleCleanMesh">Clean mesh</UiButton>
       </UiSection>
 
-      <UiSection v-if="activeMesh" title="Shading" :icon="Palette" :default-open="false">
+      <UiSection v-if="activeMesh" title="Material" :icon="Palette" :default-open="false">
         <div class="grid grid-cols-2 gap-1">
           <UiButton size="xs" @click="layoutStore.setInspectorTab('material', toolStore.appMode)">
             <Palette class="w-3 h-3 text-ui-textMuted" />
