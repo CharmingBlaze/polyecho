@@ -16,6 +16,27 @@ export default defineConfig({
       ignored: ['**/release/**', '**/dist/**'],
     },
   },
+  build: {
+    // The renderer only ever runs inside Electron's Chromium, so Vite's default
+    // baseline-widely-available target just adds downleveled syntax and parse
+    // work. chrome130 is a conservative floor well under the bundled runtime.
+    target: 'chrome130',
+    rollupOptions: {
+      output: {
+        // Vendor code changes far less often than app code, so giving it stable
+        // chunk hashes lets Chromium reuse its V8 code cache across launches
+        // instead of recompiling three.js every time the app changes.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return
+          // Reached only through dynamic import(); grouping these would pull
+          // the GLTF exporter/loader back into the eager chunk.
+          if (/[\\/]three[\\/]examples[\\/]/.test(id)) return
+          if (/[\\/]node_modules[\\/]three[\\/]/.test(id)) return 'three'
+          if (/[\\/]node_modules[\\/](vue|@vue|pinia)[\\/]/.test(id)) return 'vue'
+        },
+      },
+    },
+  },
   test: {
     environment: 'happy-dom',
     include: ['src/**/*.test.ts'],

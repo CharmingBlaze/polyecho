@@ -4,6 +4,7 @@ import { Armature, AnimationClip } from '../../types/animation'
 import { ViewportSettings } from '../../types/tools'
 import { ReferenceImage } from '../../types/reference'
 import { serializePaintLayers, type SavedPaintLayer } from '../painting/PaintLayerStorage'
+import { saveTextDocument, getLastProjectPath, setLastProjectPath } from '../desktop/desktopApi'
 
 export interface PsxProjectFile {
   version: '1.0'
@@ -112,7 +113,6 @@ export class ProjectSerializer {
    * Writes a `.psxproj` via the desktop save dialog, or a browser download.
    */
   static async downloadProject(jsonString: string, filename: string) {
-    const { saveTextDocument, getLastProjectPath, setLastProjectPath } = await import('../desktop/desktopApi')
     const name = filename.endsWith('.psxproj') ? filename : `${filename}.psxproj`
     const saved = await saveTextDocument(
       jsonString,

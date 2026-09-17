@@ -1,5 +1,4 @@
 import * as THREE from 'three'
-import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js'
 import { MeshObject } from '../../types/mesh'
 import { AnimationClip, Armature } from '../../types/animation'
 import { meshToThreeGeometry } from '../geometry/Converters'
@@ -325,6 +324,7 @@ export async function exportToGLTF(
     }
   }
 
+  const { GLTFExporter } = await import('three/examples/jsm/exporters/GLTFExporter.js')
   const exporter = new GLTFExporter()
   const disposeScene = () => {
     scene.traverse(obj => {

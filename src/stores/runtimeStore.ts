@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { isDesktopApp, logDesktopCrash } from '../core/desktop/desktopApi'
 
 export const useRuntimeStore = defineStore('runtime', () => {
   const lastError = ref<string | null>(null)
@@ -10,9 +11,7 @@ export const useRuntimeStore = defineStore('runtime', () => {
     lastError.value = message
     lastErrorSource.value = source
     console.error('[PolyEcho]', source, err)
-    void import('../core/desktop/desktopApi').then(mod => {
-      if (mod.isDesktopApp()) void mod.logDesktopCrash(source, message, err)
-    })
+    if (isDesktopApp()) void logDesktopCrash(source, message, err)
   }
 
   function dismissError() {

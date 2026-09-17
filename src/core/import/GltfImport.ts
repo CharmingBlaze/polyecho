@@ -1,5 +1,4 @@
 import * as THREE from 'three'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { MeshObject, Vertex, Face } from '../../types/mesh'
 import { Armature, Bone, AnimationClip, AnimationTrack } from '../../types/animation'
 import { Material, TextureMap } from '../../types/texture'
@@ -20,6 +19,7 @@ export class GltfImport {
    * Loads a GLTF or GLB binary array buffer into MeshObject and Armature data.
    */
   static async loadFromArrayBuffer(buffer: ArrayBuffer, fileName = 'Imported_Model'): Promise<GltfImportResult> {
+    const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js')
     const loader = new GLTFLoader()
 
     const gltf = await new Promise<any>((resolve, reject) => {
