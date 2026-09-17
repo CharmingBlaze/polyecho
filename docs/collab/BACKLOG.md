@@ -26,39 +26,22 @@ Sequencing, write contract, and the verified mutation inventory: `docs/ARCHITECT
 
 Statuses: `accepted` — ready to implement when the human names a slice.
 
-| ID | Slice | Size | Depends |
-| :--- | :--- | :--- | :--- |
-| T1.1 | `Operations.ts` accepts an injected resident bridge on every entry point | S | none |
-| T0 | Lease rule: held kernel cannot be clobbered by `acquire` | S | none |
-| T3.1 | Additive per-object topology/position/attribute counters | M | none |
-| T1.2 | Route remaining topology `perform*` through `runKernelOperation` (incl. delete/dissolve/connect/cleanup/autoMerge + `recordState` on AutoMerge) | M | T1.1 |
-| T1.4 | Route UV family as attribute-only commits | M | T1.1, T3.1 |
-| T2 | `MeshRenderView` + per-object cache | L | T3.1 |
-| T3.3 | Switch viewport watchers to per-object keys | M | T3.1, T2 |
-| T1.3 | Join/separate preserve `boneWeights` and `seamEdgeIds` | M | T1.1 |
-| T4 | Kernel snapshot in history | L | T1.2 |
-| T1.5 | Gizmo component drag on the leased kernel | L | T1.2, T0 |
-| T1.6 | Weight editing on the resident kernel | M | T1.2, T0 |
-| T1.7 | Modifier Apply as resident commit | M | T1.2 |
-| T6 | Attribute matrix + fills | M | T1.2 |
+| ID | Slice | Size | Depends | Status |
+| :--- | :--- | :--- | :--- | :--- |
+| T1.1 | `Operations.ts` accepts an injected resident bridge on every entry point | S | none | in progress (DeepSeek) |
+| T0 | Lease rule: held kernel cannot be clobbered by `acquire` | S | none | accepted |
+| T3.1 | Additive per-object topology/position/attribute counters | M | none | accepted |
+| T1.2 | Route remaining topology `perform*` through `runKernelOperation` (incl. delete/dissolve/connect/cleanup/autoMerge). Do **not** add `recordState` to AutoMerge | M | T1.1 | accepted |
+| T1.4 | Route UV family as attribute-only commits | M | T1.1, T3.1 | accepted |
+| T2 | `MeshRenderView` + per-object cache | L | T3.1 | accepted |
+| T3.3 | Switch viewport watchers to per-object keys | M | T3.1, T2 | accepted |
+| T1.3 | Join/separate preserve `boneWeights` and `seamEdgeIds` | M | T1.1 | accepted |
+| T4 | Kernel snapshot in history | L | T1.2 | accepted |
+| T1.5 | Gizmo component drag on the leased kernel | L | T1.2, T0 | accepted |
+| T1.6 | Weight editing on the resident kernel | M | T1.2, T0 | accepted |
+| T1.7 | Modifier Apply as resident commit | M | T1.2 | accepted |
+| T6 | Attribute matrix + fills | M | T1.2 | accepted |
 
 ## Proposed
 
-_(none — next DeepSeek turn should only add slices that are missing from the plan, not a second list)_
-
-## Proposed
-
-_(DeepSeek fills below)_
-
-<!--
-### A1 — short title
-
-- **status:** proposed
-- **system:** kernel | history | viewport-sync | operators | textures | rig | io
-- **fact:** `file.ts` `symbol` — what the code does today (verified)
-- **problem:** dual ownership, undo corruption, or cost that grows with mesh size
-- **slice:** types → core → store/history → App.vue/editorCommands → Vue last
-- **invariant:** which `docs/INVARIANTS.md` rule must hold
-- **size:** S | M | L
-- **depends:** K1 / A2 / none
--->
+_(none — next DeepSeek docs turn should only add slices missing from the plan, not a second list)_
