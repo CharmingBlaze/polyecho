@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import { EditableMesh, MeshEdge, MeshFace } from '../MeshKernel'
 import { HalfEdgeTopology } from '../HalfEdgeTopology'
+import { MeshValidator } from '../MeshValidator'
+import { AttributeInterpolator } from '../attributes/AttributeInterpolator'
 
 export interface InsetOptions {
   thickness: number
@@ -19,6 +21,7 @@ export interface InsetResult {
   mesh: EditableMesh
   insetFaceIds: number[]
   insetVertexIds: number[]
+  error?: string
 }
 
 interface VertLoop {
@@ -28,7 +31,17 @@ interface VertLoop {
 
 export class InsetKernel {
   static insetFaces(mesh: EditableMesh, faceIds: number[], options: InsetOptions): InsetResult {
-    const valid = faceIds.filter(id => mesh.faces.has(id))
+    const snapshot = mesh.createSnapshot()
+    const result = this.buildInset(mesh, faceIds, options)
+    if (!MeshValidator.validate(mesh).valid) {
+      mesh.restoreSnapshot(snapshot)
+      return { mesh, insetFaceIds: faceIds, insetVertexIds: [], error: 'This inset collapses a face. Try a smaller amount or a simpler region.' }
+    }
+    return result
+  }
+
+  private static buildInset(mesh: EditableMesh, faceIds: number[], options: InsetOptions): InsetResult {
+    const valid = [...new Set(faceIds)].filter(id => mesh.faces.has(id))
     const allInsetFaceIds: number[] = []
     const allInsetVertexIds: number[] = []
 
@@ -36,7 +49,9 @@ export class InsetKernel {
       return { mesh, insetFaceIds: [], insetVertexIds: [] }
     }
 
+    if (!Number.isFinite(options.thickness) || !Number.isFinite(options.depth ?? 0)) return { mesh, insetFaceIds: valid, insetVertexIds: [] }
     const thickness = Math.max(0, options.thickness)
+    if (thickness < 1e-9 && Math.abs(options.depth ?? 0) < 1e-9) return { mesh, insetFaceIds: valid, insetVertexIds: [] }
     const depth = options.depth ?? 0
     const outset = !!options.outset
     const useBoundary = options.boundary !== false
@@ -85,6 +100,10 @@ export class InsetKernel {
       return { mesh, insetFaceIds: [...faceIds], insetVertexIds: [] }
     }
 
+    if (!outset) {
+      const shortest = Math.min(...boundaryEdges.map(e => mesh.vertices.get(e.v1)!.position.distanceTo(mesh.vertices.get(e.v2)!.position)))
+      thickness = Math.min(thickness, shortest * 0.45)
+    }
     const loops = this.loopsFromEdges(mesh, boundaryEdges)
     const oldToNew = new Map<number, number>()
     const newVertexIds: number[] = []
@@ -93,7 +112,10 @@ export class InsetKernel {
     const uvPull = avgLen > 1e-6 ? Math.min(0.45, thickness / avgLen) : 0
 
     for (const loop of loops) {
-      this.orientLoop(mesh, loop, regionNormal)
+      // Selected face winding distinguishes outer contours from holes.
+      const a = loop.vertexIds[0], b = loop.vertexIds[1]
+      const face = faceIds.map(id => mesh.faces.get(id)!).find(f => f.vertexIds.includes(a) && f.vertexIds.includes(b))
+      if (face && face.vertexIds[(face.vertexIds.indexOf(a) + 1) % face.vertexIds.length] !== b) loop.vertexIds.reverse()
       const n = loop.vertexIds.length
       if (n < 2) continue
 
@@ -113,11 +135,22 @@ export class InsetKernel {
           pos = pos.clone().addScaledVector(nrm, depth)
         }
         const nv = mesh.addVertex(pos)
+        AttributeInterpolator.copyVertex(mesh.vertices.get(vid)!, nv)
         oldToNew.set(vid, nv.id)
         newVertexIds.push(nv.id)
       }
     }
 
+    if (Math.abs(depth) > 1e-8) {
+      const interior = new Set(faceIds.flatMap(id => mesh.faces.get(id)?.vertexIds ?? []))
+      for (const id of interior) {
+        const vertex = mesh.vertices.get(id)!
+        if (oldToNew.has(id) || !vertex.faceIds.every(f => sel.has(f))) continue
+        if (boundaryEdges.some(e => e.v1 === id || e.v2 === id)) continue
+        vertex.position.addScaledVector(this.vertexRegionNormal(mesh, id, sel, regionNormal), depth)
+        newVertexIds.push(id)
+      }
+    }
     const rimEdges = boundaryEdges.filter(e => oldToNew.has(e.v1) || oldToNew.has(e.v2))
     for (const edge of rimEdges) {
       const vA_old = edge.v1
@@ -144,15 +177,19 @@ export class InsetKernel {
       const uvAIn = uvA.clone().lerp(this.uvCentroid(selFace), uvPull)
       const uvBIn = uvB.clone().lerp(this.uvCentroid(selFace), uvPull)
 
+      const addRim = (ids: number[], uvs: THREE.Vector2[], material: number, color?: string) => {
+        const keep = ids.map((_, i) => i).filter(i => ids[i] !== ids[(i + 1) % ids.length])
+        mesh.addFace(keep.map(i => ids[i]), keep.map(i => uvs[i]), material, color)
+      }
       if (forward) {
-        mesh.addFace(
+        addRim(
           [vA_old, vB_old, vB_new, vA_new],
           [uvA, uvB, uvBIn, uvAIn],
           selFace?.materialIndex ?? 0,
           selFace?.color
         )
       } else {
-        mesh.addFace(
+        addRim(
           [vB_old, vA_old, vA_new, vB_new],
           [uvB, uvA, uvAIn, uvBIn],
           selFace?.materialIndex ?? 0,
@@ -253,7 +290,7 @@ export class InsetKernel {
     const inwardMean = inward0.clone().add(inward1)
     if (hit) {
       const fromCurr = hit.clone().sub(curr)
-      if (inwardMean.lengthSq() < 1e-10 || fromCurr.dot(inwardMean) >= 0) {
+      if (inwardMean.lengthSq() < 1e-10 || fromCurr.dot(inwardMean) * thickness >= 0) {
         return hit
       }
     }
@@ -289,30 +326,22 @@ export class InsetKernel {
     return p0.clone().addScaledVector(d0, t)
   }
 
-  private static orientLoop(mesh: EditableMesh, loop: VertLoop, regionNormal: THREE.Vector3) {
-    const ids = loop.vertexIds
-    const n = ids.length
-    if (n < 3) return
-    let area = 0
-    const origin = mesh.vertices.get(ids[0])!.position
-    for (let i = 1; i < n - 1; i++) {
-      const a = mesh.vertices.get(ids[i])!.position.clone().sub(origin)
-      const b = mesh.vertices.get(ids[i + 1])!.position.clone().sub(origin)
-      area += new THREE.Vector3().crossVectors(a, b).dot(regionNormal)
-    }
-    if (area < 0) ids.reverse()
-  }
-
   private static loopsFromEdges(mesh: EditableMesh, edges: MeshEdge[]): VertLoop[] {
     const edgeSet = new Set(edges.map(e => e.id))
     const loops: VertLoop[] = []
 
     while (edgeSet.size > 0) {
-      const firstEdgeId = edgeSet.values().next().value!
+      const degrees = new Map<number, number>()
+      for (const id of edgeSet) {
+        const e = mesh.edges.get(id)!
+        for (const v of [e.v1, e.v2]) degrees.set(v, (degrees.get(v) ?? 0) + 1)
+      }
+      const end = [...degrees].find(([, degree]) => degree === 1)?.[0]
+      const firstEdgeId = [...edgeSet].find(id => end !== undefined && [mesh.edges.get(id)!.v1, mesh.edges.get(id)!.v2].includes(end)) ?? edgeSet.values().next().value!
       edgeSet.delete(firstEdgeId)
       const firstEdge = mesh.edges.get(firstEdgeId)!
-      const loopVertexIds = [firstEdge.v1, firstEdge.v2]
-      let currentVert = firstEdge.v2
+      const loopVertexIds = end === firstEdge.v2 ? [firstEdge.v2, firstEdge.v1] : [firstEdge.v1, firstEdge.v2]
+      let currentVert = loopVertexIds[1]
       let closed = false
 
       while (!closed && edgeSet.size > 0) {

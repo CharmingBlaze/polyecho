@@ -12,7 +12,7 @@ Breaking any of these usually looks like “selection vanished”, “undo corru
 
 ## Winding and UVs
 
-- Face `vertexIds` and `uvs` are the same length (3 or 4).
+- Face `vertexIds` and `uvs` are the same length (at least 3; n-gons are supported).
 - Winding is counter-clockwise for outward normals.
 - Quad faces are triangulated at convert/export time (two tris). Do not drop the fourth vertex on the document model.
 
@@ -21,6 +21,8 @@ Breaking any of these usually looks like “selection vanished”, “undo corru
 - Record **before** mutating project or armature state.
 - Texture undo requires cloning `PixelBuffer`, not only cloning the `dataUrl`.
 - Modal operators restore an `EditableMesh` snapshot on cancel; they must not call `recordState` on every mouse move.
+- Snapshots include document identity, vertex colors and bone weights, and edge seam/sharp flags. Attribute records must be copied, not shared with snapshots or document projections.
+- Modal commits validate through the project store; rejection follows cancel/rollback and reports a structured error. Extrude/Inset menu commits stage and validate before changing the resident kernel or recording history.
 
 ## Textures
 
@@ -49,7 +51,7 @@ Breaking any of these usually looks like “selection vanished”, “undo corru
 - Confirm goes through `onCommit`; cancel restores the kernel snapshot then `onCancel`. Viewport `onCancel` writes that restored kernel back with `replaceMesh` for mutating tools (not primitive / Poly Draw).
 - Esc while the transform gizmo is dragging must not commit (`skipGizmoCommit` + history undo).
 - Pointer / key events while a modal tool is active go to `OperatorManager` first (viewport + `App.vue` both check this). Global undo is disabled until the operator finishes.
-- Live shortcuts come from `keymapStore` (`matchingActionIds` → `App.vue`). Digit-row **1–6** are selection modes; **Numpad 1/3/7/0/5** are camera views / quad. Workspace gates: **F** Fill in Model, Poly Draw in Blockout; **V** Poly Build in Blockout; paint_* only on the Paint tab; UV/Paint **1–4** stay in that workspace; UV-tab **P/V/U** pin, stitch, and Smart UV without Separate / Poly Build / paint tools. Paint-tab **X** swaps primary/secondary colors. `setAppMode('uvpaint')` does not reset the UV/Paint tab; leaving for Model restores the last mesh select mode. Animate: **I/K** insert keys, **E** does not extrude bones, **Shift+D** duplicates keys, **Ctrl+C/V** copy/paste pose, playback stops when leaving the workspace. Rebind in Preferences → Keyboard.
+- Live shortcuts come from `keymapStore` (`matchingActionIds` → `App.vue`). Digit-row **1–6** are selection modes; **Numpad 1/3/7/0/5** are camera views / quad. Workspace gates: **F** Fill in Model, Poly Draw in Blockout; **V** Poly Build in Blockout; paint_* only on the Paint tab; UV/Paint **1–4** stay in that workspace; UV-tab **P/V/U** pin, stitch, and Smart UV without Separate / Poly Build / paint tools. Paint-tab **X** swaps primary/secondary colors. `setAppMode('uvpaint')` does not reset the UV/Paint tab; leaving for Model restores the last mesh select mode. **1–4 / Tab / 5** do not leave Rig or Animate (those workspaces keep bone selection). Animate: **I/K** insert keys, **E** does not extrude bones, **Shift+D** duplicates keys, **Ctrl+C/V** copy/paste pose, playback stops when leaving the workspace. Rebind in Preferences → Keyboard.
 - Menu/`perform*` and modal kernel for the same verb must stay aligned. Inset / extrude / bevel / merge / edge dissolve one-shots go through those kernels; vertex dissolve uses `MeshTopologyService.dissolveVertex` (valence-2 only). `MeshTopologyService.mergeVertices` / `mergeByDistance` delegate to `MergeKernel`. Connect uses `TopologyOps.splitFace`; subdivide / poke / triangulate / fill / bridge / grid-fill / cleanup / delete / flatten / flip-normals go through `MeshTopologyService`. Subdivide shares edge midpoints and uses Number of Cuts + Smoothness. Object mode subdivides every face on the selected mesh(es); edit mode uses the current selection. Edge delete uses undirected edge ids, not vertex ids. **I** in object mode must not inset the whole mesh.
 - **F** is Fill in Model (`requestFillFace` → camera-local dir → `performFillFace`) and Poly Draw in Blockout. Do not bind both in the same workspace.
 - Grab increment-snap is **Ctrl**, not `snapping.grid`. Magnet defaults **on**; rounding G delta to `gridSize` makes small moves disappear.

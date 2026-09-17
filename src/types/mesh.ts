@@ -29,7 +29,7 @@ export type MeshShadeMode = 'flat' | 'smooth' | 'auto'
 
 export interface Face {
   id: string
-  vertexIds: string[] // 3 or 4 vertices (Tri or Quad)
+  vertexIds: string[] // Polygon loop: tri, quad, or n-gon
   uvs: UV[] // 1 UV per vertex in counter-clockwise order
   normal?: Vector3D
   materialIndex: number
@@ -81,6 +81,7 @@ export interface BevelModifierConfig {
 }
 
 export interface MeshObject {
+  shapeSource?: import('../core/shapeDraw/ShapeRecipe').ShapeSource
   id: string
   name: string
   parentId?: string

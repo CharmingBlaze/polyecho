@@ -1,3 +1,4 @@
+import { packUvRectangles } from '../uv/UVRectPacking'
 import { MeshObject, UV, Vertex, Vector3D } from '../../types/mesh'
 import { findUvIslands } from '../uv/UVIslands'
 import {
@@ -520,6 +521,7 @@ export interface SmartUvProjectOptions {
   angleLimitDegrees?: number
   marginPixels?: number
   textureSize?: number
+  textureHeight?: number
   onlyFaceIndices?: number[]
 }
 
@@ -549,7 +551,7 @@ export function smartUvProject(mesh: MeshObject, options: SmartUvProjectOptions 
   for (const faceIndex of targetFaces) {
     const face = projected.faces[faceIndex]
     const points = face.vertexIds.map(id => vertexMap.get(id)?.position).filter(Boolean) as Vector3D[]
-    normals.set(faceIndex, face.normal || computeFaceNormal(points))
+    normals.set(faceIndex, computeFaceNormal(points))
   }
 
   const edgeFaces = new Map<string, number[]>()
@@ -642,12 +644,12 @@ export function smartUvProject(mesh: MeshObject, options: SmartUvProjectOptions 
     rotateIslandToPrincipalAxis(projected, island)
   }
 
-  return packUVIslands(
-    projected,
-    Number.isFinite(Number(options.marginPixels)) ? Number(options.marginPixels) : 2,
-    Number.isFinite(Number(options.textureSize)) ? Number(options.textureSize) : 64,
-    targetFaces
-  )
+  // The projection is in geometric units; convert it to texture aspect before packing.
+  const texW = Math.max(1, Number(options.textureSize) || 64)
+  const texH = Math.max(1, Number(options.textureHeight) || texW)
+  for (const i of targetFaces) for (const uv of projected.faces[i].uvs) uv.v *= texW / texH
+
+  return packUVIslands(projected, Number.isFinite(Number(options.marginPixels)) ? Number(options.marginPixels) : 2, texW, targetFaces, texH)
 }
 
 /**
@@ -659,14 +661,17 @@ export function packUVIslands(
   mesh: MeshObject,
   marginPixels = 2,
   textureSize = 64,
-  onlyFaceIndices?: number[]
+  onlyFaceIndices?: number[],
+  textureHeight = textureSize
 ): MeshObject {
   const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
   if (newMesh.faces.length === 0) return newMesh
 
   const safeMarginPixels = Number.isFinite(marginPixels) ? marginPixels : 2
   const safeTextureSize = Number.isFinite(textureSize) ? textureSize : 64
-  const margin = Math.max(0, safeMarginPixels / Math.max(1, safeTextureSize))
+  const width = Math.max(1, safeTextureSize)
+  const height = Math.max(1, Number.isFinite(textureHeight) ? textureHeight : width)
+  const margin = Math.max(0, safeMarginPixels)
   const islands = findUvIslands(newMesh, onlyFaceIndices)
 
   // 2. Measure Island Bounding Boxes
@@ -696,8 +701,8 @@ export function packUVIslands(
       maxU,
       minV,
       maxV,
-      w: Math.max(0.001, maxU - minU),
-      h: Math.max(0.001, maxV - minV)
+      w: Math.max(1e-6, (maxU - minU) * width),
+      h: Math.max(1e-6, (maxV - minV) * height)
     }
   })
 
@@ -705,38 +710,9 @@ export function packUVIslands(
 
   boxes.sort((a, b) => Math.max(b.w, b.h) - Math.max(a.w, a.h))
 
-  interface Placement { box: IslandBox; u: number; v: number; rotated: boolean }
-  const tryPack = (scale: number): Placement[] | null => {
-    const placements: Placement[] = []
-    let x = margin
-    let y = margin
-    let rowHeight = 0
-    const limit = 1 - margin + 1e-8
-
-    for (const box of boxes) {
-      const choices = [
-        { rotated: false, w: box.w * scale, h: box.h * scale },
-        { rotated: true, w: box.h * scale, h: box.w * scale }
-      ].filter(choice => choice.w <= 1 - margin * 2 + 1e-8 && choice.h <= 1 - margin * 2 + 1e-8)
-      if (choices.length === 0) return null
-
-      let choice = choices
-        .filter(item => x + item.w <= limit)
-        .sort((a, b) => Math.max(rowHeight, a.h) - Math.max(rowHeight, b.h) || a.w - b.w)[0]
-
-      if (!choice) {
-        x = margin
-        y += rowHeight + margin
-        rowHeight = 0
-        choice = choices.sort((a, b) => a.h - b.h || a.w - b.w)[0]
-      }
-      if (!choice || y + choice.h > limit) return null
-
-      placements.push({ box, u: x, v: y, rotated: choice.rotated })
-      x += choice.w + margin
-      rowHeight = Math.max(rowHeight, choice.h)
-    }
-    return placements
+  const tryPack = (scale: number) => {
+    const packed = packUvRectangles(boxes, width, height, margin, scale)
+    return packed?.map((p, i) => ({ box: boxes[i], u: p.x, v: p.y, rotated: p.rotated })) ?? null
   }
 
   let low = 0
@@ -762,12 +738,12 @@ export function packUVIslands(
     const { box, u: targetU, v: targetV, rotated } = placement
     for (const faceIndex of box.indices) {
       for (const uv of newMesh.faces[faceIndex].uvs) {
-        const sourceU = uv.u - box.minU
-        const sourceV = uv.v - box.minV
+        const sourceU = (uv.u - box.minU) * width
+        const sourceV = (uv.v - box.minV) * height
         const packedU = rotated ? sourceV : sourceU
         const packedV = rotated ? box.w - sourceU : sourceV
-        uv.u = Math.max(0, Math.min(1, targetU + packedU * appliedScale))
-        uv.v = Math.max(0, Math.min(1, targetV + packedV * appliedScale))
+        uv.u = Math.max(0, Math.min(1, (targetU + packedU * appliedScale) / width))
+        uv.v = Math.max(0, Math.min(1, (targetV + packedV * appliedScale) / height))
       }
     }
   }

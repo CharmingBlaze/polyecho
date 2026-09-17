@@ -1,10 +1,12 @@
 import * as THREE from 'three'
+import { meshRestMatrix } from '../animation/RiggingWorkflow'
 import { MeshObject, Vertex, Face, MeshShadeMode } from '../../types/mesh'
 import { Bone } from '../../types/animation'
 import { computeFaceNormal } from '../../utils/math'
 import { getMeshEdges } from './EdgeUtils'
 import { evaluateModifiers } from './Modifiers'
 import { ensureMeshUVs } from './UVUnwrap'
+import { surfaceTriangles } from './SurfaceGeometry'
 
 export interface GeometryBundle {
   geometry: THREE.BufferGeometry
@@ -134,18 +136,7 @@ export function buildBoneSkinMatrices(
 }
 
 export function faceTriIndexSets(verts: Array<{ position: { x: number; y: number; z: number } }>): number[][] {
-  if (verts.length === 4) {
-    const a = verts[0].position
-    const b = verts[1].position
-    const c = verts[2].position
-    const d = verts[3].position
-    const d02 = (a.x - c.x) ** 2 + (a.y - c.y) ** 2 + (a.z - c.z) ** 2
-    const d13 = (b.x - d.x) ** 2 + (b.y - d.y) ** 2 + (b.z - d.z) ** 2
-    return d13 < d02 ? [[0, 1, 3], [1, 2, 3]] : [[0, 1, 2], [0, 2, 3]]
-  }
-  const out: number[][] = []
-  for (let i = 1; i < verts.length - 1; i++) out.push([0, i, i + 1])
-  return out
+  return surfaceTriangles(verts.map(({ position: p }) => new THREE.Vector3(p.x, p.y, p.z)))
 }
 
 export function meshHasSkinWeights(mesh: MeshObject): boolean {
@@ -159,20 +150,21 @@ export function meshHasSkinWeights(mesh: MeshObject): boolean {
   return false
 }
 
-const _skinMeshPos = new THREE.Vector3()
+const _skinMeshMatrix = new THREE.Matrix4()
+const _skinMeshInverse = new THREE.Matrix4()
 const _skinWorld = new THREE.Vector3()
 const _skinAccum = new THREE.Vector3()
 const _skinXform = new THREE.Vector3()
 const _skinOut = new THREE.Vector3()
 
 function skinVertexInto(
-  meshPos: THREE.Vector3,
+  meshMatrix: THREE.Matrix4,
   v: Vertex,
   boneMatrixMap: Map<string, THREE.Matrix4>,
   out: THREE.Vector3
 ): boolean {
   if (!v.boneWeights) return false
-  _skinWorld.set(meshPos.x + v.position.x, meshPos.y + v.position.y, meshPos.z + v.position.z)
+  _skinWorld.set(v.position.x, v.position.y, v.position.z).applyMatrix4(meshMatrix)
   _skinAccum.set(0, 0, 0)
   let totalWeight = 0
   for (const bId in v.boneWeights) {
@@ -188,7 +180,7 @@ function skinVertexInto(
   if (totalWeight < 0.999) {
     _skinAccum.addScaledVector(_skinWorld, 1 - totalWeight)
   }
-  out.set(_skinAccum.x - meshPos.x, _skinAccum.y - meshPos.y, _skinAccum.z - meshPos.z)
+  out.copy(_skinAccum).applyMatrix4(_skinMeshInverse)
   return true
 }
 
@@ -197,10 +189,10 @@ export function evaluateSkinning(mesh: MeshObject, vertices: Vertex[], bones: Bo
 
   const boneMatrixMap = buildBoneSkinMatrices(bones)
   const deformed: Vertex[] = []
-  _skinMeshPos.set(mesh.position.x, mesh.position.y, mesh.position.z)
+  _skinMeshMatrix.copy(meshRestMatrix(mesh)); _skinMeshInverse.copy(_skinMeshMatrix).invert()
 
   for (const v of vertices) {
-    if (!skinVertexInto(_skinMeshPos, v, boneMatrixMap, _skinOut)) {
+    if (!skinVertexInto(_skinMeshMatrix, v, boneMatrixMap, _skinOut)) {
       deformed.push(v)
       continue
     }
@@ -320,7 +312,7 @@ function buildAutoSmoothCornerNormals(
   const sharp = new Set<string>()
   const cosLimit = Math.cos(THREE.MathUtils.degToRad(angleDeg))
   for (const [key, fis] of edgeFaces) {
-    if (fis.length !== 2) continue
+    if (fis.length !== 2) { sharp.add(key); continue }
     const dot = Math.max(-1, Math.min(1, faceNormals[fis[0]].dot(faceNormals[fis[1]])))
     if (dot < cosLimit) sharp.add(key)
   }
@@ -384,9 +376,9 @@ export function meshToThreeGeometry(
   const posedPos = new Map<string, { x: number; y: number; z: number }>()
   if (skeletalDeformContext && skeletalDeformContext.isPoseMode && skeletalDeformContext.bones.length > 0) {
     const boneMatrixMap = buildBoneSkinMatrices(skeletalDeformContext.bones)
-    _skinMeshPos.set(mesh.position.x, mesh.position.y, mesh.position.z)
+    _skinMeshMatrix.copy(meshRestMatrix(mesh)); _skinMeshInverse.copy(_skinMeshMatrix).invert()
     for (const v of evalVertices) {
-      if (skinVertexInto(_skinMeshPos, v, boneMatrixMap, _skinOut)) {
+      if (skinVertexInto(_skinMeshMatrix, v, boneMatrixMap, _skinOut)) {
         posedPos.set(v.id, { x: _skinOut.x, y: _skinOut.y, z: _skinOut.z })
       }
     }
@@ -401,34 +393,9 @@ export function meshToThreeGeometry(
 
   const shade = resolveMeshShadeMode(mesh, globalShadeMode)
 
-  const vertNormalMap = new Map<string, THREE.Vector3>()
-  if (shade === 'smooth') {
-    for (const v of evalVertices) {
-      vertNormalMap.set(v.id, new THREE.Vector3(0, 0, 0))
-    }
-    for (const face of evalFaces) {
-      const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
-      if (faceVerts.length < 3) continue
-
-      const fn = computeFaceNormal(faceVerts.map(v => posOf(v)))
-      const fnVec = new THREE.Vector3(fn.x, fn.y, fn.z)
-      for (let i = 0; i < faceVerts.length; i++) {
-        const vNormal = vertNormalMap.get(faceVerts[i].id)
-        if (vNormal) addAngleWeightedNormal(faceVerts, fnVec, i, vNormal)
-      }
-    }
-    for (const [, vn] of vertNormalMap) {
-      if (vn.lengthSq() > 1e-6) vn.normalize()
-      else vn.set(0, 1, 0)
-    }
-  }
-
-  const autoCornerNormals = shade === 'auto'
-    ? buildAutoSmoothCornerNormals(
-      evalFaces,
-      vertMap,
-      mesh.autoSmoothAngle ?? DEFAULT_AUTO_SMOOTH_ANGLE
-    )
+  const normalVertices = new Map([...vertMap].map(([id, v]) => [id, { ...v, position: posOf(v) }]))
+  const autoCornerNormals = shade !== 'flat'
+    ? buildAutoSmoothCornerNormals(evalFaces, normalVertices, shade === 'smooth' ? 180 : mesh.autoSmoothAngle ?? DEFAULT_AUTO_SMOOTH_ANGLE)
     : null
 
   const positions: number[] = []
@@ -436,9 +403,11 @@ export function meshToThreeGeometry(
   const uvs: number[] = []
   const colors: number[] = []
   const faceIndexMap: number[] = []
+  const renderCornerKeys: string[] = []
   const paintFaceMap: GeometryBundle['paintFaceMap'] = []
 
   const wireframePositions: number[] = []
+  const drawnEdges = new Set<string>()
   const selectedFacesPositions: number[] = []
   const selectedFacesNormals: number[] = []
   const selectedFaceSet = selectedFaceIds.length > 0 ? new Set(selectedFaceIds) : null
@@ -454,6 +423,9 @@ export function meshToThreeGeometry(
     // Build wireframe edges
     for (let i = 0; i < faceVerts.length; i++) {
       const next = (i + 1) % faceVerts.length
+      const key = JSON.stringify([faceVerts[i].id, faceVerts[next].id].sort())
+      if (drawnEdges.has(key)) continue
+      drawnEdges.add(key)
       const p1 = posOf(faceVerts[i])
       const p2 = posOf(faceVerts[next])
       wireframePositions.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z)
@@ -475,16 +447,14 @@ export function meshToThreeGeometry(
       const triUVs = [uv0, uv1, uv2]
 
       for (let j = 0; j < 3; j++) {
+        renderCornerKeys.push(JSON.stringify([face.id, tri[j], face.vertexIds[tri[j]]]))
         const v = triVerts[j]
         const uv = triUVs[j]
 
         const p = posOf(v)
         positions.push(p.x, p.y, p.z)
 
-        if (shade === 'smooth' && vertNormalMap.has(v.id)) {
-          const vn = vertNormalMap.get(v.id)!
-          normals.push(vn.x, vn.y, vn.z)
-        } else if (shade === 'auto' && autoCornerNormals) {
+        if (autoCornerNormals) {
           const vn = autoCornerNormals.get(`${face.id}:${v.id}`)
           if (vn) normals.push(vn.x, vn.y, vn.z)
           else normals.push(faceNormal.x, faceNormal.y, faceNormal.z)
@@ -552,6 +522,8 @@ export function meshToThreeGeometry(
   geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3))
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
+
+  geometry.userData.renderCornerKeys = renderCornerKeys
 
   // Wireframe lines
   const wireframeGeometry = new THREE.BufferGeometry()
@@ -679,7 +651,7 @@ export function updateThreeGeometryAttributes(
       ? buildBoneSkinMatrices(skeletalContext.bones)
       : null)
   if (skinMatrices) {
-    _skinMeshPos.set(meshObj.position.x, meshObj.position.y, meshObj.position.z)
+    _skinMeshMatrix.copy(meshRestMatrix(meshObj)); _skinMeshInverse.copy(_skinMeshMatrix).invert()
   }
 
   const vertMap = new Map<string, Vertex>()
@@ -687,80 +659,48 @@ export function updateThreeGeometryAttributes(
     vertMap.set(v.id, v)
   }
 
-  const posArray = posAttr.array as Float32Array
-  const colArray = colAttr ? (colAttr.array as Float32Array) : null
-  const nrmArray = nrmAttr ? (nrmAttr.array as Float32Array) : null
-  const writeColors = Boolean(colArray && weightPaintContext?.isWeightPaint && weightPaintContext.activeBoneId)
-  const writeFlatNormals = Boolean(nrmArray && skinMatrices && shadeMode === 'flat')
-  let pIdx = 0
-  let cIdx = 0
-  let nIdx = 0
+  const triangles = evalFaces.map(face => {
+    const vertices = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
+    return { face, vertices, triangles: faceTriIndexSets(vertices) }
+  })
+  const keys = triangles.flatMap(({ face, triangles }) => triangles.flatMap(tri =>
+    tri.map(i => JSON.stringify([face.id, i, face.vertexIds[i]]))))
+  const previousKeys: string[] | undefined = geometry.userData.renderCornerKeys
+  // A changed triangulation requires rebuilding UVs and pick maps as well as positions.
+  if (keys.length !== posAttr.count || !previousKeys || keys.some((key, i) => key !== previousKeys[i])) return false
 
-  for (let fIdx = 0; fIdx < evalFaces.length; fIdx++) {
-    const face = evalFaces[fIdx]
-    if (face.vertexIds.length < 3) continue
-
-    const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
-    if (faceVerts.length < 3) continue
-
-    for (const triIdx of faceTriIndexSets(faceVerts)) {
-      const tri = [faceVerts[triIdx[0]], faceVerts[triIdx[1]], faceVerts[triIdx[2]]]
-      const triStart = pIdx
-      for (const v of tri) {
-        if (pIdx + 2 < posArray.length) {
-          if (skinMatrices && skinVertexInto(_skinMeshPos, v, skinMatrices, _skinOut)) {
-            posArray[pIdx] = _skinOut.x
-            posArray[pIdx + 1] = _skinOut.y
-            posArray[pIdx + 2] = _skinOut.z
-          } else {
-            posArray[pIdx] = v.position.x
-            posArray[pIdx + 1] = v.position.y
-            posArray[pIdx + 2] = v.position.z
-          }
-          pIdx += 3
+  const posed = new Map<string, Vertex>()
+  for (const [id, vertex] of vertMap) {
+    let position = vertex.position
+    if (skinMatrices && skinVertexInto(_skinMeshMatrix, vertex, skinMatrices, _skinOut)) {
+      position = { x: _skinOut.x, y: _skinOut.y, z: _skinOut.z }
+    }
+    posed.set(id, { ...vertex, position })
+  }
+  const cornerNormals = shadeMode === 'flat' ? null : buildAutoSmoothCornerNormals(
+    evalFaces, posed, shadeMode === 'smooth' ? 180 : meshObj.autoSmoothAngle ?? DEFAULT_AUTO_SMOOTH_ANGLE)
+  let index = 0
+  for (const { face, vertices, triangles: tris } of triangles) {
+    const normal = computeFaceNormal(vertices.map(v => posed.get(v.id)!.position))
+    for (const tri of tris) {
+      for (const corner of tri) {
+        const vertex = posed.get(vertices[corner].id)!
+        const p = vertex.position
+        posAttr.setXYZ(index, p.x, p.y, p.z)
+        const n = cornerNormals?.get(`${face.id}:${vertex.id}`) ?? normal
+        nrmAttr?.setXYZ(index, n.x, n.y, n.z)
+        if (colAttr && weightPaintContext?.isWeightPaint && weightPaintContext.activeBoneId) {
+          const color = weightToHeatmapColor(vertex.boneWeights?.[weightPaintContext.activeBoneId] ?? 0)
+          colAttr.setXYZ(index, color.r, color.g, color.b)
         }
-
-        if (writeColors && colArray && cIdx + 2 < colArray.length) {
-          const w = v.boneWeights?.[weightPaintContext!.activeBoneId!] || 0
-          const c = weightToHeatmapColor(w, scratchVertexColor)
-          colArray[cIdx] = c.r
-          colArray[cIdx + 1] = c.g
-          colArray[cIdx + 2] = c.b
-          cIdx += 3
-        }
-      }
-
-      if (writeFlatNormals && nrmArray && triStart + 8 < posArray.length && nIdx + 8 < nrmArray.length) {
-        const ax = posArray[triStart + 3] - posArray[triStart]
-        const ay = posArray[triStart + 4] - posArray[triStart + 1]
-        const az = posArray[triStart + 5] - posArray[triStart + 2]
-        const bx = posArray[triStart + 6] - posArray[triStart]
-        const by = posArray[triStart + 7] - posArray[triStart + 1]
-        const bz = posArray[triStart + 8] - posArray[triStart + 2]
-        let nx = ay * bz - az * by
-        let ny = az * bx - ax * bz
-        let nz = ax * by - ay * bx
-        const len = Math.hypot(nx, ny, nz) || 1
-        nx /= len
-        ny /= len
-        nz /= len
-        for (let k = 0; k < 3; k++) {
-          nrmArray[nIdx] = nx
-          nrmArray[nIdx + 1] = ny
-          nrmArray[nIdx + 2] = nz
-          nIdx += 3
-        }
+        index++
       }
     }
   }
-
   posAttr.needsUpdate = true
-  if (writeColors && colAttr) colAttr.needsUpdate = true
-  if (writeFlatNormals && nrmAttr) nrmAttr.needsUpdate = true
-  else if (skinMatrices && (shadeMode === 'smooth' || shadeMode === 'auto')) {
-    geometry.computeVertexNormals()
-  }
-  if (pIdx !== posArray.length) return false
-  if (writeColors && colArray && cIdx !== colArray.length) return false
+  if (nrmAttr) nrmAttr.needsUpdate = true
+  if (colAttr && weightPaintContext?.isWeightPaint) colAttr.needsUpdate = true
+  geometry.computeBoundingBox()
+  geometry.computeBoundingSphere()
   return true
 }

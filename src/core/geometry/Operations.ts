@@ -1,9 +1,10 @@
 import { MeshObject, Face, Vector3D } from '../../types/mesh'
 import { computeCentroid, computeFaceNormal, subVec3, lengthVec3, crossVec3, normalizeVec3, dotVec3 } from '../../utils/math'
 import { MeshBridge } from '../mesh/MeshBridge'
+import type { MeshBridgeData } from '../mesh/MeshRepository'
 import { InsetKernel } from '../mesh/operations/InsetKernel'
 import { ExtrudeKernel } from '../mesh/operations/ExtrudeKernel'
-import { BevelKernel } from '../mesh/operations/BevelKernel'
+import { bevelEdges } from '../mesh/operations/EdgeBevelKernel'
 import { MergeKernel } from '../mesh/operations/MergeKernel'
 import { DissolveKernel } from '../mesh/operations/DissolveKernel'
 import { MeshTopologyService } from '../mesh/MeshTopologyService'
@@ -15,6 +16,7 @@ export interface OperationResult {
   mesh: MeshObject
   selectedFaceIds: string[]
   selectedVertexIds: string[]
+  selectedEdgeIds?: string[]
 }
 
 /**
@@ -33,10 +35,10 @@ export function extrudeSelection(
     vertexIds?: string[]
     distance?: number
     individual?: boolean
-  }
+  },
+  bridge: MeshBridgeData = MeshBridge.meshObjectToEditableMesh(mesh)
 ): OperationResult {
   const distance = options.distance ?? 0.5
-  const bridge = MeshBridge.meshObjectToEditableMesh(mesh)
   const faceIds = (options.faceIds ?? [])
     .map((id) => bridge.strToNumFaceId.get(id))
     .filter((id): id is number => id !== undefined)
@@ -71,7 +73,7 @@ export function extrudeSelection(
   })
   const offset = result.regionNormal.clone().multiplyScalar(distance)
   for (const vid of result.newVertexIds) {
-    bridge.mesh.vertices.get(vid)?.position.add(offset)
+    bridge.mesh.vertices.get(vid)?.position.add(result.vertexNormals?.get(vid)?.clone().multiplyScalar(distance) ?? offset)
   }
   bridge.mesh.recalculateNormals()
 
@@ -96,13 +98,13 @@ export function insetFaces(
   mesh: MeshObject,
   faceIds: string[],
   thickness = 0.1,
-  options?: { individual?: boolean; depth?: number; outset?: boolean; boundary?: boolean }
+  options?: { individual?: boolean; depth?: number; outset?: boolean; boundary?: boolean },
+  bridge: MeshBridgeData = MeshBridge.meshObjectToEditableMesh(mesh)
 ): OperationResult {
   if (faceIds.length === 0) {
     return { mesh, selectedFaceIds: faceIds, selectedVertexIds: [] }
   }
 
-  const bridge = MeshBridge.meshObjectToEditableMesh(mesh)
   const numFaces = faceIds
     .map(id => bridge.strToNumFaceId.get(id))
     .filter((id): id is number => id !== undefined)
@@ -182,7 +184,12 @@ export function subdivideFaces(
   return {
     mesh: out,
     selectedFaceIds: created.map(id => bridge.numToStrFaceId.get(id) || `f_${id}`),
-    selectedVertexIds: []
+    selectedVertexIds: out.vertices.filter(v => !mesh.vertices.some(old => old.id === v.id)).map(v => v.id),
+    selectedEdgeIds: (() => {
+      const born = new Set(out.vertices.filter(v => !mesh.vertices.some(old => old.id === v.id)).map(v => v.id))
+      const ends = new Set(getMeshEdges(mesh).filter(e => edgeIds.includes(e.id)).flatMap(e => [e.v1, e.v2]))
+      return getMeshEdges(out).filter(e => (born.has(e.v1) || ends.has(e.v1)) && (born.has(e.v2) || ends.has(e.v2))).map(e => e.id)
+    })()
   }
 }
 
@@ -310,8 +317,8 @@ export function deleteElements(mesh: MeshObject, mode: 'vertex' | 'edge' | 'face
 /**
  * Bevels / Chamfers selected faces with an offset distance.
  */
-export function bevelFaces(mesh: MeshObject, faceIds: string[], offset = 0.2): OperationResult {
-  if (faceIds.length === 0) {
+export function bevelFaces(mesh: MeshObject, faceIds: string[], offset = 0.2, edgeIds: string[] = []): OperationResult {
+  if (faceIds.length === 0 && edgeIds.length === 0) {
     return { mesh, selectedFaceIds: faceIds, selectedVertexIds: [] }
   }
 
@@ -319,12 +326,18 @@ export function bevelFaces(mesh: MeshObject, faceIds: string[], offset = 0.2): O
   const numFaces = faceIds
     .map(id => bridge.strToNumFaceId.get(id))
     .filter((id): id is number => id !== undefined)
-  if (numFaces.length === 0) {
+  if (numFaces.length === 0 && edgeIds.length === 0) {
     return { mesh, selectedFaceIds: faceIds, selectedVertexIds: [] }
   }
 
-  const result = BevelKernel.bevelFaces(bridge.mesh, numFaces, {
-    width: Math.max(0.001, offset),
+  const selectedEdges = edgeIds.length ? getMeshEdges(mesh).filter(e => edgeIds.includes(e.id)).flatMap(e => {
+    const a = bridge.strToNumVertId.get(e.v1), b = bridge.strToNumVertId.get(e.v2)
+    if (a === undefined || b === undefined) return []
+    const id = DissolveKernel.findEdgeId(bridge.mesh, a, b)
+    return id === null ? [] : [id]
+  }) : [...new Set(numFaces.flatMap(id => bridge.mesh.faces.get(id)?.edgeIds ?? []))]
+  const result = bevelEdges(bridge.mesh, selectedEdges, {
+    width: offset,
     segments: 1,
     clampOverlap: true
   })
@@ -359,7 +372,7 @@ export function mergeVerticesAdvanced(
     const welded = MergeKernel.mergeByDistance(
       bridge.mesh,
       threshold,
-      only.length > 0 ? only : undefined
+      vertexIds.length > 0 ? only : undefined
     )
     const out = MeshBridge.editableMeshToMeshObject(
       bridge.mesh,
@@ -378,7 +391,7 @@ export function mergeVerticesAdvanced(
     return { mesh, selectedFaceIds: [], selectedVertexIds: vertexIds }
   }
 
-  const selectedVerts = mesh.vertices.filter(v => vertexIds.includes(v.id))
+  const selectedVerts = [...new Set(vertexIds)].map(id => mesh.vertices.find(v => v.id === id)).filter((v): v is NonNullable<typeof v> => !!v)
   if (selectedVerts.length === 0) {
     return { mesh, selectedFaceIds: [], selectedVertexIds: [] }
   }

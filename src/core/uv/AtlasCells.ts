@@ -1,12 +1,18 @@
 import type { Face, UV } from '../../types/mesh'
 import type { AtlasGrid } from '../../types/texture'
 import { PixelBuffer } from '../painting/PixelCanvas'
+import { MAX_ATLAS_CELLS, tileBounds } from '../painting/TilePixels'
 
-export function clampAtlasGrid(cols: number, rows: number): AtlasGrid {
-  return {
-    cols: Math.max(1, Math.min(32, Math.round(cols) || 1)),
-    rows: Math.max(1, Math.min(32, Math.round(rows) || 1))
+export function clampAtlasGrid(cols: number, rows: number, extra?: { spacing?: number; margin?: number }): AtlasGrid {
+  const grid: AtlasGrid = {
+    cols: Math.max(1, Math.min(MAX_ATLAS_CELLS, Math.round(cols) || 1)),
+    rows: Math.max(1, Math.min(MAX_ATLAS_CELLS, Math.round(rows) || 1))
   }
+  const spacing = Math.max(0, Math.round(extra?.spacing || 0))
+  const margin = Math.max(0, Math.round(extra?.margin || 0))
+  if (spacing) grid.spacing = spacing
+  if (margin) grid.margin = margin
+  return grid
 }
 
 /** UV rect for a cell. Row 0 is the top of the image (high V). */
@@ -70,15 +76,15 @@ export function mapFacesToAtlasCell(
 }
 
 export function sliceBufferIntoTiles(buffer: PixelBuffer, cols: number, rows: number) {
-  const g = clampAtlasGrid(cols, rows)
-  const tw = Math.max(1, Math.floor(buffer.width / g.cols))
-  const th = Math.max(1, Math.floor(buffer.height / g.rows))
+  const g = clampAtlasGrid(Math.min(cols, buffer.width), Math.min(rows, buffer.height))
   const tiles: { col: number; row: number; width: number; height: number; buffer: PixelBuffer }[] = []
   for (let r = 0; r < g.rows; r++) {
     for (let c = 0; c < g.cols; c++) {
+      const bounds = tileBounds(buffer.width, buffer.height, g.cols, g.rows, r * g.cols + c)
+      const tw = bounds.width, th = bounds.height
       const tile = new PixelBuffer(tw, th)
       tile.ctx.imageSmoothingEnabled = false
-      tile.ctx.drawImage(buffer.canvas, c * tw, r * th, tw, th, 0, 0, tw, th)
+      tile.ctx.drawImage(buffer.canvas, bounds.x, bounds.y, tw, th, 0, 0, tw, th)
       tile.syncToActiveLayer()
       tiles.push({ col: c, row: r, width: tw, height: th, buffer: tile })
     }

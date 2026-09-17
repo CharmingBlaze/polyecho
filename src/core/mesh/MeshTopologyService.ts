@@ -675,7 +675,12 @@ export class MeshTopologyService {
         buildTriGrid(snap, into)
       } else {
         const expanded = expandLoop(snap.vertexIds, snap.uvs)
-        tessellateNgon(expanded.verts, expanded.uvs, snap.materialIndex, snap.color, into)
+        if (faceIds.length === 0) {
+          // Edge splitting inserts shared boundary vertices without adding
+          // unrelated face-centre vertices or a triangle fan.
+          const face = mesh.addFace(expanded.verts, expanded.uvs, snap.materialIndex, snap.color, snap.id)
+          if (face) into.push(face.id)
+        } else tessellateNgon(expanded.verts, expanded.uvs, snap.materialIndex, snap.color, into)
       }
     }
 
@@ -947,9 +952,7 @@ export class MeshTopologyService {
     for (const fId of faceIds) {
       const face = mesh.faces.get(fId)
       if (face) {
-        face.vertexIds.reverse()
-        face.uvs.reverse()
-        face.normal.negate()
+        mesh.reverseFace(fId)
       }
     }
   }

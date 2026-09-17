@@ -26,6 +26,8 @@ export type TextureApplyPolicy =
 export interface AtlasGrid {
   cols: number
   rows: number
+  spacing?: number
+  margin?: number
 }
 
 export interface TextureMap {

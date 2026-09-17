@@ -4,6 +4,7 @@ import { createCube, createCylinder, createPlane } from '../../geometry/Primitiv
 import { MeshBridge } from '../MeshBridge'
 import { EditableMesh } from '../MeshKernel'
 import { LoopCutKernel } from './LoopCutKernel'
+import { MeshValidator } from '../MeshValidator'
 
 function uniquePositions(mesh: { vertices: Map<number, { position: { x: number; y: number; z: number } }> }) {
   const keys = new Set<string>()
@@ -14,6 +15,26 @@ function uniquePositions(mesh: { vertices: Map<number, { position: { x: number; 
 }
 
 describe('LoopCutKernel', () => {
+  it('keeps off-center and multiple loops aligned and identical to their preview', () => {
+    for (const params of [[0.2], [0.15,0.4,0.65]]) {
+      const {mesh} = MeshBridge.meshObjectToEditableMesh(createCube('Cube',2))
+      const edge = [...mesh.edges.values()].find(e => {
+        const a=mesh.vertices.get(e.v1)!.position,b=mesh.vertices.get(e.v2)!.position
+        return Math.abs(a.y-b.y)>1
+      })!
+      const preview = LoopCutKernel.previewSegments(mesh,edge.id,params)
+      expect(preview.every(s=>Math.abs(s.p1.y-s.p2.y)<1e-8)).toBe(true)
+      const result = LoopCutKernel.cutLoop(mesh,edge.id,params)
+      expect(result.newEdgeIds.length).toBe(4*params.length)
+      for (const id of result.newEdgeIds) {
+        const cut=mesh.edges.get(id)!, a=mesh.vertices.get(cut.v1)!.position,b=mesh.vertices.get(cut.v2)!.position
+        expect(preview.some(s=>(s.p1.distanceTo(a)<1e-8 && s.p2.distanceTo(b)<1e-8)||(s.p2.distanceTo(a)<1e-8 && s.p1.distanceTo(b)<1e-8))).toBe(true)
+      }
+      expect([...mesh.faces.values()].every(f=>f.vertexIds.length===4)).toBe(true)
+      expect([...mesh.edges.values()].every(e=>e.faceIds.length===2)).toBe(true)
+      expect(MeshValidator.validate(mesh).valid).toBe(true)
+    }
+  })
   it('finds the four parallel edges of a cube belt', () => {
     const { mesh } = MeshBridge.meshObjectToEditableMesh(createCube('Cube', 2))
     const vertical = [...mesh.edges.values()].find((e) => {
@@ -80,7 +101,7 @@ describe('LoopCutKernel', () => {
     expect(mesh.vertices.size).toBe(before + 8)
   })
 
-  it('still splits a triangle by inserting on the hovered edge', () => {
+  it('stops at a triangle without creating a fake loop', () => {
     const mesh = new EditableMesh()
     const a = mesh.addVertex(new THREE.Vector3(0, 0, 0))
     const b = mesh.addVertex(new THREE.Vector3(2, 0, 0))
@@ -89,11 +110,30 @@ describe('LoopCutKernel', () => {
     const edge = [...mesh.edges.values()].find((e) =>
       (e.v1 === a.id && e.v2 === b.id) || (e.v1 === b.id && e.v2 === a.id)
     )!
-    expect(LoopCutKernel.ringEdges(mesh, edge.id)).toHaveLength(1)
+    expect(LoopCutKernel.ringEdges(mesh, edge.id)).toHaveLength(0)
     LoopCutKernel.cutLoop(mesh, edge.id, 0.5)
-    expect(mesh.vertices.size).toBe(4)
+    expect(mesh.vertices.size).toBe(3)
     expect(mesh.faces.size).toBe(1)
-    expect([...mesh.faces.values()][0]!.vertexIds.length).toBe(4)
+    expect([...mesh.faces.values()][0]!.vertexIds.length).toBe(3)
+  })
+
+  it('keeps 64 dense cuts distinct without collapsing neighboring loops', () => {
+    const { mesh } = MeshBridge.meshObjectToEditableMesh(createCube('Cube', 2))
+    const vertical = [...mesh.edges.values()].find((e) => {
+      const a = mesh.vertices.get(e.v1)!.position
+      const b = mesh.vertices.get(e.v2)!.position
+      return Math.abs(a.x - b.x) < 1e-6 && Math.abs(a.z - b.z) < 1e-6 && Math.abs(a.y - b.y) > 0.5
+    })!
+    const spacing = 1 / 65
+    const params = Array.from({ length: 64 }, (_, i) => (i + 1) * spacing)
+    const result = LoopCutKernel.cutLoop(mesh, vertical.id, params)
+    expect(result.newEdgeIds).toHaveLength(256)
+    expect(new Set(result.newVertexIds.map(id => {
+      const p = mesh.vertices.get(id)!.position
+      return p.y.toFixed(5)
+    })).size).toBe(64)
+    expect([...mesh.faces.values()].every(f => f.vertexIds.length === 4)).toBe(true)
+    expect(MeshValidator.validate(mesh).valid).toBe(true)
   })
 
   it('preview belt sits on the ring, not on a face outline', () => {

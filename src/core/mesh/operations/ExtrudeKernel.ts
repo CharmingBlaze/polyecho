@@ -1,12 +1,14 @@
 import * as THREE from 'three'
 import { EditableMesh } from '../MeshKernel'
 import { HalfEdgeTopology } from '../HalfEdgeTopology'
+import { AttributeInterpolator } from '../attributes/AttributeInterpolator'
 
 export interface ExtrudeResult {
   mesh: EditableMesh
   newVertexIds: number[]
   extrudedFaceIds: number[]
   regionNormal: THREE.Vector3
+  vertexNormals?: Map<number, THREE.Vector3>
 }
 
 export interface ExtrudeOptions {
@@ -22,21 +24,23 @@ export class ExtrudeKernel {
    * Caps stay in place; the caller moves `newVertexIds`.
    */
   static extrude(mesh: EditableMesh, options: ExtrudeOptions): ExtrudeResult {
-    const faces = (options.faceIds ?? []).filter((id) => mesh.faces.has(id))
+    const faces = [...new Set(options.faceIds ?? [])].filter((id) => mesh.faces.has(id))
     if (faces.length > 0) {
       if (options.individual) {
         const newVertexIds: number[] = []
         const extrudedFaceIds: number[] = []
         const n = new THREE.Vector3()
+        const vertexNormals = new Map<number, THREE.Vector3>()
         for (const fId of faces) {
           const r = this.extrudeFaces(mesh, [fId])
           newVertexIds.push(...r.newVertexIds)
           extrudedFaceIds.push(...r.extrudedFaceIds)
           n.add(r.regionNormal)
+          r.newVertexIds.forEach(id => vertexNormals.set(id, r.regionNormal.clone()))
         }
         if (n.lengthSq() > 1e-10) n.normalize()
         else n.set(0, 1, 0)
-        return { mesh, newVertexIds, extrudedFaceIds, regionNormal: n }
+        return { mesh, newVertexIds, extrudedFaceIds, regionNormal: n, vertexNormals }
       }
       return this.extrudeFaces(mesh, faces)
     }
@@ -61,7 +65,7 @@ export class ExtrudeKernel {
    * and updates cap faces in-place without moving geometry.
    */
   static extrudeFaces(mesh: EditableMesh, selectedFaceIds: number[]): ExtrudeResult {
-    const faces = selectedFaceIds.filter((id) => mesh.faces.has(id))
+    const faces = [...new Set(selectedFaceIds)].filter((id) => mesh.faces.has(id))
     if (faces.length === 0) {
       return {
         mesh,
@@ -88,6 +92,7 @@ export class ExtrudeKernel {
       const oldV = mesh.vertices.get(vId)
       if (!oldV) continue
       const newV = mesh.addVertex(oldV.position.clone())
+      AttributeInterpolator.copyVertex(oldV, newV)
       oldToNewVertMap.set(vId, newV.id)
       newVertexIds.push(newV.id)
     }
@@ -126,10 +131,14 @@ export class ExtrudeKernel {
       const uvs = face.uvs.map((uv) => uv.clone())
       const matIdx = face.materialIndex
       const color = face.color
-      mesh.removeFace(fId)
-      mesh.addFace(newFaceVerts, uvs, matIdx, color, fId)
+      mesh.replaceFace(fId, newFaceVerts, uvs, matIdx, color)
     }
 
+    // Interior originals have no remaining surface after the cap moves.
+    for (const id of allSelectedFaceVertIds) {
+      const vertex = mesh.vertices.get(id)
+      if (vertex && vertex.faceIds.length === 0 && vertex.edgeIds.length === 0) mesh.removeVertex(id)
+    }
     mesh.recalculateNormals()
 
     return {
@@ -162,6 +171,7 @@ export class ExtrudeKernel {
       const oldV = mesh.vertices.get(vId)
       if (!oldV) return vId
       const nv = mesh.addVertex(oldV.position.clone())
+      AttributeInterpolator.copyVertex(oldV, nv)
       oldToNew.set(vId, nv.id)
       newVertexIds.push(nv.id)
       return nv.id
@@ -185,8 +195,8 @@ export class ExtrudeKernel {
         if (idxA !== -1 && idxB !== -1) forward = (idxA + 1) % fn === idxB
       }
       const added = forward
-        ? this.addSideQuad(mesh, edge.v1, edge.v2, bNew, aNew, face)
-        : this.addSideQuad(mesh, edge.v2, edge.v1, aNew, bNew, face)
+        ? this.addSideQuad(mesh, edge.v2, edge.v1, aNew, bNew, face)
+        : this.addSideQuad(mesh, edge.v1, edge.v2, bNew, aNew, face)
       if (added !== null) extrudedFaceIds.push(added)
     }
 
@@ -209,6 +219,7 @@ export class ExtrudeKernel {
         if (f) n.add(f.normal)
       }
       const nv = mesh.addVertex(oldV.position.clone())
+      AttributeInterpolator.copyVertex(oldV, nv)
       newVertexIds.push(nv.id)
       mesh.getOrCreateEdge(vId, nv.id)
     }

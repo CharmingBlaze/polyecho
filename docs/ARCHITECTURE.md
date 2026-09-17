@@ -24,17 +24,19 @@ UI (Vue SFC)
 | Tools / view flags | `src/stores/toolStore.ts` | App mode, select mode, snap, viewport shading |
 | History | `src/stores/historyStore.ts` | Undo / redo snapshots |
 | Pure mesh math | `src/core/geometry/`, `src/core/mesh/` | Topology and one-shot ops |
-| Interactive tools | `src/core/operators/` | Grab, rotate, scale, extrude, knife, loop cut, placement |
+| Interactive tools | `src/core/operators/` | Grab, rotate, scale, extrude, knife, loop cut, placement, Poly Draw, Shape Draw |
 | I/O | `src/core/import/`, `src/core/export/`, `src/core/project/` | GLB, OBJ, Blockbench, `.psxproj` |
 
-## Two mesh representations
+## Modeling kernel and document projection
 
-This split is load-bearing. Do not collapse it without a dedicated migration.
+Kernel unification is being migrated in place; see `docs/KERNEL_UNIFICATION.md` for the current boundary and remaining work.
 
 1. **`MeshObject`** (`src/types/mesh.ts`) — document model. String IDs, JSON-friendly. Stored in `projectStore.meshes`. Used by one-shot ops in `src/core/geometry/Operations.ts`, converters, serializers, exporters.
 2. **`EditableMesh`** (`src/core/mesh/MeshKernel.ts`) — edit kernel. Numeric IDs, `Map`s, half-edges. Used by modal operators and kernels under `src/core/mesh/operations/`.
 
-`MeshBridge` converts both ways. Modal tools in `Viewport3D.vue` convert the active `MeshObject` to `EditableMesh`, run the operator, then write back with `editableMeshToMeshObject`. Selection IDs must be remapped through the bridge maps; do not assume string IDs survive a round trip unless the maps are passed through.
+`MeshRepository` owns non-reactive, per-project resident kernels. Modal tools acquire the resident kernel through `projectStore.acquireEditableMesh` and publish its document projection through `publishEditableMesh`. Extrude and Inset menu operations stage a clone of that kernel, validate, record history, then update the resident instance. Remaining legacy document edits are synchronized when the kernel is next acquired. This compatibility boundary is deliberate; the full application is not yet kernel-authoritative.
+
+`MeshBridge` converts at that boundary. Vertex and face document IDs are retained in kernel snapshots as well as the bridge maps. Selection still crosses ID spaces through those maps. Vertex colors, skin weights, UVs, face materials and seam flags survive projection. No persisted file shape has changed.
 
 The same tool can exist on **both** paths. Example: `E` in the viewport is `ExtrudeOperator` + `ExtrudeKernel`; a menu/`performExtrude()` call still uses `Operations.ts`. Changing only one path makes the menu and the hotkey disagree. Prefer kernel-first for topology, then keep or bridge the store path. Full operator rules: `docs/MODELING_OPERATORS.md`.
 
@@ -145,7 +147,6 @@ Ship bar, tests, and CI: `docs/PRODUCTION.md`.
 ## Objects & Hierarchy
 
 3D meshes in the scene hierarchy support parent-child transform inheritance. The verbs are `selectMesh`, `createMesh`, and `parentMesh` (with cyclic dependency prevention). Full rules: `docs/HIERARCHY.md`.
-
 
 
 

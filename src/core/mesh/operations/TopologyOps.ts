@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { EditableMesh, MeshFace } from '../MeshKernel'
+import { editMesh } from '../MeshTransaction'
 import { AttributeInterpolator } from '../attributes/AttributeInterpolator'
 
 export interface SplitEdgeResult {
@@ -19,6 +20,17 @@ export class TopologyOps {
    * Splits an edge at parameter t (0 < t < 1), creating new vertex N and replacing the edge.
    */
   static splitEdge(mesh: EditableMesh, edgeId: number, t = 0.5): SplitEdgeResult | null {
+    if (!Number.isFinite(t) || t <= 0 || t >= 1) return null
+    const result = editMesh(mesh, () => {
+      const value = this.splitEdgeUnchecked(mesh, edgeId, t)
+      if (!value) throw new Error('Edge cannot be split')
+      return value
+    })
+    return result.success ? result.value : null
+  }
+
+  private static splitEdgeUnchecked(mesh: EditableMesh, edgeId: number, t = 0.5): SplitEdgeResult | null {
+    if (!Number.isFinite(t) || t <= 0 || t >= 1) return null
     const edge = mesh.edges.get(edgeId)
     if (!edge) return null
 
@@ -31,6 +43,7 @@ export class TopologyOps {
     // 1. Create new interpolated vertex
     const newPos = posA.clone().lerp(posB, t)
     const newV = mesh.addVertex(newPos)
+    AttributeInterpolator.interpolateVertex(mesh.vertices.get(vA)!, mesh.vertices.get(vB)!, newV, t)
     const newVId = newV.id
 
     // 2. Identify all adjacent faces
@@ -66,14 +79,15 @@ export class TopologyOps {
       const matIdx = face.materialIndex
       const color = face.color
 
-      mesh.removeFace(fId)
-      mesh.addFace(newVertIds, newUvs, matIdx, color, fId)
+      mesh.replaceFace(fId, newVertIds, newUvs, matIdx, color)
     }
 
     // 4. Remove old edge and build two new sub-edges
     mesh.removeEdge(edgeId)
     const edgeA = mesh.getOrCreateEdge(vA, newVId)
     const edgeB = mesh.getOrCreateEdge(newVId, vB)
+    edgeA.seam = edgeB.seam = edge.seam
+    edgeA.sharp = edgeB.sharp = edge.sharp
 
     mesh.recalculateNormals()
 
@@ -86,8 +100,24 @@ export class TopologyOps {
 
   /**
    * Splits a face across two non-adjacent vertices, producing two new faces sharing a new edge.
+   * One-shot callers (Connect) get a transactional validate. Batch kernels should call
+   * `splitFaceUnchecked` and validate the whole operation once.
    */
   static splitFace(mesh: EditableMesh, faceId: number, vertexA: number, vertexB: number): SplitFaceResult | null {
+    const face = mesh.faces.get(faceId)
+    if (!face || face.vertexIds.length < 4) return null
+    const a = face.vertexIds.indexOf(vertexA), b = face.vertexIds.indexOf(vertexB), n = face.vertexIds.length
+    if (a < 0 || b < 0 || a === b || (a + 1) % n === b || (b + 1) % n === a) return null
+    const result = editMesh(mesh, () => {
+      const value = this.splitFaceUnchecked(mesh, faceId, vertexA, vertexB)
+      if (!value) throw new Error('Face cannot be split')
+      return value
+    })
+    return result.success ? result.value : null
+  }
+
+  /** In-place split. Caller snapshots/validates the surrounding operation. */
+  static splitFaceUnchecked(mesh: EditableMesh, faceId: number, vertexA: number, vertexB: number): SplitFaceResult | null {
     const face = mesh.faces.get(faceId)
     if (!face || face.vertexIds.length < 4) return null
 
@@ -130,8 +160,6 @@ export class TopologyOps {
     const f1 = mesh.addFace(loop1Verts, loop1Uvs, matIdx, color)
     const f2 = mesh.addFace(loop2Verts, loop2Uvs, matIdx, color)
     const connectingEdge = mesh.getOrCreateEdge(vertexA, vertexB)
-
-    mesh.recalculateNormals()
 
     if (!f1 || !f2) return null
 

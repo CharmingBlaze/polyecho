@@ -36,7 +36,7 @@ The store verb is `performSmartUvProject` (header, left rail, inspector Unwrap, 
 
 UV-tab shortcuts are isolated from modeling shortcuts: P pins UVs without separating the mesh, V stitches without starting Poly Build, and paint shortcuts only activate on the Paint tab.
 
-Atlas cells: if the paint target has `atlas`, the UV canvas draws that grid. **Align & Snap** and the UV inspector **Atlas** section fit the current selection into a cell (`performMapUVsToAtlasCell`). Set the grid on the Texture tab. See `docs/TEXTURES.md`.
+Atlas cells: the UV canvas draws the same tile size as the tileset picker and redraws when that size changes. The active tileset tile is highlighted in amber. **Align & Snap** and the UV inspector **Atlas** section fit the current selection into a cell (`performMapUVsToAtlasCell`). Set the grid on the Texture tab or in the tileset panel. See `docs/TEXTURES.md`.
 
 ## Texel Density
 
@@ -44,9 +44,32 @@ Atlas cells: if the paint target has `atlas`, the UV canvas draws that grid. **A
 - **Apply / Set**: `applyTargetTexelDensity(mesh, density, texSize, faceIndices?)` rescales target UV islands around their centroids.
 - **Equalize**: `equalizeTexelDensity(mesh)` normalizes island scale across all faces to maintain consistent pixel density.
 
+## Paint feedback and inspector
+
+Both editors keep workspace tabs, command menus, and asset controls on separate rows so split panes do not clip commands. Paint has a dedicated contextual tool settings row, a palette above the status bar, and pointer-isolated canvas overlays. The shared help button lists shortcuts; UV transform buttons are disabled until a selection exists.
+
+The inspector follows the workspace tab: UV shows unwrap settings (cut angle and pixel margin) and atlas controls; Paint shows brush size, opacity, shape, foreground color, and pen pressure. The paint canvas previews the brush footprint with a contrasting outline. Dither and shading strokes interpolate between pointer samples, excluding the previous sample so stationary movement does not repeatedly shade a pixel. Leaving the texture breaks stroke interpolation to avoid drawing a bridge on re-entry.
+
 ## Adding a UV tool
 
 1. Change UV coords on `MeshObject.faces[].uvs` (same length as `vertexIds`).
 2. `recordState` first, then `markGeometryUpdated`.
 3. Use `getTargetFaces()` so you do not touch unselected islands.
 4. Do not import Vue into `src/core/uv/`.
+
+
+## Precision workbench and general meshes
+
+The canvas now has a collapsible **Precision** panel with pixel / UV units, selection position and size, proportional sizing, numeric move / rotate / scale, and selection / individual-island / texture-center pivots. U points right and V points up; position describes the lower-left selection bound. Numeric operations use the selected pivot; direct gizmos keep their opposite-edge / opposite-corner anchoring. Rotation is computed in texture pixels, including on rectangular images.
+
+- Arrow keys move selected corners one texture pixel; Shift moves ten. **L** expands to connected UV islands. **Home** fits the texture.
+- **Snap corners to pixels** snaps actual coordinates, while drag snapping quantizes displacement and preserves spacing. Picking always uses unsnapped pointer coordinates.
+- **Relax interiors** performs boundary-preserving Laplacian smoothing on selected welded UV nodes. Unselected corners, island borders, marked seam endpoints and pinned nodes stay fixed. This works with triangles, quads and n-gons; a border-only selection has nothing to relax.
+- **Inspect** selects faces outside the texture or with zero UV area. These are diagnostics, not automatic errors: intentional tiling can lie outside 0–1. Checker and stretch views remain available.
+- **Export layout** writes a transparent SVG wireframe at the texture dimensions for external texture authoring.
+
+`src/core/uv/UVEditing.ts` resolves selection at corner granularity and calculates changes without mutating the mesh. Numeric actions record undo only for real changes. Vertex selection published to the 3D view does not echo back and select split UV corners on unrelated islands. Pins and align / fit actions use the current selection mode.
+
+Smart UV projects actual geometric face normals, rather than trusting stale imported normals. Triangles, quads, n-gons, curved surfaces and disconnected parts use the same topology-based workflow. Projection and packing accept a separate texture height. Packing uses rotating best-short-side-fit rectangles and reuses free space, preserving pixel proportions and margins on rectangular textures. Existing callers that supply only texture width retain square-texture behavior. Packing is a bounding-box heuristic; it does not interlock concave island outlines, and an impossible margin can leave a layout unchanged. Complex organic models can still benefit from authored seams and inspection of stretch.
+
+Regression coverage: `UVEditing.test.ts` checks exact selection, pins, rectangular rotation, individual pivots and relaxation. `UVGeneralMesh.test.ts` exercises offset / deformed cubes, spheres, cylinders, cones, mixed polygons, non-overlapping packing, rectangular texture proportions, and selected-face isolation.

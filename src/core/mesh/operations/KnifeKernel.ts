@@ -1,7 +1,9 @@
 import * as THREE from 'three'
 import { ScreenGeometry, type ViewQuadrant } from '../../geometry/ScreenGeometry'
 import { EditableMesh } from '../MeshKernel'
+import { surfaceTriangles, perspectiveEdgeParameter } from '../../geometry/SurfaceGeometry'
 import { TopologyOps } from './TopologyOps'
+import { AttributeInterpolator } from '../attributes/AttributeInterpolator'
 
 export type KnifeTargetType = 'VERTEX' | 'EDGE' | 'FACE' | 'MIDPOINT'
 
@@ -13,6 +15,7 @@ export interface KnifePoint {
   edgeId?: number
   faceId?: number
   edgeT?: number
+  background?: boolean
 }
 
 export interface KnifeCutOptions {
@@ -32,14 +35,17 @@ export class KnifeKernel {
     return from.clone().add(new THREE.Vector2(Math.cos(snapped), Math.sin(snapped)).multiplyScalar(delta.length()))
   }
 
-  static applyCuts(mesh: EditableMesh, points: KnifePoint[], options: KnifeCutOptions) {
-    if (points.length < 2) return
-    const resolved = this.resolvePointsToVertices(mesh, points)
+  static applyCuts(mesh: EditableMesh, cuts: KnifePoint[] | KnifePoint[][], options: KnifeCutOptions) {
+    if (!cuts || cuts.length === 0) return
+    const chains: KnifePoint[][] = Array.isArray(cuts[0])
+      ? (cuts as KnifePoint[][])
+      : [cuts as KnifePoint[]]
 
-    if (options.cutThrough) {
+    for (const points of chains) {
+      if (points.length < 2) continue
+      const resolved = points.map(point => point.background ? -1 : this.resolvePointsToVertices(mesh, [point])[0])
+
       this.cutThroughPolyline(mesh, points, resolved, options)
-    } else {
-      this.connectSurfacePolyline(mesh, resolved)
     }
 
     mesh.recalculateNormals()
@@ -55,7 +61,7 @@ export class KnifeKernel {
         return
       }
       if ((pt.targetType === 'EDGE' || pt.targetType === 'MIDPOINT') && pt.edgeId !== undefined) {
-        const t = Math.max(0.01, Math.min(0.99, pt.edgeT ?? 0.5))
+        const t = Math.max(0.00001, Math.min(0.99999, pt.edgeT ?? 0.5))
         const list = byEdge.get(pt.edgeId) ?? []
         list.push({ t, index })
         byEdge.set(pt.edgeId, list)
@@ -99,7 +105,7 @@ export class KnifeKernel {
     if (onFace) {
       const edgeHit = this.closestFaceEdge(mesh, onFace.faceId, onFace.point)
       if (edgeHit && edgeHit.distance * edgeHit.distance <= Math.max(snapEps, edgeHit.lengthSq * 1e-6)) {
-        const t = Math.max(0.01, Math.min(0.99, edgeHit.t))
+        const t = Math.max(0.00001, Math.min(0.99999, edgeHit.t))
         const created = this.splitEdgeAtParameters(mesh, edgeHit.edgeId, [t])
         const id = created.get(this.tKey(t))
         if (id !== undefined) return id
@@ -125,13 +131,9 @@ export class KnifeKernel {
     const consider = (faceId: number) => {
       const face = mesh.faces.get(faceId)
       if (!face || face.vertexIds.length < 3) return
-      const p0 = mesh.vertices.get(face.vertexIds[0]!)?.position
-      if (!p0) return
-      for (let i = 1; i < face.vertexIds.length - 1; i++) {
-        const p1 = mesh.vertices.get(face.vertexIds[i]!)?.position
-        const p2 = mesh.vertices.get(face.vertexIds[i + 1]!)?.position
-        if (!p1 || !p2) continue
-        tri.set(p0, p1, p2)
+      const positions = face.vertexIds.map(id => mesh.vertices.get(id)!.position)
+      for (const [a, b, c] of surfaceTriangles(positions)) {
+        tri.set(positions[a], positions[b], positions[c])
         tri.closestPointToPoint(position, closest)
         const dist = closest.distanceToSquared(position)
         if (dist < bestDist) {
@@ -186,18 +188,38 @@ export class KnifeKernel {
     const uvs = face.uvs.map((uv) => uv.clone())
     const matIdx = face.materialIndex
     const color = face.color
+    const positions = verts.map(id => mesh.vertices.get(id)!.position)
+    const triangles = surfaceTriangles(positions)
+    const barycentric = new THREE.Vector3()
+    const triangle = new THREE.Triangle()
     const uvC = new THREE.Vector2()
-    for (const uv of uvs) uvC.add(uv)
-    uvC.multiplyScalar(1 / Math.max(1, uvs.length))
+    for (const [a, b, c] of triangles) {
+      triangle.set(positions[a], positions[b], positions[c])
+      if (!triangle.containsPoint(position)) continue
+      triangle.getBarycoord(position, barycentric)
+      uvC.copy(uvs[a]).multiplyScalar(barycentric.x).addScaledVector(uvs[b], barycentric.y).addScaledVector(uvs[c], barycentric.z)
+      break
+    }
     const cId = mesh.addVertex(position.clone()).id
     mesh.removeFace(faceId)
-    for (let i = 0; i < verts.length; i++) {
-      mesh.addFace(
-        [verts[i]!, verts[(i + 1) % verts.length]!, cId],
-        [uvs[i]!, uvs[(i + 1) % verts.length]!, uvC.clone()],
-        matIdx,
-        color
-      )
+    const normal = face.normal
+    const fanIsInside = positions.every((p, i) => p.clone().sub(position).cross(positions[(i + 1) % positions.length].clone().sub(position)).dot(normal) > 1e-12)
+    const addWedge = (a: number, b: number) => {
+      if (positions[a].clone().sub(position).cross(positions[b].clone().sub(position)).lengthSq() < 1e-20) return
+      mesh.addFace([verts[a], verts[b], cId], [uvs[a], uvs[b], uvC.clone()], matIdx, color)
+    }
+    if (fanIsInside) {
+      for (let i = 0; i < verts.length; i++) addWedge(i, (i + 1) % verts.length)
+    } else {
+      // Preserve regions outside the containing triangle on concave polygons.
+      for (const indices of triangles) {
+        let [a, b, c] = indices
+        if (positions[b].clone().sub(positions[a]).cross(positions[c].clone().sub(positions[a])).dot(normal) < 0) [b, c] = [c, b]
+        triangle.set(positions[a], positions[b], positions[c])
+        if (triangle.containsPoint(position)) {
+          addWedge(a, b); addWedge(b, c); addWedge(c, a)
+        } else mesh.addFace([verts[a], verts[b], verts[c]], [uvs[a], uvs[b], uvs[c]], matIdx, color)
+      }
     }
     return cId
   }
@@ -215,8 +237,9 @@ export class KnifeKernel {
     const out = new Map<string, number>()
     const edge = mesh.edges.get(edgeId)
     if (!edge) return out
+    if (parameters.some(t => !Number.isFinite(t))) return out
 
-    const unique = [...new Set(parameters.map((t) => this.tKey(Math.max(0.01, Math.min(0.99, t)))))]
+    const unique = [...new Set(parameters.map((t) => this.tKey(Math.max(0.00001, Math.min(0.99999, t)))))]
       .map((k) => Number(k))
       .sort((a, b) => a - b)
     if (unique.length === 0) return out
@@ -230,6 +253,7 @@ export class KnifeKernel {
     const newIds: number[] = []
     for (const t of unique) {
       const v = mesh.addVertex(posA.clone().lerp(posB, t))
+      AttributeInterpolator.interpolateVertex(mesh.vertices.get(vA)!, mesh.vertices.get(vB)!, v, t)
       newIds.push(v.id)
       out.set(this.tKey(t), v.id)
     }
@@ -260,96 +284,86 @@ export class KnifeKernel {
       }
       const matIdx = face.materialIndex
       const color = face.color
-      mesh.removeFace(fId)
-      mesh.addFace(newVertIds, newUvs, matIdx, color, fId)
+      mesh.replaceFace(fId, newVertIds, newUvs, matIdx, color)
     }
 
     mesh.removeEdge(edgeId)
     let prev = vA
     for (const id of newIds) {
-      mesh.getOrCreateEdge(prev, id)
+      const segment = mesh.getOrCreateEdge(prev, id)
+      segment.seam = edge.seam
+      segment.sharp = edge.sharp
       prev = id
     }
-    mesh.getOrCreateEdge(prev, vB)
+    const segment = mesh.getOrCreateEdge(prev, vB)
+    segment.seam = edge.seam
+    segment.sharp = edge.sharp
     return out
-  }
-
-  private static connectSurfacePolyline(mesh: EditableMesh, vertexIds: number[]) {
-    for (let i = 0; i < vertexIds.length - 1; i++) {
-      this.splitSharedFace(mesh, vertexIds[i]!, vertexIds[i + 1]!)
-    }
   }
 
   private static splitSharedFace(mesh: EditableMesh, vA: number, vB: number) {
     if (vA === vB) return
-    for (const [fId, face] of mesh.faces) {
+    // A rejected split can restore the mesh Maps; iterate a stable candidate list.
+    for (const [fId, face] of [...mesh.faces]) {
       if (face.vertexIds.includes(vA) && face.vertexIds.includes(vB)) {
-        TopologyOps.splitFace(mesh, fId, vA, vB)
-        return
+        const res = TopologyOps.splitFaceUnchecked(mesh, fId, vA, vB)
+        if (res) return
       }
     }
   }
 
-  private static cutThroughPolyline(
-    mesh: EditableMesh,
-    points: KnifePoint[],
-    resolved: number[],
-    options: KnifeCutOptions
-  ) {
+  private static cutThroughPolyline(mesh: EditableMesh, points: KnifePoint[], resolved: number[], options: KnifeCutOptions) {
+    const matrix = options.objectMatrix ?? new THREE.Matrix4()
+    const inverse = matrix.clone().invert()
+    const project = (p: THREE.Vector3) => ScreenGeometry.worldToScreen(p.clone().applyMatrix4(matrix), options.camera, options.viewportRect, options.quadrant)
     for (let i = 0; i < points.length - 1; i++) {
-      const a = points[i]!
-      const b = points[i + 1]!
-      const chain: number[] = [resolved[i]!]
-      const hits: { tA: number; edgeId: number; tEdge: number }[] = []
-
-      for (const [eId, edge] of mesh.edges) {
-        const p1 = mesh.vertices.get(edge.v1)?.position
-        const p2 = mesh.vertices.get(edge.v2)?.position
-        if (!p1 || !p2) continue
-        const w1 = options.objectMatrix ? p1.clone().applyMatrix4(options.objectMatrix) : p1
-        const w2 = options.objectMatrix ? p2.clone().applyMatrix4(options.objectMatrix) : p2
-        const s1 = ScreenGeometry.worldToScreen(w1, options.camera, options.viewportRect, options.quadrant)
-        const s2 = ScreenGeometry.worldToScreen(w2, options.camera, options.viewportRect, options.quadrant)
-        const hit = ScreenGeometry.intersectSegments2D(a.screen, b.screen, s1, s2)
-        if (!hit.hit) continue
-        if (hit.tA <= 0.02 || hit.tA >= 0.98) continue
-        if (hit.tB <= 0.02 || hit.tB >= 0.98) continue
-        hits.push({ tA: hit.tA, edgeId: eId, tEdge: hit.tB })
+      const a = points[i], b = points[i + 1]
+      const faceHits = new Map<number, { t: number; id: number }[]>()
+      const add = (face: number, t: number, id: number) => {
+        const hits = faceHits.get(face) ?? []
+        if (!hits.some(h => h.id === id)) hits.push({ t, id })
+        faceHits.set(face, hits)
       }
-
-      hits.sort((x, y) => x.tA - y.tA)
-      const jobs: { tA: number; v1: number; v2: number; tEdge: number }[] = []
-      for (const hit of hits) {
-        const edge = mesh.edges.get(hit.edgeId)
-        if (!edge) continue
-        jobs.push({ tA: hit.tA, v1: edge.v1, v2: edge.v2, tEdge: hit.tEdge })
+      for (const [id, t] of [[resolved[i], 0], [resolved[i + 1], 1]]) {
+        for (const face of mesh.vertices.get(id)?.faceIds ?? []) add(face, t, id)
       }
-
-      const createdByEnds = new Map<string, Map<string, number>>()
-      const endKey = (a: number, b: number) => `${Math.min(a, b)}:${Math.max(a, b)}`
-      const grouped = new Map<string, number[]>()
+      const triangles = [...mesh.faces.values()].flatMap(face => {
+        const ps = face.vertexIds.map(id => mesh.vertices.get(id)!.position)
+        return surfaceTriangles(ps).map(ids => ids.map(id => ps[id]))
+      })
+      const visible = (point: THREE.Vector3) => {
+        if (options.cutThrough) return true
+        const world = point.clone().applyMatrix4(matrix)
+        const ndc = world.clone().project(options.camera)
+        const caster = new THREE.Raycaster(); caster.setFromCamera(new THREE.Vector2(ndc.x, ndc.y), options.camera)
+        const ray = caster.ray.clone().applyMatrix4(inverse), distance = ray.origin.distanceTo(point)
+        return !triangles.some(([p0,p1,p2]) => {
+          const hit = ray.intersectTriangle(p0,p1,p2,false,new THREE.Vector3())
+          return hit && ray.origin.distanceTo(hit) < distance - Math.max(1e-6, distance * 1e-6)
+        })
+      }
+      const jobs = [...mesh.edges.values()].flatMap(edge => {
+        const p = mesh.vertices.get(edge.v1)!.position, q = mesh.vertices.get(edge.v2)!.position
+        const hit = ScreenGeometry.intersectSegments2D(a.screen, b.screen, project(p), project(q))
+        if (!hit.hit || hit.tA < -1e-7 || hit.tA > 1 + 1e-7) return []
+        const t = perspectiveEdgeParameter(hit.tB, p.clone().applyMatrix4(matrix), q.clone().applyMatrix4(matrix), options.camera)
+        if (!Number.isFinite(t) || !visible(p.clone().lerp(q, t))) return []
+        return [{ a: edge.v1, b: edge.v2, t, along: hit.tA, faces: [...edge.faceIds] }]
+      })
       for (const job of jobs) {
-        const k = endKey(job.v1, job.v2)
-        const list = grouped.get(k) ?? []
-        list.push(job.tEdge)
-        grouped.set(k, list)
+        let id: number | undefined = job.t < 1e-5 ? job.a : job.t > 1 - 1e-5 ? job.b : undefined
+        if (id === undefined) {
+          const edge = this.findEdgeId(mesh, job.a, job.b)
+          if (edge === null) continue
+          const live = mesh.edges.get(edge)!
+          const t = live.v1 === job.a ? job.t : 1 - job.t
+          id = this.splitEdgeAtParameters(mesh, edge, [t]).get(this.tKey(t))
+        }
+        if (id !== undefined) job.faces.forEach(face => add(face, job.along, id!))
       }
-      for (const [k, ts] of grouped) {
-        const [v1, v2] = k.split(':').map(Number)
-        const liveId = this.findEdgeId(mesh, v1!, v2!)
-        if (liveId === null) continue
-        createdByEnds.set(k, this.splitEdgeAtParameters(mesh, liveId, ts))
-      }
-
-      for (const job of jobs) {
-        const created = createdByEnds.get(endKey(job.v1, job.v2))
-        const id = created?.get(this.tKey(job.tEdge))
-        if (id !== undefined) chain.push(id)
-      }
-      chain.push(resolved[i + 1]!)
-
-      for (let c = 0; c < chain.length - 1; c++) {
-        this.splitSharedFace(mesh, chain[c]!, chain[c + 1]!)
+      for (const hits of faceHits.values()) {
+        hits.sort((x,y) => x.t-y.t)
+        for (let j = 0; j < hits.length - 1; j++) this.splitSharedFace(mesh, hits[j].id, hits[j+1].id)
       }
     }
   }

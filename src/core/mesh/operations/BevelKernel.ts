@@ -15,6 +15,7 @@ export interface BevelResult {
   mesh: EditableMesh
   beveledFaceIds: number[]
   beveledVertexIds: number[]
+  error?: string
 }
 
 export function bevelProfileLabel(profile: number): BevelProfileMode {
@@ -31,14 +32,15 @@ export function bevelProfileValue(mode: BevelProfileMode): number {
 
 export class BevelKernel {
   static bevelFaces(mesh: EditableMesh, faceIds: number[], options: BevelOptions): BevelResult {
-    const segments = Math.max(1, Math.min(8, options.segments || 1))
-    let width = Math.max(0.001, options.width)
+    const segments = Math.max(1, Math.min(8, Math.round(options.segments || 1)))
+    if (!Number.isFinite(options.width) || options.width <= 1e-9) return { mesh, beveledFaceIds: [], beveledVertexIds: [] }
     const profile = Math.max(0, Math.min(1, options.profile ?? 0))
 
     const beveledFaceIds: number[] = []
     const beveledVertexIds: number[] = []
 
-    for (const fId of faceIds) {
+    for (const fId of new Set(faceIds)) {
+      let width = options.width
       const face = mesh.faces.get(fId)
       if (!face || face.vertexIds.length < 3) continue
 

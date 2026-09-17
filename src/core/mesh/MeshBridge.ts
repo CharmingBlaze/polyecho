@@ -1,13 +1,19 @@
 import * as THREE from 'three'
+import { surfaceTriangles } from '../geometry/SurfaceGeometry'
 import { EditableMesh } from './MeshKernel'
 import { MeshObject, Vertex, Face } from '../../types/mesh'
+import { undirectedEdgeId } from '../geometry/EdgeUtils'
 
 export class MeshBridge {
   /**
    * Converts a traditional MeshObject into an EditableMesh.
    * Maps string IDs to stable numeric IDs.
    */
-  static meshObjectToEditableMesh(meshObj: MeshObject): {
+  static meshObjectToEditableMesh(meshObj: MeshObject, previous?: {
+    mesh: EditableMesh
+    strToNumVertId: Map<string, number>
+    strToNumFaceId: Map<string, number>
+  }): {
     mesh: EditableMesh
     strToNumVertId: Map<string, number>
     numToStrVertId: Map<number, string>
@@ -15,29 +21,59 @@ export class MeshBridge {
     numToStrFaceId: Map<number, string>
   } {
     const mesh = new EditableMesh()
-    const strToNumVertId = new Map<string, number>()
+    if (previous) {
+      mesh.restoreSnapshot({ ...previous.mesh.createSnapshot(), vertices: [], edges: [], faces: [], halfEdges: [] })
+    }
+    const strToNumVertId = new Map<string, number>(previous?.strToNumVertId)
     const numToStrVertId = new Map<number, string>()
-    const strToNumFaceId = new Map<string, number>()
+    const strToNumFaceId = new Map<string, number>(previous?.strToNumFaceId)
     const numToStrFaceId = new Map<number, string>()
 
     // Add vertices
     for (const v of meshObj.vertices) {
-      const numId = mesh.allocVertexId()
+      const numId = strToNumVertId.get(v.id) ?? mesh.allocVertexId()
       strToNumVertId.set(v.id, numId)
       numToStrVertId.set(numId, v.id)
-      mesh.addVertex(new THREE.Vector3(v.position.x, v.position.y, v.position.z), numId)
+      if (mesh.vertices.has(numId)) throw new Error(`Duplicate vertex ID: ${v.id}`)
+      const vertex = mesh.addVertex(new THREE.Vector3(v.position.x, v.position.y, v.position.z), numId)
+      vertex.documentId = v.id
+      vertex.color = v.color
+      vertex.boneWeights = v.boneWeights ? { ...v.boneWeights } : undefined
+    }
+
+    // Reserve surviving edge IDs before constructing face loops.
+    if (previous) {
+      const oldEdges = new Map([...previous.mesh.edges.values()].map(e => [undirectedEdgeId(String(e.v1), String(e.v2)), e]))
+      for (const face of meshObj.faces) for (let i = 0; i < face.vertexIds.length; i++) {
+        const a = strToNumVertId.get(face.vertexIds[i]), b = strToNumVertId.get(face.vertexIds[(i + 1) % face.vertexIds.length])
+        if (a === undefined || b === undefined || !mesh.vertices.has(a) || !mesh.vertices.has(b)) continue
+        const old = oldEdges.get(undirectedEdgeId(String(a), String(b)))
+        if (old) mesh.getOrCreateEdge(a, b, old.id)
+      }
     }
 
     // Add faces
     for (const f of meshObj.faces) {
-      const numFaceId = mesh.allocFaceId()
+      const numFaceId = strToNumFaceId.get(f.id) ?? mesh.allocFaceId()
       strToNumFaceId.set(f.id, numFaceId)
       numToStrFaceId.set(numFaceId, f.id)
 
-      const numVertIds = f.vertexIds.map(vid => strToNumVertId.get(vid)!).filter(id => id !== undefined)
+      if (mesh.faces.has(numFaceId)) throw new Error(`Duplicate face ID: ${f.id}`)
+      const numVertIds = f.vertexIds.map(vid => {
+        const id = strToNumVertId.get(vid)
+        if (id === undefined || !mesh.vertices.has(id)) throw new Error(`Face ${f.id} references missing vertex ${vid}`)
+        return id
+      })
       const uvs = f.uvs.map(u => new THREE.Vector2(u.u, u.v))
 
-      mesh.addFace(numVertIds, uvs, f.materialIndex || 0, undefined, numFaceId)
+      const face = mesh.addFace(numVertIds, uvs, f.materialIndex ?? 0, undefined, numFaceId)
+      if (!face) throw new Error(`Invalid polygon: ${f.id}`)
+      face.documentId = f.id
+    }
+
+    const seams = new Set(meshObj.seamEdgeIds ?? [])
+    for (const edge of mesh.edges.values()) {
+      if (seams.has(undirectedEdgeId(numToStrVertId.get(edge.v1)!, numToStrVertId.get(edge.v2)!))) edge.seam = true
     }
 
     mesh.recalculateNormals()
@@ -74,23 +110,51 @@ export class MeshBridge {
       vertMap = numToStrVertId
       faceMap = numToStrFaceId
     }
+    // Identity belongs to the kernel too, so callers cannot accidentally rename
+    // surviving elements by omitting the bridge maps.
+    vertMap ??= new Map()
+    faceMap ??= new Map()
+    for (const v of mesh.vertices.values()) if (v.documentId && !vertMap.has(v.id)) vertMap.set(v.id, v.documentId)
+    for (const f of mesh.faces.values()) if (f.documentId && !faceMap.has(f.id)) faceMap.set(f.id, f.documentId)
 
     const vertexIdMap = new Map<number, string>()
+    // Kernel ids are rebuilt on import; surviving document ids are not.
+    // Reserve all existing strings so a later operation cannot create a second
+    // `v_12` / `f_12` after earlier topology edits removed lower-numbered ids.
+    const usedVertices = new Set(vertMap?.values() ?? [])
+    const usedFaces = new Set(faceMap?.values() ?? [])
+    if (typeof baseMeshObjOrName !== 'string') {
+      baseMeshObjOrName.vertices.forEach(v => usedVertices.add(v.id))
+      baseMeshObjOrName.faces.forEach(f => usedFaces.add(f.id))
+    }
+    const allocate = (id: number, prefix: string, map: Map<number, string> | undefined, used: Set<string>) => {
+      const existing = map?.get(id)
+      if (existing) return existing
+      let candidate = `${prefix}_${id}`, suffix = 1
+      while (used.has(candidate)) candidate = `${prefix}_${id}_${suffix++}`
+      used.add(candidate)
+      map?.set(id, candidate)
+      return candidate
+    }
 
     // Build vertices
     for (const [vId, v] of mesh.vertices) {
-      const strId = vertMap?.get(vId) || `v_${vId}`
+      const strId = allocate(vId, 'v', vertMap, usedVertices)
+      v.documentId = strId
       vertexIdMap.set(vId, strId)
 
       vertices.push({
         id: strId,
-        position: { x: v.position.x, y: v.position.y, z: v.position.z }
+        position: { x: v.position.x, y: v.position.y, z: v.position.z },
+        ...(v.color !== undefined ? { color: v.color } : {}),
+        ...(v.boneWeights ? { boneWeights: { ...v.boneWeights } } : {})
       })
     }
 
     // Build faces
     for (const [fId, f] of mesh.faces) {
-      const strFaceId = faceMap?.get(fId) || `f_${fId}`
+      const strFaceId = allocate(fId, 'f', faceMap, usedFaces)
+      f.documentId = strFaceId
       const faceVertStrIds = f.vertexIds.map(numId => vertexIdMap.get(numId)!).filter(Boolean)
 
       // Ensure every vertex of the face has a corresponding UV coordinate
@@ -121,6 +185,11 @@ export class MeshBridge {
       })
     }
 
+    const seamEdgeIds = [...mesh.edges.values()].filter(e => e.seam)
+      .map(e => undirectedEdgeId(vertexIdMap.get(e.v1)!, vertexIdMap.get(e.v2)!))
+    const seamData = seamEdgeIds.length || (typeof baseMeshObjOrName !== 'string' && baseMeshObjOrName.seamEdgeIds)
+      ? { seamEdgeIds } : {}
+
     if (typeof baseMeshObjOrName === 'string') {
       const meshId = (typeof idOrVertMap === 'string') ? idOrVertMap : `mesh_${Date.now()}_${Math.floor(Math.random() * 1000)}`
       return {
@@ -134,14 +203,16 @@ export class MeshBridge {
         materialId: 'default_material',
         shadeMode: 'flat',
         vertices,
-        faces
+        faces,
+        ...seamData
       }
     }
 
     return {
       ...baseMeshObjOrName,
       vertices,
-      faces
+      faces,
+      ...seamData
     }
   }
 
@@ -149,6 +220,9 @@ export class MeshBridge {
    * Converts an EditableMesh directly into THREE.BufferGeometry for render/ghost previews.
    */
   static editableMeshToThreeGeometry(mesh: EditableMesh): THREE.BufferGeometry {
+    const triangleToFace: number[] = []
+    const renderVertexToVertex: number[] = []
+    const renderVertexToCorner: number[] = []
     const positions: number[] = []
     const normals: number[] = []
     const uvs: number[] = []
@@ -160,25 +234,23 @@ export class MeshBridge {
       if (vIds.length < 3) continue
 
       const fn = face.normal
-      const p0 = mesh.vertices.get(vIds[0])?.position
-      const uv0 = face.uvs[0] || new THREE.Vector2(0, 0)
-      if (!p0) continue
-
-      for (let i = 1; i < vIds.length - 1; i++) {
-        const p1 = mesh.vertices.get(vIds[i])?.position
-        const p2 = mesh.vertices.get(vIds[i + 1])?.position
-        if (!p1 || !p2) continue
-
-        const uv1 = face.uvs[i] || new THREE.Vector2(1, 0)
-        const uv2 = face.uvs[i + 1] || new THREE.Vector2(1, 1)
-
-        positions.push(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z, p2.x, p2.y, p2.z)
-        normals.push(fn.x, fn.y, fn.z, fn.x, fn.y, fn.z, fn.x, fn.y, fn.z)
-        uvs.push(uv0.x, uv0.y, uv1.x, uv1.y, uv2.x, uv2.y)
+      const points = vIds.map(id => mesh.vertices.get(id)!.position)
+      for (const triangle of surfaceTriangles(points)) {
+        triangleToFace.push(face.id)
+        for (const corner of triangle) {
+          const p = points[corner]
+          const uv = face.uvs[corner] ?? new THREE.Vector2()
+          positions.push(p.x, p.y, p.z)
+          normals.push(fn.x, fn.y, fn.z)
+          uvs.push(uv.x, uv.y)
+          renderVertexToVertex.push(vIds[corner])
+          renderVertexToCorner.push(face.halfEdgeIds[corner])
+        }
       }
     }
 
     const geometry = new THREE.BufferGeometry()
+    geometry.userData.renderMapping = { triangleToFace, renderVertexToVertex, renderVertexToCorner }
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
     geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3))
     geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))

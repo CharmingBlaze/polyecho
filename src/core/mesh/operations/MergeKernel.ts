@@ -28,14 +28,15 @@ export class MergeKernel {
     targetPosition: THREE.Vector3,
     keepId?: number
   ): number {
-    if (vertexIds.length === 0) return 0
+    vertexIds = [...new Set(vertexIds)].filter(id => mesh.vertices.has(id))
+    if (vertexIds.length === 0 || ![targetPosition.x, targetPosition.y, targetPosition.z].every(Number.isFinite)) return 0
 
     const targetId = keepId ?? vertexIds[0]
     const targetVert = mesh.vertices.get(targetId)
     if (!targetVert) return 0
     targetVert.position.copy(targetPosition)
 
-    const vertSet = new Set(vertexIds)
+    const vertSet = new Set([...vertexIds, targetId])
 
     for (const [fId, face] of [...mesh.faces]) {
       if (!face.vertexIds.some(vid => vertSet.has(vid))) continue
@@ -44,9 +45,17 @@ export class MergeKernel {
       const matIdx = face.materialIndex
       const color = face.color
       mesh.removeFace(fId)
-      if (loop.vertexIds.length >= 3) {
-        mesh.addFace(loop.vertexIds, loop.uvs, matIdx, color, fId)
+      // A merge can pinch a polygon at nonadjacent corners. Split it into
+      // simple loops instead of writing repeated vertices into one face.
+      const split = (ids: number[], uvs: THREE.Vector2[]): { ids: number[]; uvs: THREE.Vector2[] }[] => {
+        for (let i = 0; i < ids.length; i++) {
+          const j = ids.indexOf(ids[i], i + 1)
+          if (j < 0) continue
+          return [...split(ids.slice(i, j), uvs.slice(i, j)), ...split([...ids.slice(0, i), ...ids.slice(j)], [...uvs.slice(0, i), ...uvs.slice(j)])]
+        }
+        return ids.length >= 3 ? [{ ids, uvs }] : []
       }
+      split(loop.vertexIds, loop.uvs).forEach((part, i) => mesh.addFace(part.ids, part.uvs, matIdx, color, i === 0 ? fId : undefined))
     }
 
     for (const vid of vertexIds) {
@@ -61,33 +70,33 @@ export class MergeKernel {
    * Welds vertices within `threshold`. Optional `onlyIds` limits the candidates.
    */
   static mergeByDistance(mesh: EditableMesh, threshold = 0.001, onlyIds?: number[]): number {
-    const allow = onlyIds && onlyIds.length > 0 ? new Set(onlyIds) : null
-    const vertices = Array.from(mesh.vertices.values()).filter(v => !allow || allow.has(v.id))
-    const merged = new Set<number>()
-    let mergeCount = 0
-
-    for (let i = 0; i < vertices.length; i++) {
-      const vA = vertices[i]
-      if (merged.has(vA.id) || !mesh.vertices.has(vA.id)) continue
-
-      const cluster: number[] = [vA.id]
-      for (let j = i + 1; j < vertices.length; j++) {
-        const vB = vertices[j]
-        if (merged.has(vB.id) || !mesh.vertices.has(vB.id)) continue
-        if (vA.position.distanceTo(vB.position) <= threshold) {
-          cluster.push(vB.id)
-          merged.add(vB.id)
+    if (!Number.isFinite(threshold) || threshold < 0) return 0
+    const allow = onlyIds ? new Set(onlyIds) : null
+    const vertices = [...mesh.vertices.values()].filter(v => !allow || allow.has(v.id))
+    const parent = vertices.map((_, i) => i)
+    const root = (i: number): number => {
+      while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i] }
+      return i
+    }
+    const buckets = new Map<string, number[]>()
+    const cell = threshold || 1e-12
+    vertices.forEach((v, i) => {
+      const xyz = [v.position.x, v.position.y, v.position.z].map(n => Math.floor(n / cell))
+      for (let x = -1; x <= 1; x++) for (let y = -1; y <= 1; y++) for (let z = -1; z <= 1; z++) {
+        for (const j of buckets.get(`${xyz[0] + x},${xyz[1] + y},${xyz[2] + z}`) ?? []) {
+          if (v.position.distanceToSquared(vertices[j].position) <= threshold * threshold) {
+            const a = root(i), b = root(j); parent[Math.max(a, b)] = Math.min(a, b)
+          }
         }
       }
-
-      if (cluster.length > 1) {
-        const live = mesh.vertices.get(vA.id)
-        if (!live) continue
-        this.mergeVertices(mesh, cluster, live.position.clone(), vA.id)
-        mergeCount += cluster.length - 1
-      }
+      const key = xyz.join(','); const list = buckets.get(key) ?? []; list.push(i); buckets.set(key, list)
+    })
+    const clusters = new Map<number, number[]>()
+    vertices.forEach((v, i) => { const r = root(i), list = clusters.get(r) ?? []; list.push(v.id); clusters.set(r, list) })
+    let count = 0
+    for (const ids of clusters.values()) if (ids.length > 1) {
+      this.mergeVertices(mesh, ids, mesh.vertices.get(ids[0])!.position.clone(), ids[0]); count += ids.length - 1
     }
-
-    return mergeCount
+    return count
   }
 }
