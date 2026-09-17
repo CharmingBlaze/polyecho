@@ -282,7 +282,9 @@ export class PrimitivePlacementOperator extends ModalOperator {
       const matrix = meshPlacementMatrix(meshObj)
       const vertMap = new Map<string, THREE.Vector3>(meshObj.vertices.map((v: any) => [v.id, new THREE.Vector3(v.position.x,v.position.y,v.position.z).applyMatrix4(matrix)]))
       for (const face of meshObj.faces) {
-        const points: THREE.Vector3[] = face.vertexIds.map((id: string) => vertMap.get(id)).filter(Boolean)
+        const points: THREE.Vector3[] = face.vertexIds
+          .map((id: string) => vertMap.get(id))
+          .filter((v): v is THREE.Vector3 => v !== undefined)
         for (const [a,b,c] of surfaceTriangles(points)) {
           const intersect = ray.intersectTriangle(points[a],points[b],points[c],false,new THREE.Vector3())
           if (!intersect) continue

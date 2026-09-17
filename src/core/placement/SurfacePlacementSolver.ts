@@ -6,7 +6,7 @@ export type PlacementOrientation = 'WORLD' | 'SURFACE'
 export interface PlacementHit {
   type: PlacementHitType
   objectId: string | null
-  faceId: number | null
+  faceId: string | null
   worldPosition: THREE.Vector3
   worldNormal: THREE.Vector3
 }
