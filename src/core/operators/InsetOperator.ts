@@ -74,6 +74,7 @@ export class InsetOperator extends ModalOperator {
   }
 
   confirm() {
+    if (!this.lastResult?.insetVertexIds.length) { this.cancel(); return }
     if (this.lastResult) {
       this.ctx.selectedFaceIds = [...this.lastResult.insetFaceIds]
       this.ctx.selectedVertIds = [...this.lastResult.insetVertexIds]
@@ -86,6 +87,6 @@ export class InsetOperator extends ModalOperator {
     if (this.isOutset) parts.push('Outset')
     if (!this.useBoundary) parts.push('No Boundary')
     const num = this.numericInput.text ? ` ${this.numericInput.text}` : ''
-    this.statusText = `Inset ${parts.join(' ')}${num}  (I individual, O outset, B boundary, Ctrl depth)`
+    this.statusText = this.lastResult?.error ?? `Inset ${parts.join(' ')}${num}  (I individual, O outset, B boundary, Ctrl depth)`
   }
 }

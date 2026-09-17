@@ -10,6 +10,8 @@ Front and Side show **XY / ZY grids** (the floor grid is edge-on in those camera
 
 ## How to block out
 
+For editable outlines, rounded volumes, paths, cross-sections, and structured quad surfaces, see [Shape Draw](SHAPE_DRAW.md).
+
 1. Drop a tracing photo on Front or Side (inspector **Refs**), or skip refs and sketch freehand.
 2. **F** or the amber outline button: **Poly Draw** — a new volume from a silhouette. Click on Front/Side (or Persp ground/face) to drop verts. **Shift** locks 45° from the last point. Close by clicking the dashed first-vert ring, double-click, **C / F / Enter**, or **Close loop**. Thickness starts **toward the camera** whether you wound the outline clockwise or the other way; drag toward or away, **F / C** or **Flip** if you meant the other direction. **N** before the first vert flips the draw plane. RMB / Backspace undoes a point. Confirm keeps a new `Block_N` mesh.
 3. **V** or the cyan vertex button: **Poly Build** — faces on the **active mesh**. Click to draw an outline (empty = new vert, cyan = reuse). The preview fill stays **inside** that loop. Click the first vert (green) / **C / F / Enter** to fill; concave shapes are ear-clipped into quads/tris like Poly Draw. Then draw the next outline. **Tab / R** reverses the current chain. Esc cancels; **Done** keeps new verts. Preview rubber-bands are dashed.
@@ -46,5 +48,8 @@ Enable **Continue strip** beside **Fill face** to keep the last drawn edge as th
 
 - `src/core/operators/PolyDrawOperator.ts`
 - `src/core/mesh/operations/PolyDrawKernel.ts`
+- `src/core/operators/ShapeDrawOperator.ts`
+- `src/core/shapeDraw/`
+- `src/components/viewport/ShapeDrawPanel.vue`
 - `src/types/reference.ts`
 - `src/components/inspector/ReferenceProps.vue`

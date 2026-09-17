@@ -47,6 +47,32 @@ function stubContext(onCommit: () => void, onCancel: () => void): OperatorContex
 }
 
 describe('OperatorManager', () => {
+  it('routes a rejected commit through cancel exactly once', () => {
+    const mgr = new OperatorManager(), op = new FakeOp()
+    let commits = 0, cancels = 0
+    const ctx = stubContext(() => commits++, () => cancels++)
+    ctx.validateCommit = () => false
+    mgr.start(op, ctx, { x: 0, y: 0 })
+    mgr.handleKeyDown(new KeyboardEvent('keydown', { key: 'Enter' }))
+    expect(commits).toBe(0)
+    expect(cancels).toBe(1)
+    expect(op.cancelled).toBe(1)
+    expect(mgr.activeOperator).toBeNull()
+    expect(mgr.state.value.active).toBe(false)
+    mgr.confirm()
+    expect(cancels).toBe(1)
+  })
+  it('releases modal state when Enter confirms inside the operator', () => {
+    const mgr = new OperatorManager(), op = new FakeOp()
+    let commits = 0
+    mgr.start(op, stubContext(() => { commits++ }, () => {}), { x: 0, y: 0 })
+    mgr.handleKeyDown(new KeyboardEvent('keydown', { key: 'Enter' }))
+    expect(commits).toBe(1)
+    expect(mgr.activeOperator).toBeNull()
+    expect(mgr.state.value.active).toBe(false)
+    mgr.confirm()
+    expect(commits).toBe(1)
+  })
   it('cancels the running operator when another starts, then confirm finishes', () => {
     const mgr = new OperatorManager()
     const first = new FakeOp()

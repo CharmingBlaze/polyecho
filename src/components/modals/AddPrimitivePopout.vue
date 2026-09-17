@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { PrimitiveType } from '../../core/primitives/PrimitiveTypes'
-import { PrimitivePlacementMode } from '../../core/operators/placement/PrimitivePlacementOperator'
+import { PrimitivePlacementOperator, PrimitivePlacementMode } from '../../core/operators/placement/PrimitivePlacementOperator'
+import { PrimitiveRegistry } from '../../core/primitives/PrimitiveRegistry'
+import { operatorManager } from '../../core/operators/OperatorManager'
 import { useLayoutStore } from '../../stores/layoutStore'
 import { useFloatingDrag } from '../../composables/useFloatingDrag'
 import { PlacementOrientation } from '../../core/placement/SurfacePlacementSolver'
@@ -27,6 +29,18 @@ const searchQuery = ref('')
 
 const placementMode = ref<PrimitivePlacementMode>(PrimitivePlacementMode.CAD_DRAW)
 const orientation = ref<PlacementOrientation>('SURFACE')
+const chosenType = ref<PrimitiveType>('BOX')
+const settings = ref<Record<string, any>>({ ...PrimitiveRegistry.get('BOX')!.defaultParameters })
+const fieldLabels: Record<string, string> = { heightSegments: 'Height divisions', segmentsX: 'Width divisions', segmentsY: 'Height divisions', segmentsZ: 'Depth divisions', sides: 'Sides', segments: 'Segments', rings: 'Rings', subdivisions: 'Subdivisions', capTop: 'Top cap', capBottom: 'Bottom cap', majorRadius: 'Ring radius', tubeRadius: 'Tube radius', majorSegments: 'Ring segments', tubeSegments: 'Tube segments', outerRadius: 'Outer radius', innerRadius: 'Inner radius', totalRun: 'Run', totalHeight: 'Height', openingWidth: 'Opening width', openingHeight: 'Opening height' }
+const fields = computed(() => Object.keys(settings.value).filter(key => placementMode.value === PrimitivePlacementMode.PLACE || /segments|rings|sides|steps|subdivisions|cap|filled|flip/i.test(key)))
+function updateSetting(key: string, event: Event) {
+  const input = event.target as HTMLInputElement
+  const value = input.type === 'checkbox' ? input.checked : Number(input.value)
+  if (typeof value === 'number' && !Number.isFinite(value)) return
+  settings.value[key] = value
+  const op = operatorManager.activeOperator
+  if (op instanceof PrimitivePlacementOperator && op.primitiveType === chosenType.value) op.setParameters(settings.value)
+}
 
 const { startDrag } = useFloatingDrag(position, { minX: 10, minY: 40, maxPadX: 320, maxPadY: 80 })
 
@@ -98,10 +112,12 @@ function close() {
 }
 
 function selectPrimitive(type: PrimitiveType) {
+  if (chosenType.value !== type) { chosenType.value = type; settings.value = { ...PrimitiveRegistry.get(type)!.defaultParameters } }
   requestPrimitivePlacement({
     type,
     mode: placementMode.value,
-    orientation: orientation.value
+    orientation: orientation.value,
+    parameters: { ...settings.value }
   })
 }
 
@@ -292,6 +308,18 @@ defineExpose({
           </div>
         </button>
       </div>
+
+      <details open class="border-t border-ui-borderSubtle pt-2">
+        <summary class="cursor-pointer text-ui-textPrimary font-semibold">{{ PrimitiveRegistry.get(chosenType)?.label }} settings</summary>
+        <div class="grid grid-cols-2 gap-2 mt-2 max-h-40 overflow-y-auto">
+          <label v-for="key in fields" :key="key" class="flex flex-col gap-1 text-[10px] text-ui-textMuted">
+            {{ fieldLabels[key] || key.charAt(0).toUpperCase() + key.slice(1) }}
+            <input v-if="typeof settings[key] === 'boolean'" type="checkbox" :checked="settings[key]" @change="updateSetting(key, $event)" />
+            <input v-else type="number" :value="settings[key]" :step="/segments|rings|sides|steps|subdivisions/i.test(key) ? 1 : 0.1" min="0" class="w-full bg-ui-input border border-ui-borderSubtle rounded px-2 py-1 text-ui-textPrimary" @change="updateSetting(key, $event)" />
+          </label>
+        </div>
+        <p class="text-[10px] text-ui-textMuted mt-2">{{ placementMode === PrimitivePlacementMode.PLACE ? 'Set exact dimensions, then click the surface to place.' : 'Draw the size. Type a size or height; scroll adjusts detail.' }}</p>
+      </details>
 
       <!-- Footer Info -->
       <div class="pt-1.5 border-t border-ui-borderSubtle text-[10px] text-ui-textMuted font-mono flex items-center justify-between">

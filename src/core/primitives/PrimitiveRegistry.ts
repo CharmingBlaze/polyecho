@@ -39,7 +39,7 @@ export class PrimitiveRegistry {
       label: 'Box',
       category: 'BASIC',
       creationKind: 'RECTANGULAR',
-      defaultParameters: { width: 1, depth: 1, height: 1 },
+      defaultParameters: { width: 1, depth: 1, height: 1, segmentsX: 1, segmentsY: 1, segmentsZ: 1 },
       builder: new BoxBuilder()
     })
 
@@ -48,7 +48,7 @@ export class PrimitiveRegistry {
       label: 'Plane',
       category: 'BASIC',
       creationKind: 'RECTANGULAR',
-      defaultParameters: { width: 2, depth: 2 },
+      defaultParameters: { width: 2, depth: 2, segmentsX: 1, segmentsZ: 1 },
       builder: new PlaneBuilder()
     })
 
@@ -75,7 +75,7 @@ export class PrimitiveRegistry {
       label: 'Cylinder',
       category: 'BASIC',
       creationKind: 'RADIAL_HEIGHT',
-      defaultParameters: { radius: 0.5, height: 1.0, sides: 8, capTop: true, capBottom: true },
+      defaultParameters: { radius: 0.5, height: 1.0, sides: 8, heightSegments: 1, capTop: true, capBottom: true },
       builder: new CylinderBuilder()
     })
 

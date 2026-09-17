@@ -11,6 +11,7 @@ export interface OperatorManagerState {
 export class OperatorManager {
   private static instance: OperatorManager
   public activeOperator: ModalOperator | null = null
+  private callbacks = new WeakMap<OperatorContext, Pick<OperatorContext, 'onCommit' | 'onCancel'>>()
 
   public state = ref<OperatorManagerState>({
     active: false,
@@ -32,7 +33,33 @@ export class OperatorManager {
     }
 
     this.activeOperator = operator
+    // Operators can finish through their own keyboard handlers as well as the
+    // manager's buttons. Both paths must release the modal state exactly once.
+    let callbacks = this.callbacks.get(context)
+    if (!callbacks) {
+      callbacks = { onCommit: context.onCommit, onCancel: context.onCancel }
+      this.callbacks.set(context, callbacks)
+    }
+    const original = callbacks
+    let finished = false
+    context.onCommit = name => {
+      if (finished) return
+      if (context.validateCommit && !context.validateCommit()) {
+        operator.cancel()
+        return
+      }
+      finished = true
+      if (this.activeOperator === operator) this.finish()
+      original.onCommit(name)
+    }
+    context.onCancel = () => {
+      if (finished) return
+      finished = true
+      if (this.activeOperator === operator) this.finish()
+      original.onCancel()
+    }
     this.activeOperator.begin(context, pointerPos)
+    if (this.activeOperator !== operator) return
 
     this.state.value.active = true
     this.state.value.operatorName = operator.name

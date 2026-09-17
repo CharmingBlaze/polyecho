@@ -5,6 +5,8 @@ import { ExtrudeKernel, ExtrudeResult } from '../mesh/operations/ExtrudeKernel'
 import { PolyDrawKernel, DrawPlane, DrawViewKind } from '../mesh/operations/PolyDrawKernel'
 import { TransformSolver } from '../transform/TransformSolver'
 import { PivotManager } from '../transform/PivotManager'
+import type { MeshSnapshot } from '../mesh/MeshKernel'
+import { bevelEdges } from '../mesh/operations/EdgeBevelKernel'
 
 export type PolyDrawPhase = 'draw' | 'extrude'
 
@@ -19,6 +21,29 @@ export class PolyDrawOperator extends ModalOperator {
   public screenPoints: THREE.Vector2[] = []
   public hoverScreen: THREE.Vector2 | null = null
   public isClosing = false
+  public options = { depth: 0, taper: 1, centered: false, bevel: 0, segments: 1, profile: 0 }
+  public optionsError = ''
+  public depthLocked = false
+  private extrusionSnapshot: MeshSnapshot | null = null
+
+  setOption(key: keyof PolyDrawOperator['options'], value: number | boolean) {
+    if (this.phase !== 'extrude') return
+    if (key === 'centered') this.options.centered = Boolean(value)
+    else {
+      const n = Number(value)
+      if (!Number.isFinite(n)) return
+      if (key === 'depth') this.options.depth = Math.max(-1000, Math.min(1000, n))
+      if (key === 'taper') this.options.taper = Math.max(0.05, Math.min(3, n))
+      if (key === 'bevel') this.options.bevel = Math.max(0, Math.min(100, n))
+      if (key === 'segments') this.options.segments = Math.max(1, Math.min(8, Math.round(n)))
+      if (key === 'profile') this.options.profile = Math.max(0, Math.min(1, n))
+    }
+    this.depthLocked = true
+    this.numericInput.reset()
+    this.evaluate()
+    this.ctx.onUpdatePreview()
+    this.updateStatus()
+  }
 
   private plane!: DrawPlane
   private planeLock: DrawViewKind | null = null
@@ -43,6 +68,10 @@ export class PolyDrawOperator extends ModalOperator {
     this.points = []
     this.hoverPoint = null
     this.extrudeResult = null
+    this.extrusionSnapshot = null
+    this.options = { depth: 0, taper: 1, centered: false, bevel: 0, segments: 1, profile: 0 }
+    this.optionsError = ''
+    this.depthLocked = false
     this.planeLock = null
     this.planeLocked = false
     this.perspMode = 'view'
@@ -133,13 +162,39 @@ export class PolyDrawOperator extends ModalOperator {
     if (this.isShiftHeld && numVal === null) dist *= 0.2
     if (this.isCtrlHeld && numVal === null) dist = this.snapManager.snapLinear(dist, 0.5)
 
+    if (this.depthLocked) dist = this.options.depth
+    this.options.depth = dist
+    if (this.extrusionSnapshot) this.ctx.mesh.restoreSnapshot(this.extrusionSnapshot)
     const delta = moveDir.multiplyScalar(dist)
+    if (this.options.centered) {
+      for (const [id, vertex] of this.ctx.mesh.vertices) {
+        const initial = this.initialVertices.get(id)
+        if (initial) vertex.position.copy(initial).addScaledVector(delta, -0.5)
+      }
+    }
     for (const vId of this.extrudeResult.newVertexIds) {
       const initPos = this.initialVertices.get(vId)
       const v = this.ctx.mesh.vertices.get(vId)
-      if (initPos && v) v.position.copy(initPos).add(delta)
+      if (initPos && v) v.position.copy(initPos).sub(this.pivot).multiplyScalar(this.options.taper)
+        .add(this.pivot).addScaledVector(delta, this.options.centered ? 0.5 : 1)
     }
     this.ctx.mesh.recalculateNormals()
+    this.optionsError = ''
+    if (this.options.bevel > 0 && Math.abs(dist) > 0.00001) {
+      const edges = [...this.ctx.mesh.edges.values()].filter(edge => {
+        if (edge.faceIds.length !== 2) return false
+        const a = this.ctx.mesh.faces.get(edge.faceIds[0])!
+        const b = this.ctx.mesh.faces.get(edge.faceIds[1])!
+        return a.normal.dot(b.normal) < 0.9999
+      }).map(edge => edge.id)
+      const result = bevelEdges(this.ctx.mesh, edges, {
+        width: this.options.bevel, segments: this.options.segments,
+        profile: this.options.profile, clampOverlap: true,
+      })
+      this.optionsError = result.error ?? ''
+    }
+    this.ctx.selectedFaceIds = [...this.ctx.mesh.faces.keys()]
+    PolyDrawKernel.applyBoxUvs(this.ctx.mesh)
     this.updateSolidPreview()
   }
 
@@ -300,7 +355,7 @@ export class PolyDrawOperator extends ModalOperator {
       return
     }
     const num = this.numericInput.text ? `: ${this.numericInput.text}m` : ''
-    this.statusText = `Thickness${num} · drag either way · F/C flips · LMB/Enter confirm`
+    this.statusText = this.optionsError || `Thickness${num} · ${this.depthLocked ? 'live options' : 'drag either way'} · F/C flips · LMB/Enter confirm`
   }
 
   flipExtrude() {
@@ -352,6 +407,7 @@ export class PolyDrawOperator extends ModalOperator {
     }
 
     this.startRay.copy(this.pointerRay(this.currentMouse))
+    this.extrusionSnapshot = this.ctx.mesh.createSnapshot()
     this.ctx.selectedFaceIds = [...this.extrudeResult.extrudedFaceIds]
     this.updateSolidPreview()
     this.ctx.onUpdatePreview()

@@ -2,77 +2,46 @@ import * as THREE from 'three'
 import { EditableMesh } from '../../mesh/MeshKernel'
 import { BoxParameters, PlaneParameters, PyramidParameters, WedgeParameters, IPrimitiveBuilder } from '../PrimitiveTypes'
 
+function gridSurface(mesh: EditableMesh, vertices: Map<string, number>, origin: THREE.Vector3, u: THREE.Vector3, v: THREE.Vector3, nx: number, ny: number) {
+  const ids: number[][] = []
+  for (let y = 0; y <= ny; y++) {
+    ids[y] = []
+    for (let x = 0; x <= nx; x++) {
+      const p = origin.clone().addScaledVector(u, x / nx).addScaledVector(v, y / ny)
+      const key = p.toArray().map(n => n.toFixed(10)).join(',')
+      let id = vertices.get(key)
+      if (id === undefined) { id = mesh.addVertex(p).id; vertices.set(key, id) }
+      ids[y][x] = id
+    }
+  }
+  for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) mesh.addFace(
+    [ids[y][x], ids[y][x + 1], ids[y + 1][x + 1], ids[y + 1][x]],
+    [new THREE.Vector2(x/nx,y/ny),new THREE.Vector2((x+1)/nx,y/ny),new THREE.Vector2((x+1)/nx,(y+1)/ny),new THREE.Vector2(x/nx,(y+1)/ny)])
+}
+const divisions = (n?: number) => Math.max(1, Math.min(32, Math.round(n || 1)))
+
 export class BoxBuilder implements IPrimitiveBuilder<BoxParameters> {
   create(params: BoxParameters): EditableMesh {
-    const mesh = new EditableMesh()
-    const w = Math.abs(params.width) || 1
-    const d = Math.abs(params.depth) || 1
-    const h = Math.abs(params.height) || 1
-
-    const hx = w / 2
-    const hz = d / 2
-    const hy = h / 2
-
-    // 8 Vertices
-    const v0 = mesh.addVertex(new THREE.Vector3(-hx, -hy,  hz)).id // 0: -X -Y +Z
-    const v1 = mesh.addVertex(new THREE.Vector3( hx, -hy,  hz)).id // 1: +X -Y +Z
-    const v2 = mesh.addVertex(new THREE.Vector3( hx,  hy,  hz)).id // 2: +X +Y +Z
-    const v3 = mesh.addVertex(new THREE.Vector3(-hx,  hy,  hz)).id // 3: -X +Y +Z
-    const v4 = mesh.addVertex(new THREE.Vector3(-hx, -hy, -hz)).id // 4: -X -Y -Z
-    const v5 = mesh.addVertex(new THREE.Vector3( hx, -hy, -hz)).id // 5: +X -Y -Z
-    const v6 = mesh.addVertex(new THREE.Vector3( hx,  hy, -hz)).id // 6: +X +Y -Z
-    const v7 = mesh.addVertex(new THREE.Vector3(-hx,  hy, -hz)).id // 7: -X +Y -Z
-
-    const uvs = [
-      new THREE.Vector2(0, 0),
-      new THREE.Vector2(1, 0),
-      new THREE.Vector2(1, 1),
-      new THREE.Vector2(0, 1)
-    ]
-
-    // 6 Quad faces with correct CCW outward winding
-    // Front (+Z)
-    mesh.addFace([v0, v1, v2, v3], uvs, 0)
-    // Back (-Z)
-    mesh.addFace([v5, v4, v7, v6], uvs, 0)
-    // Top (+Y)
-    mesh.addFace([v3, v2, v6, v7], uvs, 0)
-    // Bottom (-Y)
-    mesh.addFace([v4, v5, v1, v0], uvs, 0)
-    // Right (+X)
-    mesh.addFace([v1, v5, v6, v2], uvs, 0)
-    // Left (-X)
-    mesh.addFace([v4, v0, v3, v7], uvs, 0)
-
-    mesh.recalculateNormals()
-    return mesh
+    const mesh = new EditableMesh(), vertices = new Map<string, number>()
+    const w = Math.abs(params.width) || 1, h = Math.abs(params.height) || 1, d = Math.abs(params.depth) || 1
+    const x = divisions(params.segmentsX), y = divisions(params.segmentsY), z = divisions(params.segmentsZ)
+    const V = (a:number,b:number,c:number) => new THREE.Vector3(a,b,c)
+    gridSurface(mesh,vertices,V(-w/2,-h/2,d/2),V(w,0,0),V(0,h,0),x,y)
+    gridSurface(mesh,vertices,V(w/2,-h/2,-d/2),V(-w,0,0),V(0,h,0),x,y)
+    gridSurface(mesh,vertices,V(-w/2,h/2,d/2),V(w,0,0),V(0,0,-d),x,z)
+    gridSurface(mesh,vertices,V(-w/2,-h/2,-d/2),V(w,0,0),V(0,0,d),x,z)
+    gridSurface(mesh,vertices,V(w/2,-h/2,d/2),V(0,0,-d),V(0,h,0),z,y)
+    gridSurface(mesh,vertices,V(-w/2,-h/2,-d/2),V(0,0,d),V(0,h,0),z,y)
+    mesh.recalculateNormals(); return mesh
   }
 }
 
 export class PlaneBuilder implements IPrimitiveBuilder<PlaneParameters> {
   create(params: PlaneParameters): EditableMesh {
     const mesh = new EditableMesh()
-    const w = Math.abs(params.width) || 1
-    const d = Math.abs(params.depth) || 1
-
-    const hx = w / 2
-    const hz = d / 2
-
-    const v0 = mesh.addVertex(new THREE.Vector3(-hx, 0,  hz)).id
-    const v1 = mesh.addVertex(new THREE.Vector3( hx, 0,  hz)).id
-    const v2 = mesh.addVertex(new THREE.Vector3( hx, 0, -hz)).id
-    const v3 = mesh.addVertex(new THREE.Vector3(-hx, 0, -hz)).id
-
-    const uvs = [
-      new THREE.Vector2(0, 0),
-      new THREE.Vector2(1, 0),
-      new THREE.Vector2(1, 1),
-      new THREE.Vector2(0, 1)
-    ]
-
-    mesh.addFace([v0, v1, v2, v3], uvs, 0)
-    mesh.recalculateNormals()
-    return mesh
+    const w = Math.abs(params.width) || 1, d = Math.abs(params.depth) || 1
+    gridSurface(mesh,new Map(),new THREE.Vector3(-w/2,0,d/2),new THREE.Vector3(w,0,0),new THREE.Vector3(0,0,-d),divisions(params.segmentsX),divisions(params.segmentsZ))
+    mesh.recalculateNormals(); return mesh
   }
 }
 

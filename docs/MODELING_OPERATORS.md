@@ -146,8 +146,9 @@ Their mesh is vertex-dict faces + UV-by-vertex-id. **Do not** replace `MeshObjec
 
 ---
 
-## Two-Mesh Bridge Rule
+## Resident Kernel Boundary
 
 - **Do NOT** run interactive modal operations directly on `MeshObject` strings.
-- **Always** convert to `EditableMesh` inside `startModalOperator()`, pass `strToNum` and `numToStr` maps, and write back via `MeshBridge.editableMeshToMeshObject()`.
-- This ensures topological operations (splits, merges, extrusions) run with $O(1)$ half-edge pointers and zero garbage collection overhead.
+- Acquire existing meshes through `projectStore.acquireEditableMesh()`, retain both ID maps, and publish projections with `publishEditableMesh()`. Primitive and procedural shape construction use isolated kernels.
+- Preview publication bumps the render revision without scheduling an autosave per pointer move. Confirm validates; invalid topology takes the normal cancel path.
+- `MeshBridge` remains the import/projection boundary. Legacy document edits are synchronized on the next acquire until the remaining migration is complete.

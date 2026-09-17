@@ -5,6 +5,9 @@ import { MeshBridge } from '../mesh/MeshBridge'
 
 export class PrimitiveGhost {
   public group: THREE.Group
+  private geometryKey = ''
+  private lift = 0
+  public faceCount = 0
   private meshInstance: THREE.Mesh
   private wireframeInstance: THREE.LineSegments
   private fillMaterial: THREE.MeshBasicMaterial
@@ -51,22 +54,29 @@ export class PrimitiveGhost {
     rotation = new THREE.Quaternion(),
     scale = new THREE.Vector3(1, 1, 1)
   ) {
+    const key = JSON.stringify([type, params])
+    if (this.geometryKey !== key) {
+    this.geometryKey = key
     const editableMesh = PrimitiveBuilder.create(type, params)
+    this.faceCount = editableMesh.faces.size
     const geom = MeshBridge.editableMeshToThreeGeometry(editableMesh)
     geom.computeBoundingBox()
     const minY = geom.boundingBox?.min.y ?? 0
-    const lift = Number.isFinite(minY) ? -minY : 0
+    this.lift = Number.isFinite(minY) ? -minY : 0
 
     this.meshInstance.geometry.dispose()
     this.meshInstance.geometry = geom
 
     this.wireframeInstance.geometry.dispose()
-    this.wireframeInstance.geometry = new THREE.WireframeGeometry(geom)
+    const lines: THREE.Vector3[] = []
+    for (const edge of editableMesh.edges.values()) lines.push(editableMesh.vertices.get(edge.v1)!.position, editableMesh.vertices.get(edge.v2)!.position)
+    this.wireframeInstance.geometry = new THREE.BufferGeometry().setFromPoints(lines)
+    }
 
     this.group.quaternion.copy(rotation)
     this.group.scale.copy(scale)
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(rotation)
-    this.group.position.copy(restPosition).addScaledVector(up, lift)
+    this.group.position.copy(restPosition).addScaledVector(up, this.lift * scale.y)
     this.group.visible = true
   }
 

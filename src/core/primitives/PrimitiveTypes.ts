@@ -54,6 +54,7 @@ export interface IcosphereParameters {
 }
 
 export interface CylinderParameters {
+  heightSegments?: number
   radius: number
   height: number
   sides?: number

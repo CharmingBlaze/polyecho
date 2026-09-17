@@ -58,7 +58,8 @@ export class ExtrudeOperator extends ModalOperator {
 
     const worldMat = this.ctx.objectMatrix?.clone() ?? new THREE.Matrix4()
     this.worldToLocal.copy(worldMat).invert()
-    this.normal.copy(this.extrudeResult.regionNormal).transformDirection(worldMat).normalize()
+    const normalMatrix = new THREE.Matrix3().getNormalMatrix(worldMat)
+    this.normal.copy(this.extrudeResult.regionNormal).applyMatrix3(normalMatrix).normalize()
     if (this.normal.lengthSq() < 1e-8) this.normal.set(0, 1, 0)
 
     this.pivot.set(0, 0, 0)
@@ -98,6 +99,15 @@ export class ExtrudeOperator extends ModalOperator {
         const hitStart = TransformSolver.rayPlaneIntersect(this.startRay, this.pivot, this.ctx.camera)
         const hitCur = TransformSolver.rayPlaneIntersect(this.currentRay, this.pivot, this.ctx.camera)
         if (hitStart && hitCur) dist = hitCur.sub(hitStart).dot(moveDir)
+        // In a face-on view the normal projects to a point. Vertical drag still
+        // controls extrusion, scaled to the visible world size at the pivot.
+        if (Math.abs(dist) < 1e-6) {
+          const height = this.ctx.viewportElement.clientHeight || this.ctx.viewportElement.getBoundingClientRect().height || 600
+          const cam = this.ctx.camera as THREE.OrthographicCamera & THREE.PerspectiveCamera
+          const span = cam.isOrthographicCamera ? (cam.top - cam.bottom) / cam.zoom
+            : 2 * this.pivot.distanceTo(cam.position) * Math.tan(THREE.MathUtils.degToRad(cam.fov / 2))
+          dist = (this.startMouse.y - this.currentMouse.y) * span / height
+        }
       }
     }
 
@@ -111,14 +121,16 @@ export class ExtrudeOperator extends ModalOperator {
     for (const vId of this.extrudeResult.newVertexIds) {
       const rest = restWorld.get(vId)
       if (!rest) continue
-      this.writeWorldPos(vId, rest.clone().add(delta))
+      const localNormal = this.individual && this.constraint === 'FREE' ? this.extrudeResult.vertexNormals?.get(vId) : undefined
+      const movement = localNormal ? localNormal.clone().applyMatrix3(normalMatrix).normalize().multiplyScalar(dist) : delta
+      this.writeWorldPos(vId, rest.clone().add(movement))
     }
 
     this.ctx.mesh.recalculateNormals()
   }
 
   confirm() {
-    if (!this.extrudeResult || this.extrudeResult.newVertexIds.length === 0) {
+    if (!this.extrudeResult || this.extrudeResult.newVertexIds.length === 0 || Math.abs(this.lastDist) < 1e-9) {
       this.cancel()
       return
     }

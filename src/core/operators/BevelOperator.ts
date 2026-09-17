@@ -1,5 +1,6 @@
 import { ModalOperator } from './ModalOperator'
-import { BevelKernel, BevelResult, bevelProfileLabel, bevelProfileValue } from '../mesh/operations/BevelKernel'
+import { BevelResult, bevelProfileLabel, bevelProfileValue } from '../mesh/operations/BevelKernel'
+import { bevelEdges } from '../mesh/operations/EdgeBevelKernel'
 
 export class BevelOperator extends ModalOperator {
   readonly name = 'Bevel'
@@ -61,7 +62,10 @@ export class BevelOperator extends ModalOperator {
       width = this.snapManager.snapLinear(width, 0.05)
     }
 
-    this.lastResult = BevelKernel.bevelFaces(this.ctx.mesh, this.ctx.selectedFaceIds, {
+    const edgeIds = this.ctx.selectedEdgeIds.length ? this.ctx.selectedEdgeIds
+      : this.ctx.selectedFaceIds.length ? [...new Set(this.ctx.selectedFaceIds.flatMap(id => this.ctx.mesh.faces.get(id)?.edgeIds ?? []))]
+        : [...this.ctx.mesh.edges.values()].filter(e => this.ctx.selectedVertIds.includes(e.v1) && this.ctx.selectedVertIds.includes(e.v2)).map(e => e.id)
+    this.lastResult = bevelEdges(this.ctx.mesh, edgeIds, {
       width,
       segments: this.segments,
       profile: this.profile,
@@ -70,6 +74,7 @@ export class BevelOperator extends ModalOperator {
   }
 
   confirm() {
+    if (!this.lastResult?.beveledFaceIds.length) { this.cancel(); return }
     if (this.lastResult) {
       this.ctx.selectedFaceIds = [...this.lastResult.beveledFaceIds]
       this.ctx.selectedVertIds = [...this.lastResult.beveledVertexIds]
@@ -80,6 +85,6 @@ export class BevelOperator extends ModalOperator {
   updateStatus() {
     const num = this.numericInput.text ? ` Width: ${this.numericInput.text}` : ''
     const shape = bevelProfileLabel(this.profile)
-    this.statusText = `Bevel${num} | Profile: ${shape} (P) | Segments: ${this.segments} (scroll)`
+    this.statusText = this.lastResult?.error ?? `Bevel${num} | Profile: ${shape} (P) | Segments: ${this.segments} (scroll)`
   }
 }

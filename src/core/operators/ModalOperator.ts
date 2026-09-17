@@ -41,6 +41,8 @@ export interface OperatorContext {
   objectEuler?: THREE.Euler
   onUpdatePreview: () => void
   onCommit: (actionName: string) => void
+  /** Rejected commits follow the operator's normal cancel/rollback path. */
+  validateCommit?: () => boolean
   onCancel: () => void
   /** Document id currently bound to `mesh` (Knife / Loop Cut retarget). */
   targetMeshId?: string

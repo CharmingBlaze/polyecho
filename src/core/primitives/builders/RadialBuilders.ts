@@ -15,65 +15,28 @@ import {
 export class CylinderBuilder implements IPrimitiveBuilder<CylinderParameters> {
   create(params: CylinderParameters): EditableMesh {
     const mesh = new EditableMesh()
-    const r = Math.abs(params.radius) || 0.5
-    const h = Math.abs(params.height) || 1.0
-    const sides = Math.max(3, params.sides || 8)
-    const capTop = params.capTop !== false
-    const capBottom = params.capBottom !== false
-
-    const hy = h / 2
-    const topVerts: number[] = []
-    const botVerts: number[] = []
-
-    for (let i = 0; i < sides; i++) {
-      const theta = (i / sides) * Math.PI * 2
-      const x = Math.cos(theta) * r
-      const z = Math.sin(theta) * r
-
-      topVerts.push(mesh.addVertex(new THREE.Vector3(x, hy, z)).id)
-      botVerts.push(mesh.addVertex(new THREE.Vector3(x, -hy, z)).id)
+    const radius = Math.abs(params.radius) || 0.5, height = Math.abs(params.height) || 1
+    const sides = Math.max(3, Math.min(64, Math.round(params.sides || 8)))
+    const levels = Math.max(1, Math.min(64, Math.round(params.heightSegments || 1)))
+    const rings: number[][] = []
+    for (let j = 0; j <= levels; j++) {
+      rings[j] = []
+      for (let i = 0; i < sides; i++) {
+        const angle = i / sides * Math.PI * 2
+        rings[j].push(mesh.addVertex(new THREE.Vector3(radius * Math.cos(angle), height * (j / levels - 0.5), -radius * Math.sin(angle))).id)
+      }
     }
-
-    // Side Quad Faces
-    for (let i = 0; i < sides; i++) {
+    for (let j = 0; j < levels; j++) for (let i = 0; i < sides; i++) {
       const next = (i + 1) % sides
-      const v0 = botVerts[i]
-      const v1 = botVerts[next]
-      const v2 = topVerts[next]
-      const v3 = topVerts[i]
-
-      const u0 = i / sides
-      const u1 = (i + 1) / sides
-      const uvs = [
-        new THREE.Vector2(u0, 0),
-        new THREE.Vector2(u1, 0),
-        new THREE.Vector2(u1, 1),
-        new THREE.Vector2(u0, 1)
-      ]
-      mesh.addFace([v0, v1, v2, v3], uvs, 0)
+      mesh.addFace([rings[j][i],rings[j][next],rings[j+1][next],rings[j+1][i]],
+        [new THREE.Vector2(i/sides,j/levels),new THREE.Vector2((i+1)/sides,j/levels),new THREE.Vector2((i+1)/sides,(j+1)/levels),new THREE.Vector2(i/sides,(j+1)/levels)])
     }
-
-    // Top Cap n-gon
-    if (capTop) {
-      const topUvs = topVerts.map((_, i) => {
-        const theta = (i / sides) * Math.PI * 2
-        return new THREE.Vector2(0.5 + 0.5 * Math.cos(theta), 0.5 + 0.5 * Math.sin(theta))
-      })
-      mesh.addFace([...topVerts], topUvs, 0)
-    }
-
-    // Bottom Cap n-gon (reversed winding for outward normal)
-    if (capBottom) {
-      const reversedBot = [...botVerts].reverse()
-      const botUvs = reversedBot.map((_, i) => {
-        const theta = (i / sides) * Math.PI * 2
-        return new THREE.Vector2(0.5 + 0.5 * Math.cos(theta), 0.5 + 0.5 * Math.sin(theta))
-      })
-      mesh.addFace(reversedBot, botUvs, 0)
-    }
-
-    mesh.recalculateNormals()
-    return mesh
+    const cap = (ids: number[]) => mesh.addFace(ids,ids.map(id => {
+      const p = mesh.vertices.get(id)!.position; return new THREE.Vector2(0.5+p.x/(2*radius),0.5+p.z/(2*radius))
+    }))
+    if (params.capTop !== false) cap(rings[levels])
+    if (params.capBottom !== false) cap([...rings[0]].reverse())
+    mesh.recalculateNormals(); return mesh
   }
 }
 

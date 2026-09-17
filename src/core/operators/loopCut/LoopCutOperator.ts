@@ -4,6 +4,8 @@ import { LoopCutKernel } from '../../mesh/operations/LoopCutKernel'
 import { ScreenGeometry } from '../../geometry/ScreenGeometry'
 import { adoptEditMeshUnderPointer, copyObjectMatrix } from '../adoptEditMesh'
 import { operatorManager } from '../OperatorManager'
+import { surfaceTriangles, perspectiveEdgeParameter } from '../../geometry/SurfaceGeometry'
+import { MeshValidator } from '../../mesh/MeshValidator'
 
 export enum LoopCutState {
   FINDING_RING = 'FINDING_RING',
@@ -29,6 +31,8 @@ export class LoopCutOperator extends ModalOperator {
   public previewSegments: LoopCutPreviewSegment[] = []
 
   private objectWorld = new THREE.Matrix4()
+  private slideStart = 0.5
+  public error = ''
 
   begin(ctx: OperatorContext, startPointer: { x: number; y: number }) {
     super.begin(ctx, startPointer)
@@ -45,46 +49,73 @@ export class LoopCutOperator extends ModalOperator {
 
   pointerMove(event: PointerEvent) {
     this.currentMouse = { x: event.clientX, y: event.clientY }
+    this.isShiftHeld = event.shiftKey
+    this.isCtrlHeld = event.ctrlKey
     this.updateHover(event.shiftKey, event.ctrlKey)
   }
 
   wheel(event: WheelEvent): boolean {
     event.preventDefault()
-    this.cutCount = event.deltaY < 0
-      ? Math.min(16, this.cutCount + 1)
-      : Math.max(1, this.cutCount - 1)
-    this.updatePreviewSegments()
-    this.updateStatus()
+    if (this.loopState === LoopCutState.FINDING_RING) this.setCutCount(this.cutCount + (event.deltaY < 0 ? 1 : -1))
     return true
   }
 
   keyDown(event: KeyboardEvent): boolean {
-    const key = event.key
-    if (key === 'Enter') {
+    if (event.key === 'Escape') { event.preventDefault(); operatorManager.cancel(); return true }
+    if (event.key === 'Enter') { event.preventDefault(); this.advance(); return true }
+    if (!event.ctrlKey && !event.metaKey && this.numericInput.handleKey(event.key)) {
       event.preventDefault()
-      if (this.hoveredEdgeId !== null) operatorManager.confirm()
-      return true
-    }
-    if (key === 'Escape') {
-      event.preventDefault()
-      operatorManager.cancel()
+      const value = this.numericInput.getValue()
+      if (this.loopState === LoopCutState.FINDING_RING && value !== null) this.setCutCount(value, false)
+      else if (this.loopState === LoopCutState.SLIDING) {
+        this.slideFactor = value === null ? 0.5 : 0.5 + Math.max(-0.998,Math.min(0.998,value)) / 2
+        this.refresh()
+      }
       return true
     }
     return false
   }
 
+  public setCutCount(value: number, resetInput = true) {
+    if (!Number.isFinite(value) || this.loopState !== LoopCutState.FINDING_RING) return
+    this.cutCount = Math.max(1,Math.min(64,Math.round(value)))
+    if (resetInput) this.numericInput.reset()
+    this.refresh()
+  }
+
+  public advance() {
+    if (this.hoveredEdgeId === null || !this.ringEdgeIds.length) return
+    if (this.loopState === LoopCutState.FINDING_RING) {
+      this.loopState = LoopCutState.SLIDING
+      this.slideStart = this.pointerParameter()
+      this.slideFactor = 0.5
+      this.numericInput.reset()
+      this.refresh()
+    } else operatorManager.confirm()
+  }
+
+  public centerAndConfirm() {
+    if (!this.ringEdgeIds.length) return
+    this.slideFactor = 0.5
+    operatorManager.confirm()
+  }
+
   handlePointerDown(button: number): boolean {
     if (button === 0) {
-      this.updateHover(this.isShiftHeld, this.isCtrlHeld)
-      if (this.hoveredEdgeId !== null) operatorManager.confirm()
+      this.updateHover(this.isShiftHeld,this.isCtrlHeld)
+      this.advance()
       return true
     }
     if (button === 2) {
-      operatorManager.cancel()
+      if (this.loopState === LoopCutState.SLIDING) this.centerAndConfirm()
+      else operatorManager.cancel()
       return true
     }
     return false
   }
+
+  private refresh() { this.updatePreviewSegments(); this.updateStatus(); this.ctx.onUpdatePreview() }
+  public relayout() { this.refresh() }
 
   private overlayPointer(client: { x: number; y: number }) {
     const p = ScreenGeometry.pointerInView(client, this.ctx.viewportElement)
@@ -118,65 +149,29 @@ export class LoopCutOperator extends ModalOperator {
   }
 
   private updateHover(shiftKey: boolean, ctrlKey: boolean) {
-    if (adoptEditMeshUnderPointer(this.ctx, this.currentMouse, { edgePx: 48, vertexPx: 0 })) {
-      copyObjectMatrix(this.ctx, this.objectWorld)
-      this.initialSnapshot = this.ctx.mesh.createSnapshot()
-      this.hoveredEdgeId = null
-    }
-
-    this.findHoveredEdgeAndRing()
-    this.updateSlideFromPointer(shiftKey, ctrlKey)
-    this.updatePreviewSegments()
-    this.updateStatus()
-  }
-
-  private findHoveredEdgeAndRing() {
-    const overlay = this.overlayPointer(this.currentMouse)
-    let closestEdgeId: number | null = null
-    let minScreenDist = 64
-
-    for (const [eId, edge] of this.ctx.mesh.edges) {
-      const p1 = this.ctx.mesh.vertices.get(edge.v1)?.position
-      const p2 = this.ctx.mesh.vertices.get(edge.v2)?.position
-      if (!p1 || !p2) continue
-      const { distance } = ScreenGeometry.distancePointToSegment2D(
-        overlay,
-        this.toOverlay(p1),
-        this.toOverlay(p2)
-      )
-      if (distance < minScreenDist) {
-        minScreenDist = distance
-        closestEdgeId = eId
+    if (!ScreenGeometry.isInPane(this.currentMouse,this.ctx.viewportElement,this.ctx.quadrant)) return
+    if (this.loopState === LoopCutState.FINDING_RING) {
+      if (adoptEditMeshUnderPointer(this.ctx, this.currentMouse, { edgePx: 16, vertexPx: 0 })) {
+        copyObjectMatrix(this.ctx, this.objectWorld)
+        this.initialSnapshot = this.ctx.mesh.createSnapshot()
       }
-    }
-
-    if (closestEdgeId === null) {
-      closestEdgeId = this.closestEdgeOnHitFace()
-    }
-
-    this.hoveredEdgeId = closestEdgeId
-    this.ringEdgeIds = closestEdgeId !== null
-      ? LoopCutKernel.ringEdges(this.ctx.mesh, closestEdgeId)
-      : []
+      this.hoveredEdgeId = this.closestEdgeOnHitFace()
+      this.ringEdgeIds = this.hoveredEdgeId === null ? [] : LoopCutKernel.ringEdges(this.ctx.mesh,this.hoveredEdgeId)
+      this.slideFactor = 0.5
+    } else this.updateSlideFromPointer(shiftKey,ctrlKey)
+    this.refresh()
   }
 
   private closestEdgeOnHitFace(): number | null {
     const ray = this.localRayFromClient(this.currentMouse)
-    const cull = this.objectWorld.determinant() >= 0
     let closestDist = Infinity
     let hitFaceId: number | null = null
     const tmp = new THREE.Vector3()
 
     for (const [fId, face] of this.ctx.mesh.faces) {
-      const ids = face.vertexIds
-      if (ids.length < 3) continue
-      const p0 = this.ctx.mesh.vertices.get(ids[0]!)?.position
-      if (!p0) continue
-      for (let i = 1; i < ids.length - 1; i++) {
-        const p1 = this.ctx.mesh.vertices.get(ids[i]!)?.position
-        const p2 = this.ctx.mesh.vertices.get(ids[i + 1]!)?.position
-        if (!p1 || !p2) continue
-        const hit = ray.intersectTriangle(p0, p1, p2, cull, tmp)
+      const positions = face.vertexIds.map(id => this.ctx.mesh.vertices.get(id)!.position)
+      for (const [a,b,c] of surfaceTriangles(positions)) {
+        const hit = ray.intersectTriangle(positions[a],positions[b],positions[c],false,tmp)
         if (!hit) continue
         const d = ray.origin.distanceTo(hit)
         if (d < closestDist) {
@@ -188,7 +183,7 @@ export class LoopCutOperator extends ModalOperator {
 
     if (hitFaceId === null) return null
     const face = this.ctx.mesh.faces.get(hitFaceId)
-    if (!face) return null
+    if (!face || face.vertexIds.length !== 4) return null
 
     const overlay = this.overlayPointer(this.currentMouse)
     let bestId: number | null = null
@@ -222,33 +217,27 @@ export class LoopCutOperator extends ModalOperator {
     return null
   }
 
-  private updateSlideFromPointer(shiftKey: boolean, ctrlKey: boolean) {
-    if (this.hoveredEdgeId === null) return
-    const edge = this.ctx.mesh.edges.get(this.hoveredEdgeId)
-    if (!edge) return
-    const p1 = this.ctx.mesh.vertices.get(edge.v1)?.position
-    const p2 = this.ctx.mesh.vertices.get(edge.v2)?.position
-    if (!p1 || !p2) return
-    const overlay = this.overlayPointer(this.currentMouse)
-    let t = ScreenGeometry.closestPointParameterOnSegment2D(
-      overlay,
-      this.toOverlay(p1),
-      this.toOverlay(p2)
-    )
-    if (shiftKey) t = 0.5 + (t - 0.5) * 0.2
-    if (ctrlKey) t = Math.round(t * 10) / 10
-    this.slideFactor = Math.max(0.01, Math.min(0.99, t))
+  private pointerParameter(): number {
+    const edge = this.hoveredEdgeId === null ? null : this.ctx.mesh.edges.get(this.hoveredEdgeId)
+    if (!edge) return 0.5
+    const a = this.ctx.mesh.vertices.get(edge.v1)!.position
+    const b = this.ctx.mesh.vertices.get(edge.v2)!.position
+    const t = ScreenGeometry.closestPointParameterOnSegment2D(this.overlayPointer(this.currentMouse),this.toOverlay(a),this.toOverlay(b))
+    return perspectiveEdgeParameter(t,this.toWorld(a),this.toWorld(b),this.ctx.camera)
+  }
+
+  private updateSlideFromPointer(shift: boolean, ctrl: boolean) {
+    if (this.numericInput.active) return
+    let offset = (this.pointerParameter() - this.slideStart) * (shift ? 0.2 : 1)
+    if (ctrl) offset = Math.round(offset * 10) / 10
+    this.slideFactor = Math.max(0.001,Math.min(0.999,0.5 + offset))
   }
 
   private getCutParameters(): number[] {
-    if (this.cutCount === 1) return [this.slideFactor]
-    const params: number[] = []
-    const baseSpacing = 1 / (this.cutCount + 1)
-    const offset = (this.slideFactor - 0.5) * 0.5
-    for (let i = 1; i <= this.cutCount; i++) {
-      params.push(Math.max(0.01, Math.min(0.99, i * baseSpacing + offset)))
-    }
-    return params
+    const spacing = 1 / (this.cutCount + 1)
+    // Translate the entire group within one spacing, never clamp cuts onto each other.
+    const offset = Math.max(-spacing + 0.001, Math.min(spacing - 0.001, (this.slideFactor - 0.5) * 2 * spacing))
+    return Array.from({length:this.cutCount},(_,i)=>(i+1)*spacing + offset)
   }
 
   private updatePreviewSegments() {
@@ -274,14 +263,26 @@ export class LoopCutOperator extends ModalOperator {
       this.cancel()
       return
     }
-    LoopCutKernel.cutLoop(this.ctx.mesh, this.hoveredEdgeId, this.getCutParameters())
+    this.restoreSnapshot()
+    const result = LoopCutKernel.cutLoop(this.ctx.mesh,this.hoveredEdgeId,this.getCutParameters())
+    if (!result.newEdgeIds.length || !MeshValidator.validate(this.ctx.mesh).valid) {
+      this.restoreSnapshot()
+      this.ctx.onUpdatePreview()
+      this.cancel()
+      return
+    }
+    this.ctx.selectedVertIds = result.newVertexIds
+    this.ctx.selectedEdgeIds = result.newEdgeIds
+    this.ctx.selectedFaceIds = []
     super.confirm()
   }
 
   updateStatus() {
-    const n = this.ringEdgeIds.length
-    this.statusText = n > 0
-      ? `Loop Cut · ${n} edges · Cuts ${this.cutCount} (scroll) · click to cut · Esc cancel`
-      : `Loop Cut · hover a face or edge · click to cut · Esc cancel`
+    this.statusText = this.loopState === LoopCutState.SLIDING
+      ? `Slide ${(2*this.slideFactor-1).toFixed(3)} · move or type -1 to 1 · Shift precision · Ctrl snap · click/Enter apply · RMB center · Esc cancel`
+      : this.ringEdgeIds.length
+        ? `${this.cutCount} cuts · scroll or type count · click/Enter to slide · Esc cancel`
+        : 'Hover a quad face · loops stop at triangles, n-gons, and boundaries · Esc cancel'
   }
+
 }
