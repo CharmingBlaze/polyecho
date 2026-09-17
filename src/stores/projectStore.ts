@@ -72,6 +72,7 @@ import { Vector3D, PrimitiveTransform } from '../types/mesh'
 import { ReferenceImage, ReferencePlane } from '../types/reference'
 import { useHistoryStore } from './historyStore'
 import { useAnimationStore } from './animationStore'
+import { SpringPhysicsSolver } from '../core/animation/SpringPhysics'
 import { useToolStore } from './toolStore'
 import { ProjectStorage, type ProjectStorageData } from '../core/storage/ProjectStorage'
 
@@ -1456,6 +1457,7 @@ export const useProjectStore = defineStore('project', () => {
       if (data.armature) {
         const animationStore = useAnimationStore()
         animationStore.armature = data.armature
+        SpringPhysicsSolver.reset()
       }
 
       clearSubSelections()
@@ -2129,6 +2131,7 @@ export const useProjectStore = defineStore('project', () => {
       clips: [],
       activeClipId: null
     }
+    SpringPhysicsSolver.reset()
 
     clearSubSelections()
     markGeometryUpdated()
