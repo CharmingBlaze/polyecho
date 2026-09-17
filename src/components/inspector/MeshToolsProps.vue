@@ -100,6 +100,47 @@ function deleteSel() {
     </div>
 
     <div v-else class="flex flex-col">
+      <UiSection title="Object shading" blender-icon="shading-solid" :default-open="true">
+        <label class="flex items-start justify-between gap-3 py-0.5 cursor-pointer">
+          <div class="min-w-0">
+            <span class="text-[11px] font-medium text-ui-textPrimary">Smooth shading</span>
+            <p class="text-[10px] leading-snug text-ui-textMuted">On interpolates vertex normals. Off keeps faceted flat faces.</p>
+          </div>
+          <input
+            type="checkbox"
+            class="mt-0.5 rounded-xs text-amber-500 cursor-pointer"
+            :checked="(activeMesh.shadeMode || 'flat') !== 'flat'"
+            :title="(activeMesh.shadeMode || 'flat') !== 'flat' ? 'Smooth shading on — click to shade flat' : 'Smooth shading off — click to shade smooth'"
+            @change="projectStore.setShadeMode(($event.target as HTMLInputElement).checked ? 'smooth' : 'flat')"
+          />
+        </label>
+        <label
+          v-if="(activeMesh.shadeMode || 'flat') !== 'flat'"
+          class="flex items-center justify-between gap-2 pt-1 cursor-pointer"
+        >
+          <span class="text-[10px] text-ui-textSecondary">Keep sharp edges by angle</span>
+          <input
+            type="checkbox"
+            class="rounded-xs text-amber-500 cursor-pointer"
+            :checked="activeMesh.shadeMode === 'auto'"
+            title="Shade Smooth by Angle"
+            @change="projectStore.setShadeMode(($event.target as HTMLInputElement).checked ? 'auto' : 'smooth')"
+          />
+        </label>
+        <UiNumberField
+          v-if="activeMesh.shadeMode === 'auto'"
+          class="w-full"
+          :model-value="activeMesh.autoSmoothAngle ?? 30"
+          label="Angle °"
+          :min="0"
+          :max="180"
+          :step="1"
+          :precision="0"
+          @before-change="projectStore.recordState('Set Auto Smooth Angle')"
+          @update:model-value="projectStore.setAutoSmoothAngle($event, { record: false })"
+        />
+      </UiSection>
+
       <div class="px-2.5 py-1.5 border-b border-ui-borderSubtle space-y-1">
         <div class="text-[10px] text-ui-textSecondary truncate">
           <span class="font-semibold text-ui-textPrimary">{{ modeLabel }}</span>
@@ -168,14 +209,6 @@ function deleteSel() {
           <UiButton size="xs" class="col-span-2" title="Flip Normals (Shift+N). Uses selected faces, or the whole mesh." @click="projectStore.performFlipNormals()">
             <BlenderIcon name="flip-normals" :size="12" />
             <span>Flip Normals</span>
-          </UiButton>
-          <UiButton size="xs" :active="activeMesh?.shadeMode === 'smooth'" title="Shade Smooth — interpolate vertex normals" @click="projectStore.setShadeMode('smooth')">
-            <BlenderIcon name="shading-solid" :size="12" />
-            <span>Smooth</span>
-          </UiButton>
-          <UiButton size="xs" :active="activeMesh?.shadeMode === 'flat' || !activeMesh?.shadeMode" title="Shade Flat — one normal per face" @click="projectStore.setShadeMode('flat')">
-            <BlenderIcon name="shading-wire" :size="12" />
-            <span>Flat</span>
           </UiButton>
         </div>
       </UiSection>

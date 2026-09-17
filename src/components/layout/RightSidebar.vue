@@ -111,7 +111,7 @@ const standardPropTabs = computed<PropertyTabItem[]>(() => {
       ? { id: 'props', label: 'Animation', title: 'Animation & Keyframes', blenderIcon: 'keyframe' }
       : mode === 'uvpaint'
         ? { id: 'props', label: 'UV / Paint', title: 'UV & Seams Properties', blenderIcon: 'uv' }
-        : { id: 'props', label: 'Transform', title: 'Object Transform & Coordinates', blenderIcon: 'empty-axis' }
+        : { id: 'props', label: 'Transform', title: 'Object Properties, Shading & Coordinates', blenderIcon: 'empty-axis' }
 
   const tools: PropertyTabItem = { id: 'tools', label: 'Tools', title: 'Mesh Tools (Subdivide, merge, fill…)', blenderIcon: 'tools' }
   const mod: PropertyTabItem = { id: 'modifiers', label: 'Modifiers', title: 'Modifiers (Mirror, Subdiv, Solidify)', blenderIcon: 'modifier' }

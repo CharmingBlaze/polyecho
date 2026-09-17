@@ -28,7 +28,7 @@ import {
 } from '../../core/desktop/desktopApi'
 import { EDITOR_EVENTS, requestCameraView, requestFillFace, requestModalTool } from '../../core/commands/editorCommands'
 
-type NavMenu = 'file' | 'edit' | 'mesh' | 'workspace' | 'space' | 'view' | 'snap' | 'overlays' | 'shade' | null
+type NavMenu = 'file' | 'edit' | 'mesh' | 'workspace' | 'space' | 'view' | 'snap' | 'overlays' | null
 type CameraView = 'persp' | 'top' | 'front' | 'right' | 'iso'
 
 const projectStore = useProjectStore()
@@ -103,7 +103,6 @@ const viewLabel: Record<CameraView, string> = {
   iso: 'Iso',
 }
 
-const objectShade = computed(() => projectStore.activeMesh?.shadeMode || toolStore.viewport.shadeMode)
 const snapTargetOn = computed(() => toolStore.snapping.vertex || toolStore.snapping.edge || toolStore.snapping.face)
 const snapToggleChord = computed(() => keymapStore.bindings.find(b => b.id === 'toggle_snap')?.currentKey || 'Shift+Tab')
 const gridSnapOn = computed(() => toolStore.snapping.grid)
@@ -123,11 +122,6 @@ function setGridStep(size: number) {
 const overlayOn = computed(() =>
   toolStore.viewport.faceOrientation || !toolStore.viewport.showGrid || !toolStore.viewport.showAxes
 )
-
-function applyObjectShade(mode: 'flat' | 'smooth' | 'auto') {
-  projectStore.setShadeMode(mode)
-  closeDropdowns()
-}
 
 function runMeshSubdivide() {
   if (toolStore.selectMode === 'object' || toolStore.selectMode === 'vertex' || toolStore.selectMode === 'edge' || toolStore.selectMode === 'face') {
@@ -1035,42 +1029,6 @@ onUnmounted(() => {
               class="w-full h-1 bg-ui-borderStrong rounded-lg appearance-none cursor-pointer accent-ui-accent"
             />
           </div>
-        </div>
-      </div>
-
-      <!-- Object Shade -->
-      <div class="relative">
-        <button
-          type="button"
-          class="h-6 px-1.5 rounded-xs bg-ui-input border border-ui-borderDefault text-ui-textPrimary hover:bg-ui-hover flex items-center gap-1 cursor-pointer"
-          title="Object shade"
-          @click="toggleDropdown('shade')"
-        >
-          <span class="capitalize">{{ objectShade === 'auto' ? 'Angle' : objectShade }}</span>
-          <BlenderIcon name="chevron-down" :size="12" />
-        </button>
-        <div v-if="activeDropdown === 'shade'" class="absolute right-0 top-full mt-0.5 w-40 bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-1 z-50 text-[11px] font-mono">
-          <button
-            type="button"
-            class="w-full text-left px-2 py-1.5 rounded-xs hover:bg-ui-hover cursor-pointer"
-            :class="{ 'text-ui-textAccent font-semibold': objectShade === 'flat' }"
-            title="One normal per face"
-            @click="applyObjectShade('flat')"
-          >Flat</button>
-          <button
-            type="button"
-            class="w-full text-left px-2 py-1.5 rounded-xs hover:bg-ui-hover cursor-pointer"
-            :class="{ 'text-ui-textAccent font-semibold': objectShade === 'smooth' }"
-            title="Interpolated vertex normals"
-            @click="applyObjectShade('smooth')"
-          >Smooth</button>
-          <button
-            type="button"
-            class="w-full text-left px-2 py-1.5 rounded-xs hover:bg-ui-hover cursor-pointer"
-            :class="{ 'text-ui-textAccent font-semibold': objectShade === 'auto' }"
-            title="Smooth, keep sharp edges by angle"
-            @click="applyObjectShade('auto')"
-          >Smooth by Angle</button>
         </div>
       </div>
 

@@ -29,7 +29,7 @@ UI (Vue SFC)
 
 ## Modeling kernel and document projection
 
-Kernel unification is being migrated in place; see `docs/KERNEL_UNIFICATION.md` for the current boundary and remaining work.
+Kernel unification is being migrated in place; see `docs/KERNEL_UNIFICATION.md` for the current boundary and remaining work, and `docs/ARCHITECTURE_IMPROVEMENT_PLAN.md` for the sequencing, the write contract, and the verified list of mutation paths that still bypass the resident kernel.
 
 1. **`MeshObject`** (`src/types/mesh.ts`) — document model. String IDs, JSON-friendly. Stored in `projectStore.meshes`. Used by one-shot ops in `src/core/geometry/Operations.ts`, converters, serializers, exporters.
 2. **`EditableMesh`** (`src/core/mesh/MeshKernel.ts`) — edit kernel. Numeric IDs, `Map`s, half-edges. Used by modal operators and kernels under `src/core/mesh/operations/`.
@@ -110,7 +110,7 @@ Right sidebar (`RightSidebar.vue`): Tools / List / context (Object, UV, or Anim)
 
 Left toolbar (`LeftToolbar.vue`) is a docked icon shelf: Object/Vertex/Edge/Face plus the workspace tools. T to toggle. Hidden in UV/Paint (those editors keep in-canvas tool strips). Hover labels use `useFastTitleTips` (not OS `title` delay).
 
-`HeaderMenu.vue` is the app chrome: File/Edit/Mesh, space+pivot, snap, live mirror X/Y/Z, workspace tabs, then view/overlays/shading/object shade/x-ray/command search. Add primitives with Shift+A (or Scene Add / the command palette). The floating LightWave cluster is pan / orbit / zoom / frame; with Sticky Viewport Controls (on by default) a click locks pan/orbit/zoom until click-again or Esc.
+`HeaderMenu.vue` is the app chrome: File/Edit/Mesh, space+pivot, snap, live mirror X/Y/Z, workspace tabs, then view/overlays/x-ray/command search. Object Shade Flat / Smooth lives on the Object inspector (Inspect → Object). Add primitives with Shift+A (or Scene Add / the command palette). The floating LightWave cluster is pan / orbit / zoom / frame; with Sticky Viewport Controls (on by default) a click locks pan/orbit/zoom until click-again or Esc.
 
 Pointer conventions: `docs/INPUT.md`. Icon conventions: `docs/ICONS.md`.
 

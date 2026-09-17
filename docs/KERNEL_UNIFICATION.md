@@ -24,6 +24,8 @@ Do not expose persistent sharp/crease attributes or loose-edge creation until th
 
 The resident compatibility signature is linear in mesh size on acquisition. It is a correctness guard during migration, not the final revision-based cache strategy. Preview document projections also remain an interim rendering path.
 
+The ordered execution plan for the work above — the resident-commit write contract, the verified list of mutation paths that still bypass the kernel, the per-object revision scheme, history topology capture, and the attribute-propagation matrix — lives in `docs/ARCHITECTURE_IMPROVEMENT_PLAN.md`.
+
 ## Verification
 
 `MeshResidency.test.ts` covers map-free identity, deep attribute isolation, split seam propagation, stable adjacent edges, extrusion, resident reuse and failed import rejection. `stores/meshResidency.test.ts` covers resident Extrude, rejected edits without history, cancel, undo/redo and 1.0 project parsing. Existing topology, rendering, operator, modifier, rigging and project tests remain required.

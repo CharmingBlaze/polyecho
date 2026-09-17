@@ -149,9 +149,9 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | Folder | Role |
 | :--- | :--- |
 | `src/components/layout/` | Header, toolbars, status; `RightSidebar.vue` (flush inspector chrome) |
-| `src/components/viewport/` | 3D view (`Viewport3D`: picking, gizmo, fill camera, modal start). Space/pivot/snap/shade/overlays/x-ray live in `HeaderMenu.vue`. `ShapeDrawPanel.vue` / `PolyDrawPanel.vue` are Blockout overlays. |
-| `src/components/inspector/MeshToolsProps.vue` | Modeling Tools tab: mode readout, Subdivide cuts/smooth, Faces / Edges / Vertices, Mesh |
-| `src/components/inspector/TransformProps.vue` | Object tab: TRS, Normals (Shade Smooth / Flat / Smooth by Angle), flip/rotate, origin, parent; workspace jumps (UV / Rig) |
+| `src/components/viewport/` | 3D view (`Viewport3D`: picking, gizmo, fill camera, modal start). Space/pivot/snap/overlays/x-ray live in `HeaderMenu.vue`. `ShapeDrawPanel.vue` / `PolyDrawPanel.vue` are Blockout overlays. |
+| `src/components/inspector/MeshToolsProps.vue` | Modeling Tools tab: object shading, mode readout, Subdivide cuts/smooth, Faces / Edges / Vertices, Mesh |
+| `src/components/inspector/TransformProps.vue` | Object tab: Smooth shading on/off, TRS, flip/rotate, origin, parent; workspace jumps (UV / Rig) |
 | `src/components/inspector/AnimationInspector.vue` | Animate sheet: clip readout, keys, pose, playback |
 | `src/components/outliner/` | Object tree |
 | `src/components/uvpaint/` | UV editor, pixel editor (`PixelCanvas.vue` is the UV/Paint tab router), palettes, `PaintLayers.vue` (`inspector-head`), `TilesetEditor.vue` (floating atlas / tilemap panel) |
@@ -163,3 +163,26 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/utils/` | Vectors, color, dither, gradients |
 
 Pointer: `docs/INPUT.md` (RMB pans views). Icons: `docs/ICONS.md`.
+
+## Architecture docs
+
+| Path | Role |
+| :--- | :--- |
+| `docs/ARCHITECTURE.md` | Layout and data flow |
+| `docs/KERNEL_UNIFICATION.md` | Resident kernel boundary + remaining migration |
+| `docs/ARCHITECTURE_IMPROVEMENT_PLAN.md` | Sequencing and write contract for that migration |
+| `docs/INVARIANTS.md` | Do-not-break list |
+
+## Agent collab
+
+Cursor ↔ DeepSeek architecture mailbox. Protocol: `docs/collab/README.md`. Do not treat `docs/SUGGESTIONS_AND_IMPROVEMENTS.md` as a roadmap.
+
+| Path | Role |
+| :--- | :--- |
+| `docs/collab/HANDOFF.md` | Whose turn + short status |
+| `docs/collab/BACKLOG.md` | Architecture slices (K1–K5 seed + proposed) |
+| `docs/collab/REVIEW.md` | Cursor’s last code check |
+| `docs/collab/REJECTED.md` | Stale claims not to re-propose |
+| `docs/collab/PROMPT_DEEPSEEK.md` | Paste into DeepSeek (first turn) |
+| `docs/collab/PROMPT_DEEPSEEK_NEXT.md` | Paste into DeepSeek (after the plan is accepted) |
+| `docs/collab/PROMPT_CURSOR.md` | How Cursor reviews a drop |

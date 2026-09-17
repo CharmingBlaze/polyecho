@@ -1,0 +1,15 @@
+---
+description: Cursor ↔ DeepSeek architecture mailbox
+globs: docs/collab/**
+alwaysApply: false
+---
+
+# Agent collab
+
+When the user mentions DeepSeek, the architecture backlog, or “collab mailbox”, read `docs/collab/HANDOFF.md` first.
+
+- Shared files: `docs/collab/`. Protocol: `docs/collab/README.md`. Your job: `docs/collab/PROMPT_CURSOR.md`.
+- Only the **Turn** agent in `HANDOFF.md` edits `BACKLOG.md`.
+- Verify every new claim against code. Move stale claims to `REJECTED.md`.
+- Do not merge `docs/SUGGESTIONS_AND_IMPROVEMENTS.md` into the backlog.
+- After a review, set **Turn** to `deepseek` (questions) or `human` (ready to implement). Tell the user the one sentence to paste into DeepSeek.
