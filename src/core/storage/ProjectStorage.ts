@@ -1,6 +1,7 @@
 import { MeshObject } from '../../types/mesh'
 import { Material, Palette } from '../../types/texture'
 import { Armature } from '../../types/animation'
+import type { SavedPaintLayer } from '../painting/PaintLayerStorage'
 
 export interface TextureStorageData {
   id: string
@@ -8,6 +9,8 @@ export interface TextureStorageData {
   width: number
   height: number
   dataUrl: string
+  layers?: SavedPaintLayer[]
+  activeLayerId?: string
   atlas?: { cols: number; rows: number }
 }
 

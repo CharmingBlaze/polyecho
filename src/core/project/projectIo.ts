@@ -4,6 +4,9 @@ import { useAnimationStore } from '../../stores/animationStore'
 import { useToolStore } from '../../stores/toolStore'
 import { addRecentProject, getLastProjectPath, saveTextDocument, setLastProjectPath, setDesktopTitle } from '../desktop/desktopApi'
 import { useHistoryStore } from '../../stores/historyStore'
+import { markRaw } from 'vue'
+import { PixelBuffer } from '../painting/PixelCanvas'
+import { restorePaintLayers } from '../painting/PaintLayerStorage'
 
 export function serializeOpenProject(): string {
   const projectStore = useProjectStore()
@@ -49,6 +52,13 @@ export async function loadOpenProject(text: string, filePath?: string | null): P
   const animationStore = useAnimationStore()
   const historyStore = useHistoryStore()
   const proj = ProjectSerializer.deserialize(text)
+  // Decode first, so a bad image does not replace the currently open project.
+  const restoredTextures = await Promise.all((proj.textures || []).map(async t => {
+    const buffer = new PixelBuffer(t.width, t.height)
+    if (t.layers?.length) await restorePaintLayers(buffer, t.layers, t.activeLayerId)
+    else if (t.dataUrl) await buffer.loadFromDataURL(t.dataUrl, false)
+    return { id: t.id, name: t.name, width: t.width, height: t.height, dataUrl: t.dataUrl, atlas: t.atlas, pixelBuffer: markRaw(buffer) }
+  }))
   projectStore.projectName = proj.projectName || 'Project'
   projectStore.meshes = proj.meshes || []
   if (proj.materials) projectStore.materials = proj.materials
@@ -56,12 +66,11 @@ export async function loadOpenProject(text: string, filePath?: string | null): P
   if (proj.referenceImages) projectStore.referenceImages = proj.referenceImages
   if (proj.armature) animationStore.armature = proj.armature
   if (proj.animations) animationStore.armature.clips = proj.animations
-  if (proj.textures && proj.textures.length > 0) {
-    projectStore.textures = []
-    for (const t of proj.textures) {
-      projectStore.createTexture(t.name, t.width, t.height, t.dataUrl, undefined, { record: false, select: false, atlas: t.atlas })
-    }
+  if (restoredTextures.length > 0) {
+    projectStore.textures = restoredTextures
+    projectStore.activeTextureId = restoredTextures[0].id
   }
+  if (projectStore.meshes.length) projectStore.selectMesh(projectStore.meshes[0].id)
   projectStore.markGeometryUpdated()
   historyStore.clearHistory()
   historyStore.markClean()

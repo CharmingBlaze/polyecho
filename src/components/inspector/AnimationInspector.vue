@@ -12,7 +12,39 @@ const animationStore = useAnimationStore()
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
 
+const workspaceDetail = ref<'guided' | 'advanced'>('guided')
 const newClipTitle = ref('')
+const newClipFps = ref(30)
+const newClipSeconds = ref(1)
+const newClipLoop = ref(true)
+const canKey = computed(() => !!animationStore.activeClip && !!(selectedBone.value || activeMesh.value))
+const hasClipboard = computed(() => animationStore.hasPoseClipboard)
+const selectedTrack = computed(() => animationStore.activeClip?.tracks.find(t =>
+  t.targetId === (selectedBone.value?.id || activeMesh.value?.id) && t.targetType === (selectedBone.value ? 'bone' : 'mesh')))
+const targetKeyFrames = computed(() => [...new Set(selectedTrack.value ? [
+  ...selectedTrack.value.positionKeys, ...selectedTrack.value.rotationKeys, ...selectedTrack.value.scaleKeys
+].map(k => k.frame) : [])].sort((a, b) => a - b))
+const previousKey = computed(() => targetKeyFrames.value.filter(f => f < animationStore.currentFrame).at(-1))
+const nextKey = computed(() => targetKeyFrames.value.find(f => f > animationStore.currentFrame))
+const keyedNow = computed(() => targetKeyFrames.value.includes(animationStore.currentFrame))
+function commitPose(channel: 'position' | 'rotation' | 'scale', axis: 'x' | 'y' | 'z', event: Event) {
+  const input = event.target as HTMLInputElement
+  const bone = selectedBone.value
+  if (!bone) return
+  if (input.value.trim()) animationStore.setBonePoseValue(bone.id, channel, axis, Number(input.value))
+  input.value = String(bone[channel][axis])
+}
+function boneDepth(id: string) {
+  const visited = new Set<string>([id])
+  let bone = animationStore.armature.bones.find(b => b.id === id)
+  let depth = 0
+  while (bone?.parentId && !visited.has(bone.parentId)) {
+    visited.add(bone.parentId)
+    bone = animationStore.armature.bones.find(b => b.id === bone!.parentId)
+    if (bone) depth++
+  }
+  return Math.min(depth, 6)
+}
 const boneSearchQuery = ref('')
 const blendClipAId = ref('')
 const blendClipBId = ref('')
@@ -38,7 +70,7 @@ const filteredBones = computed(() => {
 
 function handleCreateClip() {
   const name = newClipTitle.value.trim() || `Action_${animationStore.armature.clips.length + 1}`
-  animationStore.createClip(name, 24, 12)
+  animationStore.createClip(name, Math.round(Math.max(0.1, Math.min(120, Number(newClipSeconds.value) || 1)) * newClipFps.value), newClipFps.value, { loop: newClipLoop.value })
   newClipTitle.value = ''
 }
 
@@ -126,6 +158,22 @@ const generators: { label: string; run: () => void }[] = [
       </span>
     </div>
 
+    <div class="p-2 space-y-2 border-b border-ui-borderSubtle">
+      <UiButton size="sm" variant="primary" class="w-full" @click="animationStore.showPosePopup = true">Open Quick Pose & Animate</UiButton>
+      <div class="grid grid-cols-2 gap-1" aria-label="Animation workspace detail">
+        <UiButton size="xs" :variant="workspaceDetail === 'guided' ? 'accent' : 'default'" :aria-pressed="workspaceDetail === 'guided'" @click="workspaceDetail = 'guided'">Essentials</UiButton>
+        <UiButton size="xs" :variant="workspaceDetail === 'advanced' ? 'accent' : 'default'" :aria-pressed="workspaceDetail === 'advanced'" @click="workspaceDetail = 'advanced'">Advanced</UiButton>
+      </div>
+      <div v-if="workspaceDetail === 'guided'" class="rounded border border-ui-borderDefault bg-ui-surface p-2 space-y-1 text-[11px] leading-relaxed">
+        <p class="font-semibold text-ui-textPrimary">Bring your {{ hasBones ? 'character' : 'object' }} to life</p>
+        <p class="text-ui-textMuted">1. Choose a clip and select {{ hasBones ? 'a bone' : 'an object' }}.</p>
+        <p class="text-ui-textMuted">2. Pose it, then insert a key (I).</p>
+        <p class="text-ui-textMuted">3. Move along the timeline, pose again, and play.</p>
+        <p class="text-ui-textAccent">{{ animationStore.autoKey ? 'Auto-key is on: pose edits save keys automatically.' : 'Auto-key is off: insert a key to save each pose.' }}</p>
+        <UiButton v-if="!hasBones" size="xs" class="w-full" @click="toolStore.setAppMode('rig')">Set up a skeleton in Rigging</UiButton>
+      </div>
+    </div>
+
     <UiSection title="Clip" blender-icon="keyframe-map" :default-open="true">
       <select
         :value="animationStore.activeClip?.id"
@@ -166,6 +214,9 @@ const generators: { label: string; run: () => void }[] = [
           </select>
         </label>
       </div>
+      <p class="text-[10px] text-ui-textMuted">{{ animationStore.activeClip?.durationFrames }} frames · {{ animationStore.totalDurationSeconds }} seconds · {{ animationStore.activeClip?.tracks.length || 0 }} tracks</p>
+      <details class="space-y-2">
+        <summary class="cursor-pointer text-[11px] text-ui-textAccent py-1">Create game clip</summary>
       <div class="flex gap-1">
         <input
           v-model="newClipTitle"
@@ -175,26 +226,37 @@ const generators: { label: string; run: () => void }[] = [
         />
         <UiButton size="xs" variant="primary" @click="handleCreateClip">New</UiButton>
       </div>
+      <div class="grid grid-cols-2 gap-2">
+        <label class="text-[10px] text-ui-textMuted">Seconds<input v-model.number="newClipSeconds" aria-label="New clip duration" type="number" min="0.1" max="120" step="0.1" class="w-full bg-ui-input border border-ui-borderDefault p-1" /></label>
+        <label class="text-[10px] text-ui-textMuted">Frame rate<select v-model.number="newClipFps" aria-label="New clip frame rate" class="w-full bg-ui-input border border-ui-borderDefault p-1"><option v-for="rate in [12, 15, 24, 30, 60]" :key="rate" :value="rate">{{ rate }} fps</option></select></label>
+      </div>
+      <label class="flex gap-2 items-center text-[10px]"><input type="checkbox" v-model="newClipLoop" /> Loop (idle / walk). Uncheck for one-shot actions.</label>
+      </details>
       <div class="grid grid-cols-2 gap-1">
         <UiButton size="xs" :disabled="!animationStore.activeClip" @click="animationStore.duplicateClip(animationStore.activeClip!.id)">Duplicate</UiButton>
         <UiButton size="xs" variant="danger" :disabled="animationStore.armature.clips.length <= 1" @click="animationStore.deleteClip(animationStore.activeClip!.id)">Delete</UiButton>
       </div>
     </UiSection>
 
-    <UiSection title="Keyframe" blender-icon="keyframe" :default-open="true">
+    <UiSection title="Pose & keyframes" blender-icon="keyframe" :default-open="true">
       <p class="text-[10px] text-ui-textMuted leading-snug">{{ keyTargetLabel }}</p>
+      <div class="flex items-center justify-between gap-1 text-[10px]">
+        <UiButton size="xs" :disabled="previousKey === undefined" @click="previousKey !== undefined && animationStore.setFrame(previousKey)">‹ Previous key</UiButton>
+        <span :class="keyedNow ? 'text-amber-400' : 'text-ui-textMuted'">{{ keyedNow ? '◆ Keyed' : '◇ No key' }}</span>
+        <UiButton size="xs" :disabled="nextKey === undefined" @click="nextKey !== undefined && animationStore.setFrame(nextKey)">Next key ›</UiButton>
+      </div>
       <p v-if="animationStore.recordedStatusMessage !== 'Ready'" class="text-[9px] text-emerald-400 truncate">{{ animationStore.recordedStatusMessage }}</p>
       <div class="grid grid-cols-2 gap-1">
-        <UiButton size="xs" variant="primary" title="I or K" @click="animationStore.recordCurrentKeyframe()">Insert key</UiButton>
-        <UiButton size="xs" @click="animationStore.recordAllBonesKeyframe()">Key all</UiButton>
-        <UiButton size="xs" @click="animationStore.clearKeyframeAtCurrentTime()">Clear frame</UiButton>
+        <UiButton size="xs" variant="primary" :disabled="!canKey" title="Save the selected bone or object pose (I or K)" @click="animationStore.recordCurrentKeyframe()">Insert key</UiButton>
+        <UiButton size="xs" title="Keys every bone and object in the scene" @click="animationStore.recordAllBonesKeyframe()">Key entire scene</UiButton>
+        <UiButton size="xs" :disabled="!keyedNow" @click="animationStore.deleteKeyframeAt(selectedBone?.id || activeMesh!.id, animationStore.currentFrame)">Delete target key</UiButton>
         <UiButton size="xs" title="Alt+R" @click="animationStore.resetPose()"><BlenderIcon name="undo" :size="12" /> Reset</UiButton>
       </div>
       <div class="grid grid-cols-2 gap-1">
         <UiButton size="xs" @click="animationStore.copyPose()"><BlenderIcon name="duplicate" :size="12" /> Copy</UiButton>
-        <UiButton size="xs" @click="animationStore.pastePose()"><BlenderIcon name="import" :size="12" /> Paste</UiButton>
+        <UiButton size="xs" :disabled="!hasClipboard" @click="animationStore.pastePose()"><BlenderIcon name="import" :size="12" /> Paste</UiButton>
       </div>
-      <UiButton size="xs" class="w-full" @click="animationStore.pasteFlippedPose()">Paste flipped</UiButton>
+      <UiButton size="xs" class="w-full" :disabled="!hasClipboard" @click="animationStore.pasteFlippedPose()">Paste flipped</UiButton>
     </UiSection>
 
     <UiSection v-if="selectedBone" title="Pose" blender-icon="pose" :default-open="true">
@@ -202,16 +264,25 @@ const generators: { label: string; run: () => void }[] = [
       <div class="grid grid-cols-3 gap-1">
         <div v-for="ax in (['x', 'y', 'z'] as const)" :key="'r'+ax" class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
           <span class="text-[9px] font-bold cursor-ew-resize" :class="ax === 'x' ? 'text-rose-400' : ax === 'y' ? 'text-emerald-400' : 'text-sky-400'" @mousedown="startScrubVector($event, selectedBone.rotation, ax, 1, 1)">{{ ax.toUpperCase() }}</span>
-          <input type="number" step="1" v-model.number="selectedBone.rotation[ax]" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
+          <input type="number" step="1" :aria-label="`Rotation ${ax.toUpperCase()}`" :value="selectedBone.rotation[ax]" @change="commitPose('rotation', ax, $event)" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
         </div>
       </div>
       <div class="text-[9px] text-ui-textMuted">Location</div>
       <div class="grid grid-cols-3 gap-1">
         <div v-for="ax in (['x', 'y', 'z'] as const)" :key="'p'+ax" class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
           <span class="text-[9px] font-bold cursor-ew-resize" :class="ax === 'x' ? 'text-rose-400' : ax === 'y' ? 'text-emerald-400' : 'text-sky-400'" @mousedown="startScrubVector($event, selectedBone.position, ax)">{{ ax.toUpperCase() }}</span>
-          <input type="number" step="0.1" v-model.number="selectedBone.position[ax]" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
+          <input type="number" step="0.1" :aria-label="`Location ${ax.toUpperCase()}`" :value="selectedBone.position[ax]" @change="commitPose('position', ax, $event)" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
         </div>
       </div>
+      <template v-if="workspaceDetail === 'advanced'">
+        <div class="text-[9px] text-ui-textMuted">Scale</div>
+        <div class="grid grid-cols-3 gap-1">
+          <label v-for="ax in (['x', 'y', 'z'] as const)" :key="ax" class="text-[10px] text-ui-textMuted">{{ ax.toUpperCase() }}
+            <input type="number" step="0.05" :aria-label="`Scale ${ax.toUpperCase()}`" :value="selectedBone.scale[ax]" @change="commitPose('scale', ax, $event)" class="w-full bg-ui-input border border-ui-borderSubtle p-1 font-mono" />
+          </label>
+        </div>
+        <p class="text-[10px] text-ui-textMuted">{{ selectedBone.ikConstraint?.enabled ? 'IK enabled · solver controls this chain.' : 'Direct bone posing (FK)' }}{{ selectedBone.springConstraint?.enabled ? ' · Spring enabled' : '' }}</p>
+      </template>
     </UiSection>
 
     <UiSection v-if="hasBones" title="Bones" blender-icon="bone" :badge="filteredBones.length" :default-open="true">
@@ -224,8 +295,13 @@ const generators: { label: string; run: () => void }[] = [
           class="w-full text-left px-2 py-1 rounded-xs text-[10px] truncate"
           :class="animationStore.selectedBoneId === b.id ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textSecondary hover:bg-ui-hover'"
           @click="animationStore.selectBone(b.id)"
-        >{{ b.name }}</button>
+          :style="{ paddingLeft: `${8 + boneDepth(b.id) * 10}px` }"
+          :aria-pressed="animationStore.selectedBoneId === b.id"
+          :title="b.name"
+        >{{ b.parentId ? '↳ ' : '◈ ' }}{{ b.name }}<span v-if="b.ikConstraint?.enabled" class="text-ui-textAccent ml-1">IK</span></button>
+        <p v-if="!filteredBones.length" class="text-[10px] text-ui-textMuted p-2">No bones match your search.</p>
       </div>
+      <UiButton size="xs" class="w-full" @click="animationStore.toggleBoneHierarchyPopout(true)">Open bone hierarchy</UiButton>
     </UiSection>
     <UiSection v-else title="Bones" blender-icon="bone" :default-open="false">
       <p class="text-[10px] text-ui-textMuted leading-snug">No armature. This clip keys the selected object. Build a skeleton in Rig to pose bones.</p>
@@ -296,7 +372,7 @@ const generators: { label: string; run: () => void }[] = [
       </template>
     </UiSection>
 
-    <UiSection title="Generate" blender-icon="uv-smart" :default-open="false">
+    <UiSection v-if="workspaceDetail === 'advanced'" title="Generate & blend" blender-icon="uv-smart" :default-open="false">
       <p class="text-[9px] text-ui-textMuted">Creates a clip and selects it.</p>
       <div class="grid grid-cols-3 gap-1">
         <UiButton v-for="g in generators" :key="g.label" size="xs" @click="g.run">{{ g.label }}</UiButton>
@@ -312,12 +388,12 @@ const generators: { label: string; run: () => void }[] = [
       </select>
       <input type="range" min="0" max="1" step="0.05" v-model.number="blendFactor" class="w-full accent-ui-accent h-1" />
       <div class="grid grid-cols-2 gap-1">
-        <UiButton size="xs" @click="applyBlendPreview">Preview</UiButton>
-        <UiButton size="xs" variant="primary" @click="keyBlend">Key blend</UiButton>
+        <UiButton size="xs" :disabled="!hasBones || !blendClipAId || !blendClipBId" @click="applyBlendPreview">Preview</UiButton>
+        <UiButton size="xs" variant="primary" :disabled="!hasBones || !blendClipAId || !blendClipBId" @click="keyBlend">Key blend</UiButton>
       </div>
     </UiSection>
 
-    <UiSection v-if="activeMesh && hasBones" title="Mesh parent" blender-icon="link" :default-open="false">
+    <UiSection v-if="workspaceDetail === 'advanced' && activeMesh && hasBones" title="Mesh parent" blender-icon="link" :default-open="false">
       <p class="text-[9px] text-ui-textMuted">Object bind. Skin weights live in Rig → Bind / Wts.</p>
       <select
         :value="activeMeshBoneId || 'none'"

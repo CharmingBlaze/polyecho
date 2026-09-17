@@ -99,6 +99,29 @@ export const useToolStore = defineStore('tool', () => {
     return mode === 'object' || mode === 'vertex' || mode === 'edge' || mode === 'face'
   }
 
+  /** 1–4 / 5 / 6 stay in the current workspace unless they require another one. */
+  function enterSelectMode(mode: SelectMode) {
+    if (mode === 'bone') {
+      if (appMode.value !== 'rig' && appMode.value !== 'animate') setAppMode('rig')
+      selectMode.value = 'bone'
+      return
+    }
+    if (appMode.value === 'uvpaint' || isMeshWorkspace()) {
+      selectMode.value = mode
+      return
+    }
+    if (appMode.value === 'rig' || appMode.value === 'animate') return
+    setAppMode('model')
+    selectMode.value = mode
+  }
+
+  function bindGeometryKind(): 'object' | 'vertices' | 'edges' | 'faces' {
+    if (selectMode.value === 'vertex') return 'vertices'
+    if (selectMode.value === 'edge') return 'edges'
+    if (selectMode.value === 'face') return 'faces'
+    return 'object'
+  }
+
   function setAppMode(mode: AppMode) {
     const prev = appMode.value
     const leavingBlockout = prev === 'blockout' && mode !== 'blockout'
@@ -138,6 +161,16 @@ export const useToolStore = defineStore('tool', () => {
 
   function setModelTool(tool: ModelToolType) {
     modelTool.value = tool
+    if (tool !== 'select') isBoxSelectActive.value = false
+  }
+
+  function toggleBoxSelect() {
+    if (isBoxSelectActive.value) {
+      isBoxSelectActive.value = false
+      return
+    }
+    modelTool.value = 'select'
+    isBoxSelectActive.value = true
   }
 
   function setPaintTool(tool: PaintToolType) {
@@ -189,9 +222,13 @@ export const useToolStore = defineStore('tool', () => {
     cursor3D,
     viewport,
     isMeshWorkspace,
+    isMeshSelectMode,
+    enterSelectMode,
+    bindGeometryKind,
     setAppMode,
     setSelectMode,
     setModelTool,
+    toggleBoxSelect,
     setPaintTool,
     setRigTool,
   }

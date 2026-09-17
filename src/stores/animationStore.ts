@@ -4,6 +4,9 @@ import { Armature, Bone, BoneSocket, Keyframe, AnimationClip, AnimationTrack, In
 import { Vector3D, MeshObject, Vertex } from '../types/mesh'
 import { sampleTrack, setMeshBoneParent } from '../core/animation/Armature'
 import { autoWeightMeshToArmature } from '../core/animation/AutoSkinning'
+import { fitRigPreset, meshRestMatrix, type RigPresetId } from '../core/animation/RiggingWorkflow'
+import { Vector3 } from 'three'
+import { fitJoint } from '../core/animation/JointFitting'
 import { applyIKConstraints } from '../core/animation/IKSolver'
 import { SpringPhysicsSolver } from '../core/animation/SpringPhysics'
 import { useProjectStore } from './projectStore'
@@ -52,6 +55,19 @@ export const useAnimationStore = defineStore('animation', () => {
   const loopMode = ref<'loop' | 'once' | 'pingpong'>('loop')
   const showBones = ref<boolean>(true)
   const xrayBones = ref<boolean>(true)
+  const boneDisplaySize = ref(1)
+  const showRigFitPopup = ref(false)
+  const showHumanoidRigWizard = ref(false)
+  const showPosePopup = ref(false)
+  const jointPlacementActive = ref(false)
+  const jointPlacementMirror = ref(true)
+  const autoSkinMethod = ref<'surface' | 'distance'>('surface')
+
+  function placeRigJoint(point: Vector3D) {
+    if (!selectedBoneId.value) return
+    projectStore.recordState('Fit Rig Joint')
+    fitJoint(armature.value.bones, selectedBoneId.value, point, jointPlacementMirror.value)
+  }
 
   function setShowBones(visible: boolean) {
     showBones.value = visible
@@ -90,6 +106,10 @@ export const useAnimationStore = defineStore('animation', () => {
       isWeightPaintActive.value = !isWeightPaintActive.value
     }
     if (isWeightPaintActive.value) {
+      jointPlacementActive.value = false
+      isPlaying.value = false
+      stopPlayback()
+      clickToPlaceMode.value = false
       isTestPoseActive.value = false
       resetAllBonesToRest()
     }
@@ -319,6 +339,9 @@ export const useAnimationStore = defineStore('animation', () => {
         child.parentId = bone.parentId
         if (!bone.parentId) {
           armature.value.rootBoneIds.push(child.id)
+        } else {
+          const parent = armature.value.bones.find(b => b.id === bone.parentId)
+          if (parent && !parent.childrenIds.includes(child.id)) parent.childrenIds.push(child.id)
         }
       }
     }
@@ -362,6 +385,7 @@ export const useAnimationStore = defineStore('animation', () => {
   function reparentBone(boneId: string, parentBoneId: string | null): boolean {
     const bone = armature.value.bones.find(item => item.id === boneId)
     if (!bone || boneId === parentBoneId) return false
+    if (parentBoneId && !armature.value.bones.some(b => b.id === parentBoneId)) return false
 
     // A bone cannot become a child of itself or any of its descendants.
     let cursor = parentBoneId
@@ -395,6 +419,7 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function selectBone(id: string | null) {
+    selectedSocketId.value = null
     selectedBoneId.value = id
   }
 
@@ -602,8 +627,65 @@ export const useAnimationStore = defineStore('animation', () => {
 
   function autoWeightMeshToBones(mesh: MeshObject) {
     if (armature.value.bones.length === 0) return
-    autoWeightMeshToArmature(mesh, armature.value.bones, { maxInfluences: 4, falloffPower: 2.0 })
+    const oldParent = mesh.parentBoneId
+    if (oldParent && mesh.parentId === oldParent) mesh.parentId = undefined
+    if (mesh.parentId && armature.value.bones.some(b => b.id === mesh.parentId)) mesh.parentId = undefined
+    setMeshBoneParent(mesh, null)
+    mesh.armatureId = armature.value.id
+    autoWeightMeshToArmature(mesh, armature.value.bones, { maxInfluences: 4, falloffPower: 2.0, method: autoSkinMethod.value })
     projectStore.markGeometryUpdated()
+  }
+
+  function addRigPreset(meshId: string, preset: RigPresetId): boolean {
+    const mesh = projectStore.meshes.find(m => m.id === meshId)
+    if (!mesh) return false
+    const joints = fitRigPreset(mesh, preset)
+    if (!joints.length) return false
+    projectStore.recordState('Add Skeleton Preset')
+    toggleWeightPaint(false)
+    toggleTestPose(false)
+    clickToPlaceMode.value = false
+    const names = new Map<string, string>()
+    const existingNames = new Set(armature.value.bones.map(b => b.name))
+    let suffix = 1
+    const suffixedName = (name: string) => name.replace(/([._][LR])?$/, `_${suffix}$1`)
+    while (joints.some(j => existingNames.has(suffixedName(j.name)))) suffix++
+    const needsSuffix = joints.some(j => existingNames.has(j.name))
+    for (const joint of joints) {
+      const [x, y, z] = joint.head
+      const [tx, ty, tz] = joint.tail
+      const bone = addBoneFromPoints({ x, y, z }, { x: tx, y: ty, z: tz }, joint.parent ? names.get(joint.parent) : null, needsSuffix ? suffixedName(joint.name) : joint.name)
+      names.set(joint.name, bone.id)
+    }
+    selectBone(names.get(joints[0].name)!)
+    setShowBones(true)
+    return true
+  }
+
+  function commitHumanoidRig(previewMesh: MeshObject, previewBones: Bone[]): boolean {
+    const mesh = projectStore.meshes.find(m => m.id === previewMesh.id)
+    if (!mesh || !previewBones.length || mesh.vertices.length !== previewMesh.vertices.length) return false
+    const source = new Map(previewMesh.vertices.map(v => [v.id, v]))
+    if (mesh.vertices.some(v => JSON.stringify(v.position) !== JSON.stringify(source.get(v.id)?.position))) return false
+    if (['position', 'rotation', 'scale', 'faces'].some(key => JSON.stringify(mesh[key as keyof MeshObject]) !== JSON.stringify(previewMesh[key as keyof MeshObject]))) return false
+    const ids = new Map(previewBones.map(b => [b.id, genId('bone')]))
+    projectStore.recordState('Create Humanoid Rig')
+    const usedNames = new Set(armature.value.bones.map(b => b.name))
+    let suffix = 1
+    while (previewBones.some(b => usedNames.has(`Rig${suffix}_${b.name}`))) suffix++
+    const prefix = previewBones.some(b => usedNames.has(b.name)) ? `Rig${suffix}_` : ''
+    const bones = previewBones.map(b => ({ ...JSON.parse(JSON.stringify(b)) as Bone, id: ids.get(b.id)!, name: prefix + b.name, parentId: b.parentId ? ids.get(b.parentId)! : null, childrenIds: b.childrenIds.map(id => ids.get(id)!), rotation: { x: 0, y: 0, z: 0 } }))
+    armature.value.bones.push(...bones)
+    armature.value.rootBoneIds.push(...bones.filter(b => !b.parentId).map(b => b.id))
+    if (mesh.parentId && armature.value.bones.some(b => b.id === mesh.parentId)) mesh.parentId = undefined
+    setMeshBoneParent(mesh, null)
+    mesh.armatureId = armature.value.id
+    for (const vertex of mesh.vertices) vertex.boneWeights = Object.fromEntries(Object.entries(source.get(vertex.id)?.boneWeights || {}).filter(([id]) => ids.has(id)).map(([id, weight]) => [ids.get(id)!, weight]))
+    selectBone(bones[0].id)
+    setShowBones(true)
+    xrayBones.value = true
+    projectStore.markGeometryUpdated()
+    return true
   }
 
   function addBoneFromPoints(head: Vector3D, tail: Vector3D, parentId?: string | null, name = 'Bone'): Bone {
@@ -654,6 +736,8 @@ export const useAnimationStore = defineStore('animation', () => {
 
     // 1. Direct Object Node Parenting
     if (targetType === 'object') {
+      // A rigid part must not also receive vertex skinning in the viewport/export.
+      for (const vertex of activeMesh.vertices) vertex.boneWeights = {}
       setMeshBoneParent(activeMesh, boneId, armature.value.id)
       projectStore.markGeometryUpdated()
       return { success: true, message: `Parented ${activeMesh.name} to ${bone.name} (Object Node)` }
@@ -912,16 +996,14 @@ export const useAnimationStore = defineStore('animation', () => {
     const autoNorm = options?.autoNormalize ?? weightAutoNormalize.value
     const mirrorX = options?.xMirror ?? weightXMirror.value
 
-    const meshWorldX = mesh.position.x
-    const meshWorldY = mesh.position.y
-    const meshWorldZ = mesh.position.z
+    const restMatrix = meshRestMatrix(mesh)
+    const worldVertex = new Vector3()
 
     const affectedVerts: { vert: Vertex; dist: number; factor: number }[] = []
 
     for (const v of mesh.vertices) {
-      const vx = meshWorldX + v.position.x
-      const vy = meshWorldY + v.position.y
-      const vz = meshWorldZ + v.position.z
+      worldVertex.set(v.position.x, v.position.y, v.position.z).applyMatrix4(restMatrix)
+      const { x: vx, y: vy, z: vz } = worldVertex
 
       const dx = vx - worldHitPoint.x
       const dy = vy - worldHitPoint.y
@@ -1034,6 +1116,11 @@ export const useAnimationStore = defineStore('animation', () => {
 
   function normalizeSingleVertex(v: Vertex) {
     if (!v.boneWeights) return
+    const validIds = new Set(armature.value.bones.map(b => b.id))
+    const entries = Object.entries(v.boneWeights)
+      .filter(([id, weight]) => validIds.has(id) && Number.isFinite(weight) && weight >= .0001)
+      .sort((a, b) => b[1] - a[1]).slice(0, 4)
+    v.boneWeights = Object.fromEntries(entries)
     let total = 0
     for (const bId in v.boneWeights) {
       if (v.boneWeights[bId] < 0.0001) {
@@ -1183,12 +1270,18 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function toggleTestPose(active?: boolean) {
+    isPlaying.value = false
+    stopPlayback()
     if (active !== undefined) {
       isTestPoseActive.value = active
     } else {
       isTestPoseActive.value = !isTestPoseActive.value
     }
-    if (!isTestPoseActive.value) {
+    if (isTestPoseActive.value) {
+      jointPlacementActive.value = false
+      isWeightPaintActive.value = false
+      clickToPlaceMode.value = false
+    } else {
       resetAllBonesToRest()
     }
   }
@@ -1253,6 +1346,27 @@ export const useAnimationStore = defineStore('animation', () => {
       keys.push(newKey)
       keys.sort((a, b) => a.frame - b.frame)
     }
+  }
+
+  function setBonePoseValue(boneId: string, channel: 'position' | 'rotation' | 'scale', axis: 'x' | 'y' | 'z', value: number) {
+    setPoseValues(boneId, 'bone', channel, { [axis]: value })
+  }
+
+  /** One undo step for a numeric pose edit, nudge, or channel reset. */
+  function setPoseValues(targetId: string, targetType: 'bone' | 'mesh', channel: 'position' | 'rotation' | 'scale', values: Partial<Vector3D>) {
+    const target = targetType === 'bone'
+      ? armature.value.bones.find(b => b.id === targetId)
+      : projectStore.meshes.find(m => m.id === targetId)
+    if (!target) return
+    const axes = (['x', 'y', 'z'] as const).filter(axis => values[axis] !== undefined)
+    if (!axes.length || axes.some(axis => !Number.isFinite(values[axis]))) return
+    if (axes.every(axis => target[channel][axis] === values[axis])) return
+    stopPlayback()
+    isPlaying.value = false
+    projectStore.recordState(`Pose ${target.name}`)
+    for (const axis of axes) target[channel][axis] = values[axis]!
+    if (autoKey.value) addKeyframe(target.id, targetType, channel, target[channel])
+    recordedStatusMessage.value = `${autoKey.value ? 'Keyed' : 'Adjusted'} ${target.name} · frame ${currentFrame.value}`
   }
 
   function recordCurrentKeyframe(options?: { record?: boolean }) {
@@ -1979,9 +2093,33 @@ export const useAnimationStore = defineStore('animation', () => {
     applyIKConstraints(armature.value.bones)
   }
 
+  watch(jointPlacementActive, active => {
+    if (active) {
+      toggleWeightPaint(false)
+      toggleTestPose(false)
+      clickToPlaceMode.value = false
+    }
+  }, { flush: 'sync' })
+
+  watch(clickToPlaceMode, active => {
+    if (active) {
+      jointPlacementActive.value = false
+      isWeightPaintActive.value = false
+      toggleTestPose(false)
+    }
+  }, { flush: 'sync' })
+
   watch(
     () => useToolStore().appMode,
-    (mode) => {
+    (mode, previousMode) => {
+      if (previousMode === 'rig' && mode !== 'rig') {
+        showHumanoidRigWizard.value = false
+        showRigFitPopup.value = false
+        jointPlacementActive.value = false
+        isWeightPaintActive.value = false
+        clickToPlaceMode.value = false
+        if (isTestPoseActive.value) toggleTestPose(false)
+      }
       if (mode !== 'animate' && isPlaying.value) {
         isPlaying.value = false
         stopPlayback()
@@ -2005,6 +2143,16 @@ export const useAnimationStore = defineStore('animation', () => {
     setShowBones,
     toggleShowBones,
     xrayBones,
+    boneDisplaySize,
+    poseClipboard,
+    showRigFitPopup,
+    showHumanoidRigWizard,
+    commitHumanoidRig,
+    showPosePopup,
+    jointPlacementActive,
+    jointPlacementMirror,
+    autoSkinMethod,
+    placeRigJoint,
     autoKey,
     interpolationMode,
     onionSkin,
@@ -2028,6 +2176,7 @@ export const useAnimationStore = defineStore('animation', () => {
     symmetrizeArmature,
     parentMeshToBone,
     autoWeightMeshToBones,
+    addRigPreset,
     clearArmature,
     deleteBone,
     renameBone,
@@ -2040,6 +2189,9 @@ export const useAnimationStore = defineStore('animation', () => {
     addKeyframe,
     addChannelKeyframe,
     recordCurrentKeyframe,
+    setBonePoseValue,
+    setPoseValues,
+    hasPoseClipboard: computed(() => Object.keys(poseClipboard.value).length > 0),
     recordAllBonesKeyframe,
     clearKeyframeAtCurrentTime,
     recordedStatusMessage,

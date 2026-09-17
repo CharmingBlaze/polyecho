@@ -205,10 +205,22 @@ function handleDuplicateActiveClip() {
   animationStore.duplicateClip(animationStore.activeClip.id)
 }
 
-// Flat list of all rig bones
-const allRigBones = computed(() => {
-  return animationStore.armature.bones
-})
+const trackSearch = ref('')
+const trackFilter = ref<'all' | 'selected' | 'animated'>('all')
+function matchesTrack(item: { id: string; name: string }, type: 'bone' | 'mesh') {
+  if (!item.name.toLowerCase().includes(trackSearch.value.trim().toLowerCase())) return false
+  if (trackFilter.value === 'selected') return type === 'bone'
+    ? animationStore.selectedBoneId === item.id
+    : !animationStore.selectedBoneId && projectStore.selectedMeshIds.includes(item.id)
+  if (trackFilter.value === 'animated') return animationStore.activeClip?.tracks.some(t =>
+    t.targetId === item.id && t.targetType === type && (t.positionKeys.length || t.rotationKeys.length || t.scaleKeys.length))
+  return true
+}
+const allRigBones = computed(() => animationStore.armature.bones.filter(b => matchesTrack(b, 'bone')))
+const visibleMeshes = computed(() => projectStore.meshes.filter(m => matchesTrack(m, 'mesh')))
+function expandVisibleTracks(expanded: boolean) {
+  for (const item of [...allRigBones.value, ...visibleMeshes.value]) expandedTracks.value[item.id] = expanded
+}
 
 // Timeline seconds markers list
 const timeMarkers = computed(() => {
@@ -893,6 +905,17 @@ function handleGraphSvgClick(e: MouseEvent) {
       </div>
     </div>
 
+    <div v-if="activeTab === 'keyframe'" class="flex items-center gap-2 px-2 py-1 border-b border-ui-borderSubtle bg-ui-panel shrink-0 text-[10px] flex-wrap">
+      <button class="text-ui-textAccent border border-ui-borderDefault rounded px-2 py-1" @click="animationStore.showPosePopup = true">Quick Pose</button>
+      <input v-model="trackSearch" aria-label="Search animation tracks" placeholder="Find bone or object…" class="w-44 min-w-0 bg-ui-input border border-ui-borderDefault rounded px-2 py-1" />
+      <select v-model="trackFilter" aria-label="Filter animation tracks" class="bg-ui-input border border-ui-borderDefault rounded px-2 py-1">
+        <option value="all">All tracks</option><option value="selected">Selected only</option><option value="animated">Animated only</option>
+      </select>
+      <button class="text-ui-textMuted hover:text-ui-textPrimary" @click="expandVisibleTracks(true)">Expand channels</button>
+      <button class="text-ui-textMuted hover:text-ui-textPrimary" @click="expandVisibleTracks(false)">Collapse</button>
+      <span class="text-ui-textMuted ml-auto">{{ allRigBones.length + visibleMeshes.length }} tracks · Double-click a cell to toggle a key</span>
+    </div>
+
     <!-- VIEW 1: KEYFRAME EDITOR (Expandable Dope Sheet Matrix) -->
     <div
       v-show="activeTab === 'keyframe'"
@@ -969,6 +992,10 @@ function handleGraphSvgClick(e: MouseEvent) {
         <div class="w-[1.5px] -ml-[0.75px] h-full bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.8)]"></div>
       </div>
 
+      <div v-if="!allRigBones.length && !visibleMeshes.length" class="p-5 text-[11px] text-ui-textMuted">
+        No tracks to show. Select an object or bone, or clear the track filters.
+        <button v-if="trackSearch || trackFilter !== 'all'" class="text-ui-textAccent ml-2" @click="trackSearch = ''; trackFilter = 'all'">Show all tracks</button>
+      </div>
       <!-- Dope Sheet Rows (Expandable Blockbench Channel Tracks) -->
       <div class="divide-y divide-ui-borderSubtle">
         <!-- 1. Armature Bones Tracks -->
@@ -1119,7 +1146,7 @@ function handleGraphSvgClick(e: MouseEvent) {
         </template>
 
         <!-- 2. Scene Meshes Tracks -->
-        <template v-for="mesh in projectStore.meshes" :key="mesh.id">
+        <template v-for="mesh in visibleMeshes" :key="mesh.id">
           <div 
             @click="selectTrackItem('mesh', mesh.id)"
             class="h-6 flex items-center hover:bg-ui-hover/60 cursor-pointer shrink-0 transition"

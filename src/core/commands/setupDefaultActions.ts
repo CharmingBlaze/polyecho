@@ -44,7 +44,7 @@ export function setupDefaultActions(
     },
     {
       id: 'bevel',
-      label: 'Bevel Edges / Vertices',
+      label: 'Bevel Edges',
       category: 'Modeling',
       shortcut: 'Ctrl+b',
       icon: 'bevel',
@@ -65,6 +65,16 @@ export function setupDefaultActions(
       shortcut: 'k',
       icon: 'knife',
       handler: () => requestModalTool('knife')
+    },
+    {
+      id: 'shapedraw',
+      label: 'Shape Draw — Outline, Path, Sections',
+      category: 'Modeling',
+      icon: 'face-select',
+      handler: () => {
+        toolStore.setAppMode('blockout')
+        requestModalTool('shapedraw')
+      }
     },
     {
       id: 'polydraw',
@@ -348,7 +358,7 @@ export function setupDefaultActions(
       category: 'Selection',
       shortcut: 'b',
       icon: 'marquee',
-      handler: () => { toolStore.isBoxSelectActive = true }
+      handler: () => { toolStore.toggleBoxSelect() }
     },
     {
       id: 'mode_vertex',
@@ -356,7 +366,7 @@ export function setupDefaultActions(
       category: 'Selection',
       shortcut: '1',
       icon: 'vertex-select',
-      handler: () => { toolStore.setAppMode('model'); toolStore.selectMode = 'vertex' }
+      handler: () => toolStore.enterSelectMode('vertex')
     },
     {
       id: 'mode_edge',
@@ -364,7 +374,7 @@ export function setupDefaultActions(
       category: 'Selection',
       shortcut: '2',
       icon: 'edge-select',
-      handler: () => { toolStore.setAppMode('model'); toolStore.selectMode = 'edge' }
+      handler: () => toolStore.enterSelectMode('edge')
     },
     {
       id: 'mode_face',
@@ -372,7 +382,7 @@ export function setupDefaultActions(
       category: 'Selection',
       shortcut: '3',
       icon: 'face-select',
-      handler: () => { toolStore.setAppMode('model'); toolStore.selectMode = 'face' }
+      handler: () => toolStore.enterSelectMode('face')
     },
     {
       id: 'mode_object',
@@ -380,14 +390,18 @@ export function setupDefaultActions(
       category: 'Selection',
       shortcut: '4',
       icon: 'mesh-cube',
-      handler: () => { toolStore.setAppMode('model'); toolStore.selectMode = 'object' }
+      handler: () => toolStore.enterSelectMode('object')
     },
     {
       id: 'mode_origin',
       label: 'Origin / Pivot Mode',
       category: 'Selection',
       shortcut: '5',
-      handler: () => { toolStore.setAppMode('model'); toolStore.selectMode = 'origin' }
+      handler: () => {
+        if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') return
+        if (!toolStore.isMeshWorkspace() && toolStore.appMode !== 'uvpaint') toolStore.setAppMode('model')
+        toolStore.enterSelectMode('origin')
+      }
     },
     {
       id: 'mode_bone',
@@ -395,7 +409,7 @@ export function setupDefaultActions(
       category: 'Selection',
       shortcut: '6',
       icon: 'bone',
-      handler: () => { toolStore.setAppMode('rig'); toolStore.selectMode = 'bone' }
+      handler: () => toolStore.enterSelectMode('bone')
     },
     {
       id: 'toggle_edit_object',
@@ -403,11 +417,9 @@ export function setupDefaultActions(
       category: 'Selection',
       shortcut: 'Tab',
       handler: () => {
-        if (toolStore.selectMode === 'object') {
-          toolStore.selectMode = 'face'
-        } else {
-          toolStore.selectMode = 'object'
-        }
+        if (toolStore.appMode === 'uvpaint' || toolStore.appMode === 'rig' || toolStore.appMode === 'animate') return
+        if (!toolStore.isMeshWorkspace()) toolStore.setAppMode('model')
+        toolStore.selectMode = toolStore.selectMode === 'object' ? 'face' : 'object'
       }
     },
 
@@ -624,7 +636,7 @@ export function setupDefaultActions(
     },
     {
       id: 'restore_default_texture',
-      label: 'Restore Default Texture Atlas (64x64 Retro)',
+      label: 'Restore Starter Texture',
       category: 'UV & Texture',
       icon: 'sparkles',
       handler: () => {

@@ -3,6 +3,7 @@ import { Material, Palette, TextureMap } from '../../types/texture'
 import { Armature, AnimationClip } from '../../types/animation'
 import { ViewportSettings } from '../../types/tools'
 import { ReferenceImage } from '../../types/reference'
+import { serializePaintLayers, type SavedPaintLayer } from '../painting/PaintLayerStorage'
 
 export interface PsxProjectFile {
   version: '1.0'
@@ -11,7 +12,7 @@ export interface PsxProjectFile {
   savedAt: string
   meshes: MeshObject[]
   textureDataUrl: string
-  textures?: { id: string; name: string; width: number; height: number; dataUrl: string; atlas?: { cols: number; rows: number } }[]
+  textures?: { id: string; name: string; width: number; height: number; dataUrl: string; atlas?: { cols: number; rows: number }; layers?: SavedPaintLayer[]; activeLayerId?: string }[]
   activePalette: Palette
   materials: Material[]
   armature: Armature
@@ -82,6 +83,7 @@ export class ProjectSerializer {
       width: t.width,
       height: t.height,
       dataUrl: t.pixelBuffer ? t.pixelBuffer.toDataURL() : (t.dataUrl || textureDataUrl),
+      ...serializePaintLayers(t.pixelBuffer),
       atlas: t.atlas
     }))
 

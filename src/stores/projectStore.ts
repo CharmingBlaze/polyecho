@@ -1,3 +1,4 @@
+import { serializePaintLayers, restorePaintLayers } from '../core/painting/PaintLayerStorage'
 import { defineStore } from 'pinia'
 import { ref, computed, markRaw, onScopeDispose } from 'vue'
 import { MeshObject, Vertex, Face, MeshShadeMode } from '../types/mesh'
@@ -25,11 +26,22 @@ import {
 import { getMeshEdges, getEdgeLoop, getEdgeRing, boundaryEdgeIdsForFaces } from '../core/geometry/EdgeUtils'
 import { DEFAULT_PALETTES, loadCustomPalettes, saveCustomPalettes } from '../utils/color'
 import { PixelBuffer } from '../core/painting/PixelCanvas'
-import { generateRetroAtlas } from '../core/painting/DefaultTextures'
+import {
+  createStarterTextureContents,
+  generateRetroAtlas,
+  loadDefaultTexturePref,
+  normalizeDefaultTexturePref,
+  saveDefaultTexturePref,
+  type DefaultTexturePref
+} from '../core/painting/DefaultTextures'
 import { PrimitiveType, PrimitiveParameters } from '../core/primitives/PrimitiveTypes'
 import { PrimitiveBuilder } from '../core/primitives/PrimitiveBuilder'
 import { MeshBridge } from '../core/mesh/MeshBridge'
 import { EditableMesh } from '../core/mesh/MeshKernel'
+import { MeshRepository, type MeshBridgeData } from '../core/mesh/MeshRepository'
+import { editMesh, type MeshEditResult } from '../core/mesh/MeshTransaction'
+import { MeshValidator } from '../core/mesh/MeshValidator'
+import type { OperationResult } from '../core/geometry/Operations'
 import { placeOriginAtBoundsCenter } from '../core/geometry/MeshOrigin'
 import { addObjectRotation, flipMeshGeometry, type SymmetryAxis } from '../core/geometry/ObjectSymmetry'
 import { SeamUnwrapper } from '../core/uv/SeamUnwrapper'
@@ -65,6 +77,9 @@ import { ProjectStorage, type ProjectStorageData } from '../core/storage/Project
 
 export const useProjectStore = defineStore('project', () => {
   const historyStore = useHistoryStore()
+  const meshRepository = new MeshRepository()
+  onScopeDispose(() => meshRepository.clear())
+  const meshEditError = ref<Extract<MeshEditResult<unknown>, { success: false }> | null>(null)
 
   // Project state
   const projectName = ref<string>('PSX_LowPoly_Model')
@@ -97,19 +112,17 @@ export const useProjectStore = defineStore('project', () => {
   const referenceRevision = ref<number>(0)
   const selectedReferenceId = ref<string>('')
 
-  // Create default 64x64 pixel buffer atlas
-  const defaultBuffer = new PixelBuffer(64, 64)
-  generateRetroAtlas(defaultBuffer)
-
+  const defaultTexturePref = ref<DefaultTexturePref>(loadDefaultTexturePref())
+  const starter = createStarterTextureContents(defaultTexturePref.value)
   const textures = ref<TextureMap[]>([
     {
       id: 'tex_default',
-      name: 'Texture_Atlas_64x64',
-      width: 64,
-      height: 64,
-      dataUrl: defaultBuffer.toDataURL(),
-      pixelBuffer: markRaw(defaultBuffer),
-      atlas: { cols: 2, rows: 2 }
+      name: starter.name,
+      width: starter.width,
+      height: starter.height,
+      dataUrl: starter.dataUrl,
+      pixelBuffer: markRaw(starter.pixelBuffer),
+      atlas: starter.atlas
     }
   ])
 
@@ -451,48 +464,59 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   // Modeling operations on active mesh
+  function runKernelOperation(description: string, operation: (document: MeshObject, bridge: MeshBridgeData) => OperationResult) {
+    const document = activeMesh.value
+    if (!document || document.locked) return
+    meshEditError.value = null
+    const resident = acquireEditableMesh(document)
+    const staged: MeshBridgeData = {
+      mesh: resident.mesh.clone(),
+      strToNumVertId: new Map(resident.strToNumVertId), numToStrVertId: new Map(resident.numToStrVertId),
+      strToNumFaceId: new Map(resident.strToNumFaceId), numToStrFaceId: new Map(resident.numToStrFaceId),
+    }
+    const result = editMesh(staged.mesh, () => operation(document, staged))
+    if (!result.success) { meshEditError.value = result; return result }
+    if (!result.change.topologyChanged && !result.change.positionsChanged && !result.change.attributesChanged) return result
+    // Validate the staged result before recording. History still precedes mutation
+    // of either the resident kernel or its document projection.
+    recordState(description)
+    resident.mesh.restoreSnapshot(staged.mesh.createSnapshot())
+    staged.mesh = resident.mesh
+    selectedFaceIds.value = result.value.selectedFaceIds
+    selectedVertexIds.value = result.value.selectedVertexIds
+    selectedEdgeIds.value = result.value.selectedEdgeIds ?? []
+    publishEditableMesh(result.value.mesh, staged)
+    return result
+  }
+
   function performExtrude(distance = 0.5) {
-    if (!activeMesh.value) return
-    recordState('Extrude')
-    const result = extrudeSelection(activeMesh.value, {
+    if (!activeMesh.value || activeMesh.value.locked) return
+    return runKernelOperation('Extrude', (document, bridge) => extrudeSelection(document, {
       faceIds: selectedFaceIds.value,
       edgeIds: selectedEdgeIds.value,
       vertexIds: selectedFaceIds.value.length || selectedEdgeIds.value.length ? [] : selectedVertexIds.value,
       distance,
-    })
-    selectedFaceIds.value = result.selectedFaceIds
-    selectedVertexIds.value = result.selectedVertexIds
-    replaceMesh(result.mesh)
+    }, bridge))
   }
 
   function performInset(thickness = 0.1) {
-    if (!activeMesh.value || selectedFaceIds.value.length === 0) return
-    recordState('Inset Faces')
-    const result = insetFaces(activeMesh.value, selectedFaceIds.value, thickness)
-    selectedFaceIds.value = result.selectedFaceIds
-    selectedVertexIds.value = result.selectedVertexIds
-    replaceMesh(result.mesh)
+    if (!activeMesh.value || activeMesh.value.locked || selectedFaceIds.value.length === 0) return
+    return runKernelOperation('Inset Faces', (document, bridge) => insetFaces(document, selectedFaceIds.value, thickness, undefined, bridge))
   }
 
   function performBevel(offset = 0.2) {
-    if (!activeMesh.value) return
-    let targetFaceIds = [...selectedFaceIds.value]
-    if (targetFaceIds.length === 0 && selectedEdgeIds.value.length > 0) {
-      const selectedEdges = getMeshEdges(activeMesh.value).filter(e => selectedEdgeIds.value.includes(e.id))
-      targetFaceIds = activeMesh.value.faces
-        .filter(face => selectedEdges.some(edge => face.vertexIds.includes(edge.v1) && face.vertexIds.includes(edge.v2)))
-        .map(face => face.id)
-    }
-    if (targetFaceIds.length === 0) return
-    recordState('Bevel Face(s)')
-    const result = bevelFaces(activeMesh.value, targetFaceIds, offset)
+    if (!activeMesh.value || activeMesh.value.locked) return
+    if (!selectedFaceIds.value.length && !selectedEdgeIds.value.length) return
+    recordState('Bevel')
+    const result = bevelFaces(activeMesh.value, selectedFaceIds.value, offset, selectedEdgeIds.value)
     selectedFaceIds.value = result.selectedFaceIds
     selectedVertexIds.value = result.selectedVertexIds
+    selectedEdgeIds.value = []
     replaceMesh(result.mesh)
   }
 
   function performSubdivide(mode?: 'object' | 'vertex' | 'edge' | 'face') {
-    if (!activeMesh.value) return
+    if (!activeMesh.value || activeMesh.value.locked) return
     const toolStore = useToolStore()
     const resolved = mode ?? (
       toolStore.selectMode === 'object' || toolStore.selectMode === 'vertex'
@@ -506,7 +530,7 @@ export const useProjectStore = defineStore('project', () => {
       const ids = selectedMeshIds.value.length > 0
         ? [...selectedMeshIds.value]
         : (activeMeshId.value ? [activeMeshId.value] : [])
-      const targets = meshes.value.filter(m => ids.includes(m.id) && m.faces.length > 0)
+      const targets = meshes.value.filter(m => ids.includes(m.id) && !m.locked && m.faces.length > 0)
       if (targets.length === 0) return
       recordState('Subdivide')
       for (const mesh of targets) {
@@ -549,6 +573,7 @@ export const useProjectStore = defineStore('project', () => {
     })
     selectedFaceIds.value = result.selectedFaceIds
     selectedVertexIds.value = result.selectedVertexIds
+    selectedEdgeIds.value = result.selectedEdgeIds ?? []
     replaceMesh(result.mesh)
   }
 
@@ -578,15 +603,18 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   function performMerge(type: 'center' | 'first' | 'last' | 'distance' = 'center', threshold = 0.05) {
-    if (!activeMesh.value) return
+    if (!activeMesh.value || activeMesh.value.locked) return
     let targetVertIds = [...selectedVertexIds.value]
     if (targetVertIds.length < 2 && selectedEdgeIds.value.length > 0) {
       const selectedEdges = getMeshEdges(activeMesh.value).filter(e => selectedEdgeIds.value.includes(e.id))
       targetVertIds = Array.from(new Set(selectedEdges.flatMap(edge => [edge.v1, edge.v2])))
     }
-    if (type !== 'distance' && targetVertIds.length < 2) return
+    if (targetVertIds.length < 2 && selectedFaceIds.value.length) targetVertIds = [...new Set(activeMesh.value.faces.filter(f => selectedFaceIds.value.includes(f.id)).flatMap(f => f.vertexIds))]
+    if (targetVertIds.length < 2) return
     recordState(`Merge Vertices (${type})`)
     const result = mergeVerticesAdvanced(activeMesh.value, targetVertIds, type, threshold)
+    selectedFaceIds.value = []
+    selectedEdgeIds.value = []
     selectedVertexIds.value = result.selectedVertexIds
     replaceMesh(result.mesh)
   }
@@ -844,6 +872,29 @@ export const useProjectStore = defineStore('project', () => {
     else if (type === 'subdivision') delete activeMesh.value.subdivision
     else delete activeMesh.value.solidify
     markGeometryUpdated()
+  }
+
+  function acquireEditableMesh(document: MeshObject) {
+    meshRepository.retain(meshes.value.map(mesh => mesh.id))
+    return meshRepository.acquire(document)
+  }
+
+  function validateEditableMesh(mesh: EditableMesh): boolean {
+    mesh.recalculateNormals()
+    const validation = MeshValidator.validate(mesh)
+    meshEditError.value = validation.valid ? null : {
+      success: false, code: 'invalid-topology', reason: 'The edit would leave invalid mesh topology.', validation,
+    }
+    return validation.valid
+  }
+
+  function publishEditableMesh(document: MeshObject, bridge: MeshBridgeData, preview = false) {
+    const idx = meshes.value.findIndex(mesh => mesh.id === document.id)
+    if (idx === -1) return
+    meshRepository.publish(document, bridge)
+    meshes.value[idx] = document
+    if (preview) geometryRevision.value++
+    else markGeometryUpdated()
   }
 
   function replaceMesh(newMesh: MeshObject) {
@@ -1270,6 +1321,7 @@ export const useProjectStore = defineStore('project', () => {
           width: t.width,
           height: t.height,
           dataUrl: t.pixelBuffer ? t.pixelBuffer.canvas.toDataURL() : '',
+          ...serializePaintLayers(t.pixelBuffer),
           atlas: t.atlas ? { ...t.atlas } : undefined
         }))
 
@@ -1344,7 +1396,9 @@ export const useProjectStore = defineStore('project', () => {
         textures.value = data.textures.map(t => {
           const buf = new PixelBuffer(t.width || 64, t.height || 64)
           // If this is default texture and dataUrl is missing or too short, generate retro atlas
-          if (t.id === 'tex_default' && (!t.dataUrl || t.dataUrl.length < 100)) {
+          if (t.layers?.length) {
+            textureLoads.push(restorePaintLayers(buf, t.layers, t.activeLayerId))
+          } else if (t.id === 'tex_default' && (!t.dataUrl || t.dataUrl.length < 100)) {
             generateRetroAtlas(buf)
             t.dataUrl = buf.toDataURL()
           } else if (t.dataUrl) {
@@ -1382,20 +1436,10 @@ export const useProjectStore = defineStore('project', () => {
         await Promise.all(textureLoads)
       }
 
-      // Ensure default retro atlas texture is always available
+      // Ensure the starter texture is always available
       let defTex = textures.value.find(t => t.id === 'tex_default')
       if (!defTex) {
-        const defBuf = new PixelBuffer(64, 64)
-        generateRetroAtlas(defBuf)
-        defTex = {
-          id: 'tex_default',
-          name: 'Texture_Atlas_64x64',
-          width: 64,
-          height: 64,
-          dataUrl: defBuf.toDataURL(),
-          pixelBuffer: markRaw(defBuf),
-          atlas: { cols: 2, rows: 2 }
-        }
+        defTex = makeStarterTexture()
         textures.value.unshift(defTex)
       }
 
@@ -1562,7 +1606,7 @@ export const useProjectStore = defineStore('project', () => {
     const tex = textures.value.find(t => t.id === id)
     if (!tex) return
     recordState(`Atlas Grid ${cols}×${rows}`)
-    const grid = clampAtlasGrid(cols, rows)
+    const grid = clampAtlasGrid(cols, rows, tex.atlas)
     tex.atlas = grid.cols === 1 && grid.rows === 1 ? undefined : grid
     markTextureUpdated(id)
   }
@@ -1852,7 +1896,12 @@ export const useProjectStore = defineStore('project', () => {
     return forkMaterialForMesh(activeMesh.value.id)
   }
 
-  function applyTextureToMesh(meshId: string, textureId: string, policy: TextureApplyPolicy = 'this_object') {
+  function applyTextureToMesh(
+    meshId: string,
+    textureId: string,
+    policy: TextureApplyPolicy = 'this_object',
+    options?: { record?: boolean }
+  ) {
     const mesh = meshes.value.find(m => m.id === meshId)
     if (!mesh) {
       selectTexture(textureId)
@@ -1864,7 +1913,7 @@ export const useProjectStore = defineStore('project', () => {
     const currentMat = materials.value.find(m => m.id === currentMatId)
     const shared = isMaterialShared(currentMatId)
 
-    recordState(`Apply Texture to ${mesh.name}`)
+    if (options?.record !== false) recordState(`Apply Texture to ${mesh.name}`)
 
     if (policy === 'this_object' && shared && currentMat) {
       const newMat: Material = {
@@ -1898,38 +1947,62 @@ export const useProjectStore = defineStore('project', () => {
     applyTextureToMesh(activeMesh.value.id, textureId, policy)
   }
 
-  function restoreDefaultTexture(): TextureMap {
-    recordPixels('Restore Default Texture')
-    const defBuf = new PixelBuffer(64, 64)
-    generateRetroAtlas(defBuf)
-
-    const target = activeTexture.value || textures.value.find(t => t.id === 'tex_default')
-    if (target) {
-      target.width = 64
-      target.height = 64
-      target.pixelBuffer = defBuf
-      target.dataUrl = defBuf.toDataURL()
-      target.atlas = { cols: 2, rows: 2 }
-      if (activeTextureId.value !== target.id) {
-        activeTextureId.value = target.id
-      }
-      markTextureUpdated(target.id)
-      return target
-    }
-
-    const created: TextureMap = {
+  function makeStarterTexture(): TextureMap {
+    const contents = createStarterTextureContents(defaultTexturePref.value)
+    return {
       id: 'tex_default',
-      name: 'Texture_Atlas_64x64',
-      width: 64,
-      height: 64,
-      dataUrl: defBuf.toDataURL(),
-      pixelBuffer: markRaw(defBuf),
-      atlas: { cols: 2, rows: 2 }
+      name: contents.name,
+      width: contents.width,
+      height: contents.height,
+      dataUrl: contents.dataUrl,
+      pixelBuffer: markRaw(contents.pixelBuffer),
+      atlas: contents.atlas
     }
-    textures.value.unshift(created)
-    activeTextureId.value = created.id
-    markTextureUpdated(created.id)
-    return created
+  }
+
+  function paintStarterOnto(target: TextureMap) {
+    const starterTex = makeStarterTexture()
+    target.name = starterTex.name
+    target.width = starterTex.width
+    target.height = starterTex.height
+    target.dataUrl = starterTex.dataUrl
+    target.pixelBuffer = starterTex.pixelBuffer
+    target.atlas = starterTex.atlas
+  }
+
+  function setDefaultTexturePref(next: Partial<DefaultTexturePref>) {
+    defaultTexturePref.value = normalizeDefaultTexturePref({ ...defaultTexturePref.value, ...next })
+    saveDefaultTexturePref(defaultTexturePref.value)
+    restoreDefaultTexture({ select: false })
+  }
+
+  function restoreDefaultTexture(options?: { record?: boolean; select?: boolean }): TextureMap {
+    if (options?.record !== false) recordPixels('Restore Default Texture')
+    let target = textures.value.find(t => t.id === 'tex_default')
+    if (!target) {
+      target = makeStarterTexture()
+      textures.value.unshift(target)
+    } else {
+      paintStarterOnto(target)
+    }
+    if (options?.select !== false) selectTexture(target.id)
+    markTextureUpdated(target.id)
+    return target
+  }
+
+  function generateRetroAtlasOnActive(): TextureMap | null {
+    const target = activeTexture.value
+    if (!target) return null
+    recordPixels('Generate Retro Atlas')
+    const buf = new PixelBuffer(64, 64)
+    generateRetroAtlas(buf)
+    target.width = 64
+    target.height = 64
+    target.pixelBuffer = markRaw(buf)
+    target.dataUrl = buf.toDataURL()
+    target.atlas = { cols: 2, rows: 2 }
+    markTextureUpdated(target.id)
+    return target
   }
 
   // --- Palettes Subsystem (Three Verbs — see docs/PALETTES.md) ---
@@ -2015,8 +2088,7 @@ export const useProjectStore = defineStore('project', () => {
 
   function resetToDefaultProject() {
     recordPixels('New Project')
-    const defBuf = new PixelBuffer(64, 64)
-    generateRetroAtlas(defBuf)
+    const starterTex = makeStarterTexture()
 
     projectName.value = 'New Project'
     const defaultCube = createCube('Cube_1', 2)
@@ -2025,17 +2097,7 @@ export const useProjectStore = defineStore('project', () => {
     activeMeshId.value = defaultCube.id
     selectedMeshIds.value = [defaultCube.id]
 
-    textures.value = [
-      {
-        id: 'tex_default',
-        name: 'Texture_Atlas_64x64',
-        width: 64,
-        height: 64,
-        dataUrl: defBuf.toDataURL(),
-        pixelBuffer: markRaw(defBuf),
-        atlas: { cols: 2, rows: 2 }
-      }
-    ]
+    textures.value = [starterTex]
     activeTextureId.value = 'tex_default'
     referenceImages.value = []
     referenceRevision.value++
@@ -2169,6 +2231,7 @@ export const useProjectStore = defineStore('project', () => {
       angleLimitDegrees: angle,
       marginPixels: margin,
       textureSize: options.textureSize ?? pixelBuffer.value.width,
+      textureHeight: options.textureHeight ?? pixelBuffer.value.height,
       onlyFaceIndices: faces
     }))
   }
@@ -2195,7 +2258,8 @@ export const useProjectStore = defineStore('project', () => {
       activeMesh.value,
       Number.isFinite(padding) && padding >= 1 ? padding : Math.round(padding * texSize),
       texSize,
-      faces
+      faces,
+      pixelBuffer.value.height
     ))
   }
 
@@ -2518,6 +2582,10 @@ export const useProjectStore = defineStore('project', () => {
     shrinkSelection,
     selectConnected,
     replaceMesh,
+    acquireEditableMesh,
+    publishEditableMesh,
+    meshEditError,
+    validateEditableMesh,
     setShadeMode,
     setAutoSmoothAngle,
     toggleShadeMode,
@@ -2560,7 +2628,10 @@ export const useProjectStore = defineStore('project', () => {
     assignMaterialToSelectedMeshes,
     assignTextureToActiveMesh,
     makeActiveMeshMaterialUnique,
+    defaultTexturePref,
+    setDefaultTexturePref,
     restoreDefaultTexture,
+    generateRetroAtlasOnActive,
     resetToDefaultProject,
     markSelectedEdgesAsSeam,
     clearSelectedEdgesSeam,

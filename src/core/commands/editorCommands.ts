@@ -25,6 +25,7 @@ export type ModalToolCommand =
   | 'knife'
   | 'loop_cut'
   | 'polydraw'
+  | 'shapedraw'
   | 'polybuild'
 
 export type CameraViewCommand = 'persp' | 'top' | 'front' | 'right' | 'iso'

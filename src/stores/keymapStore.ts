@@ -15,7 +15,7 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { id: 'extrude', label: 'Extrude Region', category: 'Modeling', defaultKey: 'e', currentKey: 'e' },
   { id: 'extrude_individual', label: 'Extrude Individual', category: 'Modeling', defaultKey: 'Alt+e', currentKey: 'Alt+e' },
   { id: 'inset', label: 'Inset Faces', category: 'Modeling', defaultKey: 'i', currentKey: 'i' },
-  { id: 'bevel', label: 'Bevel Edges / Vertices', category: 'Modeling', defaultKey: 'Ctrl+b', currentKey: 'Ctrl+b' },
+  { id: 'bevel', label: 'Bevel Edges', category: 'Modeling', defaultKey: 'Ctrl+b', currentKey: 'Ctrl+b' },
   { id: 'loopcut', label: 'Loop Cut and Slide', category: 'Modeling', defaultKey: 'Ctrl+r', currentKey: 'Ctrl+r' },
   { id: 'knife', label: 'Knife Topology', category: 'Modeling', defaultKey: 'k', currentKey: 'k' },
   { id: 'polydraw', label: 'Poly Draw (Blockout F)', category: 'Modeling', defaultKey: 'f', currentKey: 'f', description: 'Blockout workspace only. Model F is Fill.' },
