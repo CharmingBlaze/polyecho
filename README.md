@@ -35,6 +35,7 @@ PolyEcho combines five integrated workspaces:
   - Flip Edge Diagonal (Rotate triangle hypotenuse).
   - Separate Selection (`P`) & Join Meshes (`Ctrl+J`).
   - Flip Face Normals & Recalculate Outside Normals.
+  - Boolean Union / Difference / Intersect, Bisect, Rip, Split, Edge Slide, Fill Holes, Tris to Quads.
   - Safe Mesh Cleanup (removes zero-length edges, orphan vertices, degenerate polygons).
 - **Interactive CAD Placement (`Shift+A`)**: Draw primitives (Box, Plane, Cylinder, Cone, Sphere, Icosphere) directly on grids or surface geometry with snap alignment.
 - **Shape Draw (Blockout)**: Outline, path, or cross-sections with live volume, then **Make Editable Mesh**.

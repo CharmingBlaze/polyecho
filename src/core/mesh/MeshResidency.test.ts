@@ -94,6 +94,28 @@ describe('resident kernel identity and attributes', () => {
     expect(repository.acquire(document).mesh).not.toBe(bridge.mesh)
   })
 
+  it('does not clobber a held kernel when the document signature changes', () => {
+    const document = createCube('Cube', 2)
+    const repository = new MeshRepository()
+    const bridge = repository.hold(document)
+    const v0 = document.vertices[0]
+    const numId = bridge.strToNumVertId.get(v0.id)!
+    const vertex = bridge.mesh.vertices.get(numId)!
+    const kernelX = vertex.position.x
+    vertex.position.x += 0.5
+    v0.position.x += 99
+    const acquired = repository.acquire(document)
+    expect(acquired.mesh).toBe(bridge.mesh)
+    expect(acquired.mesh.vertices.get(numId)!.position.x).toBe(kernelX + 0.5)
+    repository.retain([])
+    expect(repository.isHeld(document.id)).toBe(true)
+    expect(repository.acquire(document).mesh).toBe(bridge.mesh)
+    repository.release(document.id)
+    const after = repository.acquire(document)
+    expect(after.mesh).toBe(bridge.mesh)
+    expect(after.mesh.vertices.get(numId)!.position.x).toBe(v0.position.x)
+  })
+
   it('rolls attributes, identity and allocations back atomically on failure', () => {
     const { mesh } = MeshBridge.meshObjectToEditableMesh(createCube('Cube', 2))
     const before = mesh.createSnapshot()

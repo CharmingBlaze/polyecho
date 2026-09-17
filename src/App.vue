@@ -30,7 +30,7 @@ import { useThemeStore } from './stores/themeStore'
 import { useKeymapStore } from './stores/keymapStore'
 import { loadOpenProject, refreshDesktopTitle, saveOpenProject, startBlankProject } from './core/project/projectIo'
 import { allowDesktopClose, cancelDesktopClose, confirmUnsavedClose, getLaunchProjectPath, isDesktopApp, onDesktopCloseRequest, onOpenExternalProject, openProjectPath } from './core/desktop/desktopApi'
-import { EDITOR_EVENTS, requestCameraView, requestModalTool, requestFillFace, requestPrimitiveMenu, requestOpenPie, requestToggleUvOverlay, requestSmartUvProject } from './core/commands/editorCommands'
+import { EDITOR_EVENTS, requestCameraView, requestModalTool, requestFillFace, requestPrimitiveMenu, requestOpenPie, requestToggleUvOverlay, requestSmartUvProject, requestKnifeProject } from './core/commands/editorCommands'
 import { setupDefaultActions } from './core/commands/setupDefaultActions'
 import { operatorManager } from './core/operators/OperatorManager'
 import { useFastTitleTips } from './composables/useFastTitleTips'
@@ -204,6 +204,10 @@ function resolveKeymapAction(ids: string[]): string | null {
     if (isMeshWorkspace() && ids.includes('poke_faces')) return 'poke_faces'
     if ((mode === 'rig' || mode === 'animate') && ids.includes('unbind_geometry')) return 'unbind_geometry'
   }
+  if (ids.includes('rip') || ids.includes('paste_flipped_pose')) {
+    if (isMeshWorkspace() && ids.includes('rip')) return 'rip'
+    if (mode === 'animate' && ids.includes('paste_flipped_pose')) return 'paste_flipped_pose'
+  }
   if (ids.includes('box_select') && isMeshWorkspace()) return 'box_select'
   for (const id of ids) {
     if (id.startsWith('paint_')) continue
@@ -376,6 +380,7 @@ function runKeymapAction(id: string) {
     case 'dissolve':
       if (isMeshWorkspace()) {
         if (toolStore.selectMode === 'edge') projectStore.performDissolve('edge')
+        else if (toolStore.selectMode === 'face') projectStore.performDissolve('face')
         else if (toolStore.selectMode === 'vertex') projectStore.performDissolve('vertex')
       }
       return
@@ -529,6 +534,102 @@ function runKeymapAction(id: string) {
       if (toolStore.appMode === 'rig' && projectStore.activeMesh) {
         animationStore.unbindGeometry(projectStore.activeMesh.id)
       }
+      return
+    case 'edge_slide':
+      if (isMeshWorkspace()) requestModalTool('edge_slide')
+      return
+    case 'vertex_slide':
+      if (isMeshWorkspace()) requestModalTool('vertex_slide')
+      return
+    case 'offset_loop':
+      if (isMeshWorkspace()) requestModalTool('offset_loop')
+      return
+    case 'bisect':
+      if (isMeshWorkspace()) requestModalTool('bisect')
+      return
+    case 'spin':
+      if (isMeshWorkspace()) requestModalTool('spin')
+      return
+    case 'shrink_fatten':
+      if (isMeshWorkspace()) requestModalTool('shrink_fatten')
+      return
+    case 'shear':
+      if (isMeshWorkspace()) requestModalTool('shear')
+      return
+    case 'to_sphere':
+      if (isMeshWorkspace()) requestModalTool('to_sphere')
+      return
+    case 'flip_edge':
+      if (isMeshWorkspace()) projectStore.performFlipEdge()
+      return
+    case 'recalculate_outside':
+      if (isMeshWorkspace()) projectStore.performRecalculateOutside()
+      return
+    case 'tris_to_quads':
+      if (isMeshWorkspace()) projectStore.performTrisToQuads()
+      return
+    case 'make_planar':
+      if (isMeshWorkspace()) projectStore.performMakePlanar()
+      return
+    case 'fill_holes':
+      if (isMeshWorkspace()) projectStore.performFillHoles()
+      return
+    case 'limited_dissolve':
+      if (isMeshWorkspace()) projectStore.performLimitedDissolve()
+      return
+    case 'delete_only_faces':
+      if (isMeshWorkspace()) projectStore.performDeleteOnlyFaces()
+      return
+    case 'delete_only_edges':
+      if (isMeshWorkspace()) projectStore.performDeleteOnlyEdges()
+      return
+    case 'rip':
+      if (isMeshWorkspace()) projectStore.performRip(false)
+      return
+    case 'rip_fill':
+      if (isMeshWorkspace()) projectStore.performRip(true)
+      return
+    case 'split_faces':
+      if (isMeshWorkspace()) projectStore.performSplit()
+      return
+    case 'vertex_bevel':
+      if (isMeshWorkspace()) projectStore.performVertexBevel()
+      return
+    case 'solidify_faces':
+      if (isMeshWorkspace()) projectStore.performSolidifyFaces()
+      return
+    case 'symmetrize_x':
+      if (isMeshWorkspace()) projectStore.performSymmetrize('x')
+      return
+    case 'smooth_verts':
+      if (isMeshWorkspace()) projectStore.performSmoothVertices()
+      return
+    case 'randomize_verts':
+      if (isMeshWorkspace()) projectStore.performRandomizeVertices()
+      return
+    case 'unsubdivide':
+      if (isMeshWorkspace()) projectStore.performUnsubdivide()
+      return
+    case 'decimate':
+      if (isMeshWorkspace()) projectStore.performDecimate()
+      return
+    case 'boolean_union':
+      if (isMeshWorkspace()) projectStore.performBoolean('union')
+      return
+    case 'boolean_difference':
+      if (isMeshWorkspace()) projectStore.performBoolean('difference')
+      return
+    case 'boolean_intersect':
+      if (isMeshWorkspace()) projectStore.performBoolean('intersect')
+      return
+    case 'knife_project':
+      if (isMeshWorkspace()) requestKnifeProject()
+      return
+    case 'separate_loose':
+      if (isMeshWorkspace()) projectStore.performSeparateByLooseParts()
+      return
+    case 'separate_material':
+      if (isMeshWorkspace()) projectStore.performSeparateByMaterial()
       return
   }
 }

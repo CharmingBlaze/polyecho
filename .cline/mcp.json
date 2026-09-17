@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "polyecho-collab": {
+      "command": "py",
+      "args": ["-3", "scripts/collab_mcp.py"],
+      "env": {
+        "COLLAB_AGENT": "deepseek"
+      },
+      "disabled": false,
+      "autoApprove": [
+        "collab_status",
+        "collab_inbox",
+        "collab_heartbeat",
+        "collab_log"
+      ]
+    }
+  }
+}

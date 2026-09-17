@@ -15,9 +15,9 @@ import { X, GripHorizontal, Minus, Plus } from 'lucide-vue-next'
 const layoutStore = useLayoutStore()
 const visible = ref(false)
 const isMinimized = ref(false)
-const position = ref({ x: 120, y: 70 })
+const position = ref({ x: 56, y: 42 })
 const activeTab = ref<'BASIC' | 'SHAPES' | 'BUILD'>('BASIC')
-const searchQuery = ref('')
+const PANEL_WIDTH = 208
 
 const placementMode = ref<PrimitivePlacementMode>(PrimitivePlacementMode.CAD_DRAW)
 const orientation = ref<PlacementOrientation>('SURFACE')
@@ -113,14 +113,7 @@ const primitiveIcons: Record<PrimitiveType, string> = {
   ARCH: 'mesh-torus'
 }
 
-const filteredPrimitives = computed(() => {
-  const q = searchQuery.value.trim().toLowerCase()
-  const all = PrimitiveRegistry.getAll()
-  if (q) {
-    return all.filter(p => p.label.toLowerCase().includes(q) || p.type.toLowerCase().includes(q))
-  }
-  return PrimitiveRegistry.getByCategory(activeTab.value)
-})
+const categoryPrimitives = computed(() => PrimitiveRegistry.getByCategory(activeTab.value))
 
 function updateSetting(key: string, event: Event) {
   const input = event.target as HTMLInputElement
@@ -131,7 +124,7 @@ function updateSetting(key: string, event: Event) {
   if (op instanceof PrimitivePlacementOperator && op.primitiveType === chosenType.value) op.setParameters(settings.value)
 }
 
-const { startDrag } = useFloatingDrag(position, { minX: 10, minY: 40, maxPadX: 320, maxPadY: 80 })
+const { startDrag } = useFloatingDrag(position, { minX: 10, minY: 40, maxPadX: PANEL_WIDTH, maxPadY: 80 })
 
 watch(placing, (op, was) => {
   if (op && !was && !visible.value) openAt()
@@ -139,15 +132,13 @@ watch(placing, (op, was) => {
 
 function openAt(x?: number, y?: number) {
   if (x !== undefined && y !== undefined) {
-    const panelWidth = 320
-    const panelHeight = 440
-    const clampedX = Math.min(x, window.innerWidth - panelWidth - 20)
+    const panelHeight = 480
+    const clampedX = Math.min(x, window.innerWidth - PANEL_WIDTH - 20)
     const clampedY = Math.min(y, window.innerHeight - panelHeight - 20)
     position.value = { x: Math.max(20, clampedX), y: Math.max(40, clampedY) }
   } else if (!visible.value) {
     position.value = { x: 56, y: 42 }
   }
-  searchQuery.value = ''
   isMinimized.value = false
   visible.value = true
   layoutStore.showPrimitivePanel = true
@@ -214,19 +205,19 @@ defineExpose({
   <div
     data-floating-panel
     v-if="visible"
-    class="fixed z-50 flex flex-col bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl font-sans select-none pointer-events-auto w-[320px] text-xs"
+    class="fixed z-50 flex flex-col bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl font-sans select-none pointer-events-auto w-52 text-xs"
     :style="{ left: `${position.x}px`, top: `${position.y}px` }"
   >
     <div
       class="inspector-head cursor-move"
       @pointerdown="startDrag"
     >
-      <div class="inspector-head-kicker">
+      <div class="inspector-head-kicker min-w-0">
         <GripHorizontal class="w-3.5 h-3.5 shrink-0" />
         <BlenderIcon name="mesh-cube" :size="12" />
         <span>Add</span>
+        <span class="text-ui-textPrimary truncate">{{ chosenLabel }}</span>
       </div>
-      <span class="inspector-head-name">{{ chosenLabel }}</span>
       <div class="flex items-center shrink-0" @mousedown.stop @pointerdown.stop>
         <button
           type="button"
@@ -248,7 +239,7 @@ defineExpose({
       </div>
     </div>
 
-    <div v-show="!isMinimized" class="px-2.5 py-2 flex flex-col gap-2">
+    <div v-show="!isMinimized" class="px-2 py-2 flex flex-col gap-1.5">
       <div class="inspector-seg is-stretch" aria-label="Placement">
         <button
           type="button"
@@ -282,30 +273,20 @@ defineExpose({
         >World</button>
       </div>
 
-      <div class="relative">
-        <BlenderIcon name="search" :size="12" class="absolute left-2 top-1/2 -translate-y-1/2 text-ui-textMuted pointer-events-none" />
-        <input
-          v-model="searchQuery"
-          type="search"
-          aria-label="Filter primitives"
-          placeholder="Filter…"
-          class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs pl-7 pr-2 py-1 text-[11px] text-ui-textPrimary placeholder-ui-textMuted focus:outline-none focus:border-ui-accent"
-        />
-      </div>
-
-      <div v-if="!searchQuery" class="inspector-seg is-stretch" aria-label="Category">
+      <div class="inspector-seg is-stretch" aria-label="Category">
         <button type="button" class="inspector-seg-btn" :class="{ 'is-active': activeTab === 'BASIC' }" @click="activeTab = 'BASIC'">Basic</button>
         <button type="button" class="inspector-seg-btn" :class="{ 'is-active': activeTab === 'SHAPES' }" @click="activeTab = 'SHAPES'">Shapes</button>
         <button type="button" class="inspector-seg-btn" :class="{ 'is-active': activeTab === 'BUILD' }" @click="activeTab = 'BUILD'">Build</button>
       </div>
 
-      <div class="grid grid-cols-2 gap-1 max-h-52 overflow-y-auto custom-scrollbar">
+      <div class="flex flex-col gap-0.5">
         <button
-          v-for="item in filteredPrimitives"
+          v-for="item in categoryPrimitives"
           :key="item.type"
           type="button"
           class="inspector-chip w-full justify-start"
           :class="{ 'is-active': chosenType === item.type }"
+          :title="item.label"
           @click="selectPrimitive(item.type)"
         >
           <BlenderIcon :name="(primitiveIcons[item.type] as any)" :size="14" />
@@ -313,29 +294,30 @@ defineExpose({
         </button>
       </div>
 
-      <div class="border-t border-ui-borderSubtle pt-2 space-y-1.5">
-        <p class="text-[10px] font-semibold text-ui-textSecondary">{{ chosenLabel }}</p>
-        <div class="grid grid-cols-2 gap-1.5">
-          <label v-for="key in fields" :key="key" class="flex flex-col gap-0.5 text-[10px] text-ui-textMuted">
-            {{ fieldLabels[key] || key.charAt(0).toUpperCase() + key.slice(1) }}
-            <input
-              v-if="typeof settings[key] === 'boolean'"
-              type="checkbox"
-              :checked="settings[key]"
-              class="accent-ui-accent"
-              @change="updateSetting(key, $event)"
-            />
-            <input
-              v-else
-              type="number"
-              :value="settings[key]"
-              :step="/segments|rings|sides|steps|subdivisions/i.test(key) ? 1 : 0.1"
-              min="0"
-              class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 font-mono text-[10px] text-ui-textPrimary"
-              @change="updateSetting(key, $event)"
-            />
-          </label>
-        </div>
+      <div class="border-t border-ui-borderSubtle pt-1.5 space-y-1">
+        <label
+          v-for="key in fields"
+          :key="key"
+          class="flex items-center gap-2 min-h-[22px] text-[10px] text-ui-textMuted"
+        >
+          <span class="flex-1 truncate" :title="fieldLabels[key] || key">{{ fieldLabels[key] || key.charAt(0).toUpperCase() + key.slice(1) }}</span>
+          <input
+            v-if="typeof settings[key] === 'boolean'"
+            type="checkbox"
+            :checked="settings[key]"
+            class="accent-ui-accent"
+            @change="updateSetting(key, $event)"
+          />
+          <input
+            v-else
+            type="number"
+            :value="settings[key]"
+            :step="/segments|rings|sides|steps|subdivisions/i.test(key) ? 1 : 0.1"
+            min="0"
+            class="w-14 shrink-0 bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 font-mono text-[10px] text-ui-textPrimary text-right"
+            @change="updateSetting(key, $event)"
+          />
+        </label>
         <p class="text-[10px] text-ui-textMuted leading-snug">{{ sessionHint }}</p>
         <p v-if="placing?.dimensionText" class="font-mono text-[10px] inspector-value">{{ placing.dimensionText }}</p>
         <div v-if="placing" class="grid grid-cols-2 gap-1">

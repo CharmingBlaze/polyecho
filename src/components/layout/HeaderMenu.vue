@@ -26,7 +26,7 @@ import {
   revealInFolder,
   showDesktopAbout
 } from '../../core/desktop/desktopApi'
-import { EDITOR_EVENTS, requestCameraView, requestFillFace, requestModalTool } from '../../core/commands/editorCommands'
+import { EDITOR_EVENTS, requestCameraView, requestFillFace, requestModalTool, requestKnifeProject } from '../../core/commands/editorCommands'
 
 type NavMenu = 'file' | 'edit' | 'mesh' | 'workspace' | 'space' | 'view' | 'snap' | 'overlays' | null
 type CameraView = 'persp' | 'top' | 'front' | 'right' | 'iso'
@@ -617,7 +617,7 @@ onUnmounted(() => {
           Mesh
         </button>
 
-        <div v-if="activeDropdown === 'mesh'" class="absolute left-0 top-full mt-0.5 w-56 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+        <div v-if="activeDropdown === 'mesh'" class="absolute left-0 top-full mt-0.5 w-56 max-h-[min(80vh,36rem)] overflow-y-auto bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
           <button @click="requestModalTool('extrude'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2"><BlenderIcon name="tool-extrude" :size="14" /> Extrude</span>
             <span class="text-ui-textMuted font-mono text-[10px]">E</span>
@@ -661,7 +661,7 @@ onUnmounted(() => {
           <button @click="projectStore.performGridFill(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
             Grid Fill
           </button>
-          <button @click="projectStore.performBridgeEdges(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
+          <button @click="projectStore.performBridgeEdges(toolStore.bridgeSegments, toolStore.bridgeTwist); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
             <BlenderIcon name="bridge-edges" :size="14" /> Bridge Edge Loops
           </button>
           <div class="h-px bg-ui-borderSubtle my-1"></div>
@@ -715,12 +715,47 @@ onUnmounted(() => {
             Rotate 180° Y
           </button>
           <button
-            @click="(toolStore.selectMode === 'edge' ? projectStore.performDissolve('edge') : projectStore.performDissolve('vertex')); closeDropdowns()"
+            @click="(toolStore.selectMode === 'face' ? projectStore.performDissolve('face') : toolStore.selectMode === 'edge' ? projectStore.performDissolve('edge') : projectStore.performDissolve('vertex')); closeDropdowns()"
             class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between"
           >
             <span class="flex items-center gap-2"><BlenderIcon name="dissolve" :size="14" /> Dissolve</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+X</span>
           </button>
+          <button @click="projectStore.performFlipEdge(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Rotate Edge</button>
+          <button @click="projectStore.performRecalculateOutside(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Recalculate Outside</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+Shift+N</span>
+          </button>
+          <button @click="projectStore.performTrisToQuads(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Tris to Quads</button>
+          <button @click="projectStore.performFillHoles(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Fill Holes</button>
+          <button @click="requestModalTool('edge_slide'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Edge Slide</button>
+          <button @click="requestModalTool('vertex_slide'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Vertex Slide</button>
+          <button @click="requestModalTool('offset_loop'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Offset Edge Loop</button>
+          <button @click="projectStore.performRip(false); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Rip</button>
+          <button @click="projectStore.performRip(true); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Rip Fill</button>
+          <button @click="projectStore.performSplit(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Split</button>
+          <button @click="projectStore.performMakePlanar(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Make Planar Faces</button>
+          <button @click="projectStore.performLimitedDissolve(toolStore.limitedDissolveAngle); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Limited Dissolve</button>
+          <button @click="projectStore.performDeleteOnlyFaces(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Delete Only Faces</button>
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+          <button @click="projectStore.performBoolean('union'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Boolean Union</button>
+          <button @click="projectStore.performBoolean('difference'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Boolean Difference</button>
+          <button @click="projectStore.performBoolean('intersect'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Boolean Intersect</button>
+          <button @click="requestKnifeProject(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Knife Project</button>
+          <button @click="requestModalTool('bisect'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Bisect</button>
+          <button @click="requestModalTool('spin'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Spin</button>
+          <button @click="projectStore.performSolidifyFaces(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Solidify Faces</button>
+          <button @click="projectStore.performSymmetrize('x'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Symmetrize X</button>
+          <button @click="projectStore.performSeparateByLooseParts(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Separate by Loose Parts</button>
+          <button @click="projectStore.performSeparateByMaterial(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Separate by Material</button>
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+          <button @click="requestModalTool('shrink_fatten'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Shrink/Fatten</button>
+          <button @click="requestModalTool('shear'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Shear</button>
+          <button @click="requestModalTool('to_sphere'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">To Sphere</button>
+          <button @click="projectStore.performSmoothVertices(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Smooth Vertices</button>
+          <button @click="projectStore.performRandomizeVertices(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Randomize Vertices</button>
+          <button @click="projectStore.performUnsubdivide(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Unsubdivide</button>
+          <button @click="projectStore.performDecimate(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Decimate</button>
         </div>
       </div>
 

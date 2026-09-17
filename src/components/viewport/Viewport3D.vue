@@ -44,6 +44,16 @@ import { InsetOperator } from '../../core/operators/InsetOperator'
 import { BevelOperator } from '../../core/operators/BevelOperator'
 import { KnifeOperator } from '../../core/operators/knife/KnifeOperator'
 import { LoopCutOperator } from '../../core/operators/loopCut/LoopCutOperator'
+import {
+  BisectOperator,
+  EdgeSlideOperator,
+  OffsetEdgeLoopOperator,
+  ShearOperator,
+  ShrinkFattenOperator,
+  SpinOperator,
+  ToSphereOperator,
+  VertexSlideOperator
+} from '../../core/operators/MeshEditOperators'
 import { PrimitivePlacementOperator, PrimitivePlacementMode } from '../../core/operators/placement/PrimitivePlacementOperator'
 import { PolyDrawOperator } from '../../core/operators/PolyDrawOperator'
 import { ShapeDrawOperator } from '../../core/operators/ShapeDrawOperator'
@@ -63,6 +73,9 @@ import { ViewportLayerManager } from '../../core/render/ViewportLayers'
 import { SnapManager } from '../../core/transform/SnapManager'
 import type { PivotMode, TransformOrientation } from '../../core/transform/TransformTypes'
 import { applyLiveSymmetry } from '../../core/transform/LiveSymmetry'
+import { applyGizmoComponentPositions } from '../../core/transform/GizmoComponentDrag'
+import type { MeshBridgeData } from '../../core/mesh/MeshRepository'
+import type { MeshChange } from '../../core/mesh/MeshTransaction'
 import { useFloatingDrag } from '../../composables/useFloatingDrag'
 import { GripHorizontal } from 'lucide-vue-next'
 import BlenderIcon from '../icons/BlenderIcon.vue'
@@ -174,6 +187,19 @@ let lastPaintTextureId: string | undefined
 let isGizmoDragging = false
 let skipGizmoCommit = false
 let gizmoDragSession = false
+let gizmoLease: MeshBridgeData | null = null
+let gizmoLeaseId: string | null = null
+const GIZMO_POSITION_CHANGE: MeshChange = {
+  topologyChanged: false,
+  positionsChanged: true,
+  attributesChanged: false,
+  createdVertices: [],
+  deletedVertices: [],
+  createdEdges: [],
+  deletedEdges: [],
+  createdFaces: [],
+  deletedFaces: [],
+}
 let pointerDownClientPos = { x: 0, y: 0 }
 let isViewNavigating = false
 let viewNavPane: ViewQuadrant | null = null
@@ -2700,6 +2726,21 @@ const objectGizmoPos = new THREE.Vector3()
 const objectGizmoQuat = new THREE.Quaternion()
 const objectGizmoScale = new THREE.Vector3()
 
+function isComponentGizmoLease() {
+  const mode = toolStore.selectMode
+  if (mode !== 'vertex' && mode !== 'edge' && mode !== 'face') return false
+  if ((toolStore.appMode === 'rig' || toolStore.appMode === 'animate') && (animationStore.selectedBoneId || animationStore.selectedSocket)) {
+    return false
+  }
+  return isMeshSelectionAllowed()
+}
+
+function releaseGizmoLease() {
+  if (gizmoLeaseId) projectStore.releaseEditableMesh(gizmoLeaseId)
+  gizmoLease = null
+  gizmoLeaseId = null
+}
+
 function beginGizmoDragSession() {
   if (gizmoDragSession) return
   gizmoDragSession = true
@@ -2714,6 +2755,7 @@ function finishGizmoGesture() {
   isGizmoDragging = false
   if (skipGizmoCommit) {
     skipGizmoCommit = false
+    releaseGizmoLease()
     historyStore.undo()
     rebuildMeshes()
     return
@@ -2725,6 +2767,7 @@ function abortGizmoSession() {
   gizmoDragSession = false
   isGizmoDragging = false
   skipGizmoCommit = false
+  releaseGizmoLease()
 }
 
 function writeObjectSceneTRS(
@@ -2856,6 +2899,11 @@ function onGizmoDragStart() {
     for (const v of activeMesh.vertices) {
       dragStartVertexMap.set(v.id, localToWorld(activeMesh, v.position, mat))
     }
+  }
+  releaseGizmoLease()
+  if (activeMesh && isComponentGizmoLease()) {
+    gizmoLease = projectStore.holdEditableMesh(activeMesh)
+    gizmoLeaseId = activeMesh.id
   }
 }
 
@@ -3119,6 +3167,83 @@ function onGizmoObjectChange() {
     }
 
     const invMat = meshWorldMatrix(activeMesh).invert()
+    if (gizmoLease) {
+      applyGizmoComponentPositions({
+        bridge: gizmoLease,
+        targetVertIds,
+        startWorld: dragStartVertexMap,
+        deltaMatrix,
+        worldInverse: invMat,
+        clipMirror: activeMesh.mirror,
+      })
+      if (toolStore.snapping.vertex || toolStore.snapping.edge || toolStore.snapping.face) {
+        const moving: THREE.Vector3[] = []
+        const movingVerts: { position: THREE.Vector3 }[] = []
+        for (const id of targetVertIds) {
+          const numId = gizmoLease.strToNumVertId.get(id)
+          const vert = numId == null ? undefined : gizmoLease.mesh.vertices.get(numId)
+          if (!vert) continue
+          moving.push(vert.position.clone())
+          movingVerts.push(vert)
+        }
+        const targets: THREE.Vector3[] = []
+        if (toolStore.snapping.vertex) {
+          for (const [id, numId] of gizmoLease.strToNumVertId) {
+            if (targetVertIds.has(id)) continue
+            const vert = gizmoLease.mesh.vertices.get(numId)
+            if (vert) targets.push(vert.position.clone())
+          }
+        }
+        if (toolStore.snapping.edge) {
+          for (const e of getMeshEdges(activeMesh)) {
+            if (targetVertIds.has(e.v1) || targetVertIds.has(e.v2)) continue
+            const a = gizmoLease.mesh.vertices.get(gizmoLease.strToNumVertId.get(e.v1)!)
+            const b = gizmoLease.mesh.vertices.get(gizmoLease.strToNumVertId.get(e.v2)!)
+            if (!a || !b) continue
+            targets.push(new THREE.Vector3().addVectors(a.position, b.position).multiplyScalar(0.5))
+          }
+        }
+        if (toolStore.snapping.face) {
+          for (const f of activeMesh.faces) {
+            if (f.vertexIds.every(id => targetVertIds.has(id))) continue
+            const c = new THREE.Vector3()
+            let n = 0
+            for (const id of f.vertexIds) {
+              const vert = gizmoLease.mesh.vertices.get(gizmoLease.strToNumVertId.get(id)!)
+              if (!vert) continue
+              c.add(vert.position)
+              n++
+            }
+            if (n > 0) targets.push(c.multiplyScalar(1 / n))
+          }
+        }
+        const thresh = Math.max(0.06, toolStore.snapping.gridSize * 0.75)
+        const extra = SnapManager.findRigidSnapOffset(moving, targets, thresh)
+        if (extra) {
+          for (const v of movingVerts) v.position.add(extra)
+        }
+      }
+      const numericTargets = new Set<number>()
+      for (const id of targetVertIds) {
+        const numId = gizmoLease.strToNumVertId.get(id)
+        if (numId != null) numericTargets.add(numId)
+      }
+      applyLiveSymmetry(
+        [...gizmoLease.mesh.vertices.values()],
+        numericTargets,
+        {
+          x: toolStore.viewport.symmetryX,
+          y: toolStore.viewport.symmetryY,
+          z: toolStore.viewport.symmetryZ,
+        }
+      )
+      projectStore.publishEditableMesh(
+        MeshBridge.editableMeshToMeshObject(gizmoLease.mesh, activeMesh, gizmoLease.numToStrVertId, gizmoLease.numToStrFaceId),
+        gizmoLease,
+        true,
+        GIZMO_POSITION_CHANGE,
+      )
+    } else {
     for (const v of activeMesh.vertices) {
       if (targetVertIds.has(v.id)) {
         const startWorld = dragStartVertexMap.get(v.id)
@@ -3214,7 +3339,9 @@ function onGizmoObjectChange() {
         z: toolStore.viewport.symmetryZ,
       }
     )
+    }
 
+    const displayMesh = projectStore.activeMesh ?? activeMesh
     const { 
       geometry, 
       wireframeGeometry, 
@@ -3223,7 +3350,7 @@ function onGizmoObjectChange() {
       selectedEdgesGeometry,
       edgeLinesGeometry
     } = meshToThreeGeometry(
-      activeMesh,
+      displayMesh,
       toolStore.selectMode === 'face' ? projectStore.selectedFaceIds : [],
       toolStore.selectMode === 'edge' ? projectStore.selectedEdgeIds : []
     )
@@ -3281,9 +3408,19 @@ function commitProxyTransform() {
   ) {
     const threshold = toolStore.snapping.autoMergeThreshold || 0.015
     projectStore.performAutoMerge(projectStore.activeMesh.id, threshold)
-  }
-
-  if (projectStore.activeMesh && !posing) {
+  } else if (gizmoLease && projectStore.activeMesh) {
+    projectStore.publishEditableMesh(
+      MeshBridge.editableMeshToMeshObject(
+        gizmoLease.mesh,
+        projectStore.activeMesh,
+        gizmoLease.numToStrVertId,
+        gizmoLease.numToStrFaceId,
+      ),
+      gizmoLease,
+      false,
+      GIZMO_POSITION_CHANGE,
+    )
+  } else if (projectStore.activeMesh && !posing) {
     projectStore.markGeometryUpdated()
   }
 
@@ -3292,6 +3429,7 @@ function commitProxyTransform() {
   }
 
   isGizmoDragging = false
+  releaseGizmoLease()
   syncBones()
   rebuildMeshes()
 }
@@ -4901,6 +5039,22 @@ function startModalOperator(tool: string, options?: any) {
     operatorManager.start(new KnifeOperator(), ctx, pointerPos)
   } else if (tool === 'loop_cut' || tool === 'loopcut') {
     operatorManager.start(new LoopCutOperator(), ctx, pointerPos)
+  } else if (tool === 'edge_slide') {
+    operatorManager.start(new EdgeSlideOperator(), ctx, pointerPos)
+  } else if (tool === 'vertex_slide') {
+    operatorManager.start(new VertexSlideOperator(), ctx, pointerPos)
+  } else if (tool === 'offset_loop') {
+    operatorManager.start(new OffsetEdgeLoopOperator(), ctx, pointerPos)
+  } else if (tool === 'bisect') {
+    operatorManager.start(new BisectOperator(), ctx, pointerPos)
+  } else if (tool === 'spin') {
+    operatorManager.start(new SpinOperator(), ctx, pointerPos)
+  } else if (tool === 'shrink_fatten') {
+    operatorManager.start(new ShrinkFattenOperator(), ctx, pointerPos)
+  } else if (tool === 'shear') {
+    operatorManager.start(new ShearOperator(), ctx, pointerPos)
+  } else if (tool === 'to_sphere') {
+    operatorManager.start(new ToSphereOperator(), ctx, pointerPos)
   } else if (shapeOp) {
     // A panel click has no drawing-pane camera. Start with a coherent front pane;
     // pointer navigation will select another pane as soon as the user enters it.
@@ -5888,6 +6042,29 @@ function handleFillFaceEvent() {
   projectStore.performFillFace({ x: dir.x, y: dir.y, z: dir.z })
 }
 
+function handleKnifeProjectEvent() {
+  const target = projectStore.activeMesh
+  if (!target) return
+  const inv = meshWorldMatrix(target).clone().invert()
+  const cutters = projectStore.meshes.filter(m => m.id !== target.id && projectStore.selectedMeshIds.includes(m.id))
+  const polylines: { x: number; y: number; z: number }[][] = []
+  for (const cutter of cutters) {
+    const world = meshWorldMatrix(cutter)
+    for (const edge of getMeshEdges(cutter)) {
+      const a = cutter.vertices.find(v => v.id === edge.v1)
+      const b = cutter.vertices.find(v => v.id === edge.v2)
+      if (!a || !b) continue
+      const pa = new THREE.Vector3(a.position.x, a.position.y, a.position.z).applyMatrix4(world).applyMatrix4(inv)
+      const pb = new THREE.Vector3(b.position.x, b.position.y, b.position.z).applyMatrix4(world).applyMatrix4(inv)
+      polylines.push([
+        { x: pa.x, y: pa.y, z: pa.z },
+        { x: pb.x, y: pb.y, z: pb.z }
+      ])
+    }
+  }
+  if (polylines.length) projectStore.performKnifeProject(polylines)
+}
+
 function handleBlenderModalEvent(e: any) {
   if (e && e.detail) {
     if (typeof e.detail === 'string') {
@@ -6264,6 +6441,7 @@ onMounted(() => {
   window.addEventListener(EDITOR_EVENTS.cameraView, handleCameraViewEvent)
   window.addEventListener(EDITOR_EVENTS.modalTool, handleBlenderModalEvent)
   window.addEventListener(EDITOR_EVENTS.fillFace, handleFillFaceEvent)
+  window.addEventListener(EDITOR_EVENTS.knifeProject, handleKnifeProjectEvent)
   window.addEventListener(EDITOR_EVENTS.primitiveCreated, handlePrimitiveCreatedEvent)
   window.addEventListener(EDITOR_EVENTS.startPrimitivePlacement, handleStartPrimitivePlacementEvent)
   window.addEventListener('theme-changed', handleThemeChangedEvent)
@@ -6279,6 +6457,7 @@ onUnmounted(() => {
   window.removeEventListener(EDITOR_EVENTS.cameraView, handleCameraViewEvent)
   window.removeEventListener(EDITOR_EVENTS.modalTool, handleBlenderModalEvent)
   window.removeEventListener(EDITOR_EVENTS.fillFace, handleFillFaceEvent)
+  window.removeEventListener(EDITOR_EVENTS.knifeProject, handleKnifeProjectEvent)
   window.removeEventListener(EDITOR_EVENTS.primitiveCreated, handlePrimitiveCreatedEvent)
   window.removeEventListener(EDITOR_EVENTS.startPrimitivePlacement, handleStartPrimitivePlacementEvent)
   window.removeEventListener('theme-changed', handleThemeChangedEvent)

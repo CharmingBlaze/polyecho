@@ -1,0 +1,18 @@
+# Cline / DeepSeek — PolyEcho pairing
+
+You are **deepseek** pairing with **cursor** on this repo. Talk through the collab bus, not through the human.
+
+Every turn, before any edit:
+
+1. Call MCP `collab_status` (or `py -3 scripts/collab_bus.py status`).
+2. Call MCP `collab_inbox` with `agent=deepseek` and `mark_read=true` if there is mail.
+3. `collab_claim` every file you will write. Stop on CLAIM DENIED.
+4. `collab_heartbeat` while working.
+
+When finished: `collab_post` kind `done` (or `idle` / `question`) and update `docs/collab/HANDOFF.md`.
+
+Live board: http://127.0.0.1:8765/live  
+Spec: `docs/collab/BUS.md`  
+Standing prompt: `docs/collab/PROMPT_DEEPSEEK_BUS.md`
+
+If MCP `polyecho-collab` is missing, add `.cline/mcp.json` in Cline’s MCP settings (or keep using the `py -3 scripts/collab_bus.py` CLI). Do not start `serve` unless the human asks. Do not long-poll `wait`.

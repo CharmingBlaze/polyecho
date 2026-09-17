@@ -98,6 +98,19 @@ function handleOriginPreset(preset: 'center' | 'bottom' | 'top' | 'min_x' | 'max
   projectStore.setOriginToPreset(activeMesh.value.id, preset)
 }
 
+function handleOriginToCursor() {
+  const mesh = activeMesh.value
+  if (!mesh) return
+  const c = toolStore.cursor3D
+  projectStore.offsetMeshOrigin(
+    mesh.id,
+    c.x - mesh.position.x,
+    c.y - mesh.position.y,
+    c.z - mesh.position.z,
+    'Origin to 3D Cursor'
+  )
+}
+
 function handleGeometryToOrigin() {
   if (!activeMesh.value) return
   projectStore.setGeometryToOrigin(activeMesh.value.id)
@@ -372,6 +385,7 @@ function toggleOriginMode() {
           <UiButton @click="handleOriginPreset('min_z')" size="xs" title="Snap pivot to Front face center (-Z)">−Z</UiButton>
           <UiButton @click="handleOriginPreset('max_z')" size="xs" title="Snap pivot to Back face center (+Z)">+Z</UiButton>
           <UiButton @click="handleOriginPreset('selection')" size="xs" title="Snap pivot to currently selected Vertices, Edges, or Faces">To Sel</UiButton>
+          <UiButton @click="handleOriginToCursor" size="xs" title="Snap pivot to the 3D cursor">To Cursor</UiButton>
         </div>
         <UiButton @click="handleGeometryToOrigin" size="xs" class="w-full" title="Recenter mesh geometry around its local origin">
           Geometry to origin

@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { ModalOperator, OperatorContext } from './ModalOperator'
 import { ExtrudeKernel, ExtrudeResult } from '../mesh/operations/ExtrudeKernel'
+import { MeshEditOps } from '../mesh/operations/MeshEditOps'
 import { TransformSolver } from '../transform/TransformSolver'
 import { PivotManager } from '../transform/PivotManager'
 import { ScreenGeometry } from '../geometry/ScreenGeometry'
@@ -9,6 +10,7 @@ export class ExtrudeOperator extends ModalOperator {
   readonly name = 'Extrude'
 
   private individual = false
+  private manifold = false
   private extrudeResult: ExtrudeResult | null = null
   private normal = new THREE.Vector3(0, 1, 0)
   private startRay = new THREE.Ray()
@@ -36,6 +38,16 @@ export class ExtrudeOperator extends ModalOperator {
       event.preventDefault()
       if (performance.now() - this.startedAt < 80) return true
       this.individual = !this.individual
+      if (this.individual) this.manifold = false
+      this.evaluate()
+      this.ctx.onUpdatePreview()
+      this.updateStatus()
+      return true
+    }
+    if (k === 'm' && !event.altKey) {
+      event.preventDefault()
+      this.manifold = !this.manifold
+      if (this.manifold) this.individual = false
       this.evaluate()
       this.ctx.onUpdatePreview()
       this.updateStatus()
@@ -127,15 +139,26 @@ export class ExtrudeOperator extends ModalOperator {
     }
 
     this.ctx.mesh.recalculateNormals()
+    if (this.manifold && this.extrudeResult) {
+      MeshEditOps.cleanupManifoldExtrude(
+        this.ctx.mesh,
+        this.extrudeResult.extrudedFaceIds,
+        this.extrudeResult.newVertexIds
+      )
+    }
   }
 
   confirm() {
-    if (!this.extrudeResult || this.extrudeResult.newVertexIds.length === 0 || Math.abs(this.lastDist) < 1e-9) {
+    const liveCaps = this.extrudeResult?.extrudedFaceIds.filter(id => this.ctx.mesh.faces.has(id)) ?? []
+    const liveNew = this.extrudeResult?.newVertexIds.filter(id => this.ctx.mesh.vertices.has(id)) ?? []
+    if (!this.extrudeResult || Math.abs(this.lastDist) < 1e-9 || (!liveNew.length && !liveCaps.length)) {
       this.cancel()
       return
     }
-    this.ctx.selectedFaceIds = [...this.extrudeResult.extrudedFaceIds]
-    this.ctx.selectedVertIds = [...this.extrudeResult.newVertexIds]
+    this.ctx.selectedFaceIds = liveCaps
+    this.ctx.selectedVertIds = liveNew.length
+      ? liveNew
+      : [...new Set(liveCaps.flatMap(id => this.ctx.mesh.faces.get(id)?.vertexIds ?? []))]
     super.confirm()
   }
 
@@ -149,9 +172,9 @@ export class ExtrudeOperator extends ModalOperator {
   }
 
   updateStatus() {
-    const kind = this.individual ? 'Individual' : 'Region'
+    const kind = this.individual ? 'Individual' : this.manifold ? 'Manifold' : 'Region'
     const axis = this.constraint !== 'FREE' ? ` ${this.constraint}` : ' Normal'
     const num = this.numericInput.text ? `: ${this.numericInput.text}` : ` ${this.lastDist.toFixed(3)}`
-    this.statusText = `Extrude ${kind}${axis}${num}  (I individual · LMB confirm · Esc cancel)`
+    this.statusText = `Extrude ${kind}${axis}${num}  (I individual · M manifold · LMB confirm · Esc cancel)`
   }
 }

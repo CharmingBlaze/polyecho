@@ -17,7 +17,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "handoff:glb": "vitest run src/core/export/EngineHandoff.test.ts",
-    "icon": "vitest run src/core/desktop/appIcon.test.ts"
+    "icon": "vitest run src/core/desktop/appIcon.test.ts",
+    "collab:bus": "py -3 scripts/collab_bus.py serve"
   },
   "build": {
     "appId": "com.polyecho.app",

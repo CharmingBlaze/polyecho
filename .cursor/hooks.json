@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "hooks": {
+    "workspaceOpen": [
+      { "command": "py -3 .cursor/hooks/collab_hook.py", "timeout": 8 }
+    ],
+    "sessionStart": [
+      { "command": "py -3 .cursor/hooks/collab_hook.py", "timeout": 8 }
+    ],
+    "preToolUse": [
+      {
+        "command": "py -3 .cursor/hooks/collab_hook.py",
+        "matcher": "Write|StrReplace|EditNotebook|Delete",
+        "timeout": 4
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "py -3 .cursor/hooks/collab_hook.py",
+        "matcher": "Write|StrReplace|EditNotebook",
+        "timeout": 4
+      }
+    ]
+  }
+}

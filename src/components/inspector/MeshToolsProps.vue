@@ -6,7 +6,7 @@ import UiSection from '../ui/UiSection.vue'
 import UiButton from '../ui/UiButton.vue'
 import UiNumberField from '../ui/UiNumberField.vue'
 import BlenderIcon from '../icons/BlenderIcon.vue'
-import { requestFillFace } from '../../core/commands/editorCommands'
+import { requestFillFace, requestModalTool, requestKnifeProject } from '../../core/commands/editorCommands'
 
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
@@ -206,6 +206,22 @@ function deleteSel() {
             <BlenderIcon name="face-select" :size="12" />
             <span>Triangulate</span>
           </UiButton>
+          <UiButton size="xs" :disabled="!hasFaces" title="Dissolve Faces (Ctrl+X in Face mode)" @click="projectStore.performDissolve('face')">
+            <BlenderIcon name="dissolve" :size="12" />
+            <span>Dissolve</span>
+          </UiButton>
+          <UiButton size="xs" :disabled="!hasFaces" title="Tris to Quads (Alt+J)" @click="projectStore.performTrisToQuads()">
+            <span>Tris to Quads</span>
+          </UiButton>
+          <UiButton size="xs" :disabled="!hasFaces" title="Make Planar Faces" @click="projectStore.performMakePlanar()">
+            <span>Planar</span>
+          </UiButton>
+          <UiButton size="xs" title="Fill Holes (Alt+F)" @click="projectStore.performFillHoles()">
+            <span>Fill Holes</span>
+          </UiButton>
+          <UiButton size="xs" :disabled="!hasFaces" title="Solidify Faces" @click="projectStore.performSolidifyFaces()">
+            <span>Solidify</span>
+          </UiButton>
           <UiButton size="xs" class="col-span-2" title="Flip Normals (Shift+N). Uses selected faces, or the whole mesh." @click="projectStore.performFlipNormals()">
             <BlenderIcon name="flip-normals" :size="12" />
             <span>Flip Normals</span>
@@ -220,7 +236,7 @@ function deleteSel() {
         v-model:is-open="sections.edge"
       >
         <div class="grid grid-cols-2 gap-1">
-          <UiButton size="xs" :disabled="!hasEdges" title="Bridge Edge Loops" @click="projectStore.performBridgeEdges()">
+          <UiButton size="xs" :disabled="!hasEdges" title="Bridge Edge Loops" @click="projectStore.performBridgeEdges(toolStore.bridgeSegments, toolStore.bridgeTwist)">
             <BlenderIcon name="bridge-edges" :size="12" />
             <span>Bridge</span>
           </UiButton>
@@ -228,6 +244,42 @@ function deleteSel() {
             <BlenderIcon name="dissolve" :size="12" />
             <span>Dissolve</span>
           </UiButton>
+          <UiButton size="xs" :disabled="!hasEdges" title="Rotate Edge (Ctrl+Shift+F)" @click="projectStore.performFlipEdge()">
+            <span>Rotate Edge</span>
+          </UiButton>
+          <UiButton size="xs" :disabled="!hasEdges" title="Rip (Ctrl+Shift+V)" @click="projectStore.performRip(false)">
+            <span>Rip</span>
+          </UiButton>
+          <UiButton size="xs" :disabled="!hasEdges" title="Rip Fill (Alt+V)" @click="projectStore.performRip(true)">
+            <span>Rip Fill</span>
+          </UiButton>
+          <UiButton size="xs" :disabled="!hasEdges" title="Delete Only Edges" @click="projectStore.performDeleteOnlyEdges()">
+            <span>Only Edges</span>
+          </UiButton>
+          <UiButton size="xs" :disabled="!hasEdges" title="Edge Slide (Shift+G)" @click="requestModalTool('edge_slide')">
+            <span>Slide</span>
+          </UiButton>
+          <UiButton size="xs" :disabled="!hasEdges" title="Offset Edge Loop (Ctrl+Shift+R)" @click="requestModalTool('offset_loop')">
+            <span>Offset Loop</span>
+          </UiButton>
+        </div>
+        <div class="grid grid-cols-2 gap-1">
+          <UiNumberField
+            v-model="toolStore.bridgeSegments"
+            label="Segs"
+            :min="1"
+            :max="16"
+            :step="1"
+            :precision="0"
+          />
+          <UiNumberField
+            v-model="toolStore.bridgeTwist"
+            label="Twist"
+            :min="-16"
+            :max="16"
+            :step="1"
+            :precision="0"
+          />
         </div>
       </UiSection>
 
@@ -245,13 +297,25 @@ function deleteSel() {
           <UiButton size="xs" title="Merge by Distance" @click="merge('distance')">Dist</UiButton>
         </div>
         <div class="grid grid-cols-2 gap-1">
-          <UiButton size="xs" :disabled="vertCount !== 2" title="Connect Vertex Path (J)" @click="projectStore.performConnectVertices()">
+          <UiButton size="xs" :disabled="vertCount < 2" title="Connect Vertex Path (J)" @click="projectStore.performConnectVertices()">
             <BlenderIcon name="connect-verts" :size="12" />
             <span>Connect</span>
           </UiButton>
           <UiButton size="xs" :disabled="vertCount === 0" title="Dissolve Vertices (Ctrl+X)" @click="projectStore.performDissolve('vertex')">
             <BlenderIcon name="dissolve" :size="12" />
             <span>Dissolve</span>
+          </UiButton>
+          <UiButton size="xs" :disabled="vertCount === 0" title="Vertex Slide (Shift+V)" @click="requestModalTool('vertex_slide')">
+            <span>Slide</span>
+          </UiButton>
+          <UiButton size="xs" :disabled="vertCount === 0" title="Vertex Bevel (Ctrl+Shift+B)" @click="projectStore.performVertexBevel()">
+            <span>Bevel</span>
+          </UiButton>
+          <UiButton size="xs" :disabled="vertCount === 0" title="Smooth Vertices" @click="projectStore.performSmoothVertices()">
+            <span>Smooth</span>
+          </UiButton>
+          <UiButton size="xs" :disabled="vertCount === 0" title="Randomize Vertices" @click="projectStore.performRandomizeVertices()">
+            <span>Random</span>
           </UiButton>
         </div>
       </UiSection>
@@ -273,6 +337,69 @@ function deleteSel() {
           <UiButton size="xs" title="Clean degenerate geometry" @click="projectStore.performCleanupMesh()">
             <BlenderIcon name="clean-mesh" :size="12" />
             <span>Clean</span>
+          </UiButton>
+          <UiButton size="xs" :disabled="!canSeparate" title="Split (Y)" @click="projectStore.performSplit()">
+            <span>Split</span>
+          </UiButton>
+          <UiButton size="xs" title="Delete Only Faces" @click="projectStore.performDeleteOnlyFaces()">
+            <span>Only Faces</span>
+          </UiButton>
+          <UiButton size="xs" title="Limited Dissolve" @click="projectStore.performLimitedDissolve(toolStore.limitedDissolveAngle)">
+            <span>Ltd Dissolve</span>
+          </UiButton>
+          <UiNumberField
+            class="col-span-1"
+            v-model="toolStore.limitedDissolveAngle"
+            label="Angle °"
+            :min="0"
+            :max="90"
+            :step="1"
+            :precision="0"
+          />
+          <UiButton size="xs" title="Unsubdivide" @click="projectStore.performUnsubdivide()">
+            <span>Unsubdivide</span>
+          </UiButton>
+          <UiButton size="xs" title="Decimate" @click="projectStore.performDecimate()">
+            <span>Decimate</span>
+          </UiButton>
+          <UiButton size="xs" title="Recalculate Outside (Ctrl+Shift+N)" @click="projectStore.performRecalculateOutside()">
+            <span>Recalc Outside</span>
+          </UiButton>
+          <UiButton size="xs" title="Symmetrize X" @click="projectStore.performSymmetrize('x')">
+            <span>Symmetrize X</span>
+          </UiButton>
+          <UiButton size="xs" :disabled="projectStore.selectedMeshIds.length < 2" title="Boolean Union" @click="projectStore.performBoolean('union')">
+            <span>Union</span>
+          </UiButton>
+          <UiButton size="xs" :disabled="projectStore.selectedMeshIds.length < 2" title="Boolean Difference" @click="projectStore.performBoolean('difference')">
+            <span>Difference</span>
+          </UiButton>
+          <UiButton size="xs" :disabled="projectStore.selectedMeshIds.length < 2" title="Boolean Intersect" @click="projectStore.performBoolean('intersect')">
+            <span>Intersect</span>
+          </UiButton>
+          <UiButton size="xs" :disabled="projectStore.selectedMeshIds.length < 2" title="Knife Project cutter onto active" @click="requestKnifeProject()">
+            <span>Knife Project</span>
+          </UiButton>
+          <UiButton size="xs" title="Separate by Loose Parts" @click="projectStore.performSeparateByLooseParts()">
+            <span>By Parts</span>
+          </UiButton>
+          <UiButton size="xs" title="Separate by Material" @click="projectStore.performSeparateByMaterial()">
+            <span>By Material</span>
+          </UiButton>
+          <UiButton size="xs" title="Bisect" @click="requestModalTool('bisect')">
+            <span>Bisect</span>
+          </UiButton>
+          <UiButton size="xs" title="Spin" @click="requestModalTool('spin')">
+            <span>Spin</span>
+          </UiButton>
+          <UiButton size="xs" title="Shrink/Fatten (Alt+S)" @click="requestModalTool('shrink_fatten')">
+            <span>Shrink/Fatten</span>
+          </UiButton>
+          <UiButton size="xs" title="Shear" @click="requestModalTool('shear')">
+            <span>Shear</span>
+          </UiButton>
+          <UiButton size="xs" title="To Sphere (Shift+Alt+S)" @click="requestModalTool('to_sphere')">
+            <span>To Sphere</span>
           </UiButton>
         </div>
         <div class="flex items-center gap-1">

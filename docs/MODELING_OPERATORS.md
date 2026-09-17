@@ -60,17 +60,21 @@ Live controls sit next to Space / Pivot in the app header. Magnet + chevron: gri
 | **`G`** | Grab / Move | `MoveOperator` | Translates selection along view plane or locked axes (`X`/`Y`/`Z`). **Ctrl**: increment snap. Viewport **Vertex Snap** / **Edge Midpoint**: rigid snap of the whole selection to the closest unused vertex or edge midpoint. |
 | **`R`** | Rotate | `RotateOperator` | Rotates selection around pivot axis based on angular pointer delta. |
 | **`S`** | Scale | `ScaleOperator` | Scales selection uniformly or along constrained axes. |
-| **`E`** | Extrude | `ExtrudeOperator` | Duplicates and projects boundary topology along face normals. |
+| **`E`** | Extrude | `ExtrudeOperator` | Duplicates and projects boundary topology along face normals. **`I`** individual, **`M`** manifold (dissolve coplanar side walls after the move). |
 | **`I`** | Inset | `InsetOperator` | Region inset (connected faces share one inner loop). Mouse = thickness from click. **`I`** individual, **`O`** outset, **`B`** boundary, **Ctrl** depth. |
 | **`Ctrl+B`** | Bevel | `BevelOperator` | Splits sharp edges/vertices into chamfered/rounded bevel strips. |
 | **`K`** | Knife Tool | `KnifeOperator` | Raycasts onto visible faces to cut arbitrary edges and vertices. |
-| **`Ctrl+R`**| Loop Cut | `LoopCutOperator` | Detects quad edge rings and splits with interactive slide + scroll wheel count. |
+| **`Ctrl+R`**| Loop Cut | `LoopCutOperator` | Detects even n-gon edge rings (quads, hexes, …) and splits with interactive slide + scroll wheel count. Odd faces (tris) still stop the ring. |
+| **`Shift+G`** | Edge Slide | `EdgeSlideOperator` | Slides selected edges along neighboring rails. |
+| **`Shift+V`** | Vertex Slide | `VertexSlideOperator` | Slides a vertex along a connected edge. |
+| **`Ctrl+Shift+R`** | Offset Edge Loop | `OffsetEdgeLoopOperator` | Inserts a pair of loops on both sides of a ring (calls `LoopCutKernel.cutLoop`, does not change the Loop Cut tool). |
+| **`Alt+S`** | Shrink/Fatten | `ShrinkFattenOperator` | Moves verts along their vertex normals. |
+| **`Shift+Alt+S`** | To Sphere | `ToSphereOperator` | Interpolates selected verts toward a sphere around the pivot. |
+| **`Ctrl+Shift+F`** | Rotate Edge | one-shot `MeshEditOps.flipEdges` | Flips the shared diagonal of two triangles. |
+| **`Ctrl+Shift+N`** | Recalculate Outside | one-shot `MeshEditOps.recalculateOutside` | Flips faces that point toward the mesh centroid. |
+| **`Ctrl+X`** | Dissolve | one-shot `DissolveKernel` / `dissolveVertex` / `MeshEditOps.dissolveFaces` | Vertices, edges, or faces. |
 | **Drag** | Primitive Placement | `PrimitivePlacementOperator` | Interactive click-and-drag grid spawner for boxes, cylinders, and spheres. |
 | **F** (Model) | Fill | one-shot `Operations.fillFaceFromVertices` | See **Fill (F)** below. Not a modal operator. |
-| **W** | Subdivide | one-shot `MeshTopologyService.subdivideFaces` | Object mode: every face on the selected mesh(es). Edit mode: current faces/edges. Number of Cuts + Smoothness in the Tools panel. Shared edge verts; neighbors tessellate. |
-| **Alt+P** | Poke Faces | one-shot `MeshTopologyService.pokeFaces` | Centroid fan. Mesh workspace only (Rig Alt+P unbinds). |
-| **Ctrl+T** | Triangulate | one-shot `MeshTopologyService.triangulateFaces` | Shortest diagonal on selected quads. |
-| **Ctrl+X** | Dissolve | one-shot `DissolveKernel` / `dissolveVertex` | Vertices or edges. |
 | **F** (Blockout) | Poly Draw | `PolyDrawOperator` | Front/Side silhouette; Persp view-plane or mesh face (N = ground). Close, then extrude toward the camera (F flips). MMB orbit. New mesh on commit. |
 | **V** (Blockout) | Poly Build | `PolyBuildOperator` | Draw an outline (new or existing verts), then close to fill **inside** that loop. Concave loops tessellate like Poly Draw. |
 

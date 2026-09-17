@@ -1,5 +1,5 @@
 import { actionRegistry, type CommandAction } from './ActionRegistry'
-import { requestExport, requestModalTool, requestPrimitivePlacement, requestCameraView, requestFillFace, requestSmartUvProject } from './editorCommands'
+import { requestExport, requestModalTool, requestPrimitivePlacement, requestCameraView, requestFillFace, requestSmartUvProject, requestKnifeProject } from './editorCommands'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import { useAnimationStore } from '../../stores/animationStore'
@@ -65,6 +65,59 @@ export function setupDefaultActions(
       shortcut: 'k',
       icon: 'knife',
       handler: () => requestModalTool('knife')
+    },
+    {
+      id: 'edge_slide',
+      label: 'Edge Slide',
+      category: 'Modeling',
+      shortcut: 'Shift+g',
+      handler: () => requestModalTool('edge_slide')
+    },
+    {
+      id: 'vertex_slide',
+      label: 'Vertex Slide',
+      category: 'Modeling',
+      shortcut: 'Shift+v',
+      handler: () => requestModalTool('vertex_slide')
+    },
+    {
+      id: 'offset_loop',
+      label: 'Offset Edge Loop',
+      category: 'Modeling',
+      shortcut: 'Ctrl+Shift+r',
+      handler: () => requestModalTool('offset_loop')
+    },
+    {
+      id: 'bisect',
+      label: 'Bisect',
+      category: 'Modeling',
+      handler: () => requestModalTool('bisect')
+    },
+    {
+      id: 'spin',
+      label: 'Spin',
+      category: 'Modeling',
+      handler: () => requestModalTool('spin')
+    },
+    {
+      id: 'shrink_fatten',
+      label: 'Shrink/Fatten',
+      category: 'Modeling',
+      shortcut: 'Alt+s',
+      handler: () => requestModalTool('shrink_fatten')
+    },
+    {
+      id: 'shear',
+      label: 'Shear',
+      category: 'Modeling',
+      handler: () => requestModalTool('shear')
+    },
+    {
+      id: 'to_sphere',
+      label: 'To Sphere',
+      category: 'Modeling',
+      shortcut: 'Shift+Alt+s',
+      handler: () => requestModalTool('to_sphere')
     },
     {
       id: 'shapedraw',
@@ -216,6 +269,7 @@ export function setupDefaultActions(
       icon: 'dissolve',
       handler: () => {
         if (toolStore.selectMode === 'edge') projectStore.performDissolve('edge')
+        else if (toolStore.selectMode === 'face') projectStore.performDissolve('face')
         else if (toolStore.selectMode === 'vertex') projectStore.performDissolve('vertex')
       }
     },
@@ -356,6 +410,158 @@ export function setupDefaultActions(
           projectStore.performCleanupMesh()
         }
       }
+    },
+    {
+      id: 'flip_edge',
+      label: 'Rotate Edge',
+      category: 'Topology',
+      shortcut: 'Ctrl+Shift+f',
+      handler: () => projectStore.performFlipEdge()
+    },
+    {
+      id: 'recalculate_outside',
+      label: 'Recalculate Outside',
+      category: 'Topology',
+      shortcut: 'Ctrl+Shift+n',
+      handler: () => projectStore.performRecalculateOutside()
+    },
+    {
+      id: 'tris_to_quads',
+      label: 'Tris to Quads',
+      category: 'Topology',
+      shortcut: 'Alt+j',
+      handler: () => projectStore.performTrisToQuads()
+    },
+    {
+      id: 'make_planar',
+      label: 'Make Planar Faces',
+      category: 'Topology',
+      handler: () => projectStore.performMakePlanar()
+    },
+    {
+      id: 'fill_holes',
+      label: 'Fill Holes',
+      category: 'Topology',
+      shortcut: 'Alt+f',
+      handler: () => projectStore.performFillHoles()
+    },
+    {
+      id: 'limited_dissolve',
+      label: 'Limited Dissolve',
+      category: 'Topology',
+      handler: () => projectStore.performLimitedDissolve()
+    },
+    {
+      id: 'delete_only_faces',
+      label: 'Delete Only Faces',
+      category: 'Topology',
+      handler: () => projectStore.performDeleteOnlyFaces()
+    },
+    {
+      id: 'delete_only_edges',
+      label: 'Delete Only Edges',
+      category: 'Topology',
+      handler: () => projectStore.performDeleteOnlyEdges()
+    },
+    {
+      id: 'rip',
+      label: 'Rip',
+      category: 'Topology',
+      shortcut: 'Ctrl+Shift+v',
+      handler: () => projectStore.performRip(false)
+    },
+    {
+      id: 'rip_fill',
+      label: 'Rip Fill',
+      category: 'Topology',
+      shortcut: 'Alt+v',
+      handler: () => projectStore.performRip(true)
+    },
+    {
+      id: 'split_faces',
+      label: 'Split',
+      category: 'Topology',
+      shortcut: 'y',
+      handler: () => projectStore.performSplit()
+    },
+    {
+      id: 'vertex_bevel',
+      label: 'Vertex Bevel',
+      category: 'Topology',
+      shortcut: 'Ctrl+Shift+b',
+      handler: () => projectStore.performVertexBevel()
+    },
+    {
+      id: 'solidify_faces',
+      label: 'Solidify Faces',
+      category: 'Topology',
+      handler: () => projectStore.performSolidifyFaces()
+    },
+    {
+      id: 'symmetrize_x',
+      label: 'Symmetrize X',
+      category: 'Topology',
+      handler: () => projectStore.performSymmetrize('x')
+    },
+    {
+      id: 'smooth_verts',
+      label: 'Smooth Vertices',
+      category: 'Topology',
+      handler: () => projectStore.performSmoothVertices()
+    },
+    {
+      id: 'randomize_verts',
+      label: 'Randomize Vertices',
+      category: 'Topology',
+      handler: () => projectStore.performRandomizeVertices()
+    },
+    {
+      id: 'unsubdivide',
+      label: 'Unsubdivide',
+      category: 'Topology',
+      handler: () => projectStore.performUnsubdivide()
+    },
+    {
+      id: 'decimate',
+      label: 'Decimate',
+      category: 'Topology',
+      handler: () => projectStore.performDecimate()
+    },
+    {
+      id: 'boolean_union',
+      label: 'Boolean Union',
+      category: 'Topology',
+      handler: () => projectStore.performBoolean('union')
+    },
+    {
+      id: 'boolean_difference',
+      label: 'Boolean Difference',
+      category: 'Topology',
+      handler: () => projectStore.performBoolean('difference')
+    },
+    {
+      id: 'boolean_intersect',
+      label: 'Boolean Intersect',
+      category: 'Topology',
+      handler: () => projectStore.performBoolean('intersect')
+    },
+    {
+      id: 'knife_project',
+      label: 'Knife Project',
+      category: 'Topology',
+      handler: () => requestKnifeProject()
+    },
+    {
+      id: 'separate_loose',
+      label: 'Separate by Loose Parts',
+      category: 'Topology',
+      handler: () => projectStore.performSeparateByLooseParts()
+    },
+    {
+      id: 'separate_material',
+      label: 'Separate by Material',
+      category: 'Topology',
+      handler: () => projectStore.performSeparateByMaterial()
     },
 
     // 3. SELECTION

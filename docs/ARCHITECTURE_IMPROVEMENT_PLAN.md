@@ -116,12 +116,15 @@ calls out for history.
 
 | Verb | Store line | What it does |
 | :--- | :--- | :--- |
-| Modifier add / apply / remove | `:845-876` | writes `mesh.mirror` / `subdivision` / `solidify`, then `markGeometryUpdated` |
-| Seam mark / clear | `:2185-2210` | writes `activeMesh.seamEdgeIds` |
+| Modifier add / remove | `:845`, `:869` | writes `mesh.mirror` / `subdivision` / `solidify` then `markGeometryUpdated`. Attribute-only: those fields are **not** in `signature()`, so they cannot push the document ahead of the kernel. Only Apply (`:862`) rebuilds the kernel |
+| Modifier apply | `:862` | `applyModifier` + `markGeometryUpdated`; slice 7 |
+| Seam mark / clear | `:2181-2210` | writes `activeMesh.seamEdgeIds` **directly** (`:2189`, `:2201`, `:2208`) — no `replaceMesh`. Seams *are* kernel state: `MeshBridge.ts:74-77` sets `edge.seam` from them, `:188` exports them, `MeshSnapshot.edges[].seam` carries them (`MeshKernel.ts:48`), and `signature()` (`MeshRepository.ts:10`) hashes them. Attribute-only, **not** TRS-only |
 | Separate | `:660-706` | in-place splices `faces` / `vertices`, `meshes.value.push(newMesh)` |
 | Join | `:708-752` | in-place splices + filter; hand-rolled ids |
 | Delete mesh | `:782-794` | filter + select fix-up |
-| Flip / rotate / mirror-copy object | `:1246-1277` | `flipMeshGeometry` / `addObjectRotation` / `cloneMeshObject` on the document |
+| Flip object axis | `:1246` | `flipMeshGeometry` (`ObjectSymmetry.ts:6-14`) negates `position[axis]` **and** reverses `f.vertexIds` + `f.uvs` — positions + winding + corner-UV order. Not TRS-only; slice 10 |
+| Rotate object | `:1255` | `addObjectRotation` (`ObjectSymmetry.ts:24-26`) writes only `mesh.rotation[axis]`. `signature()` excludes object transforms by design (`MeshRepository.ts:7`) — **TRS-only, verified, stays group (b)** |
+| Mirror copy object | `:1263` | `cloneMeshObject` (`:1228`, machine-renames all ids) + `flipMeshGeometry` + `meshes.value.push` (`:1272`). Object creation; whole-object replacement with a stated reason |
 
 ### 2.4 Writers outside `projectStore`
 
@@ -131,9 +134,9 @@ calls out for history.
 - **Rigging / weight editing** writes `mesh.vertices[].boneWeights` on the document from
   `animationStore.ts` at `:905, 929, 942, 1039, 1050, 1123, 1150, 1199, 1225, 1299`.
   Resident kernel untouched.
-- **Vertex paint fill** writes `v.color` (`MaterialProps.vue:767-880`).
-- **Shape Draw bake** writes through `replaceMesh` (`src/components/viewport/ShapeDrawPanel.vue:38`).
-- **Live symmetry** during G/R/S writes kernel verts via `ModalOperator.applyLiveSymmetry` (`LiveSymmetry.ts`). That path is already inside a modal session; it must keep using the leased kernel, not the document.
+- **Vertex paint fill** writes `v.color` on the document (`src/components/inspector/MaterialProps.vue`: nine assignments at `:767`, `:773`, `:779`, `:798`, `:808`, `:817`, `:852`, `:870`, `:880`; each owner does `recordState` → mutate → `markGeometryUpdated()`, `:790-800`, `:805-810`, `:815-819`, `:859`, `:872`, `:882`). `v.color` **is** in `signature()` (`MeshRepository.ts:9`), so these writes put the document ahead of the resident kernel. Slice 9.
+- **Shape Draw bake** writes through `replaceMesh` (`src/components/viewport/ShapeDrawPanel.vue:34-39`). **Stated reason, verified:** it only deletes `shapeSource` and replaces the whole object — it never touches `vertices` or `faces`, so it is a whole-object replacement (same class as import / primitive / separate output), not a topology edit. Keep it on `replaceMesh` and add the §6.3 comment. Note the spread is shallow (`{ ...activeMesh }`), so the new object shares the old `vertices` / `faces` array references; the clone inside `replaceMesh`/history is what makes that safe — do not deepen it into a hand-rolled copy.
+- **Live symmetry** — split, and already confirmed. The G/R/S path writes **kernel** verts: `ModalOperator.applyLiveSymmetry` (`ModalOperator.ts:215-226`) passes `[...this.ctx.mesh.vertices.values()]`, and `ctx.mesh` is the kernel `EditableMesh` (numeric ids: `vertices.get(vId)` `:210`, `edges.get(eId)` `:200`), called from `MoveOperator.ts:134`, `RotateOperator.ts:66`, `ScaleOperator.ts:84`. **No document writes; no work needed.** The only document-side call is the gizmo component branch (`Viewport3D.vue:3208` → `applyLiveSymmetry(activeMesh.vertices, …)`), which is slice 5's range. It must keep using the leased kernel there, not the document.
 
 ### 2.5 Consumers that read the document to draw
 
@@ -206,6 +209,12 @@ return the held instance or defer. A `held` flag on the repository entry is enou
 a ~15-line change with a test, and it removes a whole class of "the mesh snapped back
 mid-drag" bugs before they are introduced.
 
+**Implementation note (lease, landed 2026-09-17).** `MeshRepository` entries carry `held`.
+`hold(document)` acquires then sets the flag; `acquire` returns the held bridge without
+`restoreSnapshot` even if `signature()` differs; `publish` keeps the flag; `retain` will
+not drop a held entry. Store wrappers: `holdEditableMesh` / `releaseEditableMesh`. Gizmo
+and operators do not take a lease yet — that is **gizmo**.
+
 ### 3.3 The one-writer rule
 
 > For a given object, at a given moment, there is exactly one writer.
@@ -224,13 +233,122 @@ Corollaries the plan enforces:
 
 ### 3.4 Revisions become derived, not hand-bumped
 
-Today one global counter is hand-bumped by `markGeometryUpdated` (`:1475`) and by
-`publishEditableMesh` preview branches (`:897`), and every writer is trusted to remember.
+Today one global counter is hand-bumped by `markGeometryUpdated` (`projectStore.ts:1440`) and by
+the preview branch of `publishEditableMesh` (`:861`), and every writer is trusted to remember.
 Instead: keep `geometryRevision` as the *sum* of per-object revisions so nothing breaks,
 but make it a view of `topology` / `position` / `attribute` counters that
 `publishEditableMesh` and `replaceMesh` set from `MeshChange` (`MeshTransaction.ts:11-21`).
 `describeMeshChange` already computes exactly these three booleans; the store is currently
-throwing that information away.
+throwing that information away — `runKernelOperation` (`:485`) receives `result.change`, and
+`publishEditableMesh` (`:498`) is never told about it.
+
+#### 3.4.1 The write contract (slice **revisions** — docs-only spec)
+
+Three numbers per object, not one global number. All of it is **derived state**: never
+serialized, never in `.psxproj`, never in history, never a tool's input.
+
+```ts
+// Store-internal, non-serialized. Key = MeshObject.id (same id space as MeshRepository entries).
+type MeshRevisions = { topology: number; position: number; attribute: number }
+const meshRevisions = new Map<string, MeshRevisions>()
+const geometryRevision = ref<number>(0) // umbrella: total of every counter above
+```
+
+Rules, in priority order:
+
+1. **The umbrella never regresses.** Every counter bump also increments `geometryRevision`, so
+   all existing consumers (3.4.3) keep working untouched while the migration lands.
+2. **One writer, one report.** A counter moves in exactly two places: the commit path
+   (`runKernelOperation` → `publishEditableMesh(document, bridge, change)`) and `replaceMesh`.
+   Both take the `MeshChange` that `editMesh` (`MeshTransaction.ts:52-63`) already returns.
+3. **Topology implies the rest.** A snapshot that changes vertex / edge / face / half-edge
+   identity necessarily re-lists positions and attributes, so `topologyChanged` bumps **all
+   three** counters. Monotone implication is what lets a consumer key on `topology` alone.
+4. **A no-op reports nothing.** `runKernelOperation:487` already returns early when all three
+   booleans are false; that path must not bump any counter.
+5. **Preview stays bounded.** `preview = true` bumps counters but skips `triggerAutosave`
+   (`:861` vs `:862`) — unchanged behavior, only now per object.
+6. **Restore invalidates everything.** Undo/redo (`historyStore.ts:184`), session load
+   (`projectIo.ts:74`) and new project (`NewProjectModal.vue:47`) bump all three counters for
+   every object, or clear the map. A restored document has no claim on kernel identity.
+7. **Removal drops the entry.** `meshRepository.retain` already prunes dead kernels
+   (`projectStore.ts:709`, `:834`, `:839`); the revision map drops the same ids there.
+
+Bump table (writer → counters), verified 2026-09-17:
+
+| Writer | Counters | Signal |
+| :--- | :--- | :--- |
+| `runKernelOperation` (`:471-500`) | exactly what `result.change` reports | `editMesh` → `describeMeshChange` |
+| `performJoinMeshes` (`:690`) / `performSeparateMesh` (`:651`) | primary/source: all three; separated id: new entry | synthesized — object-level verbs, one command each |
+| `replaceMesh` (`:865`) | all three for that id (create entry if new) | whole-object replacement |
+| import / primitive / session load | all three, new entries | new object |
+| `markGeometryUpdated` (`:1440`, exported `:2559`) | **legacy**: `attribute` only | see 3.4.2 |
+
+`MeshChange` is richer than the three booleans (`createdVertices` / `deletedEdges` / …,
+`MeshTransaction.ts:15-20`). Keep it in the result: a later slice can publish those lists to the
+outliner and to Track 2's cache instead of stat-comparing.
+
+#### 3.4.2 The legacy call sites are the real work
+
+`markGeometryUpdated` is called **98 times**: 38 inside `projectStore.ts` and **60 outside it**.
+Verified 2026-09-17 with:
+
+```text
+git grep -n markGeometryUpdated -- src ':(exclude)src/stores/projectStore.ts'
+```
+
+Totals by file: `animationStore.ts` 15, `MaterialProps.vue` 30, `UVEditor.vue` 7, `HeaderMenu.vue`
+3, `Viewport3D.vue` 2, `TransformProps.vue` 2, `ModifiersProps.vue` 1, `TilesetEditor.vue` 1,
+`NewProjectModal.vue` 1, `projectIo.ts` 1, `historyStore.ts` 1 (+ `historyStore.test.ts` 7).
+
+Per §6.6 these must become `MeshChange`-driven, but they cannot all become topology commits. The
+slice is to **classify** them, not to eyeball them:
+
+1. Tag every site with its concern: **topology** / **position** (TRS-only writers stay TRS —
+   `TransformProps.vue:67`, object-mode gizmo) / **attribute** (colors, UVs, seams, weights) /
+   **material** / **not a mesh change at all**.
+2. Sites that are not mesh changes must stop bumping mesh revisions. `MaterialProps.vue`'s
+   `@change="projectStore.markGeometryUpdated()"` rows (~20 of them, `:1064`–`:1338`) edit
+   `activeMaterial` fields (`saturnMeshAlpha`, `psxAffine`, `dreamcastVQ`, …) — material concern,
+   not `vertices` / `faces`.
+3. **Marked unverified — do not guess from a line number.** (a) whether each of the nine `v.color`
+   writes (`MaterialProps.vue:767`–`880`) is reached from a mesh path or only a material path;
+   (b) the call-site ↔ field mapping for `animationStore.ts`'s 15 calls (rig / weight writes per
+   §2.4, but not per-site). Verify with
+   `git grep -n 'boneWeights\|\.color' -- src/stores/animationStore.ts src/components/inspector/MaterialProps.vue`
+   in the implementing turn.
+
+Until a site is classified it keeps its umbrella bump: safe, just not yet precise. A fourth
+concern (material) is **out of scope** — **revisions** counts mesh data only, and the umbrella
+covers everything else.
+
+#### 3.4.3 Consumers, verified today
+
+| Consumer | Today | After the counters exist |
+| :--- | :--- | :--- |
+| `Viewport3D.vue:6196-6208` rebuild watcher, incl. the per-mesh fingerprint at `:6201-6203` | global revision + hand-rolled `vertices.length` / `faces.length` / modifier string | `:6201-6203` deletes cleanly once `topology` covers it — that is **T3.3**, not this slice |
+| `Viewport3D.vue:5023` hover-vertex cache key | `${id}:${geometryRevision}:${vertices.length}` | `${id}:${topology}:${position}` (Track 3 slice 3) |
+| `Viewport3D.vue:1051` live-deform signature; `:1349-1359` onion skin | global revision | unchanged — the umbrella bump already fires |
+| `PixelEditor.vue:1203`; `UVEditor.vue:2023` | global revision | unchanged (attribute consumers) |
+| `TransformProps.vue:55` mesh-health computed | `void geometryRevision` to force re-eval | key on that object's `topology`; TRS writes must not invalidate it |
+
+#### 3.4.4 Acceptance (tests for the implementing turn)
+
+- A UV-only commit (`performBoxUnwrap`) bumps `attribute`; `topology` and `position` unchanged.
+- A position-only commit (vertex move through `runKernelOperation`) bumps `position`; `topology` unchanged.
+- A topology commit (extrude, delete face) bumps all three.
+- A no-op operation bumps nothing (the `runKernelOperation:487` early-return path).
+- Object TRS (`performRotateObject`) bumps no mesh counter.
+- Preview bumps counters and skips autosave — `meshResidency.test.ts:101-103` (previously cited as
+  `:67-69`) still passes unchanged.
+- Undo/redo bumps all counters for every object.
+- `geometryRevision` strictly increases in every case above (the umbrella contract).
+
+**Non-goals.** Do not remove `geometryRevision`; it stays the umbrella counter and the public
+store field. Do not make the revision map reactive document state — it is derived, never
+serialized, and never read by exporters. Do not add per-element (vertex / edge / face)
+revisions. Do not rewire `Viewport3D.vue` watchers here (T3.3). Do not split material revision out
+of the umbrella.
 
 ## 4. The six tracks
 
@@ -258,8 +376,24 @@ resident commit contract. After this track, `MeshRepository`'s JSON signature gu
    `:698`, `cleanupMeshGeometry` `:730`, `bridgeEdgeLoops` `:762`, `gridFill` `:813`.
 
    Exactly 16 `meshObjectToEditableMesh` call sites exist in the file and 2 are already
-   parameters, so the list above is complete. `extrudeFaces` (`:26`) and `mergeVertices`
-   (`:243`) need nothing — they delegate. No behavior change; tests stay green.
+   parameters, so the list above is complete. `extrudeFaces` (`:26`) delegates and needs
+   nothing. `mergeVertices` (`:243`) also delegates to `mergeVerticesAdvanced`, but review
+   found that a caller injecting a bridge through the `mergeVertices` name would have had it
+   silently dropped, so it forwards its `bridge` into the callee. No behavior change for
+   existing callers; tests stay green.
+
+    **Implementation note (T1.1, landed 2026-09-17).** The 14 call sites use
+    `bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)` placed **after** the
+    function's early-return guards — not a default parameter. 12 of the 14 return before
+    they ever touch the bridge (`pokeFaces` `:199-201`, `subdivideFaces` `:150-152`, …), so
+    an eager default would allocate a kernel on paths that never did. That is an allocation
+    -timing change, which is the one thing T1.1 is not allowed to make; the explicit
+    assignment is semantically identical on every path that uses the bridge. Verified after
+    the edit: 16 `meshObjectToEditableMesh` sites remain (2 defaults `:39`/`:102` + 14
+    injected) and `vue-tsc -b` is clean. Do not "fix" the style mismatch with `:39` — the
+    difference is the early returns, not an oversight. Post-review correction: `mergeVertices`
+   (`:243-245`) forwards `bridge` into `mergeVerticesAdvanced`, so injecting through either
+   name reuses one kernel instead of silently dropping the argument.
 
    **Not in this slice:** the unwrap helpers (`smartUvProject`, `boxUnwrap`, `planarUnwrap`,
    `cylinderUnwrap`, `sphereUnwrap`, `coneUnwrap`, `cubemapCrossUnwrap`, `gridifyQuadIslands`,
@@ -286,19 +420,51 @@ resident commit contract. After this track, `MeshRepository`'s JSON signature gu
 
    Payoff: uniform validation, uniform `meshEditError` reporting, uniform no-op detection,
    and numeric identity preserved across these verbs.
+
+   **Implementation note (T1.2, landed 2026-09-17).** `runKernelOperation` now takes
+   `{ record?, mesh?, applySelection? }`. Object-mode Subdivide still records once, then
+   loops `{ record: false, mesh, applySelection: false }`. AutoMerge is
+   `{ record: false, mesh, applySelection: false }` — it does not grow the undo stack.
+   Component Delete/Dissolve keep `applySelection: false` and `clearSubSelections` only
+   after a successful commit. Join/separate, UV, seams, vertex color, and symmetry stay
+   out. Identity tests: poke reuses the resident kernel; AutoMerge reuses it without a
+   history entry.
 3. **Route join / separate through kernels and fix the documented loss.**
    `performJoinMeshes` must preserve `boneWeights` and `seamEdgeIds`; `performSeparateMesh`
    must prune the source `seamEdgeIds` and carry seams to the new object. On kernels this
    becomes a property of the operation instead of a hand-maintained field list.
+
+   **Implementation note (join, landed 2026-09-17).** Core helper `src/core/geometry/MeshJoin.ts`.
+   Join appends on a clone of the resident primary (translation bake only), copies
+   `boneWeights`/`color`, remaps other-mesh seams onto kernel `edge.seam`, restores into
+   the same kernel instance, `publish` + `retain` after the splice. Separate deletes moved
+   faces on a source-kernel clone (`MeshTopologyService.deleteFaces`); JSON clone carries
+   weights; shared-border seams stay on the source; both-verts-moved seams go with the
+   new object. One `recordState` each. Not `runKernelOperation`.
 4. **Route the UV family.** Unwrap writes face-corner UVs, i.e. attributes, not topology.
    These should be attribute-only commits: no topology change, `attributesChanged: true`,
    so the viewport does not rebuild buffers it does not need (feeds Track 3). Atlas bake
    still bumps geometry because it remaps UVs used by the render projection.
+
+   **Implementation note (revisions, 2026-09-18).** Store `perform*` currently pass a
+   synthesized attribute-only `MeshChange` into `replaceMesh`. That is counter wiring only.
+   Resident identity is **unwrap**.
 5. **Route the gizmo component drag.** `onGizmoObjectChange`'s vertex/edge/face branch
    (`Viewport3D.vue:3097-3140`) becomes: hold a kernel lease on drag start, write kernel
    positions per move, publish a preview per move, publish the committed result on end.
    History shape does not change (one snapshot per drag). Highest-risk slice; lands only
    after slice 2 so the kernels are already resident.
+    **Live symmetry is a tail of this slice, not a slice of its own.** `ModalOperator`
+    `.applyLiveSymmetry` (`ModalOperator.ts:215-226`) already passes
+    `[...this.ctx.mesh.vertices.values()]`, and `ctx.mesh` is the kernel `EditableMesh`
+    (numeric ids: `vertices.get(vId)` `:210`, `edges.get(eId)` `:200`), called from
+    `MoveOperator.ts:134`, `RotateOperator.ts:66`, `ScaleOperator.ts:84` — so **G/R/S
+    writes no document vertices. Confirmed on 2026-09-17; no work needed.** The one
+    document-side call is the gizmo branch itself (`Viewport3D.vue:3208` →
+    `applyLiveSymmetry(activeMesh.vertices, …)`), i.e. inside the `:3097-3140` range this
+    slice already owns. It moves with this branch or not at all.
+
+
 6. **Route weight editing.** The `animationStore.ts` weight writers move from
    `mesh.vertices[].boneWeights` to the resident kernel's vertex attributes. Weight paint
    is a per-move preview + commit-on-pointer-up shape, same as the gizmo.
@@ -307,6 +473,98 @@ resident commit contract. After this track, `MeshRepository`'s JSON signature gu
    exporters use it). What changes: **Apply** (`applyMeshModifier` `:862`) runs its result
    through a resident commit instead of a bare `markGeometryUpdated`, so the resident
    kernel is rebuilt once, deliberately, at Apply time — not silently re-imported later.
+
+8. **Seam writes become attribute-only resident commits (T1.8).** Writer:
+    `markSelectedEdgesAsSeam` (`projectStore.ts:2181`), `clearSelectedEdgesSeam` (`:2193`),
+    `clearAllSeams` (`:2205`). Classification: **attributes**. They assign
+    `activeMesh.value.seamEdgeIds` in place — three sites, `:2189`, `:2201`, `:2208` — and
+    never call `replaceMesh`, so nothing tells the repository. Seam is kernel state, not a
+    document-only extra: `MeshBridge` imports `seamEdgeIds` onto `edge.seam`
+    (`MeshBridge.ts:74-77`), exports `e.seam` back (`:188`), `MeshSnapshot` stores it
+    (`MeshKernel.ts:48`), and `signature()` hashes it (`MeshRepository.ts:10`). So the
+    direct write makes the document disagree with the resident kernel and the next
+    `acquire` re-imports (`MeshRepository.ts:22-27`), discarding resident seam flags
+    mid-session. Path: resident commit, `attributesChanged: true`, no topology change —
+    **verified**: `attributes()` (`MeshTransaction.ts:37-40`) includes `e.seam`/`e.sharp`, so
+    a pure seam edit does raise the flag and is not swallowed by `runKernelOperation`'s
+    no-change early return (`projectStore.ts:480`). Two corrections for the implementer:
+    (1) the writer-local `recordState` (`:2188`, `:2200`, `:2207`) must be **removed** when
+    wrapping — `runKernelOperation` records itself at `:483` *after* validation, so keeping
+    both pushes a second, empty entry per toggle; the existing no-op guard survives as the
+    `:480` early return. (2) The lambda must return an `OperationResult` whose `mesh` is the
+    projection (`Operations.ts:15-16`, helper as used at `MeshResidency.test.ts:66`), because
+    `:489` publishes that projection back onto `activeMesh.value.seamEdgeIds`.
+    **Do not only assign `document.seamEdgeIds`.** `editMesh` diffs `staged.mesh`
+    (`:478-480`). A document-only write leaves `edge.seam` unchanged, so the commit no-ops
+    or, if you still project, `editableMeshToMeshObject` exports the *old* kernel flags and
+    wipes the write. Set `edge.seam` on `bridge.mesh` (document edge id →
+    `undirectedEdgeId` / numeric verts). Same rule for T1.9: write kernel vertex `color`,
+    not only `v.color` on the Pinia mesh. Row 14.
+
+   **Implementation note (T1.8, landed 2026-09-17).** Mark/clear/clear-all drop their
+   local `recordState` and call `runKernelOperation` with `{ applySelection: false }`.
+   Kernel write is `setSeamEdges` / `clearAllSeamEdges` in `Operations.ts` (`edge.seam`
+   on `bridge.mesh`, then project). One undo entry per command. Identity test in
+   `meshResidency.test.ts`.
+
+9. **Vertex color writes become attribute-only resident commits (T1.9).** Writer:
+    `src/components/inspector/MaterialProps.vue` — nine `v.color` assignments (`:767`,
+    `:773`, `:779`, `:798`, `:808`, `:817`, `:852`, `:870`, `:880`) across the gradient bake
+    (`:649-762`), Fill Selected (`:788`), Fill Entire Mesh (`:803`), Reset (`:813`), Smooth
+    (`:822`), Quantize (`:863`), Invert (`:876`). Classification: **attributes**. Each
+    owning function already does `recordState` → mutate → `markGeometryUpdated()`
+    (`:790-800`, `:805-810`, `:815-819`, `:859`, `:872`, `:882`). `v.color` **is** in
+    `signature()` (`MeshRepository.ts:9`), so this is the same defect shape as T1.4:
+    attribute-only writers that put the document ahead of the kernel for no reason. Path:
+    resident commit, `attributesChanged: true`, no topology change — the viewport stops
+    rebuilding buffers to change a color. Land directly after T1.4; treat the two as one
+    idiom. Row 14.
+    **T1.9 needs a store entry point; the component cannot commit.** Every `v.color` write is
+    inline in `MaterialProps.vue` against `activeMesh.value.vertices` — the *document*
+    (`:797-799`, `:807-809`, `:816-818`, `:845-857`, `:865-871`, `:878-881`, plus
+    `applyColorWithBlendMode`'s three sites `:767`/`:773`/`:779`, reached per vertex from
+    `:688`). Verified: no store-level vertex-color API exists today, so this slice adds one,
+    with the same shape as slice 8 — mutate `bridge.mesh` vertex `color`, project, publish. The
+    kernel plumbing already exists in both directions (`MeshBridge.ts:40` imports
+    `vertex.color`, `:149` exports it, `attributes()` hashes it at `MeshTransaction.ts:38`), so
+    a document-only loop leaves kernel colors stale and the commit either no-ops at `:480` or
+    exports the *old* colors and wipes the write. Two consequences: drop the component-local
+    `projectStore.recordState` (`:649`, `:790`, `:805`, `:815`, `:824`, `:864`, `:877`) on the
+    same single-record rule as slice 8, and commit **once per command** — `applyColorWithBlendMode`
+    runs inside a per-vertex loop (`:688`), so a per-vertex commit would be the gizmo-drag shape,
+    not a menu verb's.
+
+10. **Object symmetry verbs split by what they actually write (T1.10).**
+     - `performFlipAxis` (`projectStore.ts:1246`) → `flipMeshGeometry`
+       (`ObjectSymmetry.ts:6-14`): negates `position[axis]` **and** reverses `f.vertexIds`
+       and `f.uvs`. That is positions plus winding plus corner-UV order — **not** TRS-only
+       and not attribute-only. Path: resident commit, and it must be described as a
+       position change with a topology consequence (winding), never smuggled in as
+       `attributesChanged`.
+     - `performRotateObject` (`:1255`) → `addObjectRotation` (`ObjectSymmetry.ts:24-26`)
+       writes only `mesh.rotation[axis]`, and `signature()` deliberately excludes object
+       transforms — see its own comment at `MeshRepository.ts:7`, "Selection and object
+       transforms are editor state, not kernel mutations". **Verified: it cannot invalidate
+       the kernel. Stays group (b), TRS-only, no routing.** It keeps `markGeometryUpdated`
+       because the viewport still has to redraw.
+     - `performDuplicateMirror` (`:1263`) → `cloneMeshObject` (`:1228`) +
+       `flipMeshGeometry` + `meshes.value.push` (`:1272`). **Object creation**, same class
+       as separator output and primitive creation. Path: whole-object replacement; keep the
+       `replaceMesh` behaviour and attach the §6.3 reason comment. Note `cloneMeshObject`
+       machine-renames every vertex and face id (`:1234-1242`), so the copy's numeric kernel
+       identity is new by construction — do not try to inherit it.
+     Row 14.
+
+11. **Modifier stack writes are attribute-only; only Apply rebuilds the kernel (T1.7b,
+     sub-bullet of slice 7).** Writer: `addModifier` (`:845`), `removeMeshModifier`
+     (`:869`) — they set `mesh.mirror` / `subdivision` / `solidify` and call
+     `markGeometryUpdated()`. Classification: **attributes**. Those three fields are *not*
+     in `signature()`, so they cannot push the document ahead of the kernel — which is
+     exactly why they need no lease and no re-import. They do still change drawn geometry,
+     because `evaluateModifiers` runs inside `meshToThreeGeometry` (`Converters.ts:388`), so
+     they belong with Track 3's *attribute* counter, not the topology one. Slice 7 (Apply,
+     `:862`) stays the only modifier writer that rebuilds the kernel. Row 12.
+
 
 **Acceptance.**
 - A test asserting `project.acquireEditableMesh(project.activeMesh!).mesh` **is the same
@@ -364,13 +622,19 @@ exporters keep using it.
 **Goal.** Replace the one global `geometryRevision` counter with per-object, typed
 revisions, so a commit only invalidates what it actually changed.
 
-**Current state.** `geometryRevision` is a single `ref<number>` (`projectStore.ts:110`).
-It is bumped wholesale by `markGeometryUpdated` (`:1476`) and by the preview branch of
-`publishEditableMesh` (`:897`). Viewport watchers depend on it in four places: the live
-deform signature (`Viewport3D.vue:1051`), onion skin (`:1349-1351`, `:1359`), the hover
-vertex cache key (`:5023`), and the main rebuild watcher (`:6198`). That same watcher also
-fingerprints *all* meshes as one string (`:6201-6203`) — a hand-rolled workaround for the
-missing per-object data.
+**Current state.** `geometryRevision` is a single `ref<number>` (`projectStore.ts:113`).
+It is bumped wholesale by `markGeometryUpdated` (`:1440`) and by the preview branch of
+`publishEditableMesh` (`:861`), and it is exported (`:2559`) so UI code bumps it directly — 38
+call sites inside `projectStore.ts` and 60 outside (§3.4.2). Viewport consumers depend on it in
+four places: the live deform signature (`Viewport3D.vue:1051`), onion skin (`:1349-1351`,
+`:1359`), the hover vertex cache key (`:5023`), and the main rebuild watcher (`:6198`). That same
+watcher also fingerprints *all* meshes as one string (`:6201-6203`) — a hand-rolled workaround for
+the missing per-object data. UV/attribute consumers: `PixelEditor.vue:1203`,
+`UVEditor.vue:2023`; inspector: `TransformProps.vue:55`.
+
+**Write contract (docs-only, landed 2026-09-17).** The counter shape, bump table, legacy
+call-site classification, consumer mapping and acceptance list live in **§3.4.1–§3.4.4**. The
+slices below implement that contract; they do not redefine it.
 
 **Why this is not just performance.** One global counter cannot distinguish "something
 changed" from "this object's topology changed", so:
@@ -384,31 +648,44 @@ changed" from "this object's topology changed", so:
 1. **Add the counters next to the existing one.** A plain `Map<objectId, { topology,
    position, attribute }>` of numbers on the project store, plus the existing
    `geometryRevision` still bumped on every commit. Every current watcher keeps working;
-   nothing else changes.
+   nothing else changes. Entry lifecycle (restore, removal, new object) follows §3.4.1 rules
+   6–7.
 2. **Populate them from `MeshChange`.** `publishEditableMesh` and `replaceMesh` receive the
    change summary from `editMesh` (`MeshTransaction.ts:23-25`, `:62`) and increment only the
-   matching counters. `describeMeshChange` (`:27`) already computes `topologyChanged` /
-   `positionsChanged` / `attributesChanged` from real snapshots — the store just has to stop
-   discarding them.
+   matching counters, with `topologyChanged` implying all three (§3.4.1 rule 3).
+   `describeMeshChange` (`:27`) already computes `topologyChanged` / `positionsChanged` /
+   `attributesChanged` from real snapshots — the store just has to stop discarding them.
+
+   **Implementation note (revisions, landed 2026-09-18).** Non-serialized
+   `Map<objectId, { topology, position, attribute }>` on `projectStore`. `runKernelOperation`
+   passes `result.change` into `publishEditableMesh`. A missing change still means all three
+   (join/separate). UV family currently synthesizes attribute-only on `replaceMesh` (counters
+   only; resident commit is **unwrap**). `performRotateObject` is umbrella-only. Undo/redo
+   calls `invalidateAllGeometryRevisions`. `markGeometryUpdated` remains the legacy
+   attribute+umbrella path; `MaterialProps.vue` material `@change` rows are still on that path.
+
+   2b. **Classify the legacy `markGeometryUpdated` call sites** per §3.4.2 before the counters
+   are trusted: non-mesh sites (material edits) must stop bumping mesh revisions, and the
+   `v.color` / `boneWeights` sites are **unverified** until checked by grep.
 3. **Switch the viewport watchers to per-object keys** one at a time, starting with the
    hover vertex cache (`:5022`) and onion skin (`:1349`), then the main rebuild loop.
    Remove the `vertices.length` / `faces.length` fingerprint in `:6201-6203` once topology
    counters cover it.
 4. **Keep the preview/commit split.** `publishEditableMesh(document, bridge, preview = true)`
-   must keep skipping autosave (`:897` vs `:898`); previews move topology/position counters,
-   commits additionally go through `markGeometryUpdated`.
+   must keep skipping autosave; previews still move counters. Commits call `triggerAutosave`
+   (they no longer go through `markGeometryUpdated`).
 
-**Acceptance.**
+**Acceptance.** Full list in §3.4.4. The four plan-level claims:
 - A UV-only commit (e.g. `performBoxUnwrap`) increments `attribute` and leaves `topology`
   and `position` unchanged — asserted in a test.
 - Rotating an object (TRS) bumps no mesh revision.
 - Existing `watch(geometryRevision)` consumers (`PixelEditor.vue:1203`,
   `UVEditor.vue:2023`) behave identically.
-- `stores/meshResidency.test.ts:67-69` (preview moves the revision) still passes.
+- `stores/meshResidency.test.ts:101-103` (preview moves the revision) still passes.
 
 **Non-goals.** Do not remove `geometryRevision`; it stays the umbrella counter and the
 public store field. Do not make the revision map reactive document state — it is derived,
-never serialized.
+never serialized. Do not invent counters for material state (§3.4.2).
 
 ### Track 4 — Capture resident topology in history
 
@@ -551,7 +828,7 @@ Land in this order. Each row must finish green on `npm run typecheck`, `npm test
 | :--- | :--- | :--- |
 | 1 | Operations.ts bridge injection (T1.1) | the commit boundary accepts a resident bridge with no behavior change |
 | 2 | Lease rule (§3.2) | a held kernel cannot be silently clobbered mid-session |
-| 3 | Per-object revisions, additive (T3.1–T3.2) | change summaries reach the store; nothing reads them yet |
+| 3 | Per-object revisions, additive (T3.1–T3.2; contract in §3.4, incl. legacy call-site classification §3.4.2) | change summaries reach the store; nothing reads them yet |
 | 4 | Route remaining topology verbs (T1.2) | kernel identity survives one-shot verbs |
 | 5 | Route UV family as attribute-only (T1.4) | attribute commits stop forcing topology rebuilds |
 | 6 | `MeshRenderView` + per-object cache (T2) | one geometry build per object per commit |
@@ -562,6 +839,7 @@ Land in this order. Each row must finish green on `npm run typecheck`, `npm test
 | 11 | Weight editing on the kernel (T1.6) | rig writers stop invalidating the kernel |
 | 12 | Modifier Apply as resident commit (T1.7) | modifier output is validated once, deliberately |
 | 13 | Attribute matrix + fills (T6) | "attributes survive" is a testable claim |
+| 14 | Remaining attribute-only writers on resident commits (T1.8, T1.9) + symmetry split (T1.10) | no writer leaves the document ahead of the kernel; §6.2 can demote the signature |
 
 Two ordering constraints are load-bearing:
 
@@ -572,6 +850,13 @@ Two ordering constraints are load-bearing:
   Without Track 3 the cache key degrades to the global revision and caches nothing.
 
 Everything else can be reordered or paused without stranding the codebase.
+
+One more, weaker than the two above: **14 is the precondition of §6.2.** "Demote the JSON
+signature" is only true when no writer leaves the document ahead of the kernel, and rows
+4, 5, 10, 11 and 14 are the complete list of writers that still do. Rows 10 and 11 are
+already last for other reasons; row 14 is the cheap tail, and it is what makes §7's third
+bullet checkable rather than aspirational.
+
 
 ## 6. Guards that keep this from regressing
 
@@ -596,6 +881,8 @@ Put these in place as the tracks land, not all at once.
    (`INVARIANTS.md:23`). Tracks 1.5 and 1.6 are where this is easiest to get wrong.
 6. **Revisions only from `MeshChange`.** No hand-bumped counters in new code. If a writer
    cannot describe its change, that is the missing piece — not a reason to bump globally.
+   The 98 existing `markGeometryUpdated` call sites are grandfathered until §3.4.2 classifies
+   them: until then they keep the umbrella bump and must not be copied as a pattern.
 
 
 ## 7. Definition of done

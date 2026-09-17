@@ -9,6 +9,8 @@ import { MergeKernel } from '../mesh/operations/MergeKernel'
 import { DissolveKernel } from '../mesh/operations/DissolveKernel'
 import { MeshTopologyService } from '../mesh/MeshTopologyService'
 import { TopologyOps } from '../mesh/operations/TopologyOps'
+import { MeshEditOps, edgeLoopsFromIds } from '../mesh/operations/MeshEditOps'
+import { BooleanKernel, type BooleanOp } from '../mesh/operations/BooleanKernel'
 import { parseUndirectedEdgeId, getMeshEdges } from './EdgeUtils'
 import * as THREE from 'three'
 
@@ -143,14 +145,15 @@ export interface SubdivideOptions {
 export function subdivideFaces(
   mesh: MeshObject,
   faceIds: string[],
-  options?: SubdivideOptions
+  options?: SubdivideOptions,
+  bridge?: MeshBridgeData
 ): OperationResult {
   const edgeIds = options?.edgeIds ?? []
   if (faceIds.length === 0 && edgeIds.length === 0) {
     return { mesh, selectedFaceIds: [], selectedVertexIds: [] }
   }
 
-  const bridge = MeshBridge.meshObjectToEditableMesh(mesh)
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
   const numFaces = faceIds
     .map(id => bridge.strToNumFaceId.get(id))
     .filter((id): id is number => id !== undefined)
@@ -194,11 +197,11 @@ export function subdivideFaces(
 }
 
 /** Blender Poke Faces: insert a centroid and fan triangles. */
-export function pokeFaces(mesh: MeshObject, faceIds: string[]): OperationResult {
+export function pokeFaces(mesh: MeshObject, faceIds: string[], bridge?: MeshBridgeData): OperationResult {
   if (faceIds.length === 0) {
     return { mesh, selectedFaceIds: [], selectedVertexIds: [] }
   }
-  const bridge = MeshBridge.meshObjectToEditableMesh(mesh)
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
   const nums = faceIds
     .map(id => bridge.strToNumFaceId.get(id))
     .filter((id): id is number => id !== undefined)
@@ -216,11 +219,11 @@ export function pokeFaces(mesh: MeshObject, faceIds: string[]): OperationResult 
 }
 
 /** Split selected quads into two triangles (shortest diagonal). */
-export function triangulateFaces(mesh: MeshObject, faceIds: string[]): OperationResult {
+export function triangulateFaces(mesh: MeshObject, faceIds: string[], bridge?: MeshBridgeData): OperationResult {
   if (faceIds.length === 0) {
     return { mesh, selectedFaceIds: [], selectedVertexIds: [] }
   }
-  const bridge = MeshBridge.meshObjectToEditableMesh(mesh)
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
   const nums = faceIds
     .map(id => bridge.strToNumFaceId.get(id))
     .filter((id): id is number => id !== undefined)
@@ -240,18 +243,18 @@ export function triangulateFaces(mesh: MeshObject, faceIds: string[]): Operation
 /**
  * Merges selected vertices into a single vertex at their midpoint.
  */
-export function mergeVertices(mesh: MeshObject, vertexIds: string[]): OperationResult {
-  return mergeVerticesAdvanced(mesh, vertexIds, 'center')
+export function mergeVertices(mesh: MeshObject, vertexIds: string[], bridge?: MeshBridgeData): OperationResult {
+  return mergeVerticesAdvanced(mesh, vertexIds, 'center', 0.05, bridge)
 }
 
 /**
  * Flips the normal/winding order of selected faces.
  */
-export function flipNormals(mesh: MeshObject, faceIds: string[]): OperationResult {
+export function flipNormals(mesh: MeshObject, faceIds: string[], bridge?: MeshBridgeData): OperationResult {
   if (faceIds.length === 0) {
     return { mesh, selectedFaceIds: [], selectedVertexIds: [] }
   }
-  const bridge = MeshBridge.meshObjectToEditableMesh(mesh)
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
   const nums = faceIds
     .map(id => bridge.strToNumFaceId.get(id))
     .filter((id): id is number => id !== undefined)
@@ -271,12 +274,12 @@ export function flipNormals(mesh: MeshObject, faceIds: string[]): OperationResul
 /**
  * Deletes selected faces or vertices cleanly.
  */
-export function deleteElements(mesh: MeshObject, mode: 'vertex' | 'edge' | 'face', selectedIds: string[]): OperationResult {
+export function deleteElements(mesh: MeshObject, mode: 'vertex' | 'edge' | 'face', selectedIds: string[], bridge?: MeshBridgeData): OperationResult {
   if (selectedIds.length === 0) {
     return { mesh, selectedFaceIds: [], selectedVertexIds: [] }
   }
 
-  const bridge = MeshBridge.meshObjectToEditableMesh(mesh)
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
   if (mode === 'face') {
     const nums = selectedIds
       .map(id => bridge.strToNumFaceId.get(id))
@@ -317,12 +320,12 @@ export function deleteElements(mesh: MeshObject, mode: 'vertex' | 'edge' | 'face
 /**
  * Bevels / Chamfers selected faces with an offset distance.
  */
-export function bevelFaces(mesh: MeshObject, faceIds: string[], offset = 0.2, edgeIds: string[] = []): OperationResult {
+export function bevelFaces(mesh: MeshObject, faceIds: string[], offset = 0.2, edgeIds: string[] = [], bridge?: MeshBridgeData): OperationResult {
   if (faceIds.length === 0 && edgeIds.length === 0) {
     return { mesh, selectedFaceIds: faceIds, selectedVertexIds: [] }
   }
 
-  const bridge = MeshBridge.meshObjectToEditableMesh(mesh)
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
   const numFaces = faceIds
     .map(id => bridge.strToNumFaceId.get(id))
     .filter((id): id is number => id !== undefined)
@@ -361,9 +364,10 @@ export function mergeVerticesAdvanced(
   mesh: MeshObject,
   vertexIds: string[],
   type: 'center' | 'first' | 'last' | 'distance' = 'center',
-  threshold = 0.05
+  threshold = 0.05,
+  bridge?: MeshBridgeData
 ): OperationResult {
-  const bridge = MeshBridge.meshObjectToEditableMesh(mesh)
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
 
   if (type === 'distance') {
     const only = vertexIds
@@ -560,7 +564,8 @@ function orientFillLoop(mesh: MeshObject, loop: string[], viewDirection?: Vector
 export function fillFaceFromVertices(
   mesh: MeshObject,
   vertexIds: string[],
-  viewDirection?: Vector3D
+  viewDirection?: Vector3D,
+  bridge?: MeshBridgeData
 ): OperationResult {
   if (vertexIds.length < 3) {
     return { mesh, selectedFaceIds: [], selectedVertexIds: vertexIds }
@@ -598,7 +603,7 @@ export function fillFaceFromVertices(
     return new THREE.Vector2(dotVec3(d, uAxis), dotVec3(d, vAxis))
   })
 
-  const bridge = MeshBridge.meshObjectToEditableMesh(mesh)
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
   const nums = loop
     .map(id => bridge.strToNumVertId.get(id))
     .filter((id): id is number => id !== undefined)
@@ -626,11 +631,11 @@ export function fillFaceFromVertices(
 /**
  * Flattens selected vertices on X, Y, or Z axis to their common average coordinate.
  */
-export function flattenVerticesOnAxis(mesh: MeshObject, vertexIds: string[], axis: 'x' | 'y' | 'z'): OperationResult {
+export function flattenVerticesOnAxis(mesh: MeshObject, vertexIds: string[], axis: 'x' | 'y' | 'z', bridge?: MeshBridgeData): OperationResult {
   if (vertexIds.length === 0) {
     return { mesh, selectedFaceIds: [], selectedVertexIds: [] }
   }
-  const bridge = MeshBridge.meshObjectToEditableMesh(mesh)
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
   const nums = vertexIds
     .map(id => bridge.strToNumVertId.get(id))
     .filter((id): id is number => id !== undefined)
@@ -650,17 +655,22 @@ export function flattenVerticesOnAxis(mesh: MeshObject, vertexIds: string[], axi
 /**
  * Dissolves selected edges or vertices without removing surrounding geometry.
  */
-export function dissolveElements(mesh: MeshObject, mode: 'vertex' | 'edge', targetIds: string[]): OperationResult {
+export function dissolveElements(mesh: MeshObject, mode: 'vertex' | 'edge' | 'face', targetIds: string[], bridge?: MeshBridgeData): OperationResult {
   if (targetIds.length === 0) {
     return { mesh, selectedFaceIds: [], selectedVertexIds: [] }
   }
 
-  const bridge = MeshBridge.meshObjectToEditableMesh(mesh)
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
   if (mode === 'vertex') {
     for (const id of targetIds) {
       const num = bridge.strToNumVertId.get(id)
       if (num != null) MeshTopologyService.dissolveVertex(bridge.mesh, num)
     }
+  } else if (mode === 'face') {
+    const nums = targetIds
+      .map(id => bridge.strToNumFaceId.get(id))
+      .filter((id): id is number => id !== undefined)
+    MeshEditOps.dissolveFaces(bridge.mesh, nums)
   } else {
     const knownVerts = mesh.vertices.map(v => v.id)
     for (const edgeId of targetIds) {
@@ -689,13 +699,13 @@ export function dissolveElements(mesh: MeshObject, mode: 'vertex' | 'edge', targ
 /**
  * Connects two selected vertices on a shared face, dividing it into two faces.
  */
-export function connectTwoVertices(mesh: MeshObject, vAId: string, vBId: string): OperationResult {
+export function connectTwoVertices(mesh: MeshObject, vAId: string, vBId: string, bridge?: MeshBridgeData): OperationResult {
   const targetFace = mesh.faces.find(f => f.vertexIds.includes(vAId) && f.vertexIds.includes(vBId))
   if (!targetFace || targetFace.vertexIds.length < 4) {
     return { mesh, selectedFaceIds: [], selectedVertexIds: [vAId, vBId] }
   }
 
-  const bridge = MeshBridge.meshObjectToEditableMesh(mesh)
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
   const nA = bridge.strToNumVertId.get(vAId)
   const nB = bridge.strToNumVertId.get(vBId)
   const nFace = bridge.strToNumFaceId.get(targetFace.id)
@@ -726,8 +736,8 @@ export function connectTwoVertices(mesh: MeshObject, vAId: string, vBId: string)
 /**
  * Safe cleanup of mesh: removes degenerate faces (<3 verts), orphan vertices, updates normals.
  */
-export function cleanupMeshGeometry(mesh: MeshObject): OperationResult {
-  const bridge = MeshBridge.meshObjectToEditableMesh(mesh)
+export function cleanupMeshGeometry(mesh: MeshObject, bridge?: MeshBridgeData): OperationResult {
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
   MeshTopologyService.cleanupMesh(bridge.mesh)
   return {
     mesh: MeshBridge.editableMeshToMeshObject(
@@ -744,7 +754,7 @@ export function cleanupMeshGeometry(mesh: MeshObject): OperationResult {
 /**
  * Bridges two opposing edge loops or two selected edges with connecting quad faces (Blender Bridge Edge Loops).
  */
-export function bridgeEdgeLoops(mesh: MeshObject, selectedEdgeIds: string[]): OperationResult {
+export function bridgeEdgeLoops(mesh: MeshObject, selectedEdgeIds: string[], bridge?: MeshBridgeData): OperationResult {
   if (selectedEdgeIds.length < 2) {
     return { mesh, selectedFaceIds: [], selectedVertexIds: [] }
   }
@@ -759,7 +769,7 @@ export function bridgeEdgeLoops(mesh: MeshObject, selectedEdgeIds: string[]): Op
     return { mesh, selectedFaceIds: [], selectedVertexIds: [] }
   }
 
-  const bridge = MeshBridge.meshObjectToEditableMesh(mesh)
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
   const toNum = (id: string) => bridge.strToNumVertId.get(id)
   const created: number[] = []
 
@@ -805,12 +815,12 @@ export function bridgeEdgeLoops(mesh: MeshObject, selectedEdgeIds: string[]): Op
 /**
  * Generates an internal quad grid inside a closed boundary loop (Blender Grid Fill).
  */
-export function gridFill(mesh: MeshObject, boundaryVertexIds: string[]): OperationResult {
+export function gridFill(mesh: MeshObject, boundaryVertexIds: string[], bridge?: MeshBridgeData): OperationResult {
   if (boundaryVertexIds.length < 4 || boundaryVertexIds.length % 2 !== 0) {
     return { mesh, selectedFaceIds: [], selectedVertexIds: boundaryVertexIds }
   }
 
-  const bridge = MeshBridge.meshObjectToEditableMesh(mesh)
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
   const nums = boundaryVertexIds
     .map(id => bridge.strToNumVertId.get(id))
     .filter((id): id is number => id !== undefined)
@@ -827,5 +837,251 @@ export function gridFill(mesh: MeshObject, boundaryVertexIds: string[]): Operati
     selectedVertexIds: boundaryVertexIds.length === 4 ? boundaryVertexIds : []
   }
 }
+
+function projectSeamResult(mesh: MeshObject, bridge: MeshBridgeData): OperationResult {
+  return {
+    mesh: MeshBridge.editableMeshToMeshObject(
+      bridge.mesh,
+      mesh,
+      bridge.numToStrVertId,
+      bridge.numToStrFaceId
+    ),
+    selectedFaceIds: [],
+    selectedVertexIds: [],
+  }
+}
+
+function kernelEdgeForDocumentId(mesh: MeshObject, bridge: MeshBridgeData, edgeId: string) {
+  const parsed = parseUndirectedEdgeId(edgeId, mesh.vertices.map(v => v.id))
+  if (!parsed) return undefined
+  const n1 = bridge.strToNumVertId.get(parsed.v1)
+  const n2 = bridge.strToNumVertId.get(parsed.v2)
+  if (n1 == null || n2 == null) return undefined
+  return bridge.mesh.findEdge(n1, n2)
+}
+
+/** Mark or clear `edge.seam` on the kernel. Document `seamEdgeIds` come from the projection. */
+export function setSeamEdges(
+  mesh: MeshObject,
+  edgeIds: string[],
+  seam: boolean,
+  bridge?: MeshBridgeData
+): OperationResult {
+  if (edgeIds.length === 0) {
+    return { mesh, selectedFaceIds: [], selectedVertexIds: [] }
+  }
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
+  for (const id of edgeIds) {
+    const edge = kernelEdgeForDocumentId(mesh, bridge, id)
+    if (edge) edge.seam = seam
+  }
+  return projectSeamResult(mesh, bridge)
+}
+
+export function clearAllSeamEdges(mesh: MeshObject, bridge?: MeshBridgeData): OperationResult {
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
+  for (const edge of bridge.mesh.edges.values()) {
+    if (edge.seam) edge.seam = false
+  }
+  return projectSeamResult(mesh, bridge)
+}
+
+function projectEdit(
+  mesh: MeshObject,
+  bridge: MeshBridgeData,
+  faceIds: number[] = [],
+  vertexIds: number[] = []
+): OperationResult {
+  return {
+    mesh: MeshBridge.editableMeshToMeshObject(bridge.mesh, mesh, bridge.numToStrVertId, bridge.numToStrFaceId),
+    selectedFaceIds: faceIds.map(id => bridge.numToStrFaceId.get(id) || `f_${id}`),
+    selectedVertexIds: vertexIds.map(id => bridge.numToStrVertId.get(id) || `v_${id}`)
+  }
+}
+
+function kernelEdgeIds(mesh: MeshObject, bridge: MeshBridgeData, edgeIds: string[]): number[] {
+  const known = mesh.vertices.map(v => v.id)
+  const out: number[] = []
+  for (const id of edgeIds) {
+    const parsed = parseUndirectedEdgeId(id, known)
+    if (!parsed) continue
+    const a = bridge.strToNumVertId.get(parsed.v1)
+    const b = bridge.strToNumVertId.get(parsed.v2)
+    if (a == null || b == null) continue
+    const edge = bridge.mesh.findEdge(a, b)
+    if (edge) out.push(edge.id)
+  }
+  return out
+}
+
+function kernelVertIds(bridge: MeshBridgeData, ids: string[]): number[] {
+  return ids.map(id => bridge.strToNumVertId.get(id)).filter((id): id is number => id !== undefined)
+}
+
+function kernelFaceIds(bridge: MeshBridgeData, ids: string[]): number[] {
+  return ids.map(id => bridge.strToNumFaceId.get(id)).filter((id): id is number => id !== undefined)
+}
+
+export function flipEdges(mesh: MeshObject, edgeIds: string[], bridge?: MeshBridgeData): OperationResult {
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
+  MeshEditOps.flipEdges(bridge.mesh, kernelEdgeIds(mesh, bridge, edgeIds))
+  return projectEdit(mesh, bridge)
+}
+
+export function recalculateOutside(mesh: MeshObject, bridge?: MeshBridgeData): OperationResult {
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
+  MeshEditOps.recalculateOutside(bridge.mesh)
+  return projectEdit(mesh, bridge)
+}
+
+export function connectVertexPath(mesh: MeshObject, vertexIds: string[], bridge?: MeshBridgeData): OperationResult {
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
+  const nums = kernelVertIds(bridge, vertexIds)
+  if (nums.length === 2) return connectTwoVertices(mesh, vertexIds[0], vertexIds[1], bridge)
+  MeshEditOps.connectVertexPath(bridge.mesh, nums)
+  return projectEdit(mesh, bridge, [], nums)
+}
+
+export function trisToQuads(mesh: MeshObject, faceIds: string[], bridge?: MeshBridgeData): OperationResult {
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
+  MeshEditOps.trisToQuads(bridge.mesh, faceIds.length ? kernelFaceIds(bridge, faceIds) : undefined)
+  return projectEdit(mesh, bridge)
+}
+
+export function makePlanarFaces(mesh: MeshObject, faceIds: string[], vertexIds: string[] = [], bridge?: MeshBridgeData): OperationResult {
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
+  const faces = kernelFaceIds(bridge, faceIds)
+  if (faces.length) MeshEditOps.makePlanarFaces(bridge.mesh, faces)
+  else {
+    const verts = new Set(kernelVertIds(bridge, vertexIds))
+    const ids = verts.size
+      ? [...bridge.mesh.faces.values()].filter(f => f.vertexIds.every(id => verts.has(id))).map(f => f.id)
+      : [...bridge.mesh.faces.keys()]
+    MeshEditOps.makePlanarFaces(bridge.mesh, ids)
+  }
+  return projectEdit(mesh, bridge)
+}
+
+export function fillHoles(mesh: MeshObject, bridge?: MeshBridgeData): OperationResult {
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
+  const created = MeshEditOps.fillHoles(bridge.mesh)
+  return projectEdit(mesh, bridge, created)
+}
+
+export function limitedDissolve(mesh: MeshObject, angleDeg = 5, bridge?: MeshBridgeData): OperationResult {
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
+  MeshEditOps.limitedDissolve(bridge.mesh, angleDeg)
+  return projectEdit(mesh, bridge)
+}
+
+export function deleteOnlyFaces(mesh: MeshObject, faceIds: string[], bridge?: MeshBridgeData): OperationResult {
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
+  MeshEditOps.deleteOnlyFaces(bridge.mesh, kernelFaceIds(bridge, faceIds))
+  return projectEdit(mesh, bridge)
+}
+
+export function deleteOnlyEdges(mesh: MeshObject, edgeIds: string[], bridge?: MeshBridgeData): OperationResult {
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
+  MeshEditOps.deleteOnlyEdges(bridge.mesh, kernelEdgeIds(mesh, bridge, edgeIds))
+  return projectEdit(mesh, bridge)
+}
+
+export function ripEdges(mesh: MeshObject, edgeIds: string[], fill = false, bridge?: MeshBridgeData): OperationResult {
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
+  const ids = kernelEdgeIds(mesh, bridge, edgeIds)
+  const verts = fill ? MeshEditOps.ripFill(bridge.mesh, ids) : MeshEditOps.ripEdges(bridge.mesh, ids)
+  return projectEdit(mesh, bridge, [], verts)
+}
+
+export function splitSelectedFaces(mesh: MeshObject, faceIds: string[], bridge?: MeshBridgeData): OperationResult {
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
+  const verts = MeshEditOps.splitFaces(bridge.mesh, kernelFaceIds(bridge, faceIds))
+  return projectEdit(mesh, bridge, kernelFaceIds(bridge, faceIds), verts)
+}
+
+export function knifeProjectOnMesh(
+  mesh: MeshObject,
+  polylines: { x: number; y: number; z: number }[][],
+  bridge?: MeshBridgeData
+): OperationResult {
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
+  MeshEditOps.knifeProject(bridge.mesh, polylines.map(line => line.map(p => new THREE.Vector3(p.x, p.y, p.z))))
+  return projectEdit(mesh, bridge)
+}
+
+export function vertexBevel(mesh: MeshObject, vertexIds: string[], width = 0.1, bridge?: MeshBridgeData): OperationResult {
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
+  MeshEditOps.vertexBevel(bridge.mesh, kernelVertIds(bridge, vertexIds), width)
+  return projectEdit(mesh, bridge)
+}
+
+export function bridgeEdgeLoopsAdvanced(
+  mesh: MeshObject,
+  selectedEdgeIds: string[],
+  segments = 1,
+  twist = 0,
+  bridge?: MeshBridgeData
+): OperationResult {
+  if (selectedEdgeIds.length < 2) return { mesh, selectedFaceIds: [], selectedVertexIds: [] }
+  if (segments <= 1 && twist === 0) return bridgeEdgeLoops(mesh, selectedEdgeIds, bridge)
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
+  const loops = edgeLoopsFromIds(bridge.mesh, kernelEdgeIds(mesh, bridge, selectedEdgeIds))
+  if (loops.length < 2) return bridgeEdgeLoops(mesh, selectedEdgeIds, bridge)
+  const created = MeshEditOps.bridgeLoopsAdvanced(bridge.mesh, loops[0], loops[1], segments, twist)
+  return projectEdit(mesh, bridge, created)
+}
+
+export function solidifySelectedFaces(mesh: MeshObject, faceIds: string[], thickness: number, bridge?: MeshBridgeData): OperationResult {
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
+  MeshEditOps.solidifyFaces(bridge.mesh, kernelFaceIds(bridge, faceIds), thickness)
+  return projectEdit(mesh, bridge)
+}
+
+export function symmetrizeMesh(mesh: MeshObject, axis: 'x' | 'y' | 'z', bridge?: MeshBridgeData): OperationResult {
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
+  MeshEditOps.symmetrize(bridge.mesh, axis)
+  return projectEdit(mesh, bridge)
+}
+
+export function shrinkFattenVertices(mesh: MeshObject, vertexIds: string[], distance: number, bridge?: MeshBridgeData): OperationResult {
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
+  MeshEditOps.shrinkFatten(bridge.mesh, kernelVertIds(bridge, vertexIds), distance)
+  return projectEdit(mesh, bridge)
+}
+
+export function smoothMeshVertices(mesh: MeshObject, vertexIds: string[], factor = 0.5, bridge?: MeshBridgeData): OperationResult {
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
+  MeshEditOps.smoothVertices(bridge.mesh, kernelVertIds(bridge, vertexIds), factor)
+  return projectEdit(mesh, bridge)
+}
+
+export function randomizeMeshVertices(mesh: MeshObject, vertexIds: string[], amount: number, bridge?: MeshBridgeData): OperationResult {
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
+  MeshEditOps.randomizeVertices(bridge.mesh, kernelVertIds(bridge, vertexIds), amount)
+  return projectEdit(mesh, bridge)
+}
+
+export function unsubdivideMesh(mesh: MeshObject, bridge?: MeshBridgeData): OperationResult {
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
+  MeshEditOps.unsubdivide(bridge.mesh)
+  return projectEdit(mesh, bridge)
+}
+
+export function decimateMesh(mesh: MeshObject, ratio = 0.5, bridge?: MeshBridgeData): OperationResult {
+  bridge = bridge ?? MeshBridge.meshObjectToEditableMesh(mesh)
+  MeshEditOps.decimate(bridge.mesh, ratio)
+  return projectEdit(mesh, bridge)
+}
+
+export function booleanMeshes(a: MeshObject, b: MeshObject, op: BooleanOp, bridgeA?: MeshBridgeData): OperationResult {
+  bridgeA = bridgeA ?? MeshBridge.meshObjectToEditableMesh(a)
+  const other = MeshBridge.meshObjectToEditableMesh(b)
+  const offset = new THREE.Vector3(b.position.x - a.position.x, b.position.y - a.position.y, b.position.z - a.position.z)
+  for (const v of other.mesh.vertices.values()) v.position.add(offset)
+  BooleanKernel.operate(bridgeA.mesh, other.mesh, op)
+  return projectEdit(a, bridgeA)
+}
+
+export type { BooleanOp }
 
 

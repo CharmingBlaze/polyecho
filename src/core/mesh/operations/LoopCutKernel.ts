@@ -23,13 +23,16 @@ export class LoopCutKernel {
       for (const faceId of mesh.edges.get(a.id)!.faceIds) {
         if (visited.has(faceId)) continue
         const face = mesh.faces.get(faceId)
-        if (!face || face.vertexIds.length !== 4) continue
+        const n = face?.vertexIds.length ?? 0
+        // Quads and even n-gons have an opposite edge; odd faces (tris) still stop the ring.
+        if (!face || n < 4 || n % 2 !== 0) continue
         const vs = face.vertexIds
-        const i = vs.findIndex((v, j) => (v === a.from && vs[(j+1)%4] === a.to) || (v === a.to && vs[(j+1)%4] === a.from))
+        const i = vs.findIndex((v, j) => (v === a.from && vs[(j + 1) % n] === a.to) || (v === a.to && vs[(j + 1) % n] === a.from))
         if (i < 0) continue
         const forward = vs[i] === a.from
-        const from = vs[(i + (forward ? 3 : 2)) % 4]
-        const to = vs[(i + (forward ? 2 : 3)) % 4]
+        const half = n / 2
+        const from = vs[(i + (forward ? half + 1 : half)) % n]
+        const to = vs[(i + (forward ? half : half + 1)) % n]
         const opposite = mesh.findEdge(from, to)
         if (!opposite || opposite.faceIds.length > 2) continue
         visited.add(faceId)

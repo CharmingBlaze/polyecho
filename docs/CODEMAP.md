@@ -28,7 +28,7 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 
 | Path | Role |
 | :--- | :--- |
-| `src/stores/projectStore.ts` | Document, modeling, texture + material verbs (`docs/TEXTURES.md`, `docs/MATERIALS.md`) |
+| `src/stores/projectStore.ts` | Document, modeling, texture + material verbs (`docs/TEXTURES.md`, `docs/MATERIALS.md`). Per-object `meshRevision(id)` topology/position/attribute counters next to `geometryRevision`. |
 | `src/composables/useTextureApply.ts` | Apply-to-object + shared-material prompt |
 | `src/composables/useFloatingDrag.ts` | Pointer-capture drag for floating chrome |
 | `src/composables/useFastTitleTips.ts` | Fast icon hover labels (replaces slow OS `title`) |
@@ -37,7 +37,7 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/stores/toolStore.ts` | Modes, tools, snap, viewport flags; UV/Paint tab + last modeling select mode |
 | `src/test/setup.ts` | Vitest canvas 2D stub (`canvas2dStub.ts`) |
 | `src/stores/animationStore.ts` | Rig, clips, playback, weights |
-| `src/stores/historyStore.ts` | Undo / redo + dirty epoch (`isDirty` / `markClean`) |
+| `src/stores/historyStore.ts` | Undo / redo + dirty epoch (`isDirty` / `markClean`); `applySnapshot` invalidates per-object mesh revisions |
 | `src/stores/layoutStore.ts` | Panel chrome, inspector tab per workspace, Blockout pane split fractions |
 | `src/core/theme/` | Theme engine: tokens, color math, CSS apply, builtin presets. |
 | `src/stores/themeStore.ts` | Theme persistence, custom token edits, user presets, UI scale. Apply remaps wells away from the accent and sets `--ui-on-accent`. |
@@ -50,11 +50,11 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | :--- | :--- |
 | `src/core/mesh/MeshKernel.ts` | `EditableMesh` + snapshots |
 | `src/core/mesh/MeshBridge.ts` | `MeshObject` ↔ `EditableMesh` |
-| `src/core/mesh/MeshRepository.ts` | Per-project resident kernels; document compatibility boundary; modal preview publication |
+| `src/core/mesh/MeshRepository.ts` | Per-project resident kernels; lease: `hold`/`release` so `acquire` cannot clobber a held instance |
 | `src/core/mesh/MeshTransaction.ts` | Atomic edit/rollback, structured failures, topology/position/attribute change summaries and object-scoped element references |
 | `src/core/mesh/MeshBuilder.ts` | Validated construction using the existing kernel mutations |
 | `src/core/mesh/attributes/AttributeInterpolator.ts` | Independent vertex attribute copies, edge weight/color and corner UV interpolation |
-| `src/core/mesh/MeshResidency.test.ts`, `src/stores/meshResidency.test.ts` | Identity, attributes, resident commits, rollback, history and project round-trip regressions |
+| `src/core/mesh/MeshResidency.test.ts`, `src/stores/meshResidency.test.ts`, `src/stores/meshRevisions.test.ts` | Identity, attributes, resident commits, rollback, history and project round-trip regressions; per-object revision counters |
 | `src/core/mesh/HalfEdgeTopology.ts` | Half-edge helpers |
 | `src/core/mesh/MeshTopologyService.ts` | Topology queries + one-shot bridge / grid-fill / cleanup / subdivide / poke / triangulate |
 | `src/core/mesh/MeshValidator.ts` | Sanity checks |
@@ -63,6 +63,7 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/core/geometry/MeshTransform.ts` | `MeshObject` world matrix (degrees → radians); object-gizmo world delta onto drag-start TRS |
 | `src/core/geometry/ObjectPick.ts` | Ray / overlay pick among visible meshes (Knife / Loop Cut retarget) |
 | `src/core/geometry/ObjectSymmetry.ts` | Flip mesh through origin (H/V/Z), wrap Euler degrees, used by inspector Flip / Rotate / Mirror Copy |
+| `src/core/geometry/MeshJoin.ts` | Join / separate on a staged resident-kernel clone: translation bake, `boneWeights`, remapped `edge.seam` |
 | `src/core/geometry/Primitives.ts` | Legacy cube / plane helpers |
 | `src/core/geometry/Converters.ts` | Three.js `BufferGeometry`, including object shade flat/smooth/auto-smooth normals |
 | `src/core/geometry/MeshShading.ts` | Infer and persist Blender Shade Flat / Smooth / Smooth by Angle (`shadeMode`) for GLB / OBJ |
@@ -95,6 +96,10 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/core/operators/ExtrudeOperator.ts` | Extrude |
 | `src/core/operators/InsetOperator.ts` | Inset |
 | `src/core/operators/BevelOperator.ts` | Bevel |
+| `src/core/operators/MeshEditOperators.ts` | Edge/vertex slide, offset loop, bisect, spin, shrink/fatten, shear, to-sphere |
+| `src/core/mesh/operations/MeshEditOps.ts` | One-shot topology: dissolve faces, flip edge, fill holes, rip/split, bisect, spin, boolean helpers, deform |
+| `src/core/mesh/operations/BooleanKernel.ts` | Triangle BSP union / difference / intersect |
+| `src/core/mesh/operations/SlideKernel.ts` | Edge/vertex slide rails |
 | `src/core/operators/knife/KnifeOperator.ts` | Knife |
 | `src/core/mesh/operations/KnifeKernel.ts` | Knife splits, surface poke, cut-through |
 | `src/core/operators/loopCut/LoopCutOperator.ts` | Loop cut |
@@ -111,6 +116,7 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/core/commands/setupDefaultActions.ts` | Registers default operators, tools, and shortcuts into `ActionRegistry` |
 | `src/core/profiles/ModelProfiles.ts` | Target engine profiles (PSX, Godot 4, Unity, Blockbench) & budget validation |
 | `src/core/transform/SnapManager.ts` | Linear/angle/scale snap; `findRigidSnapOffset` (vertex/edge, whole selection) |
+| `src/core/transform/GizmoComponentDrag.ts` | Component gizmo world-delta onto a leased kernel |
 | `src/core/transform/LiveSymmetry.ts` | Live X/Y/Z counterpart follow (gizmo + G/R/S) |
 | `src/core/transform/` | Pivot, numeric input, coordinate spaces |
 
@@ -185,5 +191,14 @@ Cursor ↔ DeepSeek mailbox (docs + code). Protocol: `docs/collab/README.md`. Do
 | `docs/collab/REJECTED.md` | Stale claims not to re-propose |
 | `docs/collab/PROMPT_DEEPSEEK.md` | Paste into DeepSeek (first architecture turn) |
 | `docs/collab/PROMPT_DEEPSEEK_NEXT.md` | Paste into DeepSeek (docs follow-up) |
-| `docs/collab/PROMPT_DEEPSEEK_CODE.md` | Paste into DeepSeek (implementation; current slice T1.1) |
+| `docs/collab/PROMPT_DEEPSEEK_CODE.md` | Paste into DeepSeek (implementation; current slice **unwrap**) |
 | `docs/collab/PROMPT_CURSOR.md` | How Cursor reviews a drop |
+| `docs/collab/BUS.md` | Real-time pairing bus spec |
+| `docs/collab/PROMPT_DEEPSEEK_BUS.md` | Standing Cline prompt (bus + claims every turn) |
+| `scripts/collab_bus.py` | JSONL + HTTP + SSE server (`npm run collab:bus`) |
+| `scripts/collab_board.py` | File claims + presence |
+| `scripts/collab_mcp.py` | MCP tools so Cursor and Cline call the bus natively |
+| `scripts/collab_live.html` | Live pairing board UI |
+| `.cursor/mcp.json` / `.vscode/mcp.json` / `.cline/mcp.json` | Wire the pairing MCP into each IDE |
+| `.clinerules` | Cline standing pairing instructions |
+| `.cursor/hooks.json` | Start bus, inject board, deny claimed-file writes |

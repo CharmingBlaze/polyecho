@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createCube } from './Primitives'
-import { bevelFaces, bridgeEdgeLoops, cleanupMeshGeometry, connectTwoVertices, deleteElements, dissolveElements, extrudeFaces, fillFaceFromVertices, flattenVerticesOnAxis, flipNormals, gridFill, insetFaces, mergeVertices, mergeVerticesAdvanced, pokeFaces, subdivideFaces, triangulateFaces } from './Operations'
+import { bevelFaces, bridgeEdgeLoops, cleanupMeshGeometry, clearAllSeamEdges, connectTwoVertices, deleteElements, dissolveElements, extrudeFaces, fillFaceFromVertices, flattenVerticesOnAxis, flipNormals, gridFill, insetFaces, mergeVertices, mergeVerticesAdvanced, pokeFaces, setSeamEdges, subdivideFaces, triangulateFaces } from './Operations'
+import { MeshBridge } from '../mesh/MeshBridge'
 import type { MeshObject } from '../../types/mesh'
 import { undirectedEdgeId } from './EdgeUtils'
 
@@ -20,6 +21,23 @@ describe('Operations', () => {
       expect(face.uvs.length).toBe(face.vertexIds.length)
       expect(face.vertexIds.length).toBeGreaterThanOrEqual(3)
     }
+  })
+
+  it('injected bridge reuses the same kernel instance', () => {
+    const cube = createCube('Cube', 2)
+    const bridge = MeshBridge.meshObjectToEditableMesh(cube)
+    const kernel = bridge.mesh
+    flipNormals(cube, [cube.faces[0].id], bridge)
+    expect(bridge.mesh).toBe(kernel)
+    const edgeId = undirectedEdgeId(cube.vertices[0].id, cube.vertices[1].id)
+    setSeamEdges(cube, [edgeId], true, bridge)
+    expect(bridge.mesh).toBe(kernel)
+    expect([...bridge.mesh.edges.values()].some(e => e.seam)).toBe(true)
+    clearAllSeamEdges(cube, bridge)
+    expect(bridge.mesh).toBe(kernel)
+    expect([...bridge.mesh.edges.values()].some(e => e.seam)).toBe(false)
+    mergeVertices(cube, [cube.vertices[0].id, cube.vertices[1].id], bridge)
+    expect(bridge.mesh).toBe(kernel)
   })
 
   it('merge by distance welds coincident verts through MergeKernel', () => {

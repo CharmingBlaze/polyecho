@@ -4,5 +4,7 @@
   "editor.tabSize": 2,
   "editor.insertSpaces": true,
   "files.eol": "\n",
-  "vue.inlayHints.missingProps": true
+  "vue.inlayHints.missingProps": true,
+  "task.allowAutomaticTasks": "on",
+  "markdown.preview.doubleClickToSwitchToEditor": false
 }

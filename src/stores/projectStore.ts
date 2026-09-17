@@ -18,10 +18,33 @@ import {
   dissolveElements,
   connectTwoVertices,
   cleanupMeshGeometry,
-  bridgeEdgeLoops,
   gridFill,
   flipNormals, 
-  deleteElements 
+  deleteElements,
+  deleteOnlyFaces,
+  deleteOnlyEdges,
+  setSeamEdges,
+  clearAllSeamEdges,
+  flipEdges,
+  recalculateOutside,
+  connectVertexPath,
+  trisToQuads,
+  makePlanarFaces,
+  fillHoles,
+  limitedDissolve,
+  ripEdges,
+  splitSelectedFaces,
+  knifeProjectOnMesh,
+  vertexBevel,
+  bridgeEdgeLoopsAdvanced,
+  solidifySelectedFaces,
+  symmetrizeMesh,
+  smoothMeshVertices,
+  randomizeMeshVertices,
+  unsubdivideMesh,
+  decimateMesh,
+  booleanMeshes,
+  type BooleanOp
 } from '../core/geometry/Operations'
 import { getMeshEdges, getEdgeLoop, getEdgeRing, boundaryEdgeIdsForFaces } from '../core/geometry/EdgeUtils'
 import { DEFAULT_PALETTES, loadCustomPalettes, saveCustomPalettes } from '../utils/color'
@@ -39,10 +62,12 @@ import { PrimitiveBuilder } from '../core/primitives/PrimitiveBuilder'
 import { MeshBridge } from '../core/mesh/MeshBridge'
 import { EditableMesh } from '../core/mesh/MeshKernel'
 import { MeshRepository, type MeshBridgeData } from '../core/mesh/MeshRepository'
-import { editMesh, type MeshEditResult } from '../core/mesh/MeshTransaction'
+import { editMesh, type MeshEditResult, type MeshChange } from '../core/mesh/MeshTransaction'
 import { MeshValidator } from '../core/mesh/MeshValidator'
 import type { OperationResult } from '../core/geometry/Operations'
 import { placeOriginAtBoundsCenter } from '../core/geometry/MeshOrigin'
+import { joinMeshObjects, separateMeshFaces } from '../core/geometry/MeshJoin'
+import { MeshEditOps } from '../core/mesh/operations/MeshEditOps'
 import { addObjectRotation, flipMeshGeometry, type SymmetryAxis } from '../core/geometry/ObjectSymmetry'
 import { SeamUnwrapper } from '../core/uv/SeamUnwrapper'
 import { AtlasBaker } from '../core/uv/AtlasBaker'
@@ -108,6 +133,17 @@ export const useProjectStore = defineStore('project', () => {
   })
   const textureRevision = ref<number>(0)
   const geometryRevision = ref<number>(0)
+  // Per-object revision counters (slice: revisions). Key = MeshObject.id, same id space as
+  // MeshRepository. Derived, non-serialized state — never in .psxproj or history.
+  type MeshRevisions = { topology: number; position: number; attribute: number }
+  const meshRevisions = new Map<string, MeshRevisions>()
+  // Whole-object attribute-only writers (the UV unwrap family) report this synthesized change:
+  // they replace the mesh but change only UVs, never topology or positions.
+  const ATTRIBUTE_ONLY_CHANGE: MeshChange = {
+    topologyChanged: false, positionsChanged: false, attributesChanged: true,
+    createdVertices: [], deletedVertices: [], createdEdges: [], deletedEdges: [],
+    createdFaces: [], deletedFaces: [],
+  }
   const activeTextureId = ref<string>('tex_default')
   const referenceImages = ref<ReferenceImage[]>([])
   const referenceRevision = ref<number>(0)
@@ -465,8 +501,12 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   // Modeling operations on active mesh
-  function runKernelOperation(description: string, operation: (document: MeshObject, bridge: MeshBridgeData) => OperationResult) {
-    const document = activeMesh.value
+  function runKernelOperation(
+    description: string,
+    operation: (document: MeshObject, bridge: MeshBridgeData) => OperationResult,
+    options?: { record?: boolean; mesh?: MeshObject; applySelection?: boolean }
+  ) {
+    const document = options?.mesh ?? activeMesh.value
     if (!document || document.locked) return
     meshEditError.value = null
     const resident = acquireEditableMesh(document)
@@ -480,13 +520,15 @@ export const useProjectStore = defineStore('project', () => {
     if (!result.change.topologyChanged && !result.change.positionsChanged && !result.change.attributesChanged) return result
     // Validate the staged result before recording. History still precedes mutation
     // of either the resident kernel or its document projection.
-    recordState(description)
+    if (options?.record !== false) recordState(description)
     resident.mesh.restoreSnapshot(staged.mesh.createSnapshot())
     staged.mesh = resident.mesh
-    selectedFaceIds.value = result.value.selectedFaceIds
-    selectedVertexIds.value = result.value.selectedVertexIds
-    selectedEdgeIds.value = result.value.selectedEdgeIds ?? []
-    publishEditableMesh(result.value.mesh, staged)
+    if (options?.applySelection !== false) {
+      selectedFaceIds.value = result.value.selectedFaceIds
+      selectedVertexIds.value = result.value.selectedVertexIds
+      selectedEdgeIds.value = result.value.selectedEdgeIds ?? []
+    }
+    publishEditableMesh(result.value.mesh, staged, false, result.change)
     return result
   }
 
@@ -508,12 +550,10 @@ export const useProjectStore = defineStore('project', () => {
   function performBevel(offset = 0.2) {
     if (!activeMesh.value || activeMesh.value.locked) return
     if (!selectedFaceIds.value.length && !selectedEdgeIds.value.length) return
-    recordState('Bevel')
-    const result = bevelFaces(activeMesh.value, selectedFaceIds.value, offset, selectedEdgeIds.value)
-    selectedFaceIds.value = result.selectedFaceIds
-    selectedVertexIds.value = result.selectedVertexIds
-    selectedEdgeIds.value = []
-    replaceMesh(result.mesh)
+    const result = runKernelOperation('Bevel', (document, bridge) =>
+      bevelFaces(document, selectedFaceIds.value, offset, selectedEdgeIds.value, bridge))
+    if (result?.success) selectedEdgeIds.value = []
+    return result
   }
 
   function performSubdivide(mode?: 'object' | 'vertex' | 'edge' | 'face') {
@@ -535,11 +575,10 @@ export const useProjectStore = defineStore('project', () => {
       if (targets.length === 0) return
       recordState('Subdivide')
       for (const mesh of targets) {
-        const result = subdivideFaces(mesh, mesh.faces.map(f => f.id), {
+        runKernelOperation('Subdivide', (document, bridge) => subdivideFaces(document, document.faces.map(f => f.id), {
           cuts: toolStore.subdivideCuts,
           smoothness: toolStore.subdivideSmoothness
-        })
-        replaceMesh(result.mesh)
+        }, bridge), { record: false, mesh, applySelection: false })
       }
       clearSubSelections()
       return
@@ -566,16 +605,11 @@ export const useProjectStore = defineStore('project', () => {
 
     if (targetFaceIds.length === 0 && edgeIds.length === 0) return
 
-    recordState('Subdivide')
-    const result = subdivideFaces(activeMesh.value, targetFaceIds, {
+    return runKernelOperation('Subdivide', (document, bridge) => subdivideFaces(document, targetFaceIds, {
       cuts: toolStore.subdivideCuts,
       smoothness: toolStore.subdivideSmoothness,
       edgeIds
-    })
-    selectedFaceIds.value = result.selectedFaceIds
-    selectedVertexIds.value = result.selectedVertexIds
-    selectedEdgeIds.value = result.selectedEdgeIds ?? []
-    replaceMesh(result.mesh)
+    }, bridge))
   }
 
   function performPokeFaces() {
@@ -588,19 +622,14 @@ export const useProjectStore = defineStore('project', () => {
         .map(face => face.id)
     }
     if (targetFaceIds.length === 0) return
-    recordState('Poke Faces')
-    const result = pokeFaces(activeMesh.value, targetFaceIds)
-    selectedFaceIds.value = result.selectedFaceIds
-    replaceMesh(result.mesh)
+    return runKernelOperation('Poke Faces', (document, bridge) => pokeFaces(document, targetFaceIds, bridge))
   }
 
   function performTriangulate() {
     if (!activeMesh.value) return
     if (selectedFaceIds.value.length === 0) return
-    recordState('Triangulate Faces')
-    const result = triangulateFaces(activeMesh.value, selectedFaceIds.value)
-    selectedFaceIds.value = result.selectedFaceIds
-    replaceMesh(result.mesh)
+    return runKernelOperation('Triangulate Faces', (document, bridge) =>
+      triangulateFaces(document, selectedFaceIds.value, bridge))
   }
 
   function performMerge(type: 'center' | 'first' | 'last' | 'distance' = 'center', threshold = 0.05) {
@@ -612,12 +641,13 @@ export const useProjectStore = defineStore('project', () => {
     }
     if (targetVertIds.length < 2 && selectedFaceIds.value.length) targetVertIds = [...new Set(activeMesh.value.faces.filter(f => selectedFaceIds.value.includes(f.id)).flatMap(f => f.vertexIds))]
     if (targetVertIds.length < 2) return
-    recordState(`Merge Vertices (${type})`)
-    const result = mergeVerticesAdvanced(activeMesh.value, targetVertIds, type, threshold)
-    selectedFaceIds.value = []
-    selectedEdgeIds.value = []
-    selectedVertexIds.value = result.selectedVertexIds
-    replaceMesh(result.mesh)
+    const result = runKernelOperation(`Merge Vertices (${type})`, (document, bridge) =>
+      mergeVerticesAdvanced(document, targetVertIds, type, threshold, bridge))
+    if (result?.success) {
+      selectedFaceIds.value = []
+      selectedEdgeIds.value = []
+    }
+    return result
   }
 
   function performFillFace(viewDirection?: { x: number; y: number; z: number }) {
@@ -628,17 +658,12 @@ export const useProjectStore = defineStore('project', () => {
       boundaryVertexIds = Array.from(new Set(selectedEdges.flatMap(edge => [edge.v1, edge.v2])))
     }
     if (boundaryVertexIds.length === 2) {
-      recordState('Split Face')
-      const result = connectTwoVertices(activeMesh.value, boundaryVertexIds[0], boundaryVertexIds[1])
-      selectedFaceIds.value = result.selectedFaceIds
-      replaceMesh(result.mesh)
-      return
+      return runKernelOperation('Split Face', (document, bridge) =>
+        connectTwoVertices(document, boundaryVertexIds[0], boundaryVertexIds[1], bridge))
     }
     if (boundaryVertexIds.length < 3) return
-    recordState('Fill Face (F)')
-    const result = fillFaceFromVertices(activeMesh.value, boundaryVertexIds, viewDirection)
-    selectedFaceIds.value = result.selectedFaceIds
-    replaceMesh(result.mesh)
+    return runKernelOperation('Fill Face (F)', (document, bridge) =>
+      fillFaceFromVertices(document, boundaryVertexIds, viewDirection, bridge))
   }
 
   function performFlatten(axis: 'x' | 'y' | 'z') {
@@ -652,9 +677,8 @@ export const useProjectStore = defineStore('project', () => {
       targetVertIds = Array.from(new Set(faces.flatMap(f => f.vertexIds)))
     }
     if (targetVertIds.length === 0) return
-    recordState(`Flatten on ${axis.toUpperCase()}`)
-    const result = flattenVerticesOnAxis(activeMesh.value, targetVertIds, axis)
-    replaceMesh(result.mesh)
+    return runKernelOperation(`Flatten on ${axis.toUpperCase()}`, (document, bridge) =>
+      flattenVerticesOnAxis(document, targetVertIds, axis, bridge), { applySelection: false })
   }
 
   function performSeparateMesh() {
@@ -672,98 +696,66 @@ export const useProjectStore = defineStore('project', () => {
     }
     if (targetFaceIds.length === 0) return
 
-    recordState('Separate Selection')
     const sourceMesh = activeMesh.value
-    const facesToMove = sourceMesh.faces.filter(f => targetFaceIds.includes(f.id))
-    const usedVertIds = new Set(facesToMove.flatMap(f => f.vertexIds))
-    const vertsToMove = sourceMesh.vertices.filter(v => usedVertIds.has(v.id))
-
-    // Create new detached mesh
-    const newMesh: MeshObject = {
+    const resident = acquireEditableMesh(sourceMesh)
+    const staged = separateMeshFaces(sourceMesh, targetFaceIds, resident, {
       id: `mesh_sep_${Date.now()}`,
-      name: `${sourceMesh.name}_Separated`,
-      visible: true,
-      locked: false,
-      position: { ...sourceMesh.position },
-      rotation: { ...sourceMesh.rotation },
-      scale: { ...sourceMesh.scale },
-      materialId: sourceMesh.materialId,
-      shadeMode: sourceMesh.shadeMode,
-      autoSmoothAngle: sourceMesh.autoSmoothAngle,
-      vertices: JSON.parse(JSON.stringify(vertsToMove)),
-      faces: JSON.parse(JSON.stringify(facesToMove))
-    }
+      name: `${sourceMesh.name}_Separated`
+    })
+    if (!staged) return
+    // The new object gets its own resident kernel here instead of a throwaway import.
+    const separated = MeshBridge.meshObjectToEditableMesh(staged.separated)
+    // Validate before recording: history precedes mutation of either kernel or document.
+    if (!validateEditableMesh(staged.kernel) || !validateEditableMesh(separated.mesh)) return
 
-    // Remove from source mesh
-    sourceMesh.faces = sourceMesh.faces.filter(f => !targetFaceIds.includes(f.id))
-    const remainingUsedVerts = new Set(sourceMesh.faces.flatMap(f => f.vertexIds))
-    sourceMesh.vertices = sourceMesh.vertices.filter(v => remainingUsedVerts.has(v.id))
-
-    meshes.value.push(newMesh)
-    activeMeshId.value = newMesh.id
+    recordState('Separate Selection')
+    resident.mesh.restoreSnapshot(staged.kernel.createSnapshot())
+    meshes.value.push(staged.separated)
+    publishEditableMesh(
+      MeshBridge.editableMeshToMeshObject(resident.mesh, sourceMesh, resident.numToStrVertId, resident.numToStrFaceId),
+      resident
+    )
+    publishEditableMesh(staged.separated, separated)
+    activeMeshId.value = staged.separated.id
     clearSubSelections()
-    markGeometryUpdated()
   }
 
   function performJoinMeshes() {
     const targetMeshes = meshes.value.filter(m => selectedMeshIds.value.includes(m.id))
     if (targetMeshes.length < 2) return
-    recordState('Join Meshes (Ctrl+J)')
 
     const primary = targetMeshes[0]
     const otherMeshes = targetMeshes.slice(1)
+    const resident = acquireEditableMesh(primary)
+    const staged = joinMeshObjects(primary, otherMeshes, resident)
+    // Validate before recording: history precedes mutation of either kernel or document.
+    if (!validateEditableMesh(staged)) return
 
-    for (const other of otherMeshes) {
-      const vertIdMap = new Map<string, string>()
-
-      for (const v of other.vertices) {
-        const newVId = `v_join_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
-        vertIdMap.set(v.id, newVId)
-        // Transform vertex to primary space offset
-        primary.vertices.push({
-          id: newVId,
-          position: {
-            x: v.position.x + (other.position.x - primary.position.x),
-            y: v.position.y + (other.position.y - primary.position.y),
-            z: v.position.z + (other.position.z - primary.position.z)
-          },
-          color: v.color,
-          selected: false
-        })
-      }
-
-      for (const f of other.faces) {
-        const newFId = `f_join_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
-        primary.faces.push({
-          id: newFId,
-          vertexIds: f.vertexIds.map(vid => vertIdMap.get(vid) || vid),
-          uvs: JSON.parse(JSON.stringify(f.uvs)),
-          normal: f.normal ? { ...f.normal } : undefined,
-          materialIndex: f.materialIndex,
-          selected: false
-        })
-      }
-    }
-
-    meshes.value = meshes.value.filter(m => !otherMeshes.some(o => o.id === m.id))
+    recordState('Join Meshes (Ctrl+J)')
+    resident.mesh.restoreSnapshot(staged.createSnapshot())
+    meshes.value = meshes.value.filter(m => !otherMeshes.some(other => other.id === m.id))
+    publishEditableMesh(
+      MeshBridge.editableMeshToMeshObject(resident.mesh, primary, resident.numToStrVertId, resident.numToStrFaceId),
+      resident
+    )
+    // publish() only registers survivors, so the joined-away objects must drop their kernels.
+    meshRepository.retain(meshes.value.map(mesh => mesh.id))
+    pruneMeshRevisions()
     selectedMeshIds.value = [primary.id]
     activeMeshId.value = primary.id
-    markGeometryUpdated()
   }
 
   function performFlipNormals() {
     if (!activeMesh.value) return
-    recordState('Flip Normals')
     const targetFaceIds = selectedFaceIds.value.length > 0 ? selectedFaceIds.value : activeMesh.value.faces.map(f => f.id)
-    const result = flipNormals(activeMesh.value, targetFaceIds)
-    replaceMesh(result.mesh)
+    return runKernelOperation('Flip Normals', (document, bridge) =>
+      flipNormals(document, targetFaceIds, bridge), { applySelection: false })
   }
 
-  function performBridgeEdges() {
+  function performBridgeEdges(segments = 1, twist = 0) {
     if (!activeMesh.value || selectedEdgeIds.value.length < 2) return
-    recordState('Bridge Edge Loops')
-    const result = bridgeEdgeLoops(activeMesh.value, selectedEdgeIds.value)
-    replaceMesh(result.mesh)
+    return runKernelOperation('Bridge Edge Loops', (document, bridge) =>
+      bridgeEdgeLoopsAdvanced(document, selectedEdgeIds.value, segments, twist, bridge), { applySelection: false })
   }
 
   function performGridFill() {
@@ -774,9 +766,8 @@ export const useProjectStore = defineStore('project', () => {
       boundaryVertexIds = Array.from(new Set(selectedEdges.flatMap(edge => [edge.v1, edge.v2])))
     }
     if (boundaryVertexIds.length < 4) return
-    recordState('Grid Fill')
-    const result = gridFill(activeMesh.value, boundaryVertexIds)
-    replaceMesh(result.mesh)
+    return runKernelOperation('Grid Fill', (document, bridge) =>
+      gridFill(document, boundaryVertexIds, bridge), { applySelection: false })
   }
 
   function deleteMesh(id: string) {
@@ -790,6 +781,7 @@ export const useProjectStore = defineStore('project', () => {
       selectedMeshIds.value = [activeMeshId.value]
     }
     clearSubSelections()
+    pruneMeshRevisions()
     markGeometryUpdated()
   }
 
@@ -801,6 +793,7 @@ export const useProjectStore = defineStore('project', () => {
     activeMeshId.value = meshes.value[0]?.id || ''
     selectedMeshIds.value = activeMeshId.value ? [activeMeshId.value] : []
     clearSubSelections()
+    pruneMeshRevisions()
     markGeometryUpdated()
   }
 
@@ -810,34 +803,270 @@ export const useProjectStore = defineStore('project', () => {
       return
     }
     if (!activeMesh.value) return
-    recordState(`Delete ${mode}`)
     const ids = mode === 'face' ? selectedFaceIds.value : (mode === 'edge' ? selectedEdgeIds.value : selectedVertexIds.value)
-    const result = deleteElements(activeMesh.value, mode, ids)
-    clearSubSelections()
-    replaceMesh(result.mesh)
+    const result = runKernelOperation(`Delete ${mode}`, (document, bridge) =>
+      deleteElements(document, mode, ids, bridge), { applySelection: false })
+    if (result?.success) clearSubSelections()
+    return result
   }
 
-  function performDissolve(mode: 'vertex' | 'edge') {
+  function performDissolve(mode: 'vertex' | 'edge' | 'face') {
     if (!activeMesh.value) return
-    recordState(`Dissolve ${mode}`)
-    const ids = mode === 'edge' ? selectedEdgeIds.value : selectedVertexIds.value
-    const result = dissolveElements(activeMesh.value, mode, ids)
-    clearSubSelections()
-    replaceMesh(result.mesh)
+    const ids = mode === 'edge' ? selectedEdgeIds.value : mode === 'face' ? selectedFaceIds.value : selectedVertexIds.value
+    const result = runKernelOperation(`Dissolve ${mode}`, (document, bridge) =>
+      dissolveElements(document, mode, ids, bridge), { applySelection: false })
+    if (result?.success) clearSubSelections()
+    return result
   }
 
   function performConnectVertices() {
-    if (!activeMesh.value || selectedVertexIds.value.length !== 2) return
-    recordState('Connect Vertices (J)')
-    const result = connectTwoVertices(activeMesh.value, selectedVertexIds.value[0], selectedVertexIds.value[1])
-    replaceMesh(result.mesh)
+    if (!activeMesh.value || selectedVertexIds.value.length < 2) return
+    return runKernelOperation('Connect Vertices (J)', (document, bridge) =>
+      connectVertexPath(document, selectedVertexIds.value, bridge))
   }
 
   function performCleanupMesh() {
     if (!activeMesh.value) return
-    recordState('Clean Mesh')
-    const result = cleanupMeshGeometry(activeMesh.value)
-    replaceMesh(result.mesh)
+    return runKernelOperation('Clean Mesh', (document, bridge) =>
+      cleanupMeshGeometry(document, bridge), { applySelection: false })
+  }
+
+  function incidentFacesFromSelection(): string[] {
+    const mesh = activeMesh.value
+    if (!mesh) return []
+    if (selectedFaceIds.value.length) return [...selectedFaceIds.value]
+    if (selectedEdgeIds.value.length) {
+      const edges = getMeshEdges(mesh).filter(e => selectedEdgeIds.value.includes(e.id))
+      return mesh.faces
+        .filter(face => edges.some(edge => face.vertexIds.includes(edge.v1) && face.vertexIds.includes(edge.v2)))
+        .map(f => f.id)
+    }
+    if (selectedVertexIds.value.length) {
+      const verts = new Set(selectedVertexIds.value)
+      return mesh.faces.filter(f => f.vertexIds.some(id => verts.has(id))).map(f => f.id)
+    }
+    return []
+  }
+
+  function selectionVertexIds(): string[] {
+    const mesh = activeMesh.value
+    if (!mesh) return []
+    if (selectedVertexIds.value.length) return [...selectedVertexIds.value]
+    if (selectedEdgeIds.value.length) {
+      const edges = getMeshEdges(mesh).filter(e => selectedEdgeIds.value.includes(e.id))
+      return [...new Set(edges.flatMap(e => [e.v1, e.v2]))]
+    }
+    if (selectedFaceIds.value.length) {
+      return [...new Set(mesh.faces.filter(f => selectedFaceIds.value.includes(f.id)).flatMap(f => f.vertexIds))]
+    }
+    return mesh.vertices.map(v => v.id)
+  }
+
+  function performFlipEdge() {
+    if (!activeMesh.value || selectedEdgeIds.value.length === 0) return
+    return runKernelOperation('Rotate Edge', (document, bridge) =>
+      flipEdges(document, selectedEdgeIds.value, bridge), { applySelection: false })
+  }
+
+  function performRecalculateOutside() {
+    if (!activeMesh.value) return
+    return runKernelOperation('Recalculate Outside', (document, bridge) =>
+      recalculateOutside(document, bridge), { applySelection: false })
+  }
+
+  function performTrisToQuads() {
+    if (!activeMesh.value) return
+    return runKernelOperation('Tris to Quads', (document, bridge) =>
+      trisToQuads(document, selectedFaceIds.value, bridge), { applySelection: false })
+  }
+
+  function performMakePlanar() {
+    if (!activeMesh.value) return
+    return runKernelOperation('Make Planar Faces', (document, bridge) =>
+      makePlanarFaces(document, selectedFaceIds.value, selectedVertexIds.value, bridge), { applySelection: false })
+  }
+
+  function performFillHoles() {
+    if (!activeMesh.value) return
+    return runKernelOperation('Fill Holes', (document, bridge) =>
+      fillHoles(document, bridge))
+  }
+
+  function performLimitedDissolve(angleDeg = 5) {
+    if (!activeMesh.value) return
+    return runKernelOperation('Limited Dissolve', (document, bridge) =>
+      limitedDissolve(document, angleDeg, bridge), { applySelection: false })
+  }
+
+  function performDeleteOnlyFaces() {
+    const ids = incidentFacesFromSelection()
+    if (!ids.length) return
+    const result = runKernelOperation('Delete Only Faces', (document, bridge) =>
+      deleteOnlyFaces(document, ids, bridge), { applySelection: false })
+    if (result?.success) clearSubSelections()
+    return result
+  }
+
+  function performDeleteOnlyEdges() {
+    if (!activeMesh.value || selectedEdgeIds.value.length === 0) return
+    const result = runKernelOperation('Delete Only Edges', (document, bridge) =>
+      deleteOnlyEdges(document, selectedEdgeIds.value, bridge), { applySelection: false })
+    if (result?.success) clearSubSelections()
+    return result
+  }
+
+  function performRip(fill = false) {
+    if (!activeMesh.value || selectedEdgeIds.value.length === 0) return
+    return runKernelOperation(fill ? 'Rip Fill' : 'Rip', (document, bridge) =>
+      ripEdges(document, selectedEdgeIds.value, fill, bridge))
+  }
+
+  function performSplit() {
+    const ids = incidentFacesFromSelection()
+    if (!ids.length) return
+    return runKernelOperation('Split', (document, bridge) =>
+      splitSelectedFaces(document, ids, bridge))
+  }
+
+  function performVertexBevel(width = 0.1) {
+    const verts = selectionVertexIds()
+    if (verts.length === 0) return
+    return runKernelOperation('Vertex Bevel', (document, bridge) =>
+      vertexBevel(document, verts, width, bridge))
+  }
+
+  function performSolidifyFaces(thickness = 0.1) {
+    const ids = incidentFacesFromSelection()
+    if (!ids.length) return
+    return runKernelOperation('Solidify Faces', (document, bridge) =>
+      solidifySelectedFaces(document, ids, thickness, bridge), { applySelection: false })
+  }
+
+  function performSymmetrize(axis: 'x' | 'y' | 'z' = 'x') {
+    if (!activeMesh.value) return
+    return runKernelOperation(`Symmetrize ${axis.toUpperCase()}`, (document, bridge) =>
+      symmetrizeMesh(document, axis, bridge), { applySelection: false })
+  }
+
+  function performSmoothVertices(factor = 0.5) {
+    const verts = selectionVertexIds()
+    if (!verts.length) return
+    return runKernelOperation('Smooth Vertices', (document, bridge) =>
+      smoothMeshVertices(document, verts, factor, bridge), { applySelection: false })
+  }
+
+  function performRandomizeVertices(amount = 0.05) {
+    const verts = selectionVertexIds()
+    if (!verts.length) return
+    return runKernelOperation('Randomize Vertices', (document, bridge) =>
+      randomizeMeshVertices(document, verts, amount, bridge), { applySelection: false })
+  }
+
+  function performUnsubdivide() {
+    if (!activeMesh.value) return
+    return runKernelOperation('Unsubdivide', (document, bridge) =>
+      unsubdivideMesh(document, bridge), { applySelection: false })
+  }
+
+  function performDecimate(ratio = 0.5) {
+    if (!activeMesh.value) return
+    return runKernelOperation('Decimate', (document, bridge) =>
+      decimateMesh(document, ratio, bridge), { applySelection: false })
+  }
+
+  function performBoolean(op: BooleanOp) {
+    const ids = selectedMeshIds.value.length >= 2
+      ? selectedMeshIds.value
+      : (activeMeshId.value ? [activeMeshId.value] : [])
+    if (ids.length < 2) return
+    const primary = meshes.value.find(m => m.id === ids[0])
+    const cutter = meshes.value.find(m => m.id === ids[1])
+    if (!primary || !cutter || primary.locked) return
+    const result = runKernelOperation(`Boolean ${op}`, (document, bridge) =>
+      booleanMeshes(document, cutter, op, bridge), { mesh: primary, applySelection: false })
+    if (!result?.success) return result
+    meshes.value = meshes.value.filter(m => m.id !== cutter.id)
+    meshRepository.retain(meshes.value.map(mesh => mesh.id))
+    pruneMeshRevisions()
+    selectedMeshIds.value = [primary.id]
+    activeMeshId.value = primary.id
+    return result
+  }
+
+  function performKnifeProject(polylines: { x: number; y: number; z: number }[][]) {
+    if (!activeMesh.value || polylines.length === 0) return
+    return runKernelOperation('Knife Project', (document, bridge) =>
+      knifeProjectOnMesh(document, polylines, bridge), { applySelection: false })
+  }
+
+  function performSeparateByLooseParts() {
+    const source = activeMesh.value
+    if (!source) return
+    const resident = acquireEditableMesh(source)
+    const groups = MeshEditOps.connectedFaceGroups(resident.mesh)
+    if (groups.length < 2) return
+    const toNum = resident.strToNumFaceId
+    const groupsDoc = groups.map(g => source.faces.filter(f => {
+      const n = toNum.get(f.id)
+      return n !== undefined && g.includes(n)
+    }).map(f => f.id)).filter(ids => ids.length > 0)
+    if (groupsDoc.length < 2) return
+    recordState('Separate by Loose Parts')
+    const sourceId = source.id
+    for (let i = 1; i < groupsDoc.length; i++) {
+      const liveDoc = meshes.value.find(m => m.id === sourceId)
+      if (!liveDoc) break
+      const live = acquireEditableMesh(liveDoc)
+      const staged = separateMeshFaces(liveDoc, groupsDoc[i], live, {
+        id: `mesh_part_${Date.now()}_${i}`,
+        name: `${liveDoc.name}.${i}`
+      })
+      if (!staged) continue
+      const separated = MeshBridge.meshObjectToEditableMesh(staged.separated)
+      live.mesh.restoreSnapshot(staged.kernel.createSnapshot())
+      meshes.value.push(staged.separated)
+      publishEditableMesh(
+        MeshBridge.editableMeshToMeshObject(live.mesh, liveDoc, live.numToStrVertId, live.numToStrFaceId),
+        live
+      )
+      publishEditableMesh(staged.separated, separated)
+    }
+    clearSubSelections()
+  }
+
+  function performSeparateByMaterial() {
+    const source = activeMesh.value
+    if (!source) return
+    const byMat = new Map<number, string[]>()
+    for (const face of source.faces) {
+      const key = face.materialIndex ?? 0
+      const list = byMat.get(key) ?? []
+      list.push(face.id)
+      byMat.set(key, list)
+    }
+    if (byMat.size < 2) return
+    const groups = [...byMat.values()]
+    recordState('Separate by Material')
+    const sourceId = source.id
+    for (let i = 1; i < groups.length; i++) {
+      const liveDoc = meshes.value.find(m => m.id === sourceId)
+      if (!liveDoc) break
+      const live = acquireEditableMesh(liveDoc)
+      const staged = separateMeshFaces(liveDoc, groups[i], live, {
+        id: `mesh_mat_${Date.now()}_${i}`,
+        name: `${liveDoc.name}_mat${i}`
+      })
+      if (!staged) continue
+      const separated = MeshBridge.meshObjectToEditableMesh(staged.separated)
+      live.mesh.restoreSnapshot(staged.kernel.createSnapshot())
+      meshes.value.push(staged.separated)
+      publishEditableMesh(
+        MeshBridge.editableMeshToMeshObject(live.mesh, liveDoc, live.numToStrVertId, live.numToStrFaceId),
+        live
+      )
+      publishEditableMesh(staged.separated, separated)
+    }
+    clearSubSelections()
   }
 
   type GenerateModifier = 'mirror' | 'subdivision' | 'solidify'
@@ -877,7 +1106,18 @@ export const useProjectStore = defineStore('project', () => {
 
   function acquireEditableMesh(document: MeshObject) {
     meshRepository.retain(meshes.value.map(mesh => mesh.id))
+    pruneMeshRevisions()
     return meshRepository.acquire(document)
+  }
+
+  function holdEditableMesh(document: MeshObject) {
+    meshRepository.retain(meshes.value.map(mesh => mesh.id))
+    pruneMeshRevisions()
+    return meshRepository.hold(document)
+  }
+
+  function releaseEditableMesh(objectId: string) {
+    meshRepository.release(objectId)
   }
 
   function validateEditableMesh(mesh: EditableMesh): boolean {
@@ -889,21 +1129,64 @@ export const useProjectStore = defineStore('project', () => {
     return validation.valid
   }
 
-  function publishEditableMesh(document: MeshObject, bridge: MeshBridgeData, preview = false) {
+  function publishEditableMesh(document: MeshObject, bridge: MeshBridgeData, preview = false, change?: MeshChange) {
     const idx = meshes.value.findIndex(mesh => mesh.id === document.id)
     if (idx === -1) return
     meshRepository.publish(document, bridge)
     meshes.value[idx] = document
-    if (preview) geometryRevision.value++
-    else markGeometryUpdated()
+    bumpMeshCounters(document.id, change)
+    if (!preview) triggerAutosave()
   }
 
-  function replaceMesh(newMesh: MeshObject) {
+  function replaceMesh(newMesh: MeshObject, change?: MeshChange) {
     const idx = meshes.value.findIndex(m => m.id === newMesh.id)
     if (idx !== -1) {
       meshes.value[idx] = newMesh
-      markGeometryUpdated()
+      bumpMeshCounters(newMesh.id, change)
+      triggerAutosave()
     }
+  }
+
+  // Per-object revision accounting. `bumpMeshCounters` advances the per-object counters and the
+  // umbrella; autosave is the caller's job. A no-op MeshChange (all three false) bumps nothing.
+  function bumpMeshCounters(objectId: string, change?: MeshChange) {
+    if (change && !change.topologyChanged && !change.positionsChanged && !change.attributesChanged) return
+    const c = meshRevisions.get(objectId) ?? { topology: 0, position: 0, attribute: 0 }
+    if (change) {
+      if (change.topologyChanged) { c.topology++; c.position++; c.attribute++ }
+      else {
+        if (change.positionsChanged) c.position++
+        if (change.attributesChanged) c.attribute++
+      }
+    } else {
+      c.topology++; c.position++; c.attribute++
+    }
+    meshRevisions.set(objectId, c)
+    geometryRevision.value++
+  }
+
+  // Restore invalidation: undo/redo / session load / new project bump every counter for every
+  // object (a restored document has no claim on kernel identity).
+  function invalidateAllGeometryRevisions() {
+    for (const mesh of meshes.value) {
+      const c = meshRevisions.get(mesh.id) ?? { topology: 0, position: 0, attribute: 0 }
+      c.topology++; c.position++; c.attribute++
+      meshRevisions.set(mesh.id, c)
+    }
+    geometryRevision.value++
+    triggerAutosave()
+  }
+
+  function pruneMeshRevisions() {
+    const live = new Set(meshes.value.map(m => m.id))
+    for (const id of [...meshRevisions.keys()]) {
+      if (!live.has(id)) meshRevisions.delete(id)
+    }
+  }
+
+  function meshRevision(id: string): Readonly<MeshRevisions> | undefined {
+    const c = meshRevisions.get(id)
+    return c ? { ...c } : undefined
   }
 
   // Selection Helpers
@@ -1086,8 +1369,9 @@ export const useProjectStore = defineStore('project', () => {
   function performAutoMerge(meshId: string, threshold = 0.01) {
     const mesh = meshes.value.find(m => m.id === meshId)
     if (!mesh) return
-    const result = mergeVerticesAdvanced(mesh, mesh.vertices.map(v => v.id), 'distance', threshold)
-    replaceMesh(result.mesh)
+    return runKernelOperation('Auto Merge', (document, bridge) =>
+      mergeVerticesAdvanced(document, document.vertices.map(v => v.id), 'distance', threshold, bridge),
+      { record: false, mesh, applySelection: false })
   }
 
   // Clipboard State & Operations
@@ -1257,7 +1541,9 @@ export const useProjectStore = defineStore('project', () => {
     if (targets.length === 0 || !degrees) return
     recordState(`Rotate ${axis.toUpperCase()} ${degrees}°`)
     for (const mesh of targets) addObjectRotation(mesh, axis, degrees)
-    markGeometryUpdated()
+    // TRS-only: an object transform does not move mesh data, so no per-object counter bump.
+    geometryRevision.value++
+    triggerAutosave()
   }
 
   function performDuplicateMirror(axis: SymmetryAxis) {
@@ -1461,6 +1747,7 @@ export const useProjectStore = defineStore('project', () => {
       }
 
       clearSubSelections()
+      meshRevisions.clear()
       markGeometryUpdated()
       markTextureUpdated()
       historyStore.clearHistory()
@@ -1473,6 +1760,14 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   function markGeometryUpdated() {
+    // Legacy path: bump the active object's `attribute` counter (plus the umbrella) until the
+    // writer is classified (see §3.4.2). Non-mesh sites still get an umbrella-only render bump.
+    const id = activeMesh.value?.id
+    if (id) {
+      const c = meshRevisions.get(id) ?? { topology: 0, position: 0, attribute: 0 }
+      c.attribute++
+      meshRevisions.set(id, c)
+    }
     geometryRevision.value++
     triggerAutosave()
   }
@@ -2134,6 +2429,7 @@ export const useProjectStore = defineStore('project', () => {
     SpringPhysicsSolver.reset()
 
     clearSubSelections()
+    meshRevisions.clear()
     markGeometryUpdated()
     markTextureUpdated('tex_default')
     ProjectStorage.clearAutosave()
@@ -2185,28 +2481,24 @@ export const useProjectStore = defineStore('project', () => {
     const existing = new Set(activeMesh.value.seamEdgeIds || [])
     const toAdd = targets.filter(id => !existing.has(id))
     if (toAdd.length === 0) return
-    recordState('Mark Seam')
-    activeMesh.value.seamEdgeIds = [...existing, ...toAdd]
-    markGeometryUpdated()
+    return runKernelOperation('Mark Seam', (document, bridge) =>
+      setSeamEdges(document, toAdd, true, bridge), { applySelection: false })
   }
 
   function clearSelectedEdgesSeam() {
     if (!activeMesh.value || !activeMesh.value.seamEdgeIds) return
     const targets = seamTargetEdgeIds()
     if (targets.length === 0) return
-    const remove = new Set(targets)
-    const next = activeMesh.value.seamEdgeIds.filter(id => !remove.has(id))
-    if (next.length === activeMesh.value.seamEdgeIds.length) return
-    recordState('Clear Seam')
-    activeMesh.value.seamEdgeIds = next
-    markGeometryUpdated()
+    const remove = targets.filter(id => activeMesh.value!.seamEdgeIds!.includes(id))
+    if (remove.length === 0) return
+    return runKernelOperation('Clear Seam', (document, bridge) =>
+      setSeamEdges(document, remove, false, bridge), { applySelection: false })
   }
 
   function clearAllSeams() {
     if (!activeMesh.value || !activeMesh.value.seamEdgeIds?.length) return
-    recordState('Clear All Seams')
-    activeMesh.value.seamEdgeIds = []
-    markGeometryUpdated()
+    return runKernelOperation('Clear All Seams', (document, bridge) =>
+      clearAllSeamEdges(document, bridge), { applySelection: false })
   }
 
   function selectedFaceIndices(): number[] | undefined {
@@ -2236,7 +2528,7 @@ export const useProjectStore = defineStore('project', () => {
       textureSize: options.textureSize ?? pixelBuffer.value.width,
       textureHeight: options.textureHeight ?? pixelBuffer.value.height,
       onlyFaceIndices: faces
-    }))
+    }), ATTRIBUTE_ONLY_CHANGE)
   }
 
   function performSeamUnwrap(onlyFaceIndices?: number[]) {
@@ -2247,7 +2539,7 @@ export const useProjectStore = defineStore('project', () => {
     recordState(`Unwrap Along Seams (${faces && faces.length > 0 ? 'Selection' : 'Mesh'})`)
     const next: MeshObject = JSON.parse(JSON.stringify(activeMesh.value))
     SeamUnwrapper.unwrapMesh(next, faces, pixelBuffer.value.width || 64, 2)
-    replaceMesh(next)
+    replaceMesh(next, ATTRIBUTE_ONLY_CHANGE)
   }
 
   function performPackUVIslands(padding = 0.02, onlyFaceIndices?: number[]) {
@@ -2263,7 +2555,7 @@ export const useProjectStore = defineStore('project', () => {
       texSize,
       faces,
       pixelBuffer.value.height
-    ))
+    ), ATTRIBUTE_ONLY_CHANGE)
   }
 
   function performApplyTexelDensity(targetDensity: number, faceIndices?: number[]) {
@@ -2276,14 +2568,14 @@ export const useProjectStore = defineStore('project', () => {
         : undefined
     )
     const updated = applyTargetTexelDensity(activeMesh.value, targetDensity, texSize, indices)
-    replaceMesh(updated)
+    replaceMesh(updated, ATTRIBUTE_ONLY_CHANGE)
   }
 
   function performEqualizeTexelDensity() {
     if (!activeMesh.value) return
     recordState('Equalize Texel Density')
     const updated = equalizeTexelDensity(activeMesh.value)
-    replaceMesh(updated)
+    replaceMesh(updated, ATTRIBUTE_ONLY_CHANGE)
   }
 
   function unwrapFaceScope(onlyFaceIndices?: number[]): number[] | undefined {
@@ -2295,7 +2587,7 @@ export const useProjectStore = defineStore('project', () => {
     if (!activeMesh.value) return
     const faces = unwrapFaceScope(onlyFaceIndices)
     recordState(faces && faces.length > 0 ? 'Box Unwrap (Selection)' : 'Box UV Projection')
-    replaceMesh(boxUnwrap(activeMesh.value, faces))
+    replaceMesh(boxUnwrap(activeMesh.value, faces), ATTRIBUTE_ONLY_CHANGE)
   }
 
   function generateBoxUVs() {
@@ -2306,42 +2598,42 @@ export const useProjectStore = defineStore('project', () => {
     if (!activeMesh.value) return
     const faces = unwrapFaceScope(onlyFaceIndices)
     recordState(`Planar Unwrap (${axis.toUpperCase()})`)
-    replaceMesh(planarUnwrap(activeMesh.value, axis, faces))
+    replaceMesh(planarUnwrap(activeMesh.value, axis, faces), ATTRIBUTE_ONLY_CHANGE)
   }
 
   function performCylinderUnwrap(onlyFaceIndices?: number[]) {
     if (!activeMesh.value) return
     const faces = unwrapFaceScope(onlyFaceIndices)
     recordState('Cylindrical Unwrap')
-    replaceMesh(cylinderUnwrap(activeMesh.value, faces))
+    replaceMesh(cylinderUnwrap(activeMesh.value, faces), ATTRIBUTE_ONLY_CHANGE)
   }
 
   function performSphereUnwrap(onlyFaceIndices?: number[]) {
     if (!activeMesh.value) return
     const faces = unwrapFaceScope(onlyFaceIndices)
     recordState('Spherical Unwrap')
-    replaceMesh(sphereUnwrap(activeMesh.value, faces))
+    replaceMesh(sphereUnwrap(activeMesh.value, faces), ATTRIBUTE_ONLY_CHANGE)
   }
 
   function performConeUnwrap(onlyFaceIndices?: number[]) {
     if (!activeMesh.value) return
     const faces = unwrapFaceScope(onlyFaceIndices)
     recordState('Conical Fan Unwrap')
-    replaceMesh(coneUnwrap(activeMesh.value, faces))
+    replaceMesh(coneUnwrap(activeMesh.value, faces), ATTRIBUTE_ONLY_CHANGE)
   }
 
   function performCubemapCrossUnwrap(onlyFaceIndices?: number[]) {
     if (!activeMesh.value) return
     const faces = unwrapFaceScope(onlyFaceIndices)
     recordState('Cubemap Cross Unwrap')
-    replaceMesh(cubemapCrossUnwrap(activeMesh.value, faces))
+    replaceMesh(cubemapCrossUnwrap(activeMesh.value, faces), ATTRIBUTE_ONLY_CHANGE)
   }
 
   function performGridifyUvQuads(onlyFaceIndices?: number[]) {
     if (!activeMesh.value) return
     const faces = unwrapFaceScope(onlyFaceIndices)
     recordState('Gridify Quad Loops')
-    replaceMesh(gridifyQuadIslands(activeMesh.value, faces))
+    replaceMesh(gridifyQuadIslands(activeMesh.value, faces), ATTRIBUTE_ONLY_CHANGE)
   }
 
   function bakeSceneAtlas(padding = 2) {
@@ -2578,6 +2870,27 @@ export const useProjectStore = defineStore('project', () => {
     performDissolve,
     performConnectVertices,
     performCleanupMesh,
+    performFlipEdge,
+    performRecalculateOutside,
+    performTrisToQuads,
+    performMakePlanar,
+    performFillHoles,
+    performLimitedDissolve,
+    performDeleteOnlyFaces,
+    performDeleteOnlyEdges,
+    performRip,
+    performSplit,
+    performVertexBevel,
+    performSolidifyFaces,
+    performSymmetrize,
+    performSmoothVertices,
+    performRandomizeVertices,
+    performUnsubdivide,
+    performDecimate,
+    performBoolean,
+    performKnifeProject,
+    performSeparateByLooseParts,
+    performSeparateByMaterial,
     addModifier,
     applyMeshModifier,
     removeMeshModifier,
@@ -2586,6 +2899,8 @@ export const useProjectStore = defineStore('project', () => {
     selectConnected,
     replaceMesh,
     acquireEditableMesh,
+    holdEditableMesh,
+    releaseEditableMesh,
     publishEditableMesh,
     meshEditError,
     validateEditableMesh,
@@ -2594,6 +2909,8 @@ export const useProjectStore = defineStore('project', () => {
     toggleShadeMode,
     geometryRevision,
     markGeometryUpdated,
+    meshRevision,
+    invalidateAllGeometryRevisions,
     markTexturePreview,
     markTextureUpdated,
     selectTexture,

@@ -12,7 +12,8 @@ export const EDITOR_EVENTS = {
   fillFace: 'editor:fill-face',
   openPie: 'editor:open-pie',
   toggleUvOverlay: 'editor:toggle-uv-overlay',
-  smartUvProject: 'editor:smart-uv-project'
+  smartUvProject: 'editor:smart-uv-project',
+  knifeProject: 'editor:knife-project'
 } as const
 
 export type ModalToolCommand =
@@ -24,6 +25,14 @@ export type ModalToolCommand =
   | 'bevel'
   | 'knife'
   | 'loop_cut'
+  | 'edge_slide'
+  | 'vertex_slide'
+  | 'offset_loop'
+  | 'bisect'
+  | 'spin'
+  | 'shrink_fatten'
+  | 'shear'
+  | 'to_sphere'
   | 'polydraw'
   | 'shapedraw'
   | 'polybuild'
@@ -78,4 +87,8 @@ export function requestToggleUvOverlay() {
 
 export function requestSmartUvProject() {
   window.dispatchEvent(new CustomEvent(EDITOR_EVENTS.smartUvProject))
+}
+
+export function requestKnifeProject() {
+  window.dispatchEvent(new CustomEvent(EDITOR_EVENTS.knifeProject))
 }

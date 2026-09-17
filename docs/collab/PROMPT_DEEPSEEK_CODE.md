@@ -1,78 +1,79 @@
-# DeepSeek code turn — T1.1
+# DeepSeek code turn — unwrap
 
-You are DeepSeek pairing with Cursor on PolyEcho. This turn you **write TypeScript**, not architecture essays.
+You are DeepSeek pairing with Cursor on PolyEcho. This turn you **write TypeScript**.
 
-Copy this whole file into DeepSeek (same repo). Then send:
+Use MCP `polyecho-collab` (`collab_status`, `collab_claim`, `collab_post`) if it is connected. Otherwise `py -3 scripts/collab_bus.py`. Spec: `docs/collab/BUS.md`.
+
+Copy this whole file into DeepSeek. Then send:
 
 ```text
-Implement T1.1. Do not start T1.2.
+Implement unwrap. Do not start color, gizmo, watchers, or draw.
 ```
 
-**Write:** `src/core/geometry/Operations.ts` (and a small test if one is needed). Then `docs/collab/HANDOFF.md`.
-**Read first:** this file, `docs/ARCHITECTURE_IMPROVEMENT_PLAN.md` Track 1 slice 1, `src/core/geometry/Operations.ts`, `extrudeSelection` / `insetFaces` signatures, `docs/collab/REJECTED.md`.
-**Do not write:** `Viewport3D.vue`, `projectStore.ts` `perform*` methods, `UVUnwrap.ts`, `REVIEW.md`.
-**Do not** split stores, add frameworks, bump `.psxproj`, or delete `MeshBridge`.
+Use the **name** (`unwrap`). Do not use slice ids in chat except as a parenthetical.
+
+**Write:** route the UV unwrap family as resident attribute-only commits (seams idiom), identity + attribute tests, `docs/collab/HANDOFF.md`.
+**Read first:** this file, `docs/ARCHITECTURE_IMPROVEMENT_PLAN.md` Track 1 slice 4, `docs/collab/REJECTED.md`, `src/stores/projectStore.ts` UV `perform*` / `runKernelOperation` / `replaceMesh`, `src/core/geometry/Operations.ts` `setSeamEdges` / `projectSeamResult`, `src/core/geometry/UVUnwrap.ts` (call, do not rewrite), `src/core/mesh/MeshTransaction.ts` `attributes()` (face `uvs` are already in the diff).
+**Do not write:** `Viewport3D.vue` (Cursor has **gizmo**), `MeshRepository.ts`, `UVUnwrap.ts`, `UVEditor.vue`, `src/stores/meshResidency.test.ts`, `REVIEW.md`.
+**Do not** split stores, add frameworks, bump `.psxproj`, delete `MeshBridge`, inject a `bridge` argument into `UVUnwrap.ts` (rejected: those helpers stay `MeshObject` → `MeshObject`), or start **color**.
 
 ============================================================
-SLICE (T1.1 only)
+ALREADY DONE (do not redo)
 ============================================================
-Make every topology entry in `Operations.ts` accept an injected resident bridge, **identical default** to Extrude/Inset, so later T1.2 can pass the resident kernel without reallocating numeric ids.
+- **bridge**, **topology**, **seams**, **join**, **lease**, **revisions**.
+- UV `perform*` already pass a synthesized `ATTRIBUTE_ONLY_CHANGE` into `replaceMesh`. That was **revisions** (counters). It is **not** a resident commit. `replaceMesh` does not `meshRepository.publish`, so the next `acquire` re-imports and drops kernel identity.
 
-Already done (do not restyle):
+Cursor is in parallel on **gizmo** (`Viewport3D.vue`, `src/core/transform/GizmoComponentDrag.ts`, `src/stores/meshResidency.test.ts`). Stay off those files. Claim `src/stores/projectStore.ts` and `src/core/geometry/Operations.ts` before you write them.
 
-```ts
-// extrudeSelection — last param
-bridge: MeshBridgeData = MeshBridge.meshObjectToEditableMesh(mesh)
+============================================================
+SLICE (unwrap only)
+============================================================
 
-// insetFaces — last param after options
-bridge: MeshBridgeData = MeshBridge.meshObjectToEditableMesh(mesh)
-```
+Same defect **seams** already closed: document UVs move, the resident kernel does not, `signature()` includes `f.uvs`, next `acquire` rebuilds.
 
-**Lift these 14** — replace the inner `const bridge = MeshBridge.meshObjectToEditableMesh(mesh)` with a **last parameter** using that same default:
+Keep `geometry/UVUnwrap.ts` as pure `MeshObject` → `MeshObject` (and `SeamUnwrapper.unwrapMesh` as in-place document). Add a small Operations helper, modeled on `setSeamEdges` / `projectSeamResult`:
 
-| Function | Current inner `const bridge` |
-| :--- | :--- |
-| `subdivideFaces` | `:153` |
-| `pokeFaces` | `:201` |
-| `triangulateFaces` | `:223` |
-| `flipNormals` | `:254` |
-| `deleteElements` | `:279` |
-| `bevelFaces` | `:325` |
-| `mergeVerticesAdvanced` | `:366` |
-| `fillFaceFromVertices` | `:601` |
-| `flattenVerticesOnAxis` | `:633` |
-| `dissolveElements` | `:658` |
-| `connectTwoVertices` | `:698` |
-| `cleanupMeshGeometry` | `:730` |
-| `bridgeEdgeLoops` | `:762` |
-| `gridFill` | `:813` |
+1. Run the existing unwrap helper on the document (or a JSON clone for in-place writers).
+2. Copy the resulting face-corner UVs onto `bridge.mesh` faces (`strToNumFaceId` → `face.uvs` as `THREE.Vector2` from `{ u, v }`). Do **not** only assign `document.faces[].uvs`.
+3. Return an `OperationResult` whose `mesh` is `MeshBridge.editableMeshToMeshObject(...)` so `runKernelOperation` publishes the projection.
 
-Also: `mergeVertices` (`:243`) currently calls `mergeVerticesAdvanced(mesh, vertexIds, 'center')`. Forward an optional last `bridge` into that call.
+Wire every UV `perform*` through `runKernelOperation` with `{ applySelection: false }`. Drop the writer-local `recordState` — `runKernelOperation` records after validation. Real `MeshChange` from `editMesh` will set `attributesChanged` (face `uvs` are in `describeMeshChange`); you can delete the synthesized `ATTRIBUTE_ONLY_CHANGE` uses on these sites.
+
+Family (all of these, not a subset):
+
+- `performSmartUvProject`
+- `performSeamUnwrap`
+- `performPackUVIslands`
+- `performApplyTexelDensity`
+- `performEqualizeTexelDensity`
+- `performBoxUnwrap` / `generateBoxUVs`
+- `performPlanarUnwrap`
+- `performCylinderUnwrap`
+- `performSphereUnwrap`
+- `performConeUnwrap`
+- `performCubemapCrossUnwrap`
+- `performGridifyUvQuads`
+
+**Leave alone**
+
+- `bakeSceneAtlas` — still `markGeometryUpdated` (plan: atlas bake remaps projection UVs).
+- `UVEditor.vue` island drag / stitch / pin — not this family.
+- Import-time `boxUnwrap` in GLB/OBJ loaders.
+- Cursor’s gizmo files.
+
+============================================================
+ACCEPTANCE (must have tests)
+============================================================
+Put tests in a **new** file (`src/stores/meshUnwrap.test.ts`). Do not edit `src/stores/meshResidency.test.ts`.
+
+- After `performBoxUnwrap`, `acquireEditableMesh` returns the **same kernel instance** as before.
+- Box / pack (pick one more) bump `meshRevision(id).attribute` and leave `topology` / `position` unchanged (the existing `meshRevisions.test.ts` UV case must still pass).
+- One undo entry per command (no doubled `recordState`).
+- No-op or unchanged UVs: `runKernelOperation` early-return still bumps nothing.
 
 ============================================================
 RULES
 ============================================================
-- **Behavior unchanged** when the caller omits `bridge`. Existing `Operations.test.ts` must stay green without passing a bridge.
-- Parameter is always last. Keep existing optional args (`options`, `viewDirection`, `threshold`, `edgeIds`) where they are; do not reorder them.
-- Do not pass `previous` maps yourself. The default `meshObjectToEditableMesh(mesh)` is the no-resident path. The resident path is T1.2 (`runKernelOperation` will pass the staged bridge).
-- Do not route `perform*` onto `runKernelOperation` in this PR. That is T1.2.
-- Do not add a `bridge` to UV unwrap helpers. They are not in this file (`REJECTED.md`).
-- Do not add `recordState` to `performAutoMerge` (`REJECTED.md`).
-- Touch only `Operations.ts` plus tests. If a test needs an explicit “injected bridge reuses numeric vertex ids” case, add **one** it in `Operations.test.ts`: create a cube, convert with `MeshBridge.meshObjectToEditableMesh`, pass that bridge into e.g. `flipNormals` or `pokeFaces`, assert `bridge.mesh` is the same object reference after the call (or that `strToNumVertId` keys are unchanged for surviving verts). Keep it short.
-- Match existing style. No drive-by format of the whole file.
-
-============================================================
-DONE CHECK
-============================================================
-1. `rg "const bridge = MeshBridge.meshObjectToEditableMesh" src/core/geometry/Operations.ts` → no matches (params only).
-2. `npm run typecheck` and `npm test` (at least `src/core/geometry/Operations.test.ts`).
-3. Update `docs/collab/HANDOFF.md`:
-   - Turn: `cursor`
-   - Latest from DeepSeek: which 14 functions got the param, test command + result
-4. Chat reply to the human, exactly:
-
-```
-Mailbox updated. Tell Cursor: Check the collab mailbox.
-```
-
-If typecheck or tests fail, fix them in this turn. Do not start T1.2 to “make it complete.”
+- Names: `unwrap`, not `T1.4`.
+- `npm run typecheck` and the slice tests must pass.
+- When finished: claim-release via `kind=done`, update HANDOFF Turn to `cursor`, post the bus, reply `Mailbox updated. Tell Cursor: Check the collab mailbox.`

@@ -1,16 +1,22 @@
 ---
 description: Cursor ↔ DeepSeek collab mailbox
-globs: docs/collab/**
-alwaysApply: false
+alwaysApply: true
 ---
 
 # Agent collab
 
-When the user mentions DeepSeek, the architecture backlog, or “collab mailbox”, read `docs/collab/HANDOFF.md` first.
+You are pairing with Cline/DeepSeek on this working copy. The live channel is the collab bus, not chat paste and not GitHub.
 
-- Shared files: `docs/collab/`. Protocol: `docs/collab/README.md`.
-- Docs turns: `PROMPT_DEEPSEEK.md` / `PROMPT_DEEPSEEK_NEXT.md`. Code turns: `PROMPT_DEEPSEEK_CODE.md`. Your job: `PROMPT_CURSOR.md`.
+Every turn, before editing app source:
+
+1. Use MCP `polyecho-collab` tools if they are available: `collab_status`, then `collab_inbox` for `cursor`. Otherwise run `py -3 scripts/collab_bus.py status`.
+2. Read `docs/collab/HANDOFF.md` if Turn / topic is relevant.
+3. `collab_claim` (or CLI `claim`) every file you will write. Stop on CLAIM DENIED.
+4. `collab_heartbeat` while working. `collab_post` kind `done` / `ack` / `nack` / `idle` when you finish.
+
+- Spec: `docs/collab/BUS.md`. Live board: http://127.0.0.1:8765/live. Editor dashboard: `.collab/BOARD.md`.
+- Shared files: `docs/collab/`. Standing Cline prompt: `PROMPT_DEEPSEEK_BUS.md`. Your review job: `PROMPT_CURSOR.md`.
 - Only the **Turn** agent in `HANDOFF.md` edits `BACKLOG.md`.
-- After a code drop: review the diff, run typecheck/tests, mark the slice done or send DeepSeek back.
 - Do not merge `docs/SUGGESTIONS_AND_IMPROVEMENTS.md` into the backlog.
-- Tell the user the one sentence to paste into DeepSeek.
+- Do not dual-write `projectStore.ts`, `Viewport3D.vue`, `Operations.ts`, `MeshRepository.ts`.
+- Tell the user the one sentence to paste into DeepSeek when they need a Cline turn.

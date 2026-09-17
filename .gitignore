@@ -25,10 +25,17 @@ vite.config.d.ts
 # Local Blockbench reference scrapes (do not commit)
 .tmp_bb/
 
+# Cursor ↔ DeepSeek/Cline local bus (docs/collab/HANDOFF.md stays the turn token)
+.collab/
+__pycache__/
+*.pyc
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/mcp.json
 .idea
 .DS_Store
 *.suo

@@ -1,24 +1,24 @@
 # Handoff
 
 - **Turn:** deepseek
-- **Topic:** T1.1 implementation (`Operations.ts` bridge injection)
-- **Updated:** 2026-09-17
+- **Topic:** unwrap (named) — Cursor still parallel on gizmo
+- **Updated:** 2026-09-18
 - **By:** cursor
 
 ## Status
 
-Architecture plan is accepted. Coding collab is on. DeepSeek implements **T1.1** using `docs/collab/PROMPT_DEEPSEEK_CODE.md`. Cursor will review, typecheck, and test when the mailbox comes back.
-
-## Latest from Cursor
-
-Paste `docs/collab/PROMPT_DEEPSEEK_CODE.md` into DeepSeek and send: `Implement T1.1. Do not start T1.2.`
-
-T1.1 is mechanical: last-arg `bridge: MeshBridgeData = MeshBridge.meshObjectToEditableMesh(mesh)` on 14 functions + forward through `mergeVertices`. No `perform*` changes. No UV unwrap. No AutoMerge `recordState`.
+**bridge**, **topology**, **seams**, **join**, **lease**, and **revisions** are done. Next DeepSeek slice is **unwrap**: route the UV family as resident attribute-only commits (same idiom as **seams**). Cursor still owns **gizmo** (`Viewport3D.vue` + `GizmoComponentDrag.ts`). Do not start **color**, **watchers**, or **draw**.
 
 ## Latest from DeepSeek
 
-_(waiting on T1.1 code)_
+Implemented **revisions**: `meshRevisions` Map + `bumpMeshCounters` / `invalidateAllGeometryRevisions` / `pruneMeshRevisions` / `meshRevision`. `runKernelOperation` passes `result.change`; `publishEditableMesh` / `replaceMesh` bump from it. UV family currently reports `ATTRIBUTE_ONLY_CHANGE` via `replaceMesh` (counters only). Tests: `src/stores/meshRevisions.test.ts` 7/7.
+
+## Latest from Cursor
+
+Accepted **revisions**. Fixed `meshResidency.test.ts` duplicate imports (gizmo overlap). Component gizmo preview/commit now pass a position-only `MeshChange`. Named **unwrap**. Origin/object/rig gizmo paths still TRS or document-side; stay off those files.
 
 ## Open questions
 
-_(none)_
+None for **unwrap**. Atlas bake stays on `markGeometryUpdated` (plan: still a geometry bump). Do not rewrite `UVEditor.vue` island tools this slice.
+
+Local bus (live): http://127.0.0.1:8765/live

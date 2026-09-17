@@ -1,0 +1,39 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "collab: bus",
+      "type": "shell",
+      "command": "py -3 scripts/collab_bus.py serve --host 127.0.0.1 --port 8765",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "collab-bus",
+        "pattern": { "regexp": "^collab-bus-nomatch (.*)$", "message": 1 },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "pairing board",
+          "endsPattern": "POST "
+        }
+      },
+      "presentation": {
+        "reveal": "silent",
+        "panel": "dedicated",
+        "showReuseMessage": false
+      },
+      "runOptions": {
+        "runOn": "folderOpen"
+      }
+    },
+    {
+      "label": "collab: pairing board",
+      "type": "shell",
+      "command": "py -3 -c \"import webbrowser; webbrowser.open('http://127.0.0.1:8765/live')\"",
+      "problemMatcher": [],
+      "dependsOn": "collab: bus",
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      }
+    }
+  ]
+}

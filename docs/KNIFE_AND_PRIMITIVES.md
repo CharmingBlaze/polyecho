@@ -25,7 +25,7 @@ This is a polygon cutting workflow, not automatic quad retopology. Interior cuts
 
 Start with Ctrl+R and hover a quad face. Scroll or type a count (1–64). The first click or Enter locks the ring; move to slide, then click or press Enter to apply. Type a slide value from -1 to 1, with 0 centred. Shift gives precision movement and Ctrl snaps the slide in increments. Right-click during sliding applies centred cuts; Esc cancels the entire operation. The panel also offers Apply centered.
 
-Ring traversal preserves direction across opposite quad edges, so off-centre previews and committed cuts agree regardless of vertex numbering. Multiple cuts remain evenly spaced and cannot collapse onto one another at the slide limits. New loop edges stay selected. Tracing stops at triangles, n-gons, and non-manifold edges; hovering an unsupported face does not create a fake loop.
+Ring traversal preserves direction across opposite even n-gon edges (quads, hexes, …), so off-centre previews and committed cuts agree regardless of vertex numbering. Multiple cuts remain evenly spaced and cannot collapse onto one another at the slide limits. New loop edges stay selected. Tracing stops at triangles, odd n-gons, and non-manifold edges; hovering an unsupported face does not create a fake loop.
 
 ## Primitives
 

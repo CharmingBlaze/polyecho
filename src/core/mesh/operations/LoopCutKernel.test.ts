@@ -136,6 +136,22 @@ describe('LoopCutKernel', () => {
     expect(MeshValidator.validate(mesh).valid).toBe(true)
   })
 
+  it('cuts a hexagon across opposite edges', () => {
+    const mesh = new EditableMesh()
+    const ids: number[] = []
+    for (let i = 0; i < 6; i++) {
+      const a = i * Math.PI / 3
+      ids.push(mesh.addVertex(new THREE.Vector3(Math.cos(a), 0, Math.sin(a))).id)
+    }
+    mesh.addFace(ids)
+    const edge = [...mesh.edges.values()][0]!
+    expect(LoopCutKernel.ringEdges(mesh, edge.id)).toHaveLength(2)
+    const result = LoopCutKernel.cutLoop(mesh, edge.id, 0.5)
+    expect(result.newVertexIds).toHaveLength(2)
+    expect(mesh.faces.size).toBe(2)
+    expect(MeshValidator.validate(mesh).valid).toBe(true)
+  })
+
   it('preview belt sits on the ring, not on a face outline', () => {
     const { mesh } = MeshBridge.meshObjectToEditableMesh(createCube('Cube', 2))
     const vertical = [...mesh.edges.values()].find((e) => {

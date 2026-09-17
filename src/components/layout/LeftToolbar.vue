@@ -236,6 +236,15 @@ function toggleCombinedGizmo() {
           <BlenderIcon name="tool-knife" :size="18" />
         </button>
 
+        <button 
+          @click="handleStartModal('edge_slide')"
+          class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
+          :class="modalClass('Edge Slide')"
+          title="Edge Slide (Shift+G)"
+        >
+          <BlenderIcon name="edge-select" :size="18" />
+        </button>
+
         <!-- Fill -->
         <button 
           @click="requestFillFace()"

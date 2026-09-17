@@ -86,6 +86,9 @@ export const useToolStore = defineStore('tool', () => {
   /** Blender Subdivide redo: Number of Cuts / Smoothness. */
   const subdivideCuts = ref(1)
   const subdivideSmoothness = ref(0)
+  const limitedDissolveAngle = ref(5)
+  const bridgeSegments = ref(1)
+  const bridgeTwist = ref(0)
 
   // Snapping & Precision
   const snapping = ref<SnappingSettings>({
@@ -266,6 +269,9 @@ export const useToolStore = defineStore('tool', () => {
     smartUvMargin,
     subdivideCuts,
     subdivideSmoothness,
+    limitedDissolveAngle,
+    bridgeSegments,
+    bridgeTwist,
     snapping,
     cursor3D,
     viewport,

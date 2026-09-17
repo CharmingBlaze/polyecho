@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "polyecho-collab": {
+      "command": "py",
+      "args": ["-3", "scripts/collab_mcp.py"],
+      "env": {
+        "COLLAB_AGENT": "cursor"
+      }
+    }
+  }
+}
