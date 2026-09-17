@@ -54,15 +54,15 @@ const collapsedPropTabs = computed<DockTab[]>(() => {
   const mode = toolStore.appMode
   if (mode === 'rig') {
     return [
-      { id: 'skeleton', title: 'Skeleton & Joint Hierarchy', blender: 'armature' },
-      { id: 'props', title: 'Bone Joint Transforms & IK', blender: 'bone' },
-      { id: 'bindings', title: 'Mesh Bindings & Parents', blender: 'link' },
-      { id: 'weights', title: 'Vertex Weight Painting', blender: 'vertex-group' },
+      { id: 'skeleton', title: '1. Skeleton', blender: 'armature' },
+      { id: 'bindings', title: '2. Attach mesh', blender: 'link' },
+      { id: 'weights', title: '3. Weight paint', blender: 'vertex-group' },
+      { id: 'props', title: '4. Test pose', blender: 'bone' },
     ]
   }
   if (mode === 'blockout') {
     return [
-      { id: 'tools', title: 'Mesh Tools (Subdivide, Extrude…)', blender: 'tools' },
+      { id: 'tools', title: 'Mesh Tools (Subdivide, merge, fill…)', blender: 'tools' },
       { id: 'props', title: 'Transform & Object Properties', blender: 'empty-axis' },
       { id: 'refs', title: 'Reference Images for Blockout', blender: 'image' },
       { id: 'modifiers', title: 'Modifiers', blender: 'modifier' },
@@ -85,7 +85,7 @@ const collapsedPropTabs = computed<DockTab[]>(() => {
     ]
   }
   return [
-    { id: 'tools', title: 'Mesh Tools (Subdivide, Extrude…)', blender: 'tools' },
+    { id: 'tools', title: 'Mesh Tools (Subdivide, merge, fill…)', blender: 'tools' },
     { id: 'props', title: 'Transform & Object Properties', blender: 'empty-axis' },
     { id: 'modifiers', title: 'Modifiers', blender: 'modifier' },
     { id: 'material', title: 'Material & Shading', blender: 'material' },
@@ -105,22 +105,17 @@ const showPreferencesModal = ref(false)
 
 watch(
   () => toolStore.appMode,
-  (mode) => {
-    if (mode === 'uvpaint') {
-      projectStore.syncPaintTargetFromMesh()
-      // Painting benefits much more from horizontal room than a permanently
-      // visible inspector. The slim dock remains available to reopen it.
-      layoutStore.showRightSidebar = false
-      return
-    }
-    if (mode === 'blockout') {
-      // Tracing uses Front / Side / Persp; keep the inspector docked until needed.
-      layoutStore.showRightSidebar = false
-      return
-    }
-    // Model / Rig / Animate need the inspector (clips, skeleton, transforms).
-    layoutStore.showRightSidebar = true
-    layoutStore.restoreInspectorTab(mode)
+  (mode, prev) => {
+    if (prev) layoutStore.noteSidebarVisible(prev, layoutStore.showRightSidebar)
+    layoutStore.applySidebarForMode(mode)
+    if (mode === 'uvpaint') projectStore.syncPaintTargetFromMesh()
+  }
+)
+
+watch(
+  () => layoutStore.showRightSidebar,
+  (visible) => {
+    layoutStore.noteSidebarVisible(toolStore.appMode, visible)
   }
 )
 
@@ -131,8 +126,8 @@ watch(
   }
 )
 
-// UV / Paint Split Pane Resizing
-const uvSplitRatio = ref<number>(50) // percentage
+// UV / Paint Split Pane Resizing — shared so Layout and Paint stay the same size
+const uvSplitRatio = ref(50)
 const isUvSplitting = ref<boolean>(false)
 
 function startUvSplit(e: MouseEvent) {
@@ -160,13 +155,9 @@ function startUvSplit(e: MouseEvent) {
 }
 
 function toggleUvSplitPreset() {
-  if (uvSplitRatio.value < 40) {
-    uvSplitRatio.value = 50
-  } else if (uvSplitRatio.value < 60) {
-    uvSplitRatio.value = 70
-  } else {
-    uvSplitRatio.value = 30
-  }
+  if (uvSplitRatio.value < 40) uvSplitRatio.value = 50
+  else if (uvSplitRatio.value < 60) uvSplitRatio.value = 70
+  else uvSplitRatio.value = 30
 }
 
 function ensureMeshContext() {
@@ -705,7 +696,7 @@ onUnmounted(() => {
     <div class="flex-1 flex overflow-hidden relative min-h-0">
       <main class="flex-1 flex flex-col overflow-hidden bg-ui-root relative min-w-0 min-h-0">
         <div class="flex-1 flex overflow-hidden relative min-h-0">
-          <LeftToolbar v-if="layoutStore.showLeftToolbar" />
+          <LeftToolbar v-if="layoutStore.showLeftToolbar && toolStore.appMode !== 'uvpaint'" />
 
           <div class="flex-1 flex overflow-hidden relative min-w-0 min-h-0">
             <div 
@@ -789,7 +780,7 @@ onUnmounted(() => {
     <PosePopout />
     <div
       v-show="fastTip.visible"
-      class="fixed z-[80] max-w-xs px-2 py-1 bg-ui-header border border-ui-borderStrong rounded-xs text-[10px] font-mono text-ui-textPrimary shadow-xl pointer-events-none select-none whitespace-pre-wrap"
+      class="fixed z-[10000] max-w-xs px-2 py-1 bg-ui-header border border-ui-borderStrong rounded-xs text-[10px] font-mono text-ui-textPrimary shadow-xl pointer-events-none select-none whitespace-pre-wrap"
       :style="{
         left: fastTip.x + 'px',
         top: fastTip.y + 'px',

@@ -43,7 +43,14 @@ function edit(id: string, data: Record<string, unknown>, label = 'Edit Reference
 </script>
 
 <template>
-  <div class="flex flex-col gap-2 p-2">
+  <div class="flex flex-col">
+    <div class="inspector-head">
+      <div class="inspector-head-kicker">
+        <BlenderIcon name="image" :size="12" />
+        <span>References</span>
+      </div>
+      <span class="inspector-head-name">{{ projectStore.referenceImages.length ? `${projectStore.referenceImages.length}` : 'None' }}</span>
+    </div>
     <input ref="fileInput" type="file" accept="image/*" class="hidden" @change="onFile" />
 
     <UiSection title="Import" blender-icon="image" hint="lightbox" :default-open="true">
@@ -65,7 +72,7 @@ function edit(id: string, data: Record<string, unknown>, label = 'Edit Reference
         v-for="img in projectStore.referenceImages"
         :key="img.id"
         class="border rounded-xs p-2 mb-2 cursor-pointer"
-        :class="projectStore.selectedReferenceId === img.id ? 'border-amber-400/70 bg-amber-500/10' : 'border-ui-borderSubtle bg-ui-input/40'"
+        :class="projectStore.selectedReferenceId === img.id ? 'border-ui-borderStrong bg-ui-active' : 'border-ui-borderSubtle bg-ui-input/40'"
         @click="projectStore.selectReference(img.id)"
       >
         <div class="flex items-center justify-between gap-1 mb-1.5">
@@ -74,7 +81,7 @@ function edit(id: string, data: Record<string, unknown>, label = 'Edit Reference
             <button
               type="button"
               class="p-0.5"
-              :class="img.locked ? 'text-amber-400' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+              :class="img.locked ? 'text-ui-textAccent' : 'text-ui-textMuted hover:text-ui-textPrimary'"
               :title="img.locked ? 'Unlock to drag' : 'Lock'"
               @click="edit(img.id, { locked: !img.locked }, img.locked ? 'Unlock Reference' : 'Lock Reference')"
             >

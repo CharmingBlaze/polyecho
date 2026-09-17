@@ -30,18 +30,16 @@ const atlasCells = computed(() => {
 
 <template>
   <div class="flex flex-col select-none text-xs font-sans">
-    <div class="h-7 bg-ui-header border-b border-ui-borderSubtle px-2.5 flex items-center justify-between">
-      <div class="flex items-center space-x-1.5">
-        <BlenderIcon name="uv" :size="12" color="#38bdf8" />
-        <span class="text-[11px] font-medium text-ui-textMuted">UV / Paint</span>
+    <div class="inspector-head">
+      <div class="inspector-head-kicker">
+        <BlenderIcon name="uv" :size="12" />
+        <span>UV / Paint</span>
       </div>
-      <span class="font-semibold text-ui-textPrimary truncate max-w-[150px]">
-        {{ projectStore.activeMesh?.name || 'No object' }}
-      </span>
+      <span class="inspector-head-name">{{ projectStore.activeMesh?.name || 'No object' }}</span>
     </div>
 
     <div v-if="!projectStore.activeMesh" class="p-3 space-y-2 border-b border-ui-borderSubtle">
-      <p class="text-[11px] leading-relaxed text-amber-200/90">Select a mesh in Modeling first, then unwrap or paint it here.</p>
+      <p class="text-[11px] leading-relaxed text-ui-textSecondary">Select a mesh in Modeling first, then unwrap or paint it here.</p>
       <UiButton size="xs" class="w-full" variant="accent" @click="toolStore.setAppMode('model')">Go to Modeling</UiButton>
     </div>
 
@@ -81,11 +79,11 @@ const atlasCells = computed(() => {
           angleLimitDegrees: toolStore.smartUvAngle,
           marginPixels: toolStore.smartUvMargin
         })">Smart UV Project</UiButton>
-        <UiButton size="xs" @click="projectStore.markSelectedEdgesAsSeam()" title="Selected edges, or the border of selected faces / islands">Mark seam</UiButton>
-        <UiButton size="xs" @click="projectStore.clearSelectedEdgesSeam()" title="Selected edges, or the border of selected faces / islands">Clear seam</UiButton>
-        <UiButton size="xs" @click="projectStore.performSeamUnwrap()">Seam unwrap</UiButton>
-        <UiButton size="xs" @click="projectStore.performBoxUnwrap()">Box project</UiButton>
-        <UiButton size="xs" class="col-span-2" @click="projectStore.performPackUVIslands(toolStore.smartUvMargin)">Pack islands</UiButton>
+        <UiButton size="xs" :disabled="!projectStore.activeMesh" @click="projectStore.markSelectedEdgesAsSeam()" title="Selected edges, or the border of selected faces / islands">Mark seam</UiButton>
+        <UiButton size="xs" :disabled="!projectStore.activeMesh" @click="projectStore.clearSelectedEdgesSeam()" title="Selected edges, or the border of selected faces / islands">Clear seam</UiButton>
+        <UiButton size="xs" :disabled="!projectStore.activeMesh" @click="projectStore.performSeamUnwrap()">Seam unwrap</UiButton>
+        <UiButton size="xs" :disabled="!projectStore.activeMesh" @click="projectStore.performBoxUnwrap()">Box project</UiButton>
+        <UiButton size="xs" class="col-span-2" :disabled="!projectStore.activeMesh" @click="projectStore.performPackUVIslands(toolStore.smartUvMargin)">Pack islands</UiButton>
       </div>
     </UiSection>
 
@@ -110,7 +108,7 @@ const atlasCells = computed(() => {
 
     <UiSection v-if="toolStore.uvWorkspaceTab === 'paint'" title="Brush" blender-icon="brush" :default-open="true">
       <div class="flex items-center justify-between">
-        <span class="capitalize text-ui-textAccent">{{ toolStore.paintTool }}</span>
+        <span class="capitalize inspector-value">{{ toolStore.paintTool }}</span>
         <span class="text-ui-textMuted">[ / ] resize</span>
       </div>
       <label class="flex items-center justify-between gap-2">Size (px)
@@ -121,10 +119,10 @@ const atlasCells = computed(() => {
       <label class="flex items-center justify-between gap-2">Opacity
         <span>{{ Math.round(toolStore.brushOpacity * 100) }}%</span>
       </label>
-      <input type="range" min="0" max="1" step="0.01" v-model.number="toolStore.brushOpacity" class="w-full" aria-label="Brush opacity" />
-      <div class="grid grid-cols-2 gap-1">
-        <UiButton size="xs" :variant="toolStore.brushShape === 'square' ? 'accent' : 'default'" @click="toolStore.brushShape = 'square'">Square</UiButton>
-        <UiButton size="xs" :variant="toolStore.brushShape === 'circle' ? 'accent' : 'default'" @click="toolStore.brushShape = 'circle'">Round</UiButton>
+      <input type="range" min="0" max="1" step="0.01" v-model.number="toolStore.brushOpacity" class="inspector-range" aria-label="Brush opacity" />
+      <div class="inspector-seg is-stretch">
+        <button type="button" class="inspector-seg-btn" :class="{ 'is-active': toolStore.brushShape === 'square' }" @click="toolStore.brushShape = 'square'">Square</button>
+        <button type="button" class="inspector-seg-btn" :class="{ 'is-active': toolStore.brushShape === 'circle' }" @click="toolStore.brushShape = 'circle'">Round</button>
       </div>
       <label class="flex items-center justify-between">Foreground
         <input type="color" v-model="toolStore.primaryColor" class="w-10 h-6 bg-transparent cursor-pointer" aria-label="Foreground paint color" />
@@ -138,30 +136,30 @@ const atlasCells = computed(() => {
     <UiSection title="Viewport" blender-icon="eye-open" :default-open="true">
       <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
         <span>X-Ray</span>
-        <input type="checkbox" v-model="toolStore.viewport.xray" class="accent-amber-500" />
+        <input type="checkbox" v-model="toolStore.viewport.xray" class="accent-ui-accent" />
       </label>
       <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
         <span>Palette snap</span>
-        <input type="checkbox" v-model="toolStore.paletteSnapEnabled" class="accent-emerald-500" />
+        <input type="checkbox" v-model="toolStore.paletteSnapEnabled" class="accent-ui-accent" />
       </label>
     </UiSection>
 
     <UiSection title="Paint target" blender-icon="texture" :default-open="true">
-      <div class="text-[11px] font-mono text-emerald-300 truncate">
+      <div class="text-[11px] font-mono text-ui-textPrimary truncate">
         {{ paintTarget?.name || 'None' }}
         <span v-if="paintTarget" class="text-ui-textMuted"> {{ paintTarget.width }}×{{ paintTarget.height }}</span>
       </div>
       <p class="text-[9px] text-ui-textMuted leading-snug">Library image 2D/3D paint writes to. Bind it on Texture.</p>
       <UiButton size="xs" class="w-full" @click="layoutStore.setInspectorTab('texture', toolStore.appMode)">
-        <BlenderIcon name="texture" :size="12" color="#38bdf8" />
+        <BlenderIcon name="texture" :size="12" />
         Texture
       </UiButton>
     </UiSection>
 
     <UiSection title="Shading" blender-icon="material" :default-open="false">
-      <div class="text-[11px] font-mono text-amber-300 truncate">{{ meshMaterial?.name || 'No material' }}</div>
+      <div class="text-[11px] font-mono text-ui-textPrimary truncate">{{ meshMaterial?.name || 'No material' }}</div>
       <UiButton size="xs" class="w-full" @click="layoutStore.setInspectorTab('material', toolStore.appMode)">
-        <BlenderIcon name="material" :size="12" color="#f59e0b" />
+        <BlenderIcon name="material" :size="12" />
         Material
       </UiButton>
     </UiSection>

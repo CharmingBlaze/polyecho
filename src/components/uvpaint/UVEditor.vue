@@ -1,3 +1,8 @@
+<script lang="ts">
+/** Survives Paint-tab unmount so first-open framing is not reapplied. */
+const uvViewSession = { fitted: false, zoom: 5, panX: 0, panY: 0 }
+</script>
+
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
 import { useProjectStore } from '../../stores/projectStore'
@@ -8,7 +13,7 @@ import {
   generateUVCheckerboardDataURL,
   ensureMeshUVs
 } from '../../core/geometry/UVUnwrap'
-import { selectedUvCorners, uvBounds, transformUvCorners, relaxUvCorners, type UvCorner, type UvTransform } from '../../core/uv/UVEditing'
+import { selectedUvCorners, uvBounds, transformUvCorners, relaxUvCorners, uvInspectAfterSelection, uvInspectToggled, type UvCorner, type UvTransform } from '../../core/uv/UVEditing'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import { expandFacesToIslands, expandWeldedUvEdges, findUvIslands, stitchUvEdge } from '../../core/uv/UVIslands'
 import { undirectedEdgeId } from '../../core/geometry/EdgeUtils'
@@ -317,7 +322,8 @@ function selectIslandFromFace(faceIndex: number, additive: boolean) {
 const targetCorners = computed(() => activeMesh.value ? selectedUvCorners(activeMesh.value, uvSelectMode.value,
   selectedFaceIndices.value, selectedUvVerts.value, selectedUvEdges.value) : [])
 const selectionBounds = computed(() => activeMesh.value ? uvBounds(activeMesh.value, targetCorners.value) : null)
-const showPrecision = ref(true)
+const showPrecision = ref(false)
+const inspectDismissed = ref(false)
 const precisionTab = ref<'selection' | 'transform' | 'tools'>('selection')
 const coordinateUnits = ref<'pixels' | 'uv'>('pixels')
 const pivotMode = ref<'selection' | 'islands' | 'tile'>('selection')
@@ -353,6 +359,11 @@ function precisionTransform(options: Partial<UvTransform>, label = 'Transform UV
   if (!activeMesh.value) return
   commitCornerEdits(label, transformUvCorners(activeMesh.value, targetCorners.value,
     { ...textureSize.value, pivot: pivotMode.value, ...options }, c => isPinned(c.faceIndex, c.vertIndex)))
+}
+function toggleInspect() {
+  const next = uvInspectToggled(showPrecision.value)
+  showPrecision.value = next.showPrecision
+  inspectDismissed.value = next.inspectDismissed
 }
 function moveSelection() { precisionTransform({ moveU: Number(moveU.value) / unitU.value, moveV: Number(moveV.value) / unitV.value }, 'Move UVs') }
 function resizeSelection() { precisionTransform({ scaleU: Number(scaleU.value), scaleV: Number(lockScale.value ? scaleU.value : scaleV.value) }, 'Scale UVs') }
@@ -1524,9 +1535,9 @@ function resetPanZoom() {
   if (w <= 0 || h <= 0) return
 
   const pb = displayPixels()
-  // Fit texture into ~78% of available viewport area
-  const targetW = w * 0.78
-  const targetH = h * 0.78
+  // Fit texture into ~90% of available viewport area
+  const targetW = w * 0.9
+  const targetH = h * 0.9
   let fitZoom = Math.min(targetW / pb.width, targetH / pb.height)
   if (fitZoom >= 1) {
     fitZoom = Math.min(32, Math.floor(fitZoom))
@@ -2008,7 +2019,7 @@ watch(() => projectStore.activeTextureId, syncUvFromDocument)
 watch(() => {
   const t = uvDisplayTexture.value
   return t ? `${t.id}:${t.width}x${t.height}` : ''
-}, () => nextTick(resetPanZoom))
+}, () => nextTick(scheduleRender))
 watch(() => projectStore.geometryRevision, syncUvFromDocument, { flush: 'sync' })
 watch(zoom, scheduleRender)
 watch(showPixelGrid, scheduleRender)
@@ -2036,15 +2047,32 @@ watch(() => projectStore.selectedEdgeIds, scheduleRender)
 watch(showCheckerboard, scheduleRender)
 watch(showHeatmap, scheduleRender)
 
-watch(() => toolStore.uvWorkspaceTab, (tab) => {
-  if (tab === 'uv') {
-    nextTick(() => {
-      scheduleRender()
-    })
-  }
+watch(() => targetCorners.value.length, (count) => {
+  const next = uvInspectAfterSelection(count, showPrecision.value, inspectDismissed.value)
+  showPrecision.value = next.showPrecision
+  inspectDismissed.value = next.inspectDismissed
 })
 
 let resizeObserver: ResizeObserver | null = null
+const uvViewReady = ref(false)
+
+function restoreOrFitImage() {
+  if (uvViewReady.value) return
+  const el = containerRef.value
+  if (!el || el.clientWidth < 8 || el.clientHeight < 8) return
+  if (uvViewSession.fitted) {
+    zoom.value = uvViewSession.zoom
+    panOffset.value = { x: uvViewSession.panX, y: uvViewSession.panY }
+  } else {
+    resetPanZoom()
+    uvViewSession.fitted = true
+    uvViewSession.zoom = zoom.value
+    uvViewSession.panX = panOffset.value.x
+    uvViewSession.panY = panOffset.value.y
+  }
+  uvViewReady.value = true
+  scheduleRender()
+}
 
 function onUvKeyDown(e: KeyboardEvent) {
   if (toolStore.appMode !== 'uvpaint' || toolStore.uvWorkspaceTab !== 'uv') return
@@ -2124,23 +2152,23 @@ onMounted(() => {
   }
 
   if (containerRef.value) {
-    if (containerRef.value.clientWidth > 0) {
-      panOffset.value = {
-        x: Math.max(16, (containerRef.value.clientWidth - 64 * zoom.value) / 2),
-        y: Math.max(16, (containerRef.value.clientHeight - 64 * zoom.value) / 2)
-      }
-    }
     if (window.ResizeObserver) {
       resizeObserver = new ResizeObserver(() => {
+        restoreOrFitImage()
         scheduleRender()
       })
       resizeObserver.observe(containerRef.value)
     }
   }
-  scheduleRender()
+  nextTick(restoreOrFitImage)
 })
 
 onUnmounted(() => {
+  if (uvViewReady.value) {
+    uvViewSession.zoom = zoom.value
+    uvViewSession.panX = panOffset.value.x
+    uvViewSession.panY = panOffset.value.y
+  }
   window.removeEventListener('click', closeDropdowns)
   window.removeEventListener('keydown', onUvKeyDown)
   window.removeEventListener('keyup', onUvKeyUp)
@@ -2158,6 +2186,9 @@ onUnmounted(() => {
 })
 
 defineExpose({
+  showPrecision,
+  inspectDismissed,
+  selectedFaceIndices,
   uvSelectMode,
   snapToPixels,
   showPixelGrid,
@@ -2210,7 +2241,7 @@ defineExpose({
           <select 
             :value="projectStore.activeTextureId" 
             @change="handleTextureBindingChange(($event.target as HTMLSelectElement).value)"
-            class="bg-transparent text-emerald-400 font-bold font-mono focus:outline-none cursor-pointer max-w-[125px] truncate"
+            class="bg-transparent text-ui-textPrimary font-bold font-mono focus:outline-none cursor-pointer max-w-[125px] truncate"
             title="Paint target — the image this UV editor shows"
           >
             <option v-for="t in projectStore.textures" :key="t.id" :value="t.id" class="bg-ui-panel text-ui-textPrimary">
@@ -2219,7 +2250,7 @@ defineExpose({
           </select>
           <button
             type="button"
-            class="px-1 py-0.5 text-[8.5px] font-bold text-sky-300 hover:bg-ui-hover rounded-xs"
+            class="px-1 py-0.5 text-[8.5px] font-bold text-ui-textAccent hover:bg-ui-hover rounded-xs"
             title="Apply this paint target to the active object"
             @click="handleApplyPaintTargetToMesh"
           >
@@ -2227,7 +2258,7 @@ defineExpose({
           </button>
           <button 
             @click="showNewTextureModal = true"
-            class="p-0.5 hover:bg-ui-hover text-emerald-400 rounded-xs transition cursor-pointer"
+            class="p-0.5 hover:bg-ui-hover text-ui-textMuted rounded-xs transition cursor-pointer"
             title="New image — pick any size"
           >
             <BlenderIcon name="plus" :size="12" />
@@ -2239,7 +2270,7 @@ defineExpose({
       <div class="uv-workflow-bar uv-header-actions" aria-label="UV selection and quick actions">
         <button :disabled="!activeMesh" @click="handleSmartUvProject">Unwrap</button>
         <button :disabled="!activeMesh" @click="handlePackIslands(smartUvMargin)">Pack</button>
-        <button class="uv-panel-toggle" :aria-pressed="showPrecision" @click="showPrecision = !showPrecision" title="Toggle UV inspector">Inspect {{ showPrecision ? '−' : '+' }}</button>
+        <button class="uv-panel-toggle" :aria-pressed="showPrecision" @click="toggleInspect" title="Toggle UV inspector">Inspect {{ showPrecision ? '−' : '+' }}</button>
         <button :disabled="!projectStore.activeTexture" title="Browse, edit, and stamp atlas tiles" @click="projectStore.activeTexture && openTileset(projectStore.activeTexture.id)">Tileset</button>
       </div>
     </div>
@@ -2250,26 +2281,26 @@ defineExpose({
           <button 
             @click="toggleDropdown('texture')"
             class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0"
-            :class="activeDropdown === 'texture' ? 'bg-ui-hover text-emerald-400 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+            :class="activeDropdown === 'texture' ? 'bg-ui-hover text-ui-textPrimary' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
           >
             <span>Texture</span>
             <span class="text-[8px] opacity-70">▼</span>
           </button>
 
           <div v-if="activeDropdown === 'texture'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-56 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
-            <button @click="fileInputRef?.click(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-ui-textAccent font-bold">
+            <button @click="fileInputRef?.click(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Import Image...</span>
               <BlenderIcon name="import" :size="12" />
             </button>
-            <button @click="exportTexturePng(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-emerald-400 font-bold">
+            <button @click="exportTexturePng(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Export Texture PNG</span>
               <BlenderIcon name="export" :size="12" />
             </button>
             <div class="h-px bg-ui-borderSubtle my-1"></div>
-            <button @click="showNewTextureModal = true; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-amber-300 font-medium">
+            <button @click="showNewTextureModal = true; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>New Image...</span>
             </button>
-            <button @click="projectStore.bakeSceneAtlas(2); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-amber-400 font-bold">
+            <button @click="projectStore.bakeSceneAtlas(2); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Bake Scene Atlas</span>
             </button>
           </div>
@@ -2277,10 +2308,10 @@ defineExpose({
 
         <!-- UV Menu Dropdown -->
         <div class="relative" @click.stop>
-          <div class="flex items-stretch rounded-xs border border-amber-500/40 bg-amber-500/10 overflow-hidden shadow-xs">
+          <div class="inspector-seg">
             <button
               @click="handleSmartUvProject"
-              class="px-2 py-1 text-[11px] font-bold text-amber-300 hover:bg-amber-500/20 transition cursor-pointer flex items-center gap-1 whitespace-nowrap"
+              class="inspector-seg-btn"
               title="Automatically cut, project, and pack the selected faces or whole mesh (U)"
             >
               <BlenderIcon name="uv-smart" :size="12" />
@@ -2288,13 +2319,14 @@ defineExpose({
             </button>
             <button
               @click="toggleDropdown('uv')"
-              class="px-1.5 text-[8px] text-amber-300 border-l border-amber-500/30 hover:bg-amber-500/20"
+              class="inspector-seg-btn"
+              :class="{ 'is-active': activeDropdown === 'uv' }"
               title="UV projection options"
             >▼</button>
           </div>
 
           <div v-if="activeDropdown === 'uv'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-64 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
-            <button @click="handleSmartUvProject(); closeDropdowns()" class="w-full text-left px-3 py-2 hover:bg-amber-500/15 flex items-center justify-between text-amber-300 font-bold">
+            <button @click="handleSmartUvProject(); closeDropdowns()" class="w-full text-left px-3 py-2 hover:bg-ui-hover flex items-center justify-between font-semibold">
               <span class="flex items-center gap-2"><BlenderIcon name="uv-smart" :size="14" /> Smart UV Project</span>
               <span class="text-[10px] text-ui-textMuted font-mono font-normal">U</span>
             </button>
@@ -2302,7 +2334,7 @@ defineExpose({
               <label class="flex items-center justify-between gap-3 text-[10px] text-ui-textSecondary">
                 <span title="Lower values create more islands; higher values keep more faces together">Cut angle</span>
                 <span class="flex items-center gap-1">
-                  <input v-model.number="smartUvAngle" type="range" min="15" max="120" step="1" class="w-24 accent-amber-500" />
+                  <input v-model.number="smartUvAngle" type="range" min="15" max="120" step="1" class="w-24 inspector-range" />
                   <input v-model.number="smartUvAngle" type="number" min="1" max="179" step="1" class="w-11 h-5 bg-ui-panel border border-ui-borderDefault rounded-xs px-1 text-right font-mono" />
                   <span>°</span>
                 </span>
@@ -2325,7 +2357,7 @@ defineExpose({
               <span class="flex items-center gap-2"><BlenderIcon name="mesh-cube" :size="13" /> Box Projection</span>
               <span class="text-[9px] text-ui-textMuted">sel or all</span>
             </button>
-            <button @click="handleCubemapCross(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-ui-textAccent">
+            <button @click="handleCubemapCross(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span class="flex items-center gap-2"><BlenderIcon name="mesh-cube" :size="13" /> Cubemap Cross (Blockbench)</span>
             </button>
             <div class="h-px bg-ui-borderSubtle my-1"></div>
@@ -2358,14 +2390,14 @@ defineExpose({
           <button 
             @click="toggleDropdown('islands')"
             class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0"
-            :class="activeDropdown === 'islands' ? 'bg-ui-hover text-emerald-400 shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+            :class="activeDropdown === 'islands' ? 'bg-ui-hover text-ui-textPrimary' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
           >
             <span>Islands</span>
             <span class="text-[8px] opacity-70">▼</span>
           </button>
 
           <div v-if="activeDropdown === 'islands'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-60 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
-            <button @click="handlePackIslands(2); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-emerald-400 font-bold">
+            <button @click="handlePackIslands(2); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span class="flex items-center gap-2"><BlenderIcon name="pack-islands" :size="13" /> Auto-Pack Islands (2px Margin)</span>
             </button>
             <button @click="handlePackIslands(0); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
@@ -2375,14 +2407,14 @@ defineExpose({
               <span>Auto-Pack Islands (4px Margin)</span>
             </button>
             <div class="h-px bg-ui-borderSubtle my-1"></div>
-            <button @click="projectStore.bakeSceneAtlas(2); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover text-amber-400 font-bold">
+            <button @click="projectStore.bakeSceneAtlas(2); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
               <span>Bake Scene Atlas (All Meshes)</span>
             </button>
             <div class="h-px bg-ui-borderSubtle my-1"></div>
-            <button @click="handleGridify(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover text-ui-textAccent">
+            <button @click="handleGridify(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
               <span>Gridify Quad Loops</span>
             </button>
-            <button @click="handleEqualizeTexels(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover text-sky-400">
+            <button @click="handleEqualizeTexels(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
               <span>Equalize Texel Density</span>
             </button>
             <div class="h-px bg-ui-borderSubtle my-1"></div>
@@ -2422,7 +2454,7 @@ defineExpose({
           <button 
             @click="toggleDropdown('align')"
             class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0"
-            :class="activeDropdown === 'align' ? 'bg-ui-hover text-ui-textAccent shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+            :class="activeDropdown === 'align' ? 'bg-ui-hover text-ui-textPrimary' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
           >
             <span class="whitespace-nowrap">Align & Snap</span>
             <span class="text-[8px] opacity-70">▼</span>
@@ -2440,7 +2472,7 @@ defineExpose({
             </div>
             <div class="h-px bg-ui-borderSubtle my-1"></div>
             <div class="px-3 py-0.5 text-[9px] font-bold text-ui-textMuted uppercase">Atlas cells</div>
-            <button @click="snapToFull(); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover text-amber-400 font-bold">Fit to Full (0..1)</button>
+            <button @click="snapToFull(); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover">Fit to Full (0..1)</button>
             <div class="grid gap-0.5 px-2 py-1" :style="{ gridTemplateColumns: `repeat(${paintAtlas?.cols || 2}, minmax(0, 1fr))` }">
               <button
                 v-for="cell in atlasMenuCells"
@@ -2460,7 +2492,7 @@ defineExpose({
           <button 
             @click="toggleDropdown('texel')"
             class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0"
-            :class="activeDropdown === 'texel' ? 'bg-ui-hover text-ui-textAccent shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+            :class="activeDropdown === 'texel' ? 'bg-ui-hover text-ui-textPrimary' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
           >
             <span class="whitespace-nowrap">Texel</span>
             <span class="text-[8px] opacity-70">▼</span>
@@ -2468,8 +2500,8 @@ defineExpose({
 
           <div v-if="activeDropdown === 'texel'" class="header-dropdown-menu absolute right-0 top-full mt-1 w-60 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl p-2 z-50 text-xs space-y-2">
             <div class="flex items-center justify-between border-b border-ui-borderSubtle pb-1">
-              <span class="text-[10px] font-bold text-amber-300 uppercase">Texel Density (px/unit)</span>
-              <span v-if="sampledDensity !== null" class="text-[10px] font-mono text-emerald-400 font-bold">{{ sampledDensity }} px/u</span>
+              <span class="text-[10px] font-bold text-ui-textSecondary uppercase">Texel Density (px/unit)</span>
+              <span v-if="sampledDensity !== null" class="text-[10px] font-mono inspector-value">{{ sampledDensity }} px/u</span>
             </div>
 
             <div class="flex items-center gap-1.5">
@@ -2479,7 +2511,7 @@ defineExpose({
                 min="1" 
                 max="256" 
                 v-model.number="targetTexelDensity" 
-                class="flex-1 bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-0.5 text-xs font-mono text-ui-textPrimary focus:outline-none focus:border-amber-400"
+                class="flex-1 bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-0.5 text-xs font-mono text-ui-textPrimary focus:outline-none focus:border-ui-accent"
               />
               <button 
                 @click="handleSampleTexelDensity"
@@ -2493,7 +2525,7 @@ defineExpose({
             <div class="grid grid-cols-2 gap-1 pt-1 border-t border-ui-borderSubtle/60">
               <button 
                 @click="handleApplyTexelDensity(); closeDropdowns()" 
-                class="px-2 py-1 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded-xs text-[10px] transition text-center shadow-xs"
+                class="px-2 py-1 bg-ui-accent hover:bg-ui-accentHover text-[color:var(--ui-on-accent)] font-semibold rounded-xs text-[10px] transition text-center"
               >
                 Apply Density
               </button>
@@ -2521,23 +2553,23 @@ defineExpose({
           <div v-if="activeDropdown === 'view'" class="header-dropdown-menu absolute right-0 top-full mt-1 w-52 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
             <button @click="showCheckerboard = !showCheckerboard; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Checkerboard Grid</span>
-              <span class="text-amber-400 font-bold">{{ showCheckerboard ? 'ON' : 'OFF' }}</span>
+              <span :class="showCheckerboard ? 'inspector-value' : 'text-ui-textMuted'">{{ showCheckerboard ? 'On' : 'Off' }}</span>
             </button>
             <button @click="showHeatmap = !showHeatmap; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>UV Stretch Heatmap</span>
-              <span class="text-amber-400 font-bold">{{ showHeatmap ? 'ON' : 'OFF' }}</span>
+              <span :class="showHeatmap ? 'inspector-value' : 'text-ui-textMuted'">{{ showHeatmap ? 'On' : 'Off' }}</span>
             </button>
             <div class="h-px bg-ui-borderSubtle my-1"></div>
             <button @click="showPixelGrid = !showPixelGrid; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Pixel Grid Lines</span>
-              <span class="text-amber-400 font-bold">{{ showPixelGrid ? 'ON' : 'OFF' }}</span>
+              <span :class="showPixelGrid ? 'inspector-value' : 'text-ui-textMuted'">{{ showPixelGrid ? 'On' : 'Off' }}</span>
             </button>
             <button @click="snapToPixels = !snapToPixels; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Snap to Pixels</span>
-              <span class="text-amber-400 font-bold">{{ snapToPixels ? 'ON' : 'OFF' }}</span>
+              <span :class="snapToPixels ? 'inspector-value' : 'text-ui-textMuted'">{{ snapToPixels ? 'On' : 'Off' }}</span>
             </button>
             <div class="h-px bg-ui-borderSubtle my-1"></div>
-            <button @click="resetPanZoom(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between text-ui-textAccent">
+            <button @click="resetPanZoom(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Frame UV Canvas</span>
               <span class="text-[10px] text-ui-textMuted font-mono">Home</span>
             </button>
@@ -2629,10 +2661,10 @@ defineExpose({
           <button @click="flipUVs('v')" :disabled="!selectionBounds" class="uv-vert-tool-btn" title="Flip Vertical">
             <BlenderIcon name="flip-vertical" :size="15" /><span class="uv-tool-label">Flip V</span>
           </button>
-          <button @click="handlePackIslands(smartUvMargin)" class="uv-vert-tool-btn text-emerald-400 hover:text-emerald-300" :title="`Pack islands (${smartUvMargin}px margin)`">
+          <button @click="handlePackIslands(smartUvMargin)" class="uv-vert-tool-btn" :title="`Pack islands (${smartUvMargin}px margin)`">
             <BlenderIcon name="pack-islands" :size="15" /><span class="uv-tool-label">Pack</span>
           </button>
-          <button @click="handleSmartUvProject" class="uv-vert-tool-btn text-amber-400 hover:text-amber-300" title="Smart UV Project: cut, project, and pack (U)">
+          <button @click="handleSmartUvProject" class="uv-vert-tool-btn" title="Smart UV Project: cut, project, and pack (U)">
             <BlenderIcon name="uv-smart" :size="15" /><span class="uv-tool-label">Smart UV</span>
           </button>
         </div>
@@ -2681,22 +2713,22 @@ defineExpose({
 
       <!-- Quick Info HUD at Bottom Left -->
       <div class="uv-status-hud">
-        <span class="flex items-center gap-1">Mode: <strong class="text-ui-textAccent uppercase font-bold">{{ uvSelectMode }}</strong></span>
+        <span class="flex items-center gap-1">Mode: <strong class="inspector-value uppercase font-bold">{{ uvSelectMode }}</strong></span>
         <span>Islands: <strong class="text-ui-textPrimary font-bold">{{ uvIslandCount }}</strong></span>
         <span v-if="seamCount">Seams: <strong class="text-red-400 font-bold">{{ seamCount }}</strong></span>
-        <span v-if="selectedFaceCount">Sel: <strong class="text-amber-300 font-bold">{{ selectedFaceCount }}f</strong></span>
-        <span v-if="pinnedUvKeys.size">Pins: <strong class="text-pink-400 font-bold">{{ pinnedUvKeys.size }}</strong></span>
+        <span v-if="selectedFaceCount">Sel: <strong class="inspector-value">{{ selectedFaceCount }}f</strong></span>
+        <span v-if="pinnedUvKeys.size">Pins: <strong class="inspector-value">{{ pinnedUvKeys.size }}</strong></span>
         <span v-if="!selectionBounds" class="text-ui-textMuted">Select UVs to transform</span>
-        <span v-if="selectionBounds" class="text-ui-textAccent font-bold">
+        <span v-if="selectionBounds" class="inspector-value font-bold">
           Bounds: {{ Math.round(selectionBounds.width * 100) }}% × {{ Math.round(selectionBounds.height * 100) }}%
         </span>
         <span class="text-ui-textMuted hidden md:inline">RMB / Space-drag pan · F frame · V stitch · P pin</span>
       </div>
     </div>
     <aside v-if="showPrecision" class="uv-precision-panel" aria-label="UV precision tools">
-      <nav class="uv-inspector-tabs" aria-label="UV inspector sections"><button v-for="tab in (['selection', 'transform', 'tools'] as const)" :key="tab" :aria-pressed="precisionTab === tab" @click="precisionTab = tab">{{ tab.charAt(0).toUpperCase() + tab.slice(1) }}</button></nav>
+      <nav class="inspector-seg is-stretch uv-inspector-tabs" aria-label="UV inspector sections"><button v-for="tab in (['selection', 'transform', 'tools'] as const)" :key="tab" type="button" class="inspector-seg-btn" :class="{ 'is-active': precisionTab === tab }" :aria-pressed="precisionTab === tab" @click="precisionTab = tab">{{ tab.charAt(0).toUpperCase() + tab.slice(1) }}</button></nav>
       <div class="uv-panel-heading"><strong>Selection</strong><span>{{ targetCorners.length }} {{ targetCorners.length === 1 ? 'corner' : 'corners' }}</span></div>
-      <div class="uv-units"><button :aria-pressed="coordinateUnits === 'pixels'" @click="coordinateUnits = 'pixels'">Pixels</button><button :aria-pressed="coordinateUnits === 'uv'" @click="coordinateUnits = 'uv'">UV units</button></div>
+      <div class="inspector-seg is-stretch uv-units" role="group" aria-label="Coordinate units"><button type="button" class="inspector-seg-btn" :class="{ 'is-active': coordinateUnits === 'pixels' }" :aria-pressed="coordinateUnits === 'pixels'" @click="coordinateUnits = 'pixels'">Pixels</button><button type="button" class="inspector-seg-btn" :class="{ 'is-active': coordinateUnits === 'uv' }" :aria-pressed="coordinateUnits === 'uv'" @click="coordinateUnits = 'uv'">UV units</button></div>
       <p class="uv-panel-hint">{{ textureSize.width }} × {{ textureSize.height }} texture · U right, V up</p>
       <fieldset v-show="precisionTab === 'selection'" :disabled="!targetCorners.length" class="uv-panel-section">
         <div class="uv-field-pair">
@@ -2758,18 +2790,17 @@ defineExpose({
 <style scoped>
 .uv-workbench-body { display: flex; flex: 1; min-height: 0; min-width: 0; position: relative; }
 .uv-workflow-bar { display: flex; align-items: center; gap: 5px; padding: 6px 9px; background: var(--ui-bg-header); border-bottom: 1px solid var(--ui-border-subtle); overflow-x: auto; flex-shrink: 0; }
-.uv-workflow-title { color: var(--ui-text-accent); font-size: 9px; font-weight: 700; letter-spacing: 1.2px; white-space: nowrap; margin-right: 8px; }
-.uv-workflow-bar button, .uv-precision-panel button { border: 1px solid var(--ui-border-subtle); background: var(--ui-bg-input); color: var(--ui-text-secondary); border-radius: 4px; padding: 5px 7px; font-size: 10px; white-space: nowrap; cursor: pointer; }
-.uv-workflow-bar button:hover:not(:disabled), .uv-precision-panel button:hover:not(:disabled) { color: var(--ui-text-primary); background: var(--ui-bg-hover); border-color: var(--ui-text-accent); }
+.uv-workflow-title { color: var(--ui-text-muted); font-size: 9px; font-weight: 700; letter-spacing: 1.2px; white-space: nowrap; margin-right: 8px; }
+.uv-workflow-bar button, .uv-precision-panel button:not(.inspector-seg-btn) { border: 1px solid var(--ui-border-subtle); background: var(--ui-bg-input); color: var(--ui-text-secondary); border-radius: 4px; padding: 5px 7px; font-size: 10px; white-space: nowrap; cursor: pointer; }
+.uv-workflow-bar button:hover:not(:disabled), .uv-precision-panel button:not(.inspector-seg-btn):hover:not(:disabled) { color: var(--ui-text-primary); background: var(--ui-bg-hover); border-color: var(--ui-border-default); }
 .uv-workflow-bar button:disabled, .uv-precision-panel button:disabled, .uv-precision-panel fieldset:disabled { opacity: .45; cursor: default; }
 .uv-panel-toggle { margin-left: auto; }
-.uv-workflow-bar button[aria-pressed="true"], .uv-precision-panel button[aria-pressed="true"] { color: var(--ui-text-accent); background: var(--ui-bg-active); border-color: var(--ui-text-accent); }
+.uv-workflow-bar button[aria-pressed="true"], .uv-precision-panel button:not(.inspector-seg-btn)[aria-pressed="true"] { color: var(--ui-text-primary); background: var(--ui-bg-active); border-color: var(--ui-border-strong); }
 .uv-precision-panel { width: 220px; flex-shrink: 0; overflow-y: auto; border-left: 1px solid var(--ui-border-strong); background: var(--ui-bg-panel); padding: 12px; color: var(--ui-text-secondary); font-size: 10px; }
 .uv-panel-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 9px; }
 .uv-panel-heading strong, .uv-panel-section legend { color: var(--ui-text-primary); font-weight: 600; font-size: 11px; }
 .uv-panel-heading span { font-size: 9px; color: var(--ui-text-muted); }
-.uv-units { display: flex; gap: 4px; }
-.uv-units button { flex: 1; }
+.uv-units { margin: 0 0 8px; }
 .uv-panel-section { display: grid; gap: 8px; min-width: 0; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--ui-border-subtle); }
 .uv-panel-section legend { padding-right: 8px; }
 .uv-precision-panel label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
@@ -2782,7 +2813,7 @@ defineExpose({
 .uv-wide-action { width: 100%; }
 .uv-panel-hint { color: var(--ui-text-muted); font-size: 9px; line-height: 1.6; margin-top: 6px; }
 .uv-diagnostic { display: flex; justify-content: space-between; align-items: center; }
-.uv-diagnostic b { color: var(--ui-text-accent); }
+.uv-diagnostic b { color: var(--ui-text-primary); }
 .uv-panel-feedback { color: var(--ui-text-accent); line-height: 1.6; padding-top: 12px; font-size: 10px; }
 @container (max-width: 600px) {
   .uv-precision-panel { width: 190px; padding: 9px; }
@@ -2912,11 +2943,12 @@ defineExpose({
 }
 
 .uv-vert-tool-btn.is-active {
-  color: var(--ui-text-accent);
+  color: var(--ui-text-primary);
   background: var(--ui-bg-active);
   border-color: var(--ui-border-default);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
+.uv-vert-tool-btn svg [fill]:not([fill="none"]) { fill: currentColor; }
+.uv-vert-tool-btn svg [stroke]:not([stroke="none"]) { stroke: currentColor; }
 
 .uv-vert-divider {
   height: 1px;
@@ -2963,7 +2995,7 @@ defineExpose({
 
 .uv-view-toggle.is-active,
 .uv-view-icon.is-active {
-  color: var(--ui-text-accent);
+  color: var(--ui-text-primary);
   background: var(--ui-bg-active);
   border-color: var(--ui-border-default);
 }
@@ -3031,9 +3063,9 @@ defineExpose({
 
 <style scoped>
 .uv-editor { font-family: var(--font-sans, sans-serif); }
-.uv-component-tabs, .uv-inspector-tabs { display: flex; gap: 2px; background: var(--ui-bg-input); border: 1px solid var(--ui-border-subtle); border-radius: 4px; padding: 2px; }
-.uv-component-tabs button, .uv-inspector-tabs button { border-color: transparent; padding: 4px 6px; }
-.uv-inspector-tabs { margin: 0 0 12px; } .uv-inspector-tabs button { flex: 1; padding: 5px 3px; font-size: 10px; }
+.uv-component-tabs { display: flex; gap: 2px; background: var(--ui-bg-input); border: 1px solid var(--ui-border-subtle); border-radius: 4px; padding: 2px; }
+.uv-component-tabs button { border-color: transparent; padding: 4px 6px; }
+.uv-inspector-tabs { margin: 0 0 12px; }
 .uv-workflow-bar { min-height: 36px; gap: 5px; flex-wrap: wrap; padding: 4px 8px; }
 .uv-vertical-toolbar > .uv-vert-tool-group:first-child { display: flex; }
 .uv-vertical-toolbar > .uv-vert-divider:nth-child(2) { display: block; }

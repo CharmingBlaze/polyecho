@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
@@ -12,7 +12,6 @@ const animationStore = useAnimationStore()
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
 
-const workspaceDetail = ref<'guided' | 'advanced'>('guided')
 const newClipTitle = ref('')
 const newClipFps = ref(30)
 const newClipSeconds = ref(1)
@@ -148,36 +147,25 @@ const generators: { label: string; run: () => void }[] = [
 
 <template>
   <div class="flex flex-col select-none text-xs font-sans">
-    <div class="h-7 bg-ui-header border-b border-ui-borderSubtle px-2.5 flex items-center justify-between">
-      <div class="flex items-center space-x-1.5">
-        <BlenderIcon name="keyframe" :size="13" color="#38bdf8" />
-        <span class="text-[11px] font-medium text-ui-textMuted">Animate</span>
+    <div class="inspector-head">
+      <div class="inspector-head-kicker">
+        <BlenderIcon name="keyframe" :size="12" />
+        <span>Animate</span>
       </div>
-      <span class="font-semibold text-ui-textPrimary truncate max-w-[150px] text-[11px]">
-        {{ animationStore.activeClip?.name || 'No clip' }}
-      </span>
+      <span class="inspector-head-name">{{ animationStore.activeClip?.name || 'No clip' }}</span>
     </div>
 
-    <div class="p-2 space-y-2 border-b border-ui-borderSubtle">
-      <UiButton size="sm" variant="primary" class="w-full" @click="animationStore.showPosePopup = true">Open Quick Pose & Animate</UiButton>
-      <div class="grid grid-cols-2 gap-1" aria-label="Animation workspace detail">
-        <UiButton size="xs" :variant="workspaceDetail === 'guided' ? 'accent' : 'default'" :aria-pressed="workspaceDetail === 'guided'" @click="workspaceDetail = 'guided'">Essentials</UiButton>
-        <UiButton size="xs" :variant="workspaceDetail === 'advanced' ? 'accent' : 'default'" :aria-pressed="workspaceDetail === 'advanced'" @click="workspaceDetail = 'advanced'">Advanced</UiButton>
-      </div>
-      <div v-if="workspaceDetail === 'guided'" class="rounded border border-ui-borderDefault bg-ui-surface p-2 space-y-1 text-[11px] leading-relaxed">
-        <p class="font-semibold text-ui-textPrimary">Bring your {{ hasBones ? 'character' : 'object' }} to life</p>
-        <p class="text-ui-textMuted">1. Choose a clip and select {{ hasBones ? 'a bone' : 'an object' }}.</p>
-        <p class="text-ui-textMuted">2. Pose it, then insert a key (I).</p>
-        <p class="text-ui-textMuted">3. Move along the timeline, pose again, and play.</p>
-        <p class="text-ui-textAccent">{{ animationStore.autoKey ? 'Auto-key is on: pose edits save keys automatically.' : 'Auto-key is off: insert a key to save each pose.' }}</p>
-        <UiButton v-if="!hasBones" size="xs" class="w-full" @click="toolStore.setAppMode('rig')">Set up a skeleton in Rigging</UiButton>
+    <div class="px-2.5 py-1.5 border-b border-ui-borderSubtle">
+      <div class="text-[10px] text-ui-textSecondary truncate">
+        <span class="font-semibold text-ui-textPrimary">{{ selectedBone?.name || activeMesh?.name || 'No target' }}</span>
+        <span class="text-ui-textMuted"> · f{{ animationStore.currentFrame }} · {{ keyedNow ? 'keyed' : 'no key' }}{{ animationStore.autoKey ? ' · Auto-key' : '' }}</span>
       </div>
     </div>
 
     <UiSection title="Clip" blender-icon="keyframe-map" :default-open="true">
       <select
         :value="animationStore.activeClip?.id"
-        class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-xs cursor-pointer"
+        class="inspector-select w-full"
         @change="animationStore.selectClip(($event.target as HTMLSelectElement).value)"
       >
         <option v-for="c in animationStore.armature.clips" :key="c.id" :value="c.id" class="bg-ui-panel">
@@ -198,7 +186,7 @@ const generators: { label: string; run: () => void }[] = [
           Frame rate
           <select
             :value="animationStore.activeClip?.fps || 12"
-            class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1 py-1 text-[10px] text-ui-textPrimary"
+            class="inspector-select w-full"
             @change="animationStore.setActiveClipFps(Number(($event.target as HTMLSelectElement).value))"
           >
             <option v-for="rate in [12, 15, 24, 30, 60]" :key="rate" :value="rate">{{ rate }} fps</option>
@@ -206,7 +194,7 @@ const generators: { label: string; run: () => void }[] = [
         </label>
         <label class="flex flex-col gap-0.5 text-[9px] text-ui-textMuted">
           Preview speed
-          <select v-model.number="animationStore.playbackSpeed" class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1 py-1 text-[10px] text-ui-textPrimary">
+          <select v-model.number="animationStore.playbackSpeed" class="inspector-select w-full">
             <option :value="0.25">¼×</option>
             <option :value="0.5">½×</option>
             <option :value="1">1×</option>
@@ -215,8 +203,13 @@ const generators: { label: string; run: () => void }[] = [
         </label>
       </div>
       <p class="text-[10px] text-ui-textMuted">{{ animationStore.activeClip?.durationFrames }} frames · {{ animationStore.totalDurationSeconds }} seconds · {{ animationStore.activeClip?.tracks.length || 0 }} tracks</p>
-      <details class="space-y-2">
-        <summary class="cursor-pointer text-[11px] text-ui-textAccent py-1">Create game clip</summary>
+      <div class="grid grid-cols-2 gap-1">
+        <UiButton size="xs" :disabled="!animationStore.activeClip" @click="animationStore.duplicateClip(animationStore.activeClip!.id)">Duplicate</UiButton>
+        <UiButton size="xs" variant="danger" :disabled="animationStore.armature.clips.length <= 1" @click="animationStore.deleteClip(animationStore.activeClip!.id)">Delete</UiButton>
+      </div>
+    </UiSection>
+
+    <UiSection title="New clip" blender-icon="plus" :default-open="false">
       <div class="flex gap-1">
         <input
           v-model="newClipTitle"
@@ -224,30 +217,28 @@ const generators: { label: string; run: () => void }[] = [
           class="flex-1 bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-1 text-[10px]"
           @keydown.enter="handleCreateClip"
         />
-        <UiButton size="xs" variant="primary" @click="handleCreateClip">New</UiButton>
+        <UiButton size="xs" @click="handleCreateClip">New</UiButton>
       </div>
-      <div class="grid grid-cols-2 gap-2">
-        <label class="text-[10px] text-ui-textMuted">Seconds<input v-model.number="newClipSeconds" aria-label="New clip duration" type="number" min="0.1" max="120" step="0.1" class="w-full bg-ui-input border border-ui-borderDefault p-1" /></label>
-        <label class="text-[10px] text-ui-textMuted">Frame rate<select v-model.number="newClipFps" aria-label="New clip frame rate" class="w-full bg-ui-input border border-ui-borderDefault p-1"><option v-for="rate in [12, 15, 24, 30, 60]" :key="rate" :value="rate">{{ rate }} fps</option></select></label>
-      </div>
-      <label class="flex gap-2 items-center text-[10px]"><input type="checkbox" v-model="newClipLoop" /> Loop (idle / walk). Uncheck for one-shot actions.</label>
-      </details>
       <div class="grid grid-cols-2 gap-1">
-        <UiButton size="xs" :disabled="!animationStore.activeClip" @click="animationStore.duplicateClip(animationStore.activeClip!.id)">Duplicate</UiButton>
-        <UiButton size="xs" variant="danger" :disabled="animationStore.armature.clips.length <= 1" @click="animationStore.deleteClip(animationStore.activeClip!.id)">Delete</UiButton>
+        <label class="text-[10px] text-ui-textMuted">Seconds<input v-model.number="newClipSeconds" aria-label="New clip duration" type="number" min="0.1" max="120" step="0.1" class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1 py-0.5 font-mono text-[10px]" /></label>
+        <label class="text-[10px] text-ui-textMuted">Frame rate<select v-model.number="newClipFps" aria-label="New clip frame rate" class="inspector-select w-full"><option v-for="rate in [12, 15, 24, 30, 60]" :key="rate" :value="rate">{{ rate }} fps</option></select></label>
       </div>
+      <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
+        <span>Loop</span>
+        <input type="checkbox" v-model="newClipLoop" class="accent-ui-accent" />
+      </label>
     </UiSection>
 
     <UiSection title="Pose & keyframes" blender-icon="keyframe" :default-open="true">
       <p class="text-[10px] text-ui-textMuted leading-snug">{{ keyTargetLabel }}</p>
       <div class="flex items-center justify-between gap-1 text-[10px]">
         <UiButton size="xs" :disabled="previousKey === undefined" @click="previousKey !== undefined && animationStore.setFrame(previousKey)">‹ Previous key</UiButton>
-        <span :class="keyedNow ? 'text-amber-400' : 'text-ui-textMuted'">{{ keyedNow ? '◆ Keyed' : '◇ No key' }}</span>
+        <span class="font-mono inspector-value">{{ keyedNow ? 'Keyed' : 'No key' }}</span>
         <UiButton size="xs" :disabled="nextKey === undefined" @click="nextKey !== undefined && animationStore.setFrame(nextKey)">Next key ›</UiButton>
       </div>
-      <p v-if="animationStore.recordedStatusMessage !== 'Ready'" class="text-[9px] text-emerald-400 truncate">{{ animationStore.recordedStatusMessage }}</p>
+      <p v-if="animationStore.recordedStatusMessage !== 'Ready'" class="text-[9px] text-ui-textSecondary truncate">{{ animationStore.recordedStatusMessage }}</p>
       <div class="grid grid-cols-2 gap-1">
-        <UiButton size="xs" variant="primary" :disabled="!canKey" title="Save the selected bone or object pose (I or K)" @click="animationStore.recordCurrentKeyframe()">Insert key</UiButton>
+        <UiButton size="xs" variant="accent" :disabled="!canKey" title="Save the selected bone or object pose (I or K)" @click="animationStore.recordCurrentKeyframe()">Insert key</UiButton>
         <UiButton size="xs" title="Keys every bone and object in the scene" @click="animationStore.recordAllBonesKeyframe()">Key entire scene</UiButton>
         <UiButton size="xs" :disabled="!keyedNow" @click="animationStore.deleteKeyframeAt(selectedBone?.id || activeMesh!.id, animationStore.currentFrame)">Delete target key</UiButton>
         <UiButton size="xs" title="Alt+R" @click="animationStore.resetPose()"><BlenderIcon name="undo" :size="12" /> Reset</UiButton>
@@ -257,6 +248,7 @@ const generators: { label: string; run: () => void }[] = [
         <UiButton size="xs" :disabled="!hasClipboard" @click="animationStore.pastePose()"><BlenderIcon name="import" :size="12" /> Paste</UiButton>
       </div>
       <UiButton size="xs" class="w-full" :disabled="!hasClipboard" @click="animationStore.pasteFlippedPose()">Paste flipped</UiButton>
+      <UiButton size="xs" class="w-full" @click="animationStore.showPosePopup = true">Quick Pose</UiButton>
     </UiSection>
 
     <UiSection v-if="selectedBone" title="Pose" blender-icon="pose" :default-open="true">
@@ -274,15 +266,14 @@ const generators: { label: string; run: () => void }[] = [
           <input type="number" step="0.1" :aria-label="`Location ${ax.toUpperCase()}`" :value="selectedBone.position[ax]" @change="commitPose('position', ax, $event)" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
         </div>
       </div>
-      <template v-if="workspaceDetail === 'advanced'">
-        <div class="text-[9px] text-ui-textMuted">Scale</div>
-        <div class="grid grid-cols-3 gap-1">
-          <label v-for="ax in (['x', 'y', 'z'] as const)" :key="ax" class="text-[10px] text-ui-textMuted">{{ ax.toUpperCase() }}
-            <input type="number" step="0.05" :aria-label="`Scale ${ax.toUpperCase()}`" :value="selectedBone.scale[ax]" @change="commitPose('scale', ax, $event)" class="w-full bg-ui-input border border-ui-borderSubtle p-1 font-mono" />
-          </label>
+      <div class="text-[9px] text-ui-textMuted">Scale</div>
+      <div class="grid grid-cols-3 gap-1">
+        <div v-for="ax in (['x', 'y', 'z'] as const)" :key="'s'+ax" class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
+          <span class="text-[9px] font-bold cursor-ew-resize" :class="ax === 'x' ? 'text-rose-400' : ax === 'y' ? 'text-emerald-400' : 'text-sky-400'" @mousedown="startScrubVector($event, selectedBone.scale, ax, 0.05, 2)">{{ ax.toUpperCase() }}</span>
+          <input type="number" step="0.05" :aria-label="`Scale ${ax.toUpperCase()}`" :value="selectedBone.scale[ax]" @change="commitPose('scale', ax, $event)" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
         </div>
-        <p class="text-[10px] text-ui-textMuted">{{ selectedBone.ikConstraint?.enabled ? 'IK enabled · solver controls this chain.' : 'Direct bone posing (FK)' }}{{ selectedBone.springConstraint?.enabled ? ' · Spring enabled' : '' }}</p>
-      </template>
+      </div>
+      <p class="text-[10px] text-ui-textMuted">{{ selectedBone.ikConstraint?.enabled ? 'IK enabled · solver controls this chain.' : 'Direct bone posing (FK)' }}{{ selectedBone.springConstraint?.enabled ? ' · Spring enabled' : '' }}</p>
     </UiSection>
 
     <UiSection v-if="hasBones" title="Bones" blender-icon="bone" :badge="filteredBones.length" :default-open="true">
@@ -293,12 +284,12 @@ const generators: { label: string; run: () => void }[] = [
           :key="b.id"
           type="button"
           class="w-full text-left px-2 py-1 rounded-xs text-[10px] truncate"
-          :class="animationStore.selectedBoneId === b.id ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textSecondary hover:bg-ui-hover'"
+          :class="animationStore.selectedBoneId === b.id ? 'bg-ui-active text-ui-textPrimary' : 'text-ui-textSecondary hover:bg-ui-hover'"
           @click="animationStore.selectBone(b.id)"
           :style="{ paddingLeft: `${8 + boneDepth(b.id) * 10}px` }"
           :aria-pressed="animationStore.selectedBoneId === b.id"
           :title="b.name"
-        >{{ b.parentId ? '↳ ' : '◈ ' }}{{ b.name }}<span v-if="b.ikConstraint?.enabled" class="text-ui-textAccent ml-1">IK</span></button>
+        >{{ b.parentId ? '↳ ' : '◈ ' }}{{ b.name }}<span v-if="b.ikConstraint?.enabled" class="text-ui-textMuted ml-1">IK</span></button>
         <p v-if="!filteredBones.length" class="text-[10px] text-ui-textMuted p-2">No bones match your search.</p>
       </div>
       <UiButton size="xs" class="w-full" @click="animationStore.toggleBoneHierarchyPopout(true)">Open bone hierarchy</UiButton>
@@ -311,11 +302,11 @@ const generators: { label: string; run: () => void }[] = [
     <UiSection title="Playback" blender-icon="display" :default-open="true">
       <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
         <span>Auto-key on release</span>
-        <input type="checkbox" v-model="animationStore.autoKey" class="accent-rose-500" />
+        <input type="checkbox" v-model="animationStore.autoKey" class="accent-ui-accent" />
       </label>
       <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
         <span class="flex items-center gap-1"><BlenderIcon name="onion-skin" :size="12" /> Onion skin</span>
-        <input type="checkbox" v-model="animationStore.onionSkin" class="accent-amber-500" />
+        <input type="checkbox" v-model="animationStore.onionSkin" class="accent-ui-accent" />
       </label>
       <div v-if="animationStore.onionSkin" class="grid grid-cols-2 gap-1">
         <label class="flex flex-col gap-0.5 text-[9px] text-ui-textMuted">
@@ -340,20 +331,20 @@ const generators: { label: string; run: () => void }[] = [
           />
         </label>
       </div>
-      <div class="grid grid-cols-2 gap-1">
-        <UiButton size="xs" :variant="animationStore.interpolationMode === 'step' ? 'accent' : 'default'" @click="animationStore.interpolationMode = 'step'">Step</UiButton>
-        <UiButton size="xs" :variant="animationStore.interpolationMode === 'linear' ? 'accent' : 'default'" @click="animationStore.interpolationMode = 'linear'">Linear</UiButton>
-        <UiButton size="xs" :variant="animationStore.interpolationMode === 'cubic' ? 'accent' : 'default'" @click="animationStore.interpolationMode = 'cubic'">Cubic</UiButton>
-        <UiButton size="xs" :variant="animationStore.interpolationMode === 'bezier' ? 'accent' : 'default'" @click="animationStore.interpolationMode = 'bezier'">Bezier</UiButton>
+      <div class="inspector-seg is-stretch">
+        <button type="button" class="inspector-seg-btn" :class="{ 'is-active': animationStore.interpolationMode === 'step' }" @click="animationStore.interpolationMode = 'step'">Step</button>
+        <button type="button" class="inspector-seg-btn" :class="{ 'is-active': animationStore.interpolationMode === 'linear' }" @click="animationStore.interpolationMode = 'linear'">Linear</button>
+        <button type="button" class="inspector-seg-btn" :class="{ 'is-active': animationStore.interpolationMode === 'cubic' }" @click="animationStore.interpolationMode = 'cubic'">Cubic</button>
+        <button type="button" class="inspector-seg-btn" :class="{ 'is-active': animationStore.interpolationMode === 'bezier' }" @click="animationStore.interpolationMode = 'bezier'">Bezier</button>
       </div>
-      <div class="grid grid-cols-3 gap-1">
-        <UiButton size="xs" :variant="animationStore.loopMode === 'loop' ? 'accent' : 'default'" @click="animationStore.setLoopMode('loop')">Loop</UiButton>
-        <UiButton size="xs" :variant="animationStore.loopMode === 'once' ? 'accent' : 'default'" @click="animationStore.setLoopMode('once')">Once</UiButton>
-        <UiButton size="xs" :variant="animationStore.loopMode === 'pingpong' ? 'accent' : 'default'" @click="animationStore.setLoopMode('pingpong')">Bounce</UiButton>
+      <div class="inspector-seg is-stretch">
+        <button type="button" class="inspector-seg-btn" :class="{ 'is-active': animationStore.loopMode === 'loop' }" @click="animationStore.setLoopMode('loop')">Loop</button>
+        <button type="button" class="inspector-seg-btn" :class="{ 'is-active': animationStore.loopMode === 'once' }" @click="animationStore.setLoopMode('once')">Once</button>
+        <button type="button" class="inspector-seg-btn" :class="{ 'is-active': animationStore.loopMode === 'pingpong' }" @click="animationStore.setLoopMode('pingpong')">Bounce</button>
       </div>
       <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
         <span>X-Ray mesh (Alt+Z)</span>
-        <input type="checkbox" v-model="toolStore.viewport.xray" class="accent-amber-500" />
+        <input type="checkbox" v-model="toolStore.viewport.xray" class="accent-ui-accent" />
       </label>
       <template v-if="hasBones">
         <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
@@ -372,32 +363,32 @@ const generators: { label: string; run: () => void }[] = [
       </template>
     </UiSection>
 
-    <UiSection v-if="workspaceDetail === 'advanced'" title="Generate & blend" blender-icon="uv-smart" :default-open="false">
+    <UiSection title="Generate & blend" blender-icon="uv-smart" :default-open="false">
       <p class="text-[9px] text-ui-textMuted">Creates a clip and selects it.</p>
       <div class="grid grid-cols-3 gap-1">
         <UiButton v-for="g in generators" :key="g.label" size="xs" @click="g.run">{{ g.label }}</UiButton>
       </div>
       <div class="text-[9px] text-ui-textMuted pt-1">Blend two clips at this frame, then key.</div>
-      <select v-model="blendClipAId" class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-[10px] cursor-pointer">
+      <select v-model="blendClipAId" class="inspector-select w-full">
         <option value="" class="bg-ui-panel">Clip A</option>
         <option v-for="c in animationStore.armature.clips" :key="c.id" :value="c.id" class="bg-ui-panel">{{ c.name }}</option>
       </select>
-      <select v-model="blendClipBId" class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-[10px] cursor-pointer">
+      <select v-model="blendClipBId" class="inspector-select w-full">
         <option value="" class="bg-ui-panel">Clip B</option>
         <option v-for="c in animationStore.armature.clips" :key="c.id" :value="c.id" class="bg-ui-panel">{{ c.name }}</option>
       </select>
-      <input type="range" min="0" max="1" step="0.05" v-model.number="blendFactor" class="w-full accent-ui-accent h-1" />
+      <input type="range" min="0" max="1" step="0.05" v-model.number="blendFactor" class="inspector-range" />
       <div class="grid grid-cols-2 gap-1">
         <UiButton size="xs" :disabled="!hasBones || !blendClipAId || !blendClipBId" @click="applyBlendPreview">Preview</UiButton>
-        <UiButton size="xs" variant="primary" :disabled="!hasBones || !blendClipAId || !blendClipBId" @click="keyBlend">Key blend</UiButton>
+        <UiButton size="xs" :disabled="!hasBones || !blendClipAId || !blendClipBId" @click="keyBlend">Key blend</UiButton>
       </div>
     </UiSection>
 
-    <UiSection v-if="workspaceDetail === 'advanced' && activeMesh && hasBones" title="Mesh parent" blender-icon="link" :default-open="false">
+    <UiSection v-if="activeMesh && hasBones" title="Mesh parent" blender-icon="link" :default-open="false">
       <p class="text-[9px] text-ui-textMuted">Object bind. Skin weights live in Rig → Bind / Wts.</p>
       <select
         :value="activeMeshBoneId || 'none'"
-        class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-xs cursor-pointer"
+        class="inspector-select w-full"
         @change="animationStore.parentMeshToBone(activeMesh.id, ($event.target as HTMLSelectElement).value === 'none' ? null : ($event.target as HTMLSelectElement).value)"
       >
         <option value="none" class="bg-ui-panel">World</option>

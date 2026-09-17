@@ -95,7 +95,7 @@ X-ray bones (`xrayBones` or viewport X-Ray) only changes depth test. It does not
 
 ## Rig workspace
 
-- **Skel** = add + hierarchy. **Bone** = rest, IK, sockets, spring. **Bind** = Use-on / target / method. **Wts** = paint + selection. Same inspector chrome as Object / UV (`UiSection`).
+- **Skel** = add + hierarchy. **Bone** = rest, IK, sockets, spring. **Bind** = Use-on / target / method. **Wts** = paint + selection. Same inspector family as Object / UV / Animate (`inspector-head`, `inspector-seg`).
 - Object bind writes `parentBoneId`, not `parentId`.
 - Animate / Rig test-pose: bone gizmo and playback deform bound meshes live (`refreshLiveDeform` — skin weights + `parentBoneId`). Full `rebuildMeshes` waits until gizmo release.
 - Enable IK on the Bone tab; `evaluatePose` re-solves it after sampling keys. Two-bone + pole when chain length is 2.
@@ -129,20 +129,22 @@ Bind / unbind geometry (Ctrl+P / Alt+P) is **Rig only**. Extrude bone (E) is **R
 - Export animations in a custom non-standard proprietary format; keep GLTF/GLB standard PBR / SkinnedMesh keyframes.
 
 
-## Animation workspace essentials and advanced controls
+## Animation inspector
 
-The inspector starts in **Essentials**, with a short select → pose → key → play guide and a direct route to Rigging for objects without a skeleton. **Advanced** exposes bone scale, IK/spring status, generators, clip blending, and mesh parenting.
+The Animate sheet uses the same chrome as Modeling: `inspector-head`, a target/frame readout, then `UiSection`s. Insert key is the accent action. Quick Pose opens the existing popup from Pose & keyframes and from the keyframe editor; it is not a banner over the sheet.
 
-- **Create game clip** accepts a name, duration in seconds, frame rate (12–60 fps), and loop setting. New clips default to one second at 30 fps; existing clips keep their timing.
+- **Clip** selects, renames, and times the active action. Duplicate and Delete stay here.
+- **New clip** accepts a name, duration in seconds, frame rate (12–60 fps), and loop. New clips default to one second at 30 fps; existing clips keep their timing.
 - **Pose & keyframes** shows whether the selected target has a key at this frame, with previous/next key navigation. **Delete target key** affects only the selected bone or object; **Key entire scene** explicitly records all bones and meshes.
 - Typed bone position, rotation, and scale edits go through `setBonePoseValue`. Each change pauses playback, rejects non-finite values, records undo before mutation, and keys the edited channel when auto-key is enabled.
-- Bone search displays parent depth and IK badges, with access to the floating hierarchy.
+- Bone search displays parent depth and IK badges, with access to the floating hierarchy. Objects without an armature can still key the mesh; Open Rig jumps to the skeleton tools.
+- **Generate & blend** and **Mesh parent** stay collapsed until needed.
 - The keyframe editor supports name search, selected-only and animated-only track filters, and expand/collapse for visible channels. Filtering does not remove tracks or change playback/export.
 
 
 ## Quick Pose & Animate popup
 
-Open **Quick Pose** from the keyframe editor or **Open Quick Pose & Animate** from the inspector. The draggable, minimizable panel stays available while working in Animation and follows the active bone or object.
+Open **Quick Pose** from the keyframe editor or from Pose & keyframes in the inspector. The draggable, minimizable panel stays available while working in Animation and follows the active bone or object.
 
 Choose Move, Rotate, or Scale to activate the matching viewport gizmo. Type axis values or use ± with a custom step; Shift-click uses one tenth of the step. Bone values are local pose offsets, and parent/child navigation helps move through a chain. IK-controlled bones display a note because playback solves their constraints.
 

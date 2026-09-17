@@ -78,21 +78,21 @@ function test() {
       <div class="overflow-y-auto p-4 space-y-4 custom-scrollbar">
         <p class="text-ui-textMuted leading-relaxed">Place joints where the model bends. This window floats so you can work directly on the model.</p>
         <label class="block space-y-1"><span class="text-ui-textMuted">Model</span>
-          <select aria-label="Fitting model" :value="project.activeMeshId || ''" class="w-full border border-ui-borderDefault rounded bg-ui-input p-2" @change="project.selectMesh(($event.target as HTMLSelectElement).value)">
+          <select aria-label="Fitting model" :value="project.activeMeshId || ''" class="inspector-select w-full" @change="project.selectMesh(($event.target as HTMLSelectElement).value)">
             <option value="" disabled>Choose a model</option><option v-for="mesh in project.meshes" :key="mesh.id" :value="mesh.id">{{ mesh.name }}</option>
           </select>
         </label>
         <div v-if="!bones.length" class="space-y-2">
-          <select v-model="preset" aria-label="Starter skeleton" class="w-full border border-ui-borderDefault rounded bg-ui-input p-2"><option v-for="item in rigPresets" :key="item.id" :value="item.id">{{ item.name }}</option></select>
+          <select v-model="preset" aria-label="Starter skeleton" class="inspector-select w-full"><option v-for="item in rigPresets" :key="item.id" :value="item.id">{{ item.name }}</option></select>
           <UiButton variant="primary" size="md" class="w-full" :disabled="!project.activeMesh?.vertices.length" @click="add">Add starter skeleton</UiButton>
         </div>
         <template v-else>
           <div class="space-y-2">
             <div class="flex justify-between"><strong>1 · Fit joints</strong><span class="text-ui-textMuted">{{ index + 1 }} / {{ bones.length }}</span></div>
-            <select aria-label="Joint to fit" :value="selected?.id || ''" class="w-full border border-ui-borderDefault rounded bg-ui-input p-2" @change="animation.selectBone(($event.target as HTMLSelectElement).value)"><option v-for="bone in bones" :key="bone.id" :value="bone.id">{{ bone.name }}</option></select>
-            <p class="rounded border border-ui-accent/30 bg-ui-accentSubtle p-2 text-ui-textAccent">{{ pointName }} · place the highlighted pivot, not the bone’s tip.</p>
+            <select aria-label="Joint to fit" :value="selected?.id || ''" class="inspector-select w-full" @change="animation.selectBone(($event.target as HTMLSelectElement).value)"><option v-for="bone in bones" :key="bone.id" :value="bone.id">{{ bone.name }}</option></select>
+            <p class="rounded border border-ui-borderSubtle bg-ui-surface p-2 text-ui-textSecondary">{{ pointName }} · place the highlighted pivot, not the bone’s tip.</p>
             <div class="grid grid-cols-3 gap-1"><UiButton @click="requestCameraView('front')">Front</UiButton><UiButton @click="requestCameraView('right')">Side</UiButton><UiButton @click="requestCameraView('persp')">Perspective</UiButton></div>
-            <UiButton size="md" class="w-full" :variant="animation.jointPlacementActive ? 'accent' : 'primary'" :disabled="!selected" @click="animation.jointPlacementActive = !animation.jointPlacementActive"><Crosshair class="h-3.5 w-3.5" />{{ animation.jointPlacementActive ? 'Placing joint · click model view' : 'Place joint in viewport' }}</UiButton>
+            <UiButton size="md" class="w-full" :active="animation.jointPlacementActive" :variant="animation.jointPlacementActive ? 'default' : 'primary'" :disabled="!selected" @click="animation.jointPlacementActive = !animation.jointPlacementActive"><Crosshair class="h-3.5 w-3.5" />{{ animation.jointPlacementActive ? 'Placing joint · click model view' : 'Place joint in viewport' }}</UiButton>
             <p class="text-[11px] text-ui-textMuted leading-relaxed">Front adjusts left/right and height. Side adjusts depth. Click to place; depth along the view stays fixed. Connected endpoints move together.</p>
             <label class="flex justify-between items-center"><span>Mirror left / right joints</span><input v-model="animation.jointPlacementMirror" type="checkbox" class="accent-ui-accent" /></label>
             <div v-if="selected" class="grid grid-cols-3 gap-2"><label v-for="axis in (['x', 'y', 'z'] as const)" :key="axis" class="text-ui-textMuted">{{ axis.toUpperCase() }}<input :aria-label="`Joint ${axis.toUpperCase()}`" :value="Number(selected.head[axis].toFixed(3))" type="number" step="0.01" class="mt-1 w-full border border-ui-borderSubtle rounded bg-ui-input p-1.5 text-ui-textPrimary" @change="edit(axis, $event)" /></label></div>
@@ -100,13 +100,13 @@ function test() {
           </div>
           <div class="space-y-2 border-t border-ui-borderSubtle pt-3">
             <strong>2 · Attach and test</strong>
-            <select v-model="animation.autoSkinMethod" aria-label="Automatic weighting method" class="w-full rounded border border-ui-borderDefault bg-ui-input p-2"><option value="surface">Surface smoothing · connected geometry</option><option value="distance">Distance blend · nearby bones</option></select>
+            <select v-model="animation.autoSkinMethod" aria-label="Automatic weighting method" class="inspector-select w-full"><option value="surface">Surface smoothing · connected geometry</option><option value="distance">Distance blend · nearby bones</option></select>
             <p class="text-[11px] leading-relaxed text-ui-textMuted">Surface smoothing spreads weights along edges to reduce influence across separate parts. Distance blend is useful for very coarse meshes. Replaces this model’s weights.</p>
             <UiButton class="w-full" size="md" :disabled="!project.activeMesh?.vertices.length" @click="bind"><Wand2 class="h-3.5 w-3.5" /> Calculate weights</UiButton>
             <UiButton class="w-full" size="md" variant="primary" @click="test">Test deformation</UiButton>
           </div>
         </template>
-        <p v-if="notice" role="status" class="text-[11px] leading-relaxed text-ui-textAccent">{{ notice }}</p>
+        <p v-if="notice" role="status" class="text-[11px] leading-relaxed text-ui-textSecondary">{{ notice }}</p>
       </div>
       <footer class="border-t border-ui-borderSubtle bg-ui-header p-3 text-[10px] text-ui-textMuted">Drag the title to move · Ctrl+Z to undo joint placement</footer>
     </section>

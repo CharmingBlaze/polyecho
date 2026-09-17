@@ -34,7 +34,7 @@ export function useFastTitleTips() {
 
   function place(el: HTMLElement) {
     const r = el.getBoundingClientRect()
-    const preferRight = r.left < 96 && r.width < 48
+    const preferRight = r.width < 48
     if (preferRight) {
       side.value = 'right'
       x.value = Math.min(window.innerWidth - 12, r.right + 8)

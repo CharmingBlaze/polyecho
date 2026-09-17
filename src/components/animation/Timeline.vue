@@ -906,13 +906,13 @@ function handleGraphSvgClick(e: MouseEvent) {
     </div>
 
     <div v-if="activeTab === 'keyframe'" class="flex items-center gap-2 px-2 py-1 border-b border-ui-borderSubtle bg-ui-panel shrink-0 text-[10px] flex-wrap">
-      <button class="text-ui-textAccent border border-ui-borderDefault rounded px-2 py-1" @click="animationStore.showPosePopup = true">Quick Pose</button>
-      <input v-model="trackSearch" aria-label="Search animation tracks" placeholder="Find bone or object…" class="w-44 min-w-0 bg-ui-input border border-ui-borderDefault rounded px-2 py-1" />
-      <select v-model="trackFilter" aria-label="Filter animation tracks" class="bg-ui-input border border-ui-borderDefault rounded px-2 py-1">
+      <button type="button" class="inspector-chip" @click="animationStore.showPosePopup = true">Quick Pose</button>
+      <input v-model="trackSearch" aria-label="Search animation tracks" placeholder="Find bone or object…" class="w-44 min-w-0 bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-1" />
+      <select v-model="trackFilter" aria-label="Filter animation tracks" class="inspector-select">
         <option value="all">All tracks</option><option value="selected">Selected only</option><option value="animated">Animated only</option>
       </select>
-      <button class="text-ui-textMuted hover:text-ui-textPrimary" @click="expandVisibleTracks(true)">Expand channels</button>
-      <button class="text-ui-textMuted hover:text-ui-textPrimary" @click="expandVisibleTracks(false)">Collapse</button>
+      <button type="button" class="text-ui-textMuted hover:text-ui-textPrimary" @click="expandVisibleTracks(true)">Expand channels</button>
+      <button type="button" class="text-ui-textMuted hover:text-ui-textPrimary" @click="expandVisibleTracks(false)">Collapse</button>
       <span class="text-ui-textMuted ml-auto">{{ allRigBones.length + visibleMeshes.length }} tracks · Double-click a cell to toggle a key</span>
     </div>
 

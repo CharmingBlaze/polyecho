@@ -5,6 +5,7 @@ import { boneDisplayMetrics } from '../../core/render/BoneDisplay'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
 import { TransformGizmo } from '@voluma/three-transform-gizmo'
+import { parseHex } from '../../core/theme/colorMath'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import { useAnimationStore } from '../../stores/animationStore'
@@ -25,7 +26,9 @@ import {
   setHoverMarkerWorld,
   setHoverVertexMarkerColor,
   setVertexMarkerSeeThrough,
-  setVertexMarkerViewport
+  setVertexMarkerViewport,
+  VERTEX_COLOR_HOVER,
+  VERTEX_COLOR_SELECTED_HOVER
 } from '../../core/render/VertexMarkers'
 import { computeCentroid, computeFaceNormal } from '../../utils/math'
 import { snapColorToPalette } from '../../utils/color'
@@ -51,7 +54,7 @@ import { closestScreenSegment, visibleWorldPoint } from '../../core/geometry/Com
 import { cloneRecipe, geometrySignature, shapeSourceIsCurrent } from '../../core/shapeDraw/ShapeRecipe'
 import { PolyBuildOperator } from '../../core/operators/PolyBuildOperator'
 import { ScreenGeometry, type ViewQuadrant } from '../../core/geometry/ScreenGeometry'
-import { meshObjectWorldMatrix } from '../../core/geometry/MeshTransform'
+import { applyWorldDeltaToObjectTRS, meshObjectWorldMatrix } from '../../core/geometry/MeshTransform'
 import { PrimitiveType } from '../../core/primitives/PrimitiveTypes'
 import { EditableMesh } from '../../core/mesh/MeshKernel'
 import { MeshBridge } from '../../core/mesh/MeshBridge'
@@ -170,6 +173,7 @@ let lastPaintHit: Omit<PaintHit, 'hit'> | null = null
 let lastPaintTextureId: string | undefined
 let isGizmoDragging = false
 let skipGizmoCommit = false
+let gizmoDragSession = false
 let pointerDownClientPos = { x: 0, y: 0 }
 let isViewNavigating = false
 let viewNavPane: ViewQuadrant | null = null
@@ -642,14 +646,9 @@ function initThree() {
       orbitControls.enabled = !event.value
 
       if (event.value) {
-        skipGizmoCommit = false
-        onGizmoDragStart()
-      } else if (skipGizmoCommit) {
-        skipGizmoCommit = false
-        historyStore.undo()
-        rebuildMeshes()
+        beginGizmoDragSession()
       } else {
-        commitProxyTransform()
+        finishGizmoGesture()
       }
     })
 
@@ -675,6 +674,7 @@ function initThree() {
 
     listen('objectChange', () => {
       if (gizmo !== transformControls) return
+      if (skipGizmoCommit || !gizmoDragSession) return
       onGizmoObjectChange()
     })
   }
@@ -684,15 +684,18 @@ function initThree() {
   ;(classicControls as any)._getPointer = getGizmoPointer
   bindGizmoEvents(classicControls)
 
-  combinedControls = new TransformGizmo(cameraPersp, canvas, { scaleAnchor: 'center' })
+  combinedControls = new TransformGizmo(cameraPersp, canvas, {
+    scaleAnchor: 'center',
+    theme: combinedGizmoTheme(themeStore.activeColors)
+  })
   combinedControls.size = 1
   combinedControls.setMode('combined')
   bindGizmoEvents(combinedControls)
 
   transformControls = classicControls
   scene.add(classicControls.getHelper())
-  scene.add(combinedControls.getHelper())
-  combinedControls.getHelper().visible = false
+  scene.add(combinedControls)
+  combinedControls.visible = false
   combinedControls.enabled = false
 
   // ----------------------------------------------------
@@ -731,7 +734,6 @@ function initThree() {
   applyThemeToTransformGizmo(classicControls)
   applyThemeToTransformGizmo(combinedControls)
   layers.gizmoGroup.add(classicControls.getHelper())
-  layers.gizmoGroup.add(combinedControls.getHelper())
   layers.gizmoGroup.add(transformProxy)
   syncActiveGizmo()
   layers.gizmoGroup.add(boneGroup)
@@ -1447,7 +1449,6 @@ function rebuildMeshes() {
   // Clean gizmo group preserving transform proxy & transform controls & boneGroup
   const preserve = [
     classicControls?.getHelper(),
-    combinedControls?.getHelper(),
     transformProxy,
     boneGroup,
     onionGroup
@@ -2473,6 +2474,40 @@ function activeGizmoOperation(): 'translate' | 'rotate' | 'scale' {
   return mode
 }
 
+function themeCssToGizmoColor(css: string, fallback = 0xffffff): number {
+  const rgb = parseHex(css)
+  if (!rgb) return fallback
+  return (rgb[0] << 16) | (rgb[1] << 8) | rgb[2]
+}
+
+function combinedGizmoTheme(colors: ThemeColors) {
+  const x = themeCssToGizmoColor(colors.gizmoX, 0xef4444)
+  const y = themeCssToGizmoColor(colors.gizmoY, 0x22c55e)
+  const z = themeCssToGizmoColor(colors.gizmoZ, 0x3b82f6)
+  const accent = themeCssToGizmoColor(colors.gizmoAccent, 0xf59e0b)
+  const step = toolStore.snapping.gridSize || 0.1
+  return {
+    colors: {
+      x,
+      y,
+      z,
+      screen: accent,
+      uniform: accent,
+      hover: accent,
+      active: accent,
+      sector: accent,
+      sectorLabel: accent,
+      originGhost: accent,
+    },
+    snapping: {
+      temporaryTranslationSnap: step,
+      temporaryRotationSnapDeg: toolStore.snapping.angle || 15,
+      temporaryScaleSnap: 0.1,
+    },
+    renderOrder: 60,
+  }
+}
+
 function applyMeshGizmoMode() {
   if (!transformControls) return
   if (toolStore.selectMode === 'origin') {
@@ -2492,7 +2527,7 @@ function applyThemeToTransformGizmo(tc: TransformControls | TransformGizmo, cust
   if (!tc) return
   const colors = customColors || themeStore.activeColors
   if (tc instanceof TransformGizmo) {
-    tc.setColors(colors.gizmoX, colors.gizmoY, colors.gizmoZ, colors.gizmoAccent)
+    tc.setTheme(combinedGizmoTheme(colors))
     return
   }
   const helper = tc.getHelper()
@@ -2528,13 +2563,14 @@ function applyThemeToTransformGizmo(tc: TransformControls | TransformGizmo, cust
 }
 
 function syncActiveGizmo() {
-  if (!classicControls || !combinedControls) return
+  if (!classicControls || !combinedControls || !scene) return
   const useCombined = toolStore.viewport.combinedGizmo
   const next = useCombined ? combinedControls : classicControls
   const other = useCombined ? classicControls : combinedControls
   other.enabled = false
   other.detach()
   other.getHelper().visible = false
+  if (combinedControls.parent !== scene) scene.add(combinedControls)
   transformControls = next
   next.enabled = !operatorManager.state.value.active
   if (activeCamera) next.camera = activeCamera
@@ -2571,11 +2607,12 @@ function applyTheme(colors: ThemeColors) {
     (hoverEdgeMesh.material as THREE.LineBasicMaterial).color.set(colors.edgeColor)
   }
   if (hoverVertexMesh) {
-    setHoverVertexMarkerColor(colors.vertexColor)
+    setHoverVertexMarkerColor(VERTEX_COLOR_HOVER)
   }
 }
 
 function snapObjectGizmoIncrement() {
+  if (transformControls instanceof TransformGizmo) return
   if (!lastPointerCtrl || activeGizmoOperation() !== 'translate') return
   const step = toolStore.snapping.gridSize || 0.5
   transformProxy.position.x = Math.round(transformProxy.position.x / step) * step
@@ -2650,6 +2687,126 @@ function applySelectedMeshesRigidSnap() {
 }
 
 const dragStartBonesMap = new Map<string, { head: Vector3D; tail: Vector3D; position: Vector3D; rotation: Vector3D; scale: Vector3D }>()
+const objectGizmoPos = new THREE.Vector3()
+const objectGizmoQuat = new THREE.Quaternion()
+const objectGizmoScale = new THREE.Vector3()
+
+function beginGizmoDragSession() {
+  if (gizmoDragSession) return
+  gizmoDragSession = true
+  isGizmoDragging = true
+  skipGizmoCommit = false
+  onGizmoDragStart()
+}
+
+function finishGizmoGesture() {
+  if (!gizmoDragSession) return
+  gizmoDragSession = false
+  isGizmoDragging = false
+  if (skipGizmoCommit) {
+    skipGizmoCommit = false
+    historyStore.undo()
+    rebuildMeshes()
+    return
+  }
+  commitProxyTransform()
+}
+
+function abortGizmoSession() {
+  gizmoDragSession = false
+  isGizmoDragging = false
+  skipGizmoCommit = false
+}
+
+function writeObjectSceneTRS(
+  meshObj: { id: string; position: Vector3D; rotation: Vector3D; scale: Vector3D },
+  pos: THREE.Vector3,
+  quat: THREE.Quaternion,
+  scl: THREE.Vector3,
+  euler: THREE.Euler
+) {
+  meshObj.position.x = pos.x
+  meshObj.position.y = pos.y
+  meshObj.position.z = pos.z
+  meshObj.rotation.x = THREE.MathUtils.radToDeg(euler.x)
+  meshObj.rotation.y = THREE.MathUtils.radToDeg(euler.y)
+  meshObj.rotation.z = THREE.MathUtils.radToDeg(euler.z)
+  meshObj.scale.x = scl.x
+  meshObj.scale.y = scl.y
+  meshObj.scale.z = scl.z
+
+  const threeMesh = layers.modelGroup.getObjectByName(meshObj.id)
+  if (threeMesh) {
+    threeMesh.position.copy(pos)
+    threeMesh.quaternion.copy(quat)
+    threeMesh.scale.copy(scl)
+  }
+  const wire = layers.wireframeGroup.getObjectByName(`${meshObj.id}_wire`)
+  if (wire) {
+    wire.position.copy(pos)
+    wire.quaternion.copy(quat)
+    wire.scale.copy(scl)
+  }
+  const pts = layers.wireframeGroup.getObjectByName(`${meshObj.id}_pts`)
+  if (pts) {
+    pts.position.copy(pos)
+    pts.quaternion.copy(quat)
+    pts.scale.copy(scl)
+  }
+  const selFaces = layers.selectionGroup.getObjectByName(`${meshObj.id}_selfaces`)
+  if (selFaces) {
+    selFaces.position.copy(pos)
+    selFaces.quaternion.copy(quat)
+    selFaces.scale.copy(scl)
+  }
+}
+
+function applyObjectMeshesFromProxyDelta() {
+  snapObjectGizmoIncrement()
+  const deltaMatrix = new THREE.Matrix4().multiplyMatrices(
+    transformProxy.matrixWorld,
+    dragStartProxyMatrixInverse
+  )
+  const selected = new Set(
+    projectStore.selectedMeshIds.length > 0
+      ? projectStore.selectedMeshIds
+      : (projectStore.activeMeshId ? [projectStore.activeMeshId] : [])
+  )
+  for (const meshObj of projectStore.meshes) {
+    if (!selected.has(meshObj.id)) continue
+    const startData = dragStartMultiMeshMap.get(meshObj.id)
+    if (!startData) continue
+    const euler = applyWorldDeltaToObjectTRS(
+      startData,
+      deltaMatrix,
+      objectGizmoPos,
+      objectGizmoQuat,
+      objectGizmoScale
+    )
+    writeObjectSceneTRS(meshObj, objectGizmoPos, objectGizmoQuat, objectGizmoScale, euler)
+  }
+  applySelectedMeshesRigidSnap()
+}
+
+function syncStoreObjectSceneTRS() {
+  const ids = new Set(
+    projectStore.selectedMeshIds.length > 0
+      ? projectStore.selectedMeshIds
+      : (projectStore.activeMeshId ? [projectStore.activeMeshId] : [])
+  )
+  for (const meshObj of projectStore.meshes) {
+    if (!ids.has(meshObj.id)) continue
+    objectGizmoPos.set(meshObj.position.x, meshObj.position.y, meshObj.position.z)
+    const euler = new THREE.Euler(
+      THREE.MathUtils.degToRad(meshObj.rotation.x),
+      THREE.MathUtils.degToRad(meshObj.rotation.y),
+      THREE.MathUtils.degToRad(meshObj.rotation.z)
+    )
+    objectGizmoQuat.setFromEuler(euler)
+    objectGizmoScale.set(meshObj.scale.x, meshObj.scale.y, meshObj.scale.z)
+    writeObjectSceneTRS(meshObj, objectGizmoPos, objectGizmoQuat, objectGizmoScale, euler)
+  }
+}
 
 function onGizmoDragStart() {
   projectStore.recordState(toolStore.selectMode === 'origin' ? 'Move Origin' : 'Transform')
@@ -2860,24 +3017,7 @@ function onGizmoObjectChange() {
     }
 
     if (activeMesh) {
-      activeMesh.position.x = transformProxy.position.x
-      activeMesh.position.y = transformProxy.position.y
-      activeMesh.position.z = transformProxy.position.z
-
-      activeMesh.rotation.x = THREE.MathUtils.radToDeg(transformProxy.rotation.x)
-      activeMesh.rotation.y = THREE.MathUtils.radToDeg(transformProxy.rotation.y)
-      activeMesh.rotation.z = THREE.MathUtils.radToDeg(transformProxy.rotation.z)
-
-      activeMesh.scale.x = transformProxy.scale.x
-      activeMesh.scale.y = transformProxy.scale.y
-      activeMesh.scale.z = transformProxy.scale.z
-
-      const threeMesh = layers.modelGroup.getObjectByName(activeMesh.id)
-      if (threeMesh) {
-        threeMesh.position.copy(transformProxy.position)
-        threeMesh.rotation.copy(transformProxy.rotation)
-        threeMesh.scale.copy(transformProxy.scale)
-      }
+      applyObjectMeshesFromProxyDelta()
       return
     }
   }
@@ -2944,99 +3084,7 @@ function onGizmoObjectChange() {
   }
 
   if (toolStore.selectMode === 'object') {
-    snapObjectGizmoIncrement()
-    if (projectStore.selectedMeshIds.length > 1) {
-      const deltaMatrix = new THREE.Matrix4().multiplyMatrices(
-        transformProxy.matrixWorld,
-        dragStartProxyMatrixInverse
-      )
-
-      for (const meshObj of projectStore.meshes) {
-        if (projectStore.selectedMeshIds.includes(meshObj.id)) {
-          const startData = dragStartMultiMeshMap.get(meshObj.id)
-          if (startData) {
-            const startMatrix = new THREE.Matrix4().compose(
-              startData.position,
-              new THREE.Quaternion().setFromEuler(startData.rotation),
-              startData.scale
-            )
-            const transformedMatrix = new THREE.Matrix4().multiplyMatrices(deltaMatrix, startMatrix)
-            const newPos = new THREE.Vector3()
-            const newQuat = new THREE.Quaternion()
-            const newScale = new THREE.Vector3()
-            transformedMatrix.decompose(newPos, newQuat, newScale)
-            const newEuler = new THREE.Euler().setFromQuaternion(newQuat)
-
-            meshObj.position.x = newPos.x
-            meshObj.position.y = newPos.y
-            meshObj.position.z = newPos.z
-
-            meshObj.rotation.x = THREE.MathUtils.radToDeg(newEuler.x)
-            meshObj.rotation.y = THREE.MathUtils.radToDeg(newEuler.y)
-            meshObj.rotation.z = THREE.MathUtils.radToDeg(newEuler.z)
-
-            meshObj.scale.x = newScale.x
-            meshObj.scale.y = newScale.y
-            meshObj.scale.z = newScale.z
-
-            const threeMesh = layers.modelGroup.getObjectByName(meshObj.id)
-            if (threeMesh) {
-              threeMesh.position.copy(newPos)
-              threeMesh.quaternion.copy(newQuat)
-              threeMesh.scale.copy(newScale)
-            }
-            const wire = layers.wireframeGroup.getObjectByName(`${meshObj.id}_wire`)
-            if (wire) {
-              wire.position.copy(newPos)
-              wire.quaternion.copy(newQuat)
-              wire.scale.copy(newScale)
-            }
-          }
-        }
-      }
-      applySelectedMeshesRigidSnap()
-      return
-    }
-
-    activeMesh.position.x = transformProxy.position.x
-    activeMesh.position.y = transformProxy.position.y
-    activeMesh.position.z = transformProxy.position.z
-
-    activeMesh.rotation.x = THREE.MathUtils.radToDeg(transformProxy.rotation.x)
-    activeMesh.rotation.y = THREE.MathUtils.radToDeg(transformProxy.rotation.y)
-    activeMesh.rotation.z = THREE.MathUtils.radToDeg(transformProxy.rotation.z)
-
-    activeMesh.scale.x = transformProxy.scale.x
-    activeMesh.scale.y = transformProxy.scale.y
-    activeMesh.scale.z = transformProxy.scale.z
-
-    const threeMesh = layers.modelGroup.getObjectByName(activeMesh.id)
-    if (threeMesh) {
-      threeMesh.position.copy(transformProxy.position)
-      threeMesh.rotation.copy(transformProxy.rotation)
-      threeMesh.scale.copy(transformProxy.scale)
-
-      const wire = layers.wireframeGroup.getObjectByName(`${activeMesh.id}_wire`)
-      if (wire) {
-        wire.position.copy(transformProxy.position)
-        wire.rotation.copy(transformProxy.rotation)
-        wire.scale.copy(transformProxy.scale)
-      }
-      const pts = layers.wireframeGroup.getObjectByName(`${activeMesh.id}_pts`)
-      if (pts) {
-        pts.position.copy(transformProxy.position)
-        pts.rotation.copy(transformProxy.rotation)
-        pts.scale.copy(transformProxy.scale)
-      }
-
-      const selFaces = layers.selectionGroup.getObjectByName(`${activeMesh.id}_selfaces`)
-      if (selFaces) {
-        selFaces.position.copy(transformProxy.position)
-        selFaces.rotation.copy(transformProxy.rotation)
-        selFaces.scale.copy(transformProxy.scale)
-      }
-    }
-    applySelectedMeshesRigidSnap()
+    applyObjectMeshesFromProxyDelta()
   } else if (toolStore.selectMode === 'vertex' || toolStore.selectMode === 'face' || toolStore.selectMode === 'edge') {
     const deltaMatrix = new THREE.Matrix4().multiplyMatrices(
       transformProxy.matrixWorld,
@@ -3250,7 +3298,7 @@ function selectionPointVisible(world: THREE.Vector3) {
   return visibleWorldPoint(world, activeCamera, selectableSurfaceObjects(), toolStore.viewport.xray)
 }
 
-function findClosestVertexScreen(mesh: MeshObject, maxDistPx = 14): Vertex | null {
+function findClosestVertexScreen(mesh: MeshObject, maxDistPx = 18): Vertex | null {
   if (mesh.locked || !mesh.visible) return null
   let closest: Vertex | null = null, best = maxDistPx, depth = Infinity
   const mat = meshWorldMatrix(mesh)
@@ -4394,9 +4442,8 @@ function onPointerUp(event?: PointerEvent) {
       event.stopImmediatePropagation()
     }
   }
-  if (isGizmoDragging || transformControls.dragging) {
-    isGizmoDragging = false
-    commitProxyTransform()
+  if (gizmoDragSession) {
+    finishGizmoGesture()
   }
   if (!isSplitView() || isPerspQuadrant()) {
     if ((transformControls as any).axis === null) {
@@ -4450,6 +4497,9 @@ function startModalOperator(tool: string, options?: any) {
 
   if (activeMesh?.locked) return
   if ((tool === 'extrude' || tool === 'inset' || tool === 'bevel') && !activeMesh) return
+  if ((tool === 'knife' || tool === 'loop_cut' || tool === 'loopcut') && toolStore.selectMode === 'object') {
+    toolStore.selectMode = 'face'
+  }
   if ((tool === 'extrude' || tool === 'inset' || tool === 'bevel') && toolStore.selectMode === 'object') {
     const bevelEdges = tool === 'bevel' && projectStore.selectedEdgeIds.length > 0
     toolStore.selectMode = bevelEdges ? 'edge' : 'face'
@@ -4581,6 +4631,14 @@ function startModalOperator(tool: string, options?: any) {
         operatorManager.state.value.previewTick++
         return
       }
+      if (
+        documentMesh &&
+        toolStore.selectMode === 'object' &&
+        (tool === 'grab' || tool === 'move' || tool === 'rotate' || tool === 'scale')
+      ) {
+        syncStoreObjectSceneTRS()
+        return
+      }
       if (documentMesh && tool !== 'primitive' && tool !== 'add_primitive' && tool !== 'polydraw') {
         const updatedMeshObj = MeshBridge.editableMeshToMeshObject(
           editableMesh,
@@ -4613,12 +4671,15 @@ function startModalOperator(tool: string, options?: any) {
         }
         toolStore.selectMode = 'object'
       } else if (tool === 'polydraw' && editableMesh.faces.size > 0) {
-        projectStore.addEditableMesh(editableMesh, `Block_${projectStore.meshes.length + 1}`)
+        const created = projectStore.addEditableMesh(editableMesh, `Block_${projectStore.meshes.length + 1}`)
+        toolStore.selectMode = 'face'
+        projectStore.selectedFaceIds = created.faces.map(f => f.id)
       } else if (documentMesh && tool !== 'primitive' && tool !== 'add_primitive') {
-        const priorVertIds = new Set(documentMesh.vertices.map(v => v.id))
+        const liveMesh = projectStore.meshes.find(m => m.id === documentMesh!.id) || documentMesh
+        const priorVertIds = new Set(liveMesh.vertices.map(v => v.id))
         const updatedMeshObj = MeshBridge.editableMeshToMeshObject(
           editableMesh,
-          documentMesh,
+          liveMesh,
           bridgeData.numToStrVertId,
           bridgeData.numToStrFaceId
         )
@@ -4722,7 +4783,12 @@ function startModalOperator(tool: string, options?: any) {
   }
 
   orbitControls.enabled = false
-  if (transformControls) transformControls.enabled = false
+  abortGizmoSession()
+  if (transformControls) {
+    transformControls.enabled = false
+    const helper = transformControls.getHelper()
+    if (helper) helper.visible = false
+  }
 
   if (tool === 'grab' || tool === 'move') toolStore.setModelTool('move')
   else if (tool === 'rotate') toolStore.setModelTool('rotate')
@@ -4926,6 +4992,8 @@ function updateHoverState() {
     const v = findClosestVertexScreen(activeMesh)
     if (v) {
       const w = localToWorld(activeMesh, v.position, meshWorldMatrix(activeMesh), _hoverWorld)
+      const selected = projectStore.selectedVertexIds.includes(v.id)
+      setHoverVertexMarkerColor(selected ? VERTEX_COLOR_SELECTED_HOVER : VERTEX_COLOR_HOVER)
       setHoverMarkerWorld(hoverVertexMesh, w.x, w.y, w.z)
       hoverVertexMesh.visible = true
       hasHover = true
@@ -5658,6 +5726,9 @@ watch(
   }
 )
 watch(() => toolStore.viewport.combinedGizmo, syncActiveGizmo)
+watch(() => [toolStore.snapping.gridSize, toolStore.snapping.angle] as const, () => {
+  if (combinedControls) applyThemeToTransformGizmo(combinedControls)
+})
 watch(() => [projectStore.meshes.length, projectStore.activeMeshId, projectStore.selectedMeshIds.join(',')] as const, updateTransformGizmo)
 watch(() => toolStore.modelTool, updateTransformGizmo)
 watch(() => [toolStore.transformOrientation, toolStore.pivotPoint], updateTransformGizmo)
@@ -5798,6 +5869,7 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
       e.preventDefault()
       skipGizmoCommit = true
       transformControls.reset()
+      finishGizmoGesture()
       return
     }
   }
@@ -6328,18 +6400,18 @@ onUnmounted(() => {
           v-if="toolStore.appMode === 'rig'"
           class="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1 bg-ui-panel/90 backdrop-blur-xs border border-ui-borderStrong rounded-full shadow-lg font-sans text-[11px]"
         >
-          <div class="w-2 h-2 rounded-full" :class="animationStore.clickToPlaceMode ? 'bg-amber-400 animate-pulse' : animationStore.isWeightPaintActive ? 'bg-sky-400 animate-pulse' : 'bg-emerald-400'"></div>
-          <span v-if="animationStore.jointPlacementActive" class="text-amber-300 font-semibold">Fit {{ animationStore.selectedBone?.name }} · click to place pivot</span>
-          <span v-else-if="animationStore.clickToPlaceMode" class="text-amber-300 font-semibold">
+          <div class="w-2 h-2 rounded-full" :class="animationStore.clickToPlaceMode || animationStore.jointPlacementActive || animationStore.isWeightPaintActive ? 'bg-ui-accent' : 'bg-ui-textMuted'"></div>
+          <span v-if="animationStore.jointPlacementActive" class="text-ui-textPrimary font-semibold">Fit {{ animationStore.selectedBone?.name }} · click to place pivot</span>
+          <span v-else-if="animationStore.clickToPlaceMode" class="text-ui-textPrimary font-semibold">
             Draw Bone Active: Click Head, then Click Tail in 3D (Press B or Esc to exit)
           </span>
-          <span v-else-if="animationStore.isWeightPaintActive" class="text-sky-300 font-semibold flex items-center gap-1.5">
+          <span v-else-if="animationStore.isWeightPaintActive" class="text-ui-textPrimary font-semibold flex items-center gap-1.5">
             <span>Weight Paint Mode:</span>
-            <strong class="text-amber-400 font-mono">{{ animationStore.selectedBone ? animationStore.selectedBone.name : 'Select Bone' }}</strong>
+            <strong class="inspector-value font-mono">{{ animationStore.selectedBone ? animationStore.selectedBone.name : 'Select Bone' }}</strong>
             <span class="text-ui-textMuted text-[10px]">({{ animationStore.weightPaintTool.toUpperCase() }} · Radius: {{ animationStore.weightBrushRadius }}m · W: {{ Number(animationStore.weightBrushWeight).toFixed(2) }})</span>
           </span>
           <span v-else-if="animationStore.armature.bones.length === 0" class="text-ui-textPrimary">
-            Choose a <strong class="text-ui-textAccent">starter skeleton</strong> or press <strong class="text-ui-textAccent">B</strong> to draw joints
+            Choose a <strong>starter skeleton</strong> or press <strong>B</strong> to draw joints
           </span>
           <span v-else-if="animationStore.isTestPoseActive" class="text-ui-textSecondary">
             Test pose: rotate a joint · no keyframes recorded
@@ -6349,7 +6421,7 @@ onUnmounted(() => {
           </span>
           <button 
             @click="animationStore.toggleBoneHierarchyPopout()" 
-            class="ml-1 px-1.5 py-0.2 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[10px] text-ui-textAccent font-semibold transition cursor-pointer"
+            class="ml-1 px-1.5 py-0.2 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[10px] text-ui-textSecondary font-semibold transition cursor-pointer"
             title="Toggle Floating Bone Hierarchy (H)"
           >
             Tree (H)
@@ -7006,7 +7078,7 @@ onUnmounted(() => {
     <PolyDrawPanel />
     <ShapeDrawPanel v-if="toolStore.appMode === 'blockout'" @start="fresh => startModalOperator('shapedraw', { fresh })" />
 
-    <div v-if="operatorManager.activeOperator instanceof LoopCutOperator" data-floating-panel
+    <div v-if="toolStore.stylusModeNotifications && operatorManager.activeOperator instanceof LoopCutOperator" data-floating-panel
       class="absolute top-3 left-1/2 -translate-x-1/2 z-50 w-[440px] max-w-[95%] bg-ui-panel border border-ui-borderStrong rounded shadow-xl p-3 text-xs pointer-events-auto">
       <div class="flex justify-between items-center mb-2"><strong>Loop Cut</strong><button @click="operatorManager.cancel()" title="Cancel (Esc)">×</button></div>
       <p class="text-ui-textSecondary leading-relaxed mb-2">{{ operatorManager.state.value.statusText }}</p>
@@ -7023,7 +7095,7 @@ onUnmounted(() => {
 
     <!-- Blender Modal Operator Interactive HUD (Floating, Movable & Closable) -->
     <div 
-      v-if="operatorManager.state.value.active && !(operatorManager.activeOperator instanceof LoopCutOperator) && !(operatorManager.activeOperator instanceof ShapeDrawOperator)"
+      v-if="toolStore.stylusModeNotifications && operatorManager.state.value.active && !(operatorManager.activeOperator instanceof LoopCutOperator) && !(operatorManager.activeOperator instanceof ShapeDrawOperator) && !(operatorManager.activeOperator instanceof PrimitivePlacementOperator)"
       data-floating-panel
       class="fixed z-50 flex flex-col bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl font-sans select-none pointer-events-auto max-w-[95vw] hud-panel"
       :class="operatorManager.activeOperator instanceof KnifeOperator ? 'w-[480px] min-w-0' : operatorManager.activeOperator instanceof PolyBuildOperator ? 'min-w-[300px]' : 'min-w-[360px]'"

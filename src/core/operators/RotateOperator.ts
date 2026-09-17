@@ -46,6 +46,11 @@ export class RotateOperator extends ModalOperator {
 
     const q = new THREE.Quaternion().setFromAxisAngle(rotAxis, angleRad)
 
+    if (this.ctx.isObjectMode) {
+      this.applyObjectRotation(q)
+      return
+    }
+
     const targetVertIds = this.collectTargetVertIds()
 
     for (const [vId] of this.ctx.mesh.vertices) {

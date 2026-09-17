@@ -103,3 +103,19 @@ export function relaxUvCorners(mesh: MeshObject, corners: UvCorner[], iterations
   }
   return [...nodes.values()].filter(n => !n.fixed).flatMap(n => n.corners.map(c => ({ ...c, ...n.uv })))
 }
+
+/** Inspect stays closed until there is a UV selection, and stays closed if the user dismissed it. */
+export function uvInspectAfterSelection(
+  cornerCount: number,
+  showPrecision: boolean,
+  inspectDismissed: boolean,
+): { showPrecision: boolean; inspectDismissed: boolean } {
+  if (cornerCount === 0) return { showPrecision: false, inspectDismissed: false }
+  if (inspectDismissed) return { showPrecision, inspectDismissed: true }
+  return { showPrecision: true, inspectDismissed: false }
+}
+
+export function uvInspectToggled(currentlyOpen: boolean): { showPrecision: boolean; inspectDismissed: boolean } {
+  const showPrecision = !currentlyOpen
+  return { showPrecision, inspectDismissed: !showPrecision }
+}

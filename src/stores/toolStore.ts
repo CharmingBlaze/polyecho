@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import type { 
   AppMode, 
   SelectMode, 
@@ -23,6 +23,7 @@ export const useToolStore = defineStore('tool', () => {
   const rigTool = ref<RigToolType>('select_bone')
   const animateTool = ref<AnimateToolType>('select_bone')
   const isBoxSelectActive = ref<boolean>(false)
+  const lastTransformTool = ref<ModelToolType>('move')
   const activeProfileId = ref<string>('psx_retro')
 
   // Painting settings
@@ -39,6 +40,16 @@ export const useToolStore = defineStore('tool', () => {
   const stylusPressureEnabled = ref<boolean>(true)
   const currentPressure = ref<number>(1.0)
   const currentPointerType = ref<'mouse' | 'pen' | 'touch'>('mouse')
+  /** Floating G/R/S (and Loop Cut) HUD. Off by default; status stays in the bar. */
+  const STYLUS_MODE_NOTIFICATIONS_KEY = 'polyecho_stylus_mode_notifications'
+  const stylusModeNotifications = ref(false)
+  if (typeof localStorage !== 'undefined') {
+    stylusModeNotifications.value = localStorage.getItem(STYLUS_MODE_NOTIFICATIONS_KEY) === '1'
+  }
+  watch(stylusModeNotifications, (on) => {
+    if (typeof localStorage === 'undefined') return
+    localStorage.setItem(STYLUS_MODE_NOTIFICATIONS_KEY, on ? '1' : '0')
+  })
 
   // Vertex Painting settings
   const vertexPaintColor = ref<string>('#ffffff')
@@ -165,13 +176,18 @@ export const useToolStore = defineStore('tool', () => {
   }
 
   function toggleBoxSelect() {
-    if (isBoxSelectActive.value) {
-      isBoxSelectActive.value = false
-      return
-    }
-    modelTool.value = 'select'
-    isBoxSelectActive.value = true
+    isBoxSelectActive.value = !isBoxSelectActive.value
   }
+
+  watch(isBoxSelectActive, (active, wasActive) => {
+    if (active && !wasActive) {
+      if (modelTool.value !== 'select') lastTransformTool.value = modelTool.value
+      modelTool.value = 'select'
+    } else if (!active && wasActive && modelTool.value === 'select') {
+      const restore = lastTransformTool.value
+      modelTool.value = restore === 'select' ? 'move' : restore
+    }
+  }, { flush: 'sync' })
 
   function setPaintTool(tool: PaintToolType) {
     paintTool.value = tool
@@ -208,6 +224,7 @@ export const useToolStore = defineStore('tool', () => {
     ditherPattern,
     paletteSnapEnabled,
     stylusPressureEnabled,
+    stylusModeNotifications,
     currentPressure,
     currentPointerType,
     vertexPaintColor,

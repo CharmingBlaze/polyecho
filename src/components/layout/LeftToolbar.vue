@@ -168,7 +168,7 @@ function toggleCombinedGizmo() {
         @click="toggleCombinedGizmo"
         class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
         :class="toolStore.viewport.combinedGizmo ? 'bg-ui-active text-ui-textAccent shadow-inner' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-        title="Combined gizmo — all-in-one translate, rotate, and scale"
+        title="Combined gizmo — Voluma translate, rotate, and scale"
       >
         <BlenderIcon name="gizmo-combined" :size="18" />
       </button>
@@ -354,7 +354,7 @@ function toggleCombinedGizmo() {
         @click="toggleCombinedGizmo"
         class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
         :class="toolStore.viewport.combinedGizmo ? 'bg-ui-active text-ui-textAccent shadow-inner' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-        title="Combined gizmo — all-in-one translate, rotate, and scale"
+        title="Combined gizmo — Voluma translate, rotate, and scale"
       >
         <BlenderIcon name="gizmo-combined" :size="18" />
       </button>

@@ -1,14 +1,15 @@
 import * as THREE from 'three'
 
-/** CSS pixels. Screen-space squares, constant size at any zoom. */
-export const VERTEX_MARKER_SIZE_PX = 18
+/** CSS pixels. Screen-space circles, constant size at any zoom. */
+export const VERTEX_MARKER_SIZE_PX = 16
 export const VERTEX_HOVER_SIZE_PX = 22
 
-export const VERTEX_COLOR_IDLE = { r: 0.93, g: 0.93, b: 0.96 }
-export const VERTEX_COLOR_SELECTED = { r: 1, g: 0.62, b: 0.12 }
+export const VERTEX_COLOR_IDLE = { r: 0.92, g: 0.93, b: 0.96 }
+export const VERTEX_COLOR_SELECTED = { r: 1, g: 0.48, b: 0.08 }
+export const VERTEX_COLOR_HOVER = { r: 0.2, g: 0.92, b: 1 }
+export const VERTEX_COLOR_SELECTED_HOVER = { r: 1, g: 0.92, b: 0.22 }
 
 let unitQuad: THREE.BufferGeometry | null = null
-let markerMap: THREE.CanvasTexture | null = null
 let markerMaterial: THREE.ShaderMaterial | null = null
 let hoverMaterial: THREE.ShaderMaterial | null = null
 
@@ -27,41 +28,18 @@ function getUnitQuad(): THREE.BufferGeometry {
   return unitQuad
 }
 
-function getMarkerMap(): THREE.CanvasTexture {
-  if (markerMap) return markerMap
-  const s = 32
-  const canvas = document.createElement('canvas')
-  canvas.width = s
-  canvas.height = s
-  const ctx = canvas.getContext('2d')
-  if (!ctx) {
-    markerMap = new THREE.CanvasTexture(canvas)
-    return markerMap
-  }
-  ctx.clearRect(0, 0, s, s)
-  ctx.fillStyle = '#111111'
-  ctx.fillRect(1, 1, 30, 30)
-  ctx.fillStyle = '#ffffff'
-  ctx.fillRect(4, 4, 24, 24)
-  markerMap = new THREE.CanvasTexture(canvas)
-  markerMap.magFilter = THREE.NearestFilter
-  markerMap.minFilter = THREE.NearestFilter
-  markerMap.generateMipmaps = false
-  markerMap.needsUpdate = true
-  return markerMap
-}
-
 const vertexMarkerVert = /* glsl */ `
 attribute vec3 instancePosition;
-attribute vec3 instanceColor;
+attribute vec3 aMarkerColor;
 uniform float uSizePx;
 uniform vec2 uResolution;
-uniform vec3 uTint;
+uniform vec3 uFill;
+uniform float uUseInstanceColor;
 varying vec3 vColor;
 varying vec2 vUv;
 
 void main() {
-  vColor = instanceColor * uTint;
+  vColor = mix(uFill, aMarkerColor, uUseInstanceColor);
   vUv = uv;
   vec4 clip = projectionMatrix * modelViewMatrix * vec4(instancePosition, 1.0);
   vec2 ndcPixel = uSizePx / max(uResolution, vec2(1.0));
@@ -72,24 +50,27 @@ void main() {
 `
 
 const vertexMarkerFrag = /* glsl */ `
-uniform sampler2D uMap;
 varying vec3 vColor;
 varying vec2 vUv;
 
 void main() {
-  vec4 texel = texture2D(uMap, vUv);
-  if (texel.a < 0.2) discard;
-  gl_FragColor = vec4(texel.rgb * vColor, 1.0);
+  vec2 p = vUv * 2.0 - 1.0;
+  float r = length(p);
+  float alpha = 1.0 - smoothstep(0.84, 1.0, r);
+  if (alpha < 0.02) discard;
+  float fill = 1.0 - smoothstep(0.52, 0.66, r);
+  vec3 outline = vec3(0.05, 0.06, 0.08);
+  gl_FragColor = vec4(mix(outline, vColor, fill), alpha);
 }
 `
 
-function makeMaterial(sizePx: number): THREE.ShaderMaterial {
+function makeMaterial(sizePx: number, instanceColor: boolean): THREE.ShaderMaterial {
   const mat = new THREE.ShaderMaterial({
     uniforms: {
       uSizePx: { value: sizePx },
       uResolution: { value: new THREE.Vector2(1, 1) },
-      uTint: { value: new THREE.Color(1, 1, 1) },
-      uMap: { value: getMarkerMap() }
+      uFill: { value: new THREE.Color(VERTEX_COLOR_HOVER.r, VERTEX_COLOR_HOVER.g, VERTEX_COLOR_HOVER.b) },
+      uUseInstanceColor: { value: instanceColor ? 1 : 0 }
     },
     vertexShader: vertexMarkerVert,
     fragmentShader: vertexMarkerFrag,
@@ -106,12 +87,12 @@ function makeMaterial(sizePx: number): THREE.ShaderMaterial {
 }
 
 export function getVertexMarkerMaterial(): THREE.ShaderMaterial {
-  if (!markerMaterial) markerMaterial = makeMaterial(VERTEX_MARKER_SIZE_PX)
+  if (!markerMaterial) markerMaterial = makeMaterial(VERTEX_MARKER_SIZE_PX, true)
   return markerMaterial
 }
 
 export function getHoverVertexMarkerMaterial(): THREE.ShaderMaterial {
-  if (!hoverMaterial) hoverMaterial = makeMaterial(VERTEX_HOVER_SIZE_PX)
+  if (!hoverMaterial) hoverMaterial = makeMaterial(VERTEX_HOVER_SIZE_PX, false)
   return hoverMaterial
 }
 
@@ -120,8 +101,10 @@ export function setVertexMarkerSeeThrough(seeThrough: boolean) {
   getHoverVertexMarkerMaterial().depthTest = !seeThrough
 }
 
-export function setHoverVertexMarkerColor(hex: string | number) {
-  getHoverVertexMarkerMaterial().uniforms.uTint.value.set(hex)
+export function setHoverVertexMarkerColor(rgb: { r: number; g: number; b: number } | string | number) {
+  const fill = getHoverVertexMarkerMaterial().uniforms.uFill.value as THREE.Color
+  if (typeof rgb === 'object' && rgb && 'r' in rgb) fill.setRGB(rgb.r, rgb.g, rgb.b)
+  else fill.set(rgb as string | number)
 }
 
 export function setVertexMarkerViewport(widthCss: number, heightCss: number) {
@@ -137,6 +120,22 @@ export function setVertexMarkerViewport(widthCss: number, heightCss: number) {
   }
 }
 
+function markerColorAttribute(count: number, src?: THREE.BufferAttribute) {
+  const arr = src
+    ? new Float32Array(src.array as Float32Array).slice(0, count * 3)
+    : new Float32Array(count * 3)
+  if (!src) {
+    for (let i = 0; i < count; i++) {
+      arr[i * 3] = VERTEX_COLOR_IDLE.r
+      arr[i * 3 + 1] = VERTEX_COLOR_IDLE.g
+      arr[i * 3 + 2] = VERTEX_COLOR_IDLE.b
+    }
+  }
+  const attr = new THREE.InstancedBufferAttribute(arr, 3)
+  attr.setUsage(THREE.DynamicDrawUsage)
+  return attr
+}
+
 export function vertexPointsToMarkerGeometry(src: THREE.BufferGeometry): THREE.InstancedBufferGeometry {
   const pos = src.getAttribute('position') as THREE.BufferAttribute
   const col = src.getAttribute('color') as THREE.BufferAttribute | undefined
@@ -147,11 +146,8 @@ export function vertexPointsToMarkerGeometry(src: THREE.BufferGeometry): THREE.I
   geo.setAttribute('position', quad.getAttribute('position')!.clone())
   geo.setAttribute('uv', quad.getAttribute('uv')!.clone())
   const posArr = new Float32Array((pos?.array as Float32Array | undefined) ?? [])
-  const colArr = col
-    ? new Float32Array(col.array as Float32Array)
-    : new Float32Array(count * 3).fill(1)
   geo.setAttribute('instancePosition', new THREE.InstancedBufferAttribute(posArr, 3))
-  geo.setAttribute('instanceColor', new THREE.InstancedBufferAttribute(colArr, 3))
+  geo.setAttribute('aMarkerColor', markerColorAttribute(count, col))
   geo.instanceCount = count
   const box = new THREE.Box3()
   if (count) box.setFromArray(posArr)
@@ -182,7 +178,9 @@ export function replaceVertexMarkerGeometry(mesh: THREE.Mesh, pointsGeometry: TH
 export function createHoverVertexMarker(): THREE.Mesh {
   const src = new THREE.BufferGeometry()
   src.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3))
-  src.setAttribute('color', new THREE.Float32BufferAttribute([1, 1, 1], 3))
+  src.setAttribute('color', new THREE.Float32BufferAttribute([
+    VERTEX_COLOR_HOVER.r, VERTEX_COLOR_HOVER.g, VERTEX_COLOR_HOVER.b
+  ], 3))
   const geom = vertexPointsToMarkerGeometry(src)
   src.dispose()
   const mesh = new THREE.Mesh(geom, getHoverVertexMarkerMaterial())
@@ -204,8 +202,8 @@ export function paintVertexMarkerColors(
   map: string[],
   selected: Set<string>
 ) {
-  const colors = geometry.getAttribute('instanceColor') as THREE.InstancedBufferAttribute | undefined
-  if (!colors || map.length * 3 !== colors.array.length) return false
+  const colors = geometry.getAttribute('aMarkerColor') as THREE.InstancedBufferAttribute | undefined
+  if (!colors || map.length === 0 || map.length * 3 !== colors.array.length) return false
   for (let i = 0; i < map.length; i++) {
     const c = selected.has(map[i]) ? VERTEX_COLOR_SELECTED : VERTEX_COLOR_IDLE
     colors.setXYZ(i, c.r, c.g, c.b)

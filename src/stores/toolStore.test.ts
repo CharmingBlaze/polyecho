@@ -43,6 +43,13 @@ describe('toolStore.setAppMode', () => {
     expect(tools.selectMode).toBe('bone')
   })
 
+  it('keeps stylus mode notifications off unless opted in', () => {
+    localStorage.removeItem('polyecho_stylus_mode_notifications')
+    setActivePinia(createPinia())
+    const tools = useToolStore()
+    expect(tools.stylusModeNotifications).toBe(false)
+  })
+
   it('treats bone and object selection as rigid object binding', () => {
     const tools = useToolStore()
     tools.setAppMode('rig')
@@ -61,6 +68,7 @@ describe('toolStore.setAppMode', () => {
     expect(tools.isBoxSelectActive).toBe(true)
     tools.toggleBoxSelect()
     expect(tools.isBoxSelectActive).toBe(false)
+    expect(tools.modelTool).toBe('move')
     tools.toggleBoxSelect()
     tools.setModelTool('rotate')
     expect(tools.isBoxSelectActive).toBe(false)

@@ -10,8 +10,8 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `electron/main.mjs` | Desktop window, native file IPC |
 | `electron/preload.cjs` | `window.polyechoDesktop` bridge |
 | `src/main.ts` | Vue + Pinia bootstrap |
-| `src/App.vue` | App chrome, **authoritative global key handler**, workspace layout |
-| `src/style.css` | Global / Tailwind layers |
+| `src/App.vue` | App chrome, **authoritative global key handler**, workspace layout (UV/Paint hides the left toolbar; UV Layout and Paint share the 3D/canvas split) |
+| `src/style.css` | Global / Tailwind layers; inspector-head / rail / Split-Scene-Inspect control |
 | `vite.config.ts` | Vite + `@` alias |
 
 ## Types
@@ -60,7 +60,7 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/core/mesh/MeshValidator.ts` | Sanity checks |
 | `src/core/mesh/operations/*Kernel.ts` | Interactive + one-shot kernels (extrude/inset/bevel/merge/dissolve/…). Poly Draw box-unwraps the solid on confirm. Loop Cut / Knife batch splits use `TopologyOps.splitFaceUnchecked` and validate once on commit. |
 | `src/core/geometry/MeshOrigin.ts` | Place object origin at local AABB center (Poly Draw / Poly Build) |
-| `src/core/geometry/MeshTransform.ts` | `MeshObject` world matrix (degrees → radians) |
+| `src/core/geometry/MeshTransform.ts` | `MeshObject` world matrix (degrees → radians); object-gizmo world delta onto drag-start TRS |
 | `src/core/geometry/ObjectPick.ts` | Ray / overlay pick among visible meshes (Knife / Loop Cut retarget) |
 | `src/core/geometry/ObjectSymmetry.ts` | Flip mesh through origin (H/V/Z), wrap Euler degrees, used by inspector Flip / Rotate / Mirror Copy |
 | `src/core/geometry/Primitives.ts` | Legacy cube / plane helpers |
@@ -70,7 +70,7 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/core/geometry/ComponentPicking.ts` | Vertex / edge / face hit tests with consistent pixel thresholds |
 | `src/core/geometry/SelectionConversion.ts` | Convert the current selection when switching vertex / edge / face mode |
 | `src/core/geometry/GeometryTolerance.ts` | Shared scale-relative epsilon for degeneracy and planarity |
-| `src/core/render/VertexMarkers.ts` | Screen-space vertex squares (Blockbench-style outline, constant pixel size at any zoom) |
+| `src/core/render/VertexMarkers.ts` | Screen-space vertex circles (procedural discs, selection/hover fill, constant pixel size) |
 | `src/core/render/BoneDisplay.ts` | Faceted bone shafts, L/R colors, pickable envelopes |
 | `src/core/geometry/ScreenGeometry.ts` | Screen rays, overlay mapping (`rayFromClient` / `worldToOverlay` match renderer `clientWidth`), Blockout column splits (including maximized pane = full canvas), dashed Poly Draw / Poly Build preview |
 | `src/core/geometry/EdgeUtils.ts` | Loops / rings; `undirectedEdgeId` / `parseUndirectedEdgeId` (ids may contain `_`) |
@@ -147,15 +147,17 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 
 | Folder | Role |
 | :--- | :--- |
-| `src/components/layout/` | Header, toolbars, status |
+| `src/components/layout/` | Header, toolbars, status; `RightSidebar.vue` (flush inspector chrome) |
 | `src/components/viewport/` | 3D view (`Viewport3D`: picking, gizmo, fill camera, modal start). Space/pivot/snap/shade/overlays/x-ray live in `HeaderMenu.vue`. `ShapeDrawPanel.vue` / `PolyDrawPanel.vue` are Blockout overlays. |
-| `src/components/inspector/MeshToolsProps.vue` | Modeling Tools tab: Subdivide (cuts/smoothness), extrude/inset/bevel, merge, poke, triangulate |
+| `src/components/inspector/MeshToolsProps.vue` | Modeling Tools tab: mode readout, Subdivide cuts/smooth, Faces / Edges / Vertices, Mesh |
+| `src/components/inspector/TransformProps.vue` | Object tab: TRS, shade, flip/rotate, origin, parent; workspace jumps (UV / Rig) |
+| `src/components/inspector/AnimationInspector.vue` | Animate sheet: clip readout, keys, pose, playback |
 | `src/components/outliner/` | Object tree |
-| `src/components/uvpaint/` | UV editor, pixel editor (`PixelCanvas.vue` is the UV/Paint tab router), palettes, `PaintLayers.vue`, `TilesetEditor.vue` (floating atlas / tilemap panel) |
+| `src/components/uvpaint/` | UV editor, pixel editor (`PixelCanvas.vue` is the UV/Paint tab router), palettes, `PaintLayers.vue` (`inspector-head`), `TilesetEditor.vue` (floating atlas / tilemap panel) |
 | `src/components/animation/` | Timeline (no separate DopeSheet component); `PosePopout.vue` for copy/paste/mirror pose |
-| `src/components/rigging/` | Rig inspector: `RiggingWorkspace.vue` (Skeleton / Attach / Weights / Test), `SkeletonPanel`, `HumanoidRigWizard.vue`, `RigFitPopout.vue`, Bind, Weights |
-| `src/components/modals/` | Export, import, **new image** (`NewTextureModal`), prefs, palette, command search |
-| `src/components/ui/` | Shared buttons, menus, fields |
+| `src/components/rigging/` | Rig Inspect sheets: `SkeletonPanel`, `RiggingPanel` (Bone), `BindingsPanel`, `WeightsPanel`; `HumanoidRigWizard.vue`, `RigFitPopout.vue`, `BoneHierarchyPopout.vue` |
+| `src/components/modals/` | Export, import, **new image** (`NewTextureModal`), prefs, palette, command search, `AddPrimitivePopout.vue` (Shift+A) |
+| `src/components/ui/` | Shared buttons, menus, fields; `UiSection` inspector sections |
 | `src/components/icons/BlenderIcon.vue` | Editor glyphs — add names here (`docs/ICONS.md`) |
 | `src/utils/` | Vectors, color, dither, gradients |
 

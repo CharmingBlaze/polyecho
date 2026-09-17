@@ -40,6 +40,7 @@ If you reach for Lucide, first add the Blender glyph instead unless the case abo
 | Left toolbar, header, UV/Paint tools | `BlenderIcon` only |
 | Viewport nav cluster (pan / orbit / zoom / frame) | `BlenderIcon` |
 | Outliner / status / recover banner | `BlenderIcon` |
+| Inspector rail and sheet heads | `BlenderIcon` at `currentColor` (one accent pip on the active tab) |
 | Inspector section headers | `blender-icon` on `UiSection` |
 | Timeline transport | `BlenderIcon` (`play` / `pause` / `skip-start` / `skip-end` / `record` / `film`) |
 

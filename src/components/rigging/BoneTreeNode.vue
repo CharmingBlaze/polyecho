@@ -48,7 +48,7 @@ function removeSocket(socketId: string) {
     <div
       class="flex items-center justify-between pr-1 py-1 rounded-xs cursor-pointer text-[11px] transition group"
       :style="{ paddingLeft: indent }"
-      :class="animationStore.selectedBoneId === bone.id && !animationStore.selectedSocketId ? 'bg-ui-active text-ui-textAccent font-semibold border border-ui-accent/40 shadow-xs' : 'hover:bg-ui-hover text-ui-textSecondary'"
+      :class="animationStore.selectedBoneId === bone.id && !animationStore.selectedSocketId ? 'bg-ui-active text-ui-textPrimary font-semibold border border-ui-borderStrong' : 'hover:bg-ui-hover text-ui-textSecondary'"
       @click="select"
     >
       <div class="flex items-center gap-1 min-w-0 flex-1">
@@ -58,7 +58,7 @@ function removeSocket(socketId: string) {
         <span v-else class="truncate" @dblclick.stop="startRename">{{ bone.name }}</span>
       </div>
       <div class="flex items-center gap-0.5 opacity-50 group-hover:opacity-100">
-        <button class="p-0.5 hover:text-sky-300" title="Add socket" @click.stop="addSocket"><Wrench class="w-3 h-3" /></button>
+        <button class="p-0.5 hover:text-ui-textPrimary" title="Add socket" @click.stop="addSocket"><Wrench class="w-3 h-3" /></button>
         <button class="p-0.5 hover:text-ui-textPrimary" title="Add child bone" @click.stop="addChild"><Plus class="w-3 h-3" /></button>
         <button class="p-0.5 hover:text-rose-400" title="Delete bone" @click.stop="animationStore.deleteBone(bone.id)"><Trash2 class="w-3 h-3" /></button>
       </div>
@@ -66,7 +66,7 @@ function removeSocket(socketId: string) {
     <div
       v-for="socket in bone.sockets || []"
       :key="socket.id"
-      class="flex items-center justify-between pr-2 py-0.5 rounded-xs cursor-pointer text-[10px] text-sky-400 hover:bg-ui-hover"
+      class="flex items-center justify-between pr-2 py-0.5 rounded-xs cursor-pointer text-[10px] text-ui-textSecondary hover:bg-ui-hover"
       :style="{ paddingLeft: `${Math.min(7, depth || 0) * 14 + 25}px` }"
       @click.stop="animationStore.selectSocket(socket.id)"
     >

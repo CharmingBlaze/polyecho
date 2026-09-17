@@ -29,36 +29,38 @@ const activeTab = computed({
 
 <template>
   <div class="uv-paint-shell h-full w-full bg-ui-panel flex flex-col select-none relative z-[100] font-mono text-xs" @pointerdown="onShellPointerDown">
-    <div class="uv-paint-tabs bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center gap-2 shrink-0 relative isolate z-[200] overflow-visible h-8.5 min-h-[34px]">
-      <div role="group" aria-label="UV and paint editors" class="flex items-center bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle shrink-0">
+    <div
+      class="uv-paint-tabs bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center gap-2 shrink-0 relative overflow-visible h-8.5 min-h-[34px]"
+    >
+      <div role="group" aria-label="UV and paint editors" class="inspector-seg shrink-0">
         <button
           type="button"
-          class="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-xs text-[10px] font-bold transition cursor-pointer"
-          :class="activeTab === 'uv' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
-          title="UV Unwrapping, Seams & Quadrant Atlas Mapping"
+          class="inspector-seg-btn"
+          :class="{ 'is-active': activeTab === 'uv' }"
+          title="UV Layout"
+          aria-label="UV Layout"
           :aria-pressed="activeTab === 'uv'"
           @click="activeTab = 'uv'"
         >
-          <BlenderIcon name="uv" :size="12" />
-          <span class="uv-paint-tab-label">UV Layout</span>
+          <BlenderIcon name="uv" :size="14" />
         </button>
         <button
           type="button"
-          class="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-xs text-[10px] font-bold transition cursor-pointer"
-          :class="activeTab === 'paint' ? 'bg-ui-accent text-white shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
-          title="Pixel & Texture Paint Studio"
+          class="inspector-seg-btn"
+          :class="{ 'is-active': activeTab === 'paint' }"
+          title="Paint Texture"
+          aria-label="Paint Texture"
           :aria-pressed="activeTab === 'paint'"
           @click="activeTab = 'paint'"
         >
-          <BlenderIcon name="brush" :size="11" />
-          <span class="uv-paint-tab-label">Paint Texture</span>
+          <BlenderIcon name="brush" :size="14" />
         </button>
       </div>
       <div id="uv-paint-command-slot" class="uv-paint-command-slot flex items-center min-w-0" />
       <div class="flex items-center gap-1.5 shrink-0 ml-auto">
         <div class="px-2 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px] font-mono text-ui-textMuted flex items-center gap-1">
           <span class="uv-paint-resolution-label text-[9px] text-ui-textMuted font-bold">RES:</span>
-          <span class="text-amber-300 font-bold">{{ projectStore.pixelBuffer.width }}×{{ projectStore.pixelBuffer.height }}</span>
+          <span class="inspector-value font-bold">{{ projectStore.pixelBuffer.width }}×{{ projectStore.pixelBuffer.height }}</span>
         </div>
         <div
           v-if="activeTab === 'paint'"
@@ -74,6 +76,18 @@ const activeTab = computed({
             class="uv-paint-color-hex w-16 px-1.5 py-0.5 bg-ui-panel text-ui-textPrimary font-mono text-[10px] font-bold border border-ui-borderSubtle rounded-xs focus:outline-none focus:border-ui-accent uppercase text-center"
             aria-label="Color hex"
           />
+          <label class="flex items-center gap-1 text-[9px] text-ui-textMuted font-bold uppercase" title="Brush size ([ / ])">
+            Size
+            <input
+              type="number"
+              min="1"
+              max="128"
+              :value="toolStore.brushSize"
+              class="w-10 px-1 py-0.5 bg-ui-panel text-ui-textPrimary font-mono text-[10px] font-bold border border-ui-borderSubtle rounded-xs focus:outline-none focus:border-ui-accent text-center"
+              aria-label="Brush size in pixels"
+              @change="toolStore.brushSize = Math.max(1, Math.min(128, Math.round(Number(($event.target as HTMLInputElement).value) || 1)))"
+            />
+          </label>
         </div>
       </div>
       <button class="workspace-help-button" :aria-expanded="showHelp" @click="showHelp = !showHelp" title="Workspace shortcuts">?</button>
@@ -100,19 +114,22 @@ const activeTab = computed({
 
     <div
       v-if="!projectStore.activeMesh"
-      class="shrink-0 px-3 py-1.5 text-[11px] leading-snug text-amber-100 bg-amber-950/40 border-b border-amber-500/30 flex items-center justify-between gap-3"
+      class="shrink-0 px-3 py-1.5 text-[11px] leading-snug text-ui-textSecondary bg-ui-header border-b border-ui-borderSubtle flex items-center justify-between gap-3"
     >
       <span>Select a mesh in Modeling, then unwrap or paint it here.</span>
       <button
         type="button"
-        class="shrink-0 px-2 py-0.5 rounded-xs bg-amber-500/20 border border-amber-400/40 text-amber-100 hover:bg-amber-500/30"
+        class="shrink-0 px-2 py-0.5 rounded-xs bg-ui-active border border-ui-borderSubtle text-ui-textAccent hover:bg-ui-hover"
         @click="toolStore.setAppMode('model')"
       >Go to Modeling</button>
     </div>
 
-    <div class="flex-1 min-h-0 min-w-0">
-      <UVEditor v-if="activeTab === 'uv'" key="uv-editor" />
-      <PixelEditor v-else key="pixel-editor" />
+    <div class="flex-1 min-h-0 min-w-0 flex">
+      <div class="flex-1 min-h-0 min-w-0">
+        <UVEditor v-if="activeTab === 'uv'" key="uv-editor" />
+        <PixelEditor v-else key="pixel-editor" />
+      </div>
+      <div id="paint-layers-host" class="contents" />
     </div>
   </div>
 </template>
@@ -124,7 +141,8 @@ const activeTab = computed({
    They are portaled into the shared workspace header, so this rule covers UV
    and Paint without duplicating it in both editors. */
 .uv-paint-command-slot .header-dropdown-menu {
-  z-index: 2147483000 !important;
+  z-index: 30 !important;
+  overflow: visible;
 }
 
 @container (max-width: 760px) {
@@ -132,19 +150,32 @@ const activeTab = computed({
   .uv-paint-resolution-label,
   .uv-paint-color-label,
   .uv-paint-color-hex { display: none; }
-  .uv-paint-tabs > div:first-child button { padding-left: 6px !important; padding-right: 6px !important; }
 }
 </style>
 
 <style>
-.uv-paint-shell { font-family: var(--font-sans, sans-serif); }
-.uv-paint-shell .uv-paint-tabs { flex-wrap: wrap; height: auto !important; min-height: 34px !important; padding: 4px 8px; gap: 6px !important; align-content: flex-start; }
+.uv-paint-shell { font-family: var(--font-sans, sans-serif); overflow: visible; }
+.uv-paint-shell .uv-paint-tabs {
+  flex-wrap: nowrap;
+  height: 34px !important;
+  min-height: 34px !important;
+  padding: 4px 8px;
+  gap: 6px !important;
+  align-items: center;
+  overflow: visible !important;
+}
 </style>
 
 <style>
-.uv-paint-tabs { min-height: 34px !important; height: auto !important; }
-.uv-paint-tab-label { white-space: nowrap; }
-.uv-paint-command-slot { z-index: 190; order: 3; flex: 0 0 100%; min-width: 0; overflow-x: auto; padding-top: 3px; border-top: 1px solid var(--ui-border-subtle); }
+.uv-paint-tabs { min-height: 34px !important; height: 34px !important; }
+.uv-paint-command-slot {
+  order: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: visible;
+  padding-top: 0;
+  border-top: none;
+}
 .uv-paint-command-slot > div { display: flex; flex-wrap: nowrap; gap: 4px; width: max-content; min-height: 28px; }
 .uv-paint-shell button:focus-visible, .uv-paint-shell input:focus-visible, .uv-paint-shell select:focus-visible { outline: 2px solid var(--ui-text-accent); outline-offset: 2px; }
 .uv-paint-shell button:disabled { opacity: .35; cursor: default; }
@@ -159,12 +190,5 @@ const activeTab = computed({
 @container (min-width: 860px) {
   .uv-paint-tabs { gap: 6px !important; }
   .uv-paint-tabs .uv-paint-color-label, .uv-paint-tabs .uv-paint-resolution-label { display: none; }
-}
-@container (min-width: 980px) {
-  .uv-paint-tabs { flex-wrap: nowrap !important; min-height: 34px !important; height: 34px !important; align-items: center; }
-  .uv-paint-command-slot { order: 0 !important; flex: 1 1 auto !important; border-top: none !important; padding-top: 0 !important; }
-}
-@container (max-width: 979px) {
-  .uv-paint-tabs { flex-wrap: wrap; height: auto !important; padding-top: 4px; min-height: 62px !important; row-gap: 4px !important; }
 }
 </style>

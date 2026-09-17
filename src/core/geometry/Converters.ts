@@ -7,6 +7,7 @@ import { getMeshEdges } from './EdgeUtils'
 import { evaluateModifiers } from './Modifiers'
 import { ensureMeshUVs } from './UVUnwrap'
 import { surfaceTriangles } from './SurfaceGeometry'
+import { VERTEX_COLOR_IDLE, VERTEX_COLOR_SELECTED } from '../render/VertexMarkers'
 
 export interface GeometryBundle {
   geometry: THREE.BufferGeometry
@@ -547,9 +548,9 @@ export function meshToThreeGeometry(
     vertexPointsPositions.push(vp.x, vp.y, vp.z)
     vertexIndexMap.push(v.id)
     if (v.selected || selectedVertSet?.has(v.id)) {
-      vertexPointsColors.push(1.0, 0.62, 0.12)
+      vertexPointsColors.push(VERTEX_COLOR_SELECTED.r, VERTEX_COLOR_SELECTED.g, VERTEX_COLOR_SELECTED.b)
     } else {
-      vertexPointsColors.push(0.93, 0.93, 0.96)
+      vertexPointsColors.push(VERTEX_COLOR_IDLE.r, VERTEX_COLOR_IDLE.g, VERTEX_COLOR_IDLE.b)
     }
   }
 

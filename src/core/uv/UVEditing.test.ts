@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createCube } from '../geometry/Primitives'
-import { relaxUvCorners, selectedUvCorners, transformUvCorners, uvBounds } from './UVEditing'
+import { relaxUvCorners, selectedUvCorners, transformUvCorners, uvBounds, uvInspectAfterSelection, uvInspectToggled } from './UVEditing'
 
 describe('precision UV editing', () => {
   it('never falls back to faces when vertex or edge selection is empty', () => {
@@ -67,5 +67,18 @@ describe('UV relaxation', () => {
     expect(relaxUvCorners(mesh, corners, 10, c => c.faceIndex === 0 && c.vertIndex === 2)).toEqual([])
     expect(relaxUvCorners(mesh, corners.filter(c => c.faceIndex !== 0))).toEqual([])
     expect(relaxUvCorners(mesh, [])).toEqual([])
+  })
+})
+
+describe('UV inspect panel', () => {
+  it('stays closed with no selection and opens when corners appear', () => {
+    expect(uvInspectAfterSelection(0, false, false)).toEqual({ showPrecision: false, inspectDismissed: false })
+    expect(uvInspectAfterSelection(4, false, false)).toEqual({ showPrecision: true, inspectDismissed: false })
+  })
+  it('does not reopen after the user dismisses it until the selection is cleared', () => {
+    expect(uvInspectToggled(true)).toEqual({ showPrecision: false, inspectDismissed: true })
+    expect(uvInspectAfterSelection(4, false, true)).toEqual({ showPrecision: false, inspectDismissed: true })
+    expect(uvInspectAfterSelection(0, false, true)).toEqual({ showPrecision: false, inspectDismissed: false })
+    expect(uvInspectAfterSelection(2, false, false)).toEqual({ showPrecision: true, inspectDismissed: false })
   })
 })

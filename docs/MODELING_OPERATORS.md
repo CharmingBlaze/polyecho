@@ -96,7 +96,7 @@ Object mode **I** must not inset the whole mesh (`startModalOperator` returns ea
 
 ## Transform gizmo (`updateTransformGizmo`)
 
-Lives in `Viewport3D.vue`. Default is Three.js `TransformControls` (translate / rotate / scale as separate tools) on `transformProxy`. Overlays → **Combined gizmo** switches to `@voluma/three-transform-gizmo` (`TransformGizmo`): Select and Move then show all TRS handles. Rotate / Scale tools still use dedicated modes. Origin edit stays translate-only.
+Lives in `Viewport3D.vue`. Default is Three.js `TransformControls` (translate / rotate / scale as separate tools) on `transformProxy`. Overlays → **Combined gizmo** (toolbar button) switches to `@voluma/three-transform-gizmo` (`TransformGizmo`) on the **scene root**: Select and Move then show all TRS handles. Rotate / Scale tools still use dedicated modes. Origin edit stays translate-only. `scaleAnchor` is `'center'` so object position and scale stay independent; Ctrl uses the package snap stepped to `snapping.gridSize`. Do not parent that gizmo under `gizmoGroup`.
 
 **Do not nest vertex / edge / face centroid logic inside `selectMode === 'object'`.** That made the gizmo stay at the object origin (or detach) in every edit mode. The attach condition is:
 
@@ -109,7 +109,11 @@ With combined gizmo off, `'select'` / `'move'` are translate. With it on, they u
 
 Single-view render must set `transformControls.getHelper().visible = true`. Triple/Blockout toggles helper visibility per column and can leave it `false` if you forget to restore when leaving that layout.
 
-Gizmo vertex/edge/face drag writes `MeshObject` verts in `onGizmoObjectChange`. Grab (**G**) writes `EditableMesh` via `MoveOperator`. Change both if the move math should match.
+Gizmo vertex/edge/face drag writes `MeshObject` verts in `onGizmoObjectChange`. Grab (**G**) in **edit** mode writes `EditableMesh` via `MoveOperator`. Object-mode **G/R/S** write `MeshObject` position / rotation / scale (same world-delta path as the object gizmo) so the handles stay on the object origin. Do not bake object grab into verts — that leaves the gizmo at the old origin.
+
+Object-mode gizmo (single or multi) applies `transformProxy.matrixWorld * inverse(dragStartProxy)` onto each mesh’s drag-start TRS. The proxy stays an identity-scale handle at the pivot, so a translate after scale cannot write scale `(1,1,1)` back onto the object. Origin edit still translates the origin and compensates verts. Bones / sockets return before this path.
+
+One history snapshot per drag (`recordState` on session start). Esc (`skipGizmoCommit`) undoes that snapshot and must not also `commitProxyTransform`.
 
 ---
 

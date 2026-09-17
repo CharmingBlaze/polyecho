@@ -4,7 +4,7 @@ Pixel Paint combines layer-based image editing with a small pixel-art toolset, u
 
 ## Workspace and images
 
-The header uses a compact UV Layout / Paint Texture switch. The Menus button reveals the existing editing menus without reserving a permanent header row. The image target, object assignment, and active-tool settings remain visible; undo and redo sit beside the Paint tool settings. UV component selection uses labeled buttons, and its inspector separates Selection, Transform, and Tools.
+The header switches UV Layout and Paint with `inspector-seg` icon buttons (hover for the name). Edit / Image / Effects / Palette / Shading menus sit on the same row. The image target, object assignment, and active-tool settings remain visible; undo and redo sit beside the Paint tool settings. Shade / size / opacity use the inspector family; palette swatches keep a single accent ring for the primary color. UV Inspect separates Selection, Transform, and Tools.
 
 
 The Texture inspector has Image, Library, and Advanced sections. Image shows the preview, usage, explicit Apply action, rename and export. Library adds and browses images without changing material bindings. Advanced contains collapsed atlas and scene-wide tools. Resize and removal controls stay collapsed until needed. Layer editing and color effects live in Paint rather than being duplicated in the inspector.

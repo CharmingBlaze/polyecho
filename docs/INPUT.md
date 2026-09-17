@@ -21,6 +21,8 @@ Paint secondary stroke is **Ctrl+LMB** (or a swatch RMB), not canvas RMB.
 
 While `operatorManager` is active, RMB is Blender-style **back / cancel / undo last click** (grab cancel, knife restart, placement step back, Poly Draw undo point). Do not also pan. Document that in the operator status line.
 
+The floating Move / Rotate / Scale (and Loop Cut) panel is **Stylus mode notifications**: File → Properties → Input. **Off by default.** Status stays in the status bar. Poly Draw / Shape Draw / Add Primitive keep their own panels.
+
 ## Adding a new view
 
 1. LMB does the tool. In a 3D perspective pane, LMB drag orbits unless the tool owns the click.

@@ -1,8 +1,6 @@
 # Rigging workspace
 
-The right inspector provides four named steps, in both focused and split layouts.
-The existing dark theme and amber accent are retained. Users may jump between steps;
-the workflow does not force a wizard or remove existing expert tools.
+The right inspector uses the same chrome as Modeling: Split / Scene / Inspect, a flush icon rail, and one sheet at a time (`inspector-head`, `inspector-seg`, `inspector-chip`, `inspector-range`, `inspector-select`). Viewport bone drawing (left/right colors, amber selection) is unchanged. Users may jump between rail tabs; opening Bone does not turn on test pose. The workflow does not force a numbered wizard.
 
 1. **Skeleton:** select a model, add a fitted Human, Four-legged, Bird, Fish,
    Flexible chain or Single joint skeleton, or draw custom bones. Move joints in
@@ -13,21 +11,21 @@ the workflow does not force a wizard or remove existing expert tools.
    attachment for rigid parts. Operations affect the named model. Repeat for other
    parts. Recalculating replaces its weights and rigid attachment; attaching a solid
    part clears vertex weights to avoid applying both deformations. Both are undoable.
-   Selected-face/vertex/edge binding, split boundaries and unbinding are under Advanced.
+   Selected-face/vertex/edge binding, split boundaries and unbinding remain on Bind.
 3. **Weights:** select a bone and Paint to inspect its heatmap. Labeled tools expose
    Draw, Subtract, Smooth, Fill brush and Sample weight. Select verts enables vertex
    selection for numeric assignment. Brush falloff, local X mirror, normalization,
    and mesh utilities remain available. Rigid parts must switch to flexible binding
    before painting affects their deformation.
-4. **Test:** search/select bones and rotate them temporarily with X/Y/Z sliders or
-   the viewport. Binding checks report unweighted vertices, invalid weights and
-   broken bone parents/lengths. Reset or leaving the step restores the rest pose;
-   these controls do not create keyframes. Open Animation enters the existing editor.
+4. **Test:** on the Bone sheet, rotate a selected joint with X/Y/Z sliders or
+   the viewport after turning Pose on. Binding checks report unweighted vertices, invalid weights and
+   broken bone parents/lengths. Reset pose restores rest; these controls do not create keyframes. Animation on that sheet enters the existing editor.
 
 ## Implementation
 
-- `RiggingWorkspace.vue` coordinates the existing tools through stores. Inspector
-  tab names are retained for compatibility with existing commands.
+- `RightSidebar.vue` mounts the four rig sheets on the shared inspector rail:
+  `SkeletonPanel` (skeleton), `RiggingPanel` (Bone / `props`), `BindingsPanel`,
+  `WeightsPanel`. Inspector tab names are retained for compatibility with existing commands.
 - `RiggingWorkflow.ts` supplies templates, mesh rest transforms and read-only checks.
 - Preset creation is a single history transaction in `animationStore`.
 - Automatic weights, paint hit distances, full geometry construction and fast

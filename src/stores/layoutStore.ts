@@ -37,14 +37,22 @@ export const useLayoutStore = defineStore('layout', () => {
     rig: ['skeleton', 'props', 'bindings', 'weights']
   }
 
-  const inspectorTab = ref<InspectorTab>('outliner')
+  const inspectorTab = ref<InspectorTab>('tools')
   const lastInspectorTabByMode = ref<Record<string, InspectorTab>>({
-    model: 'outliner',
+    model: 'tools',
     blockout: 'refs',
-    uvpaint: 'texture',
+    uvpaint: 'props',
     animate: 'props',
     rig: 'skeleton'
   })
+  const defaultSidebarVisible: Record<string, boolean> = {
+    model: true,
+    blockout: false,
+    uvpaint: false,
+    rig: true,
+    animate: true,
+  }
+  const lastSidebarVisibleByMode = ref<Record<string, boolean>>({ ...defaultSidebarVisible })
 
   type BlockoutPane = 'front' | 'side' | 'persp'
 
@@ -175,15 +183,26 @@ export const useLayoutStore = defineStore('layout', () => {
 
   function restoreInspectorTab(mode: string) {
     const defaults: Record<string, InspectorTab> = {
-      model: 'outliner',
+      model: 'tools',
       blockout: 'refs',
-      uvpaint: 'texture',
+      uvpaint: 'props',
       animate: 'props',
       rig: 'skeleton'
     }
     const visible = visibleInspectorTabs(mode)
     const remembered = lastInspectorTabByMode.value[mode] || defaults[mode] || 'outliner'
     inspectorTab.value = visible.includes(remembered) ? remembered : (visible[0] || 'outliner')
+  }
+
+  function noteSidebarVisible(mode: string, visible: boolean) {
+    if (!mode) return
+    lastSidebarVisibleByMode.value = { ...lastSidebarVisibleByMode.value, [mode]: visible }
+  }
+
+  function applySidebarForMode(mode: string) {
+    const remembered = lastSidebarVisibleByMode.value[mode]
+    showRightSidebar.value = remembered ?? defaultSidebarVisible[mode] ?? true
+    restoreInspectorTab(mode)
   }
 
   function toggleLeftToolbar() {
@@ -255,6 +274,9 @@ export const useLayoutStore = defineStore('layout', () => {
     visibleInspectorTabs,
     setInspectorTab,
     restoreInspectorTab,
+    noteSidebarVisible,
+    applySidebarForMode,
+    lastSidebarVisibleByMode,
     toggleLeftToolbar,
     toggleRightSidebar,
     toggleStatusBar,

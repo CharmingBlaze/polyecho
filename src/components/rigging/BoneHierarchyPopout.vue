@@ -349,9 +349,9 @@ function closePopout() {
     >
       <div class="flex items-center gap-1.5 font-semibold text-ui-textPrimary">
         <GripHorizontal class="w-3.5 h-3.5 text-ui-textMuted opacity-60" />
-        <FolderTree class="w-3.5 h-3.5 text-ui-accent" />
+        <FolderTree class="w-3.5 h-3.5 text-ui-textMuted" />
         <span class="text-[11px] font-bold uppercase tracking-wider text-ui-textMuted">Bone Hierarchy</span>
-        <span class="text-[10px] px-1.5 py-0.2 bg-ui-input/80 border border-ui-borderSubtle rounded-xs text-ui-textAccent font-mono">
+        <span class="text-[10px] px-1.5 py-0.2 bg-ui-input/80 border border-ui-borderSubtle rounded-xs inspector-value font-mono">
           {{ animationStore.armature.bones.length }}
         </span>
       </div>
@@ -468,7 +468,7 @@ function closePopout() {
             </button>
             <button 
               @click="handleResetPose"
-              class="py-1 px-1.5 bg-ui-input hover:bg-amber-500/10 border border-ui-borderSubtle text-amber-300 rounded-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer"
+              class="py-1 px-1.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary rounded-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer"
               title="Reset Rest Pose (Alt+R)"
             >
               <RotateCcw class="w-2.5 h-2.5" />
@@ -504,23 +504,23 @@ function closePopout() {
               class="flex-1 py-1 px-1.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary hover:text-ui-textPrimary rounded-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer"
               title="Extrude Child Bone (E)"
             >
-              <GitBranch class="w-2.5 h-2.5 text-amber-400" />
+              <GitBranch class="w-2.5 h-2.5" />
               <span>Extrude</span>
             </button>
             <button 
               @click="handleToggleDrawBone"
               class="py-1 px-1.5 rounded-xs font-semibold flex items-center justify-center gap-1 transition border cursor-pointer"
-              :class="animationStore.clickToPlaceMode ? 'bg-amber-500/20 text-amber-300 border-amber-500/60' : 'bg-ui-input border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
+              :class="animationStore.clickToPlaceMode ? 'bg-ui-active text-ui-textPrimary border-ui-borderStrong' : 'bg-ui-input border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
               title="Draw Bone in 3D (B)"
             >
               <Crosshair class="w-2.5 h-2.5" />
             </button>
             <button 
               @click="handleSymmetrize"
-              class="py-1 px-1.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary hover:text-sky-300 rounded-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer"
+              class="py-1 px-1.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary hover:text-ui-textPrimary rounded-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer"
               title="Mirror Skeleton X"
             >
-              <FlipHorizontal class="w-2.5 h-2.5 text-sky-400" />
+              <FlipHorizontal class="w-2.5 h-2.5" />
             </button>
           </template>
         </div>
@@ -547,7 +547,7 @@ function closePopout() {
               @click="selectBone(node.bone.id)"
               class="flex items-center justify-between pr-2 py-1 rounded-xs cursor-pointer text-[11px] transition group"
               :style="{ paddingLeft: `${8 + node.depth * 14}px` }"
-              :class="animationStore.selectedBoneId === node.bone.id && !animationStore.selectedSocketId ? 'bg-ui-active text-ui-textAccent font-semibold border border-ui-accent/40 shadow-xs' : 'hover:bg-ui-hover text-ui-textSecondary'"
+              :class="animationStore.selectedBoneId === node.bone.id && !animationStore.selectedSocketId ? 'bg-ui-active text-ui-textPrimary font-semibold border border-ui-borderStrong' : 'hover:bg-ui-hover text-ui-textSecondary'"
             >
               <div class="flex items-center gap-1.5 truncate flex-1 min-w-0">
                 <!-- Branch Expand / Collapse Toggle -->
@@ -565,7 +565,7 @@ function closePopout() {
 
                 <GitCommitVertical 
                   class="w-3.5 h-3.5 shrink-0" 
-                  :class="animationStore.selectedBoneId === node.bone.id && !animationStore.selectedSocketId ? 'text-ui-accent' : node.depth === 0 ? 'text-purple-400' : 'text-sky-400'" 
+                  :class="animationStore.selectedBoneId === node.bone.id && !animationStore.selectedSocketId ? 'text-ui-textPrimary' : 'text-ui-textMuted'" 
                 />
                 
                 <input 
@@ -579,7 +579,7 @@ function closePopout() {
                 <span 
                   v-else 
                   class="truncate select-none font-mono" 
-                  :class="node.isMatching && searchQuery ? 'text-amber-300 font-bold' : ''"
+                  :class="node.isMatching && searchQuery ? 'text-ui-textPrimary font-bold' : ''"
                   @dblclick="startRename(node.bone.id, node.bone.name)"
                   :title="node.bone.name + ' (Double-click to rename)'"
                 >
@@ -601,7 +601,7 @@ function closePopout() {
                   <EyeOff v-if="hiddenBoneIds.has(node.bone.id)" class="w-3 h-3 text-rose-400" />
                   <Eye v-else class="w-3 h-3" />
                 </button>
-                <button @click.stop="handleAddSocket(node.bone.id)" class="p-0.5 text-ui-textMuted hover:text-sky-300 cursor-pointer" title="Add Socket (+S)">
+                <button @click.stop="handleAddSocket(node.bone.id)" class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary cursor-pointer" title="Add Socket (+S)">
                   <Wrench class="w-3 h-3" />
                 </button>
                 <button @click.stop="handleAddChild(node.bone.id)" class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary cursor-pointer" title="Add Child Bone">
@@ -621,7 +621,7 @@ function closePopout() {
                 @click.stop="selectSocket(s.id)"
                 class="flex items-center justify-between pr-2 py-0.5 rounded-xs cursor-pointer text-[10px] transition group"
                 :style="{ paddingLeft: `${22 + node.depth * 14}px` }"
-                :class="animationStore.selectedSocketId === s.id ? 'bg-sky-500/20 text-sky-300 font-semibold border border-sky-500/50 shadow-xs' : 'text-sky-400 hover:bg-ui-hover'"
+                :class="animationStore.selectedSocketId === s.id ? 'bg-ui-active text-ui-textPrimary font-semibold border border-ui-borderStrong' : 'text-ui-textSecondary hover:bg-ui-hover'"
               >
                 <div class="flex items-center gap-1.5 truncate flex-1 min-w-0">
                   <Wrench class="w-2.5 h-2.5 shrink-0" />
@@ -630,7 +630,7 @@ function closePopout() {
                     v-model="editingSocketName"
                     @blur="commitSocketRename(node.bone.id, s.id)"
                     @keydown.enter="commitSocketRename(node.bone.id, s.id)"
-                    class="bg-ui-input text-sky-200 px-1 py-0.5 rounded-xs text-[10px] w-full border border-sky-400 focus:outline-none"
+                    class="bg-ui-input text-ui-textPrimary px-1 py-0.5 rounded-xs text-[10px] w-full border border-ui-accent focus:outline-none"
                     autoFocus
                   />
                   <span v-else class="truncate select-none font-mono" @dblclick="startSocketRename(s.id, s.name)">
@@ -650,9 +650,9 @@ function closePopout() {
 
       <!-- 4. Selected Joint / Socket Inspector Tray -->
       <!-- Case A: Selected Socket -->
-      <div v-if="selectedSocket" class="p-2 border-t border-ui-borderSubtle bg-sky-950/20 space-y-1.5 text-[10px] shrink-0">
+      <div v-if="selectedSocket" class="p-2 border-t border-ui-borderSubtle bg-ui-surface space-y-1.5 text-[10px] shrink-0">
         <div class="flex items-center justify-between">
-          <div class="flex items-center gap-1.5 text-sky-300 font-semibold truncate">
+          <div class="flex items-center gap-1.5 text-ui-textPrimary font-semibold truncate">
             <Wrench class="w-3 h-3 shrink-0" />
             <span class="truncate">Socket: {{ selectedSocket.socket.name }}</span>
             <span class="text-ui-textMuted font-normal">({{ selectedSocket.bone.name }})</span>
@@ -676,7 +676,7 @@ function closePopout() {
           <button 
             v-if="projectStore.activeMesh"
             @click="handleAttachActiveMeshToSocket(selectedSocket.socket.id)"
-            class="px-2 py-0.5 bg-sky-600 hover:bg-sky-500 text-white rounded-xs font-semibold flex items-center gap-1 transition cursor-pointer shadow-xs"
+            class="px-2 py-0.5 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold flex items-center gap-1 transition cursor-pointer shadow-xs"
             :title="'Attach ' + projectStore.activeMesh.name + ' to this socket'"
           >
             <Link class="w-2.5 h-2.5" />
@@ -692,11 +692,11 @@ function closePopout() {
           <span v-if="selectedBone.parentId" class="text-ui-textSecondary truncate max-w-[90px]">
             Parent: {{ animationStore.armature.bones.find(b => b.id === selectedBone?.parentId)?.name }}
           </span>
-          <span v-else class="text-purple-400 font-semibold">(Root)</span>
+          <span v-else class="text-ui-textMuted font-semibold">(Root)</span>
         </div>
         <button 
           @click="handleAddSocket(selectedBone.id)"
-          class="px-1.5 py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[10px] text-sky-300 font-semibold transition cursor-pointer"
+          class="px-1.5 py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[10px] text-ui-textSecondary font-semibold transition cursor-pointer"
         >
           + Socket
         </button>

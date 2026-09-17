@@ -29,14 +29,14 @@ Ring traversal preserves direction across opposite quad edges, so off-centre pre
 
 ## Primitives
 
-The Add panel exposes the selected primitive's parameters. Direct placement supports exact dimensions; CAD drawing exposes detail options while dimensions follow the drawing. Parameter edits update the active preview without placing it.
+The Add panel (`AddPrimitivePopout.vue`) is the only placement chrome. Draw / Place, Surface / World, settings, live size, Confirm, and Back live there. The viewport operator HUD does not open for primitives. Shortcut help stays in the status bar. Viewport ghost drawing is unchanged.
 
 - Boxes and planes support genuine quad subdivisions. Box borders share vertices.
 - Cylinders support height divisions and independent end caps.
 - All 16 primitive presets are checked for valid topology and outward winding. Open plane and circle presets retain their intended open surface.
 - Placement follows translated, rotated, and scaled mesh surfaces.
 - CAD drawing accepts typed sizes and heights, Shift constrains a square footprint, and grid snapping applies to mouse-driven dimensions. Typed dimensions remain exact.
-- Scroll adjusts detail; the ghost shows logical polygon edges and caches geometry while moving.
+- Scroll adjusts detail; the ghost is a translucent mesh with a dashed bounding box (logical edges show on non-box shapes) and caches geometry while moving.
 
 Cylinder caps and several other presets use n-gons. Use subdivision or triangulation where the target workflow requires only quads or triangles.
 

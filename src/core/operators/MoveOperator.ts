@@ -73,6 +73,11 @@ export class MoveOperator extends ModalOperator {
       delta.z = this.snapManager.snapLinear(delta.z, step)
     }
 
+    if (this.ctx.isObjectMode) {
+      this.applyObjectTranslation(delta)
+      return
+    }
+
     const targetVertIds = this.collectTargetVertIds()
     const worldMat = this.ctx.objectMatrix ?? new THREE.Matrix4()
     const movingWorld: THREE.Vector3[] = []
@@ -85,7 +90,7 @@ export class MoveOperator extends ModalOperator {
       movingWorld.push(initPos.clone().add(delta))
     }
 
-    let extra = new THREE.Vector3()
+    const extra = new THREE.Vector3()
     if ((this.ctx.snapVertex || this.ctx.snapEdge || this.ctx.snapFace) && movingWorld.length > 0) {
       const targets: THREE.Vector3[] = []
       if (this.ctx.snapVertex) {

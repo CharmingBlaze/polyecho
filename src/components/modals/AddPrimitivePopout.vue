@@ -1,38 +1,127 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { PrimitiveType } from '../../core/primitives/PrimitiveTypes'
-import { PrimitivePlacementOperator, PrimitivePlacementMode } from '../../core/operators/placement/PrimitivePlacementOperator'
+import { PrimitivePlacementOperator, PrimitivePlacementMode, PrimitivePlacementState } from '../../core/operators/placement/PrimitivePlacementOperator'
 import { PrimitiveRegistry } from '../../core/primitives/PrimitiveRegistry'
 import { operatorManager } from '../../core/operators/OperatorManager'
 import { useLayoutStore } from '../../stores/layoutStore'
 import { useFloatingDrag } from '../../composables/useFloatingDrag'
 import { PlacementOrientation } from '../../core/placement/SurfacePlacementSolver'
 import BlenderIcon from '../icons/BlenderIcon.vue'
+import UiButton from '../ui/UiButton.vue'
 import { EDITOR_EVENTS, requestPrimitivePlacement } from '../../core/commands/editorCommands'
-import { 
-  X, 
-  Search, 
-  Box, 
-  Shapes, 
-  Building2, 
-  GripHorizontal, 
-  Minus, 
-  Plus 
-} from 'lucide-vue-next'
+import { X, GripHorizontal, Minus, Plus } from 'lucide-vue-next'
 
 const layoutStore = useLayoutStore()
 const visible = ref(false)
 const isMinimized = ref(false)
 const position = ref({ x: 120, y: 70 })
-const activeTab = ref<'basic' | 'shapes' | 'build'>('basic')
+const activeTab = ref<'BASIC' | 'SHAPES' | 'BUILD'>('BASIC')
 const searchQuery = ref('')
 
 const placementMode = ref<PrimitivePlacementMode>(PrimitivePlacementMode.CAD_DRAW)
 const orientation = ref<PlacementOrientation>('SURFACE')
 const chosenType = ref<PrimitiveType>('BOX')
 const settings = ref<Record<string, any>>({ ...PrimitiveRegistry.get('BOX')!.defaultParameters })
-const fieldLabels: Record<string, string> = { heightSegments: 'Height divisions', segmentsX: 'Width divisions', segmentsY: 'Height divisions', segmentsZ: 'Depth divisions', sides: 'Sides', segments: 'Segments', rings: 'Rings', subdivisions: 'Subdivisions', capTop: 'Top cap', capBottom: 'Bottom cap', majorRadius: 'Ring radius', tubeRadius: 'Tube radius', majorSegments: 'Ring segments', tubeSegments: 'Tube segments', outerRadius: 'Outer radius', innerRadius: 'Inner radius', totalRun: 'Run', totalHeight: 'Height', openingWidth: 'Opening width', openingHeight: 'Opening height' }
+const fieldLabels: Record<string, string> = {
+  heightSegments: 'Height divisions',
+  segmentsX: 'Width divisions',
+  segmentsY: 'Height divisions',
+  segmentsZ: 'Depth divisions',
+  sides: 'Sides',
+  segments: 'Segments',
+  rings: 'Rings',
+  subdivisions: 'Subdivisions',
+  capTop: 'Top cap',
+  capBottom: 'Bottom cap',
+  majorRadius: 'Ring radius',
+  tubeRadius: 'Tube radius',
+  majorSegments: 'Ring segments',
+  tubeSegments: 'Tube segments',
+  outerRadius: 'Outer radius',
+  innerRadius: 'Inner radius',
+  totalRun: 'Run',
+  totalHeight: 'Height',
+  openingWidth: 'Opening width',
+  openingHeight: 'Opening height'
+}
 const fields = computed(() => Object.keys(settings.value).filter(key => placementMode.value === PrimitivePlacementMode.PLACE || /segments|rings|sides|steps|subdivisions|cap|filled|flip/i.test(key)))
+const chosenLabel = computed(() => PrimitiveRegistry.get(chosenType.value)?.label || 'Box')
+const placing = computed(() => {
+  void operatorManager.state.value.active
+  void operatorManager.state.value.previewTick
+  void operatorManager.state.value.statusText
+  const op = operatorManager.activeOperator
+  return op instanceof PrimitivePlacementOperator ? op : null
+})
+const liveOrientation = computed(() => placing.value?.placementOrientation ?? orientation.value)
+const canConfirm = computed(() => {
+  const op = placing.value
+  if (!op) return false
+  if (op.mode === PrimitivePlacementMode.PLACE) return op.state === PrimitivePlacementState.PLACE_PREVIEW
+  return op.state === PrimitivePlacementState.DRAWING_PRIMARY || op.state === PrimitivePlacementState.DRAWING_SECONDARY
+})
+const sessionHint = computed(() => {
+  const op = placing.value
+  if (!op) return placementMode.value === PrimitivePlacementMode.PLACE ? 'Set size, then click a surface.' : 'Draw the size. Scroll adjusts detail.'
+  if (op.mode === PrimitivePlacementMode.PLACE) return 'Click a surface to drop.'
+  if (op.state === PrimitivePlacementState.WAITING_FOR_START) return 'Click to start the footprint.'
+  if (op.state === PrimitivePlacementState.DRAWING_PRIMARY) return 'Drag size. Shift for square. LMB locks.'
+  return 'Pull height. LMB finishes.'
+})
+
+function setOrientation(next: PlacementOrientation) {
+  orientation.value = next
+  const op = placing.value
+  if (!op) return
+  op.placementOrientation = next
+  op.updateStatus()
+}
+
+function setPlacementMode(next: PrimitivePlacementMode) {
+  placementMode.value = next
+  if (placing.value) selectPrimitive(chosenType.value)
+}
+
+function confirmPlacement() {
+  const op = placing.value
+  if (!op) return
+  if (op.mode === PrimitivePlacementMode.PLACE) operatorManager.confirm()
+  else op.handlePointerDown(0)
+}
+
+function stepBack() {
+  placing.value?.handlePointerDown(2)
+}
+
+const primitiveIcons: Record<PrimitiveType, string> = {
+  BOX: 'mesh-cube',
+  PLANE: 'mesh-plane',
+  SPHERE: 'mesh-sphere',
+  ICOSPHERE: 'mesh-icosphere',
+  CYLINDER: 'mesh-cylinder',
+  CONE: 'mesh-cone',
+  PYRAMID: 'mesh-cone',
+  CIRCLE: 'mesh-circle',
+  PRISM: 'mesh-cylinder',
+  TORUS: 'mesh-torus',
+  CAPSULE: 'mesh-cylinder',
+  WEDGE: 'mesh-cube',
+  TUBE: 'mesh-torus',
+  WALL: 'mesh-plane',
+  STAIRS: 'mesh-cube',
+  ARCH: 'mesh-torus'
+}
+
+const filteredPrimitives = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  const all = PrimitiveRegistry.getAll()
+  if (q) {
+    return all.filter(p => p.label.toLowerCase().includes(q) || p.type.toLowerCase().includes(q))
+  }
+  return PrimitiveRegistry.getByCategory(activeTab.value)
+})
+
 function updateSetting(key: string, event: Event) {
   const input = event.target as HTMLInputElement
   const value = input.type === 'checkbox' ? input.checked : Number(input.value)
@@ -44,50 +133,13 @@ function updateSetting(key: string, event: Event) {
 
 const { startDrag } = useFloatingDrag(position, { minX: 10, minY: 40, maxPadX: 320, maxPadY: 80 })
 
-interface PrimitiveItem {
-  type: PrimitiveType
-  label: string
-  desc: string
-  category: 'basic' | 'shapes' | 'build'
-  icon: string
-  color: string
-}
-
-const PRIMITIVES: PrimitiveItem[] = [
-  // BASIC
-  { type: 'BOX', label: 'Box / Cube', desc: 'Standard 6-sided solid cube', category: 'basic', icon: 'mesh-cube', color: '#f59e0b' },
-  { type: 'PLANE', label: 'Plane / Grid', desc: 'Flat 2D quad surface', category: 'basic', icon: 'mesh-plane', color: '#38bdf8' },
-  { type: 'SPHERE', label: 'UV Sphere', desc: 'Radial UV quad sphere', category: 'basic', icon: 'mesh-sphere', color: '#a855f7' },
-  { type: 'ICOSPHERE', label: 'Icosphere', desc: 'Equilateral geodesic sphere', category: 'basic', icon: 'mesh-icosphere', color: '#818cf8' },
-  { type: 'CYLINDER', label: 'Cylinder', desc: 'Smooth cylinder with end caps', category: 'basic', icon: 'mesh-cylinder', color: '#10b981' },
-  { type: 'CONE', label: 'Cone', desc: 'Conical solid with pointed tip', category: 'basic', icon: 'mesh-cone', color: '#f43f5e' },
-  { type: 'PYRAMID', label: 'Pyramid', desc: '4-sided sloped pyramid', category: 'basic', icon: 'mesh-cone', color: '#fb923c' },
-
-  // SHAPES
-  { type: 'CIRCLE', label: 'Circle / Disc', desc: 'Flat circular n-gon polygon', category: 'shapes', icon: 'mesh-circle', color: '#22d3ee' },
-  { type: 'PRISM', label: 'Prism', desc: 'Configurable 3-8 sided prism', category: 'shapes', icon: 'mesh-cylinder', color: '#34d399' },
-  { type: 'TORUS', label: 'Torus / Donut', desc: 'Smooth circular ring tube', category: 'shapes', icon: 'mesh-torus', color: '#ec4899' },
-  { type: 'CAPSULE', label: 'Capsule', desc: 'Pill shape with hemispherical caps', category: 'shapes', icon: 'mesh-cylinder', color: '#a78bfa' },
-  { type: 'WEDGE', label: 'Wedge / Ramp', desc: 'Right-angled ramp slope', category: 'shapes', icon: 'mesh-cube', color: '#eab308' },
-  { type: 'TUBE', label: 'Tube / Pipe', desc: 'Hollow cylinder pipe', category: 'shapes', icon: 'mesh-torus', color: '#14b8a6' },
-
-  // BUILD
-  { type: 'WALL', label: 'Wall Segment', desc: 'Architectural wall segment', category: 'build', icon: 'mesh-plane', color: '#f97316' },
-  { type: 'STAIRS', label: 'Stairs', desc: 'Stepped stairs with risers', category: 'build', icon: 'mesh-cube', color: '#06b6d4' },
-  { type: 'ARCH', label: 'Arch', desc: 'Curved architectural doorway', category: 'build', icon: 'mesh-torus', color: '#6366f1' },
-]
-
-const filteredPrimitives = computed(() => {
-  if (searchQuery.value.trim()) {
-    const q = searchQuery.value.toLowerCase()
-    return PRIMITIVES.filter(p => p.label.toLowerCase().includes(q) || p.desc.toLowerCase().includes(q))
-  }
-  return PRIMITIVES.filter(p => p.category === activeTab.value)
+watch(placing, (op, was) => {
+  if (op && !was && !visible.value) openAt()
 })
 
 function openAt(x?: number, y?: number) {
   if (x !== undefined && y !== undefined) {
-    const panelWidth = 360
+    const panelWidth = 320
     const panelHeight = 440
     const clampedX = Math.min(x, window.innerWidth - panelWidth - 20)
     const clampedY = Math.min(y, window.innerHeight - panelHeight - 20)
@@ -112,7 +164,10 @@ function close() {
 }
 
 function selectPrimitive(type: PrimitiveType) {
-  if (chosenType.value !== type) { chosenType.value = type; settings.value = { ...PrimitiveRegistry.get(type)!.defaultParameters } }
+  if (chosenType.value !== type) {
+    chosenType.value = type
+    settings.value = { ...PrimitiveRegistry.get(type)!.defaultParameters }
+  }
   requestPrimitivePlacement({
     type,
     mode: placementMode.value,
@@ -122,9 +177,7 @@ function selectPrimitive(type: PrimitiveType) {
 }
 
 function handleGlobalKeyDown(e: KeyboardEvent) {
-  if (e.key === 'Escape' && visible.value) {
-    close()
-  }
+  if (e.key === 'Escape' && visible.value) close()
 }
 
 function handleOpenEvent(e: any) {
@@ -158,175 +211,137 @@ defineExpose({
 </script>
 
 <template>
-  <!-- Floating, Movable, Closable & Minimizable Primitive Panel -->
-  <div 
+  <div
     data-floating-panel
-    v-if="visible" 
-    class="fixed z-50 flex flex-col bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl font-sans select-none pointer-events-auto w-[360px] text-xs transition-shadow"
+    v-if="visible"
+    class="fixed z-50 flex flex-col bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl font-sans select-none pointer-events-auto w-[320px] text-xs"
     :style="{ left: `${position.x}px`, top: `${position.y}px` }"
   >
-    <!-- Panel Draggable Header Bar -->
-    <div 
-      class="flex items-center justify-between px-2.5 py-1.5 bg-ui-header border-b border-ui-borderSubtle cursor-move rounded-t-xs text-xs text-ui-textMuted group select-none"
+    <div
+      class="inspector-head cursor-move"
       @pointerdown="startDrag"
-      title="Drag to move panel"
     >
-      <div class="flex items-center space-x-1.5">
-        <GripHorizontal class="w-3.5 h-3.5 text-ui-textMuted group-hover:text-ui-textSecondary transition" />
-        <span class="font-semibold text-ui-textPrimary text-xs tracking-wide">Add Primitives & CAD</span>
+      <div class="inspector-head-kicker">
+        <GripHorizontal class="w-3.5 h-3.5 shrink-0" />
+        <BlenderIcon name="mesh-cube" :size="12" />
+        <span>Add</span>
       </div>
-
-      <div class="flex items-center space-x-1" @mousedown.stop @pointerdown.stop>
-        <!-- Minimize Button -->
-        <button 
-          @click="isMinimized = !isMinimized" 
-          class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary transition"
-          :title="isMinimized ? 'Expand Panel' : 'Minimize Panel'"
+      <span class="inspector-head-name">{{ chosenLabel }}</span>
+      <div class="flex items-center shrink-0" @mousedown.stop @pointerdown.stop>
+        <button
+          type="button"
+          class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary"
+          :aria-label="isMinimized ? 'Expand' : 'Minimize'"
+          @click="isMinimized = !isMinimized"
         >
           <Plus v-if="isMinimized" class="w-3.5 h-3.5" />
           <Minus v-else class="w-3.5 h-3.5" />
         </button>
-
-        <!-- Close Button -->
-        <button 
-          @click="close" 
-          class="p-1 rounded-xs hover:bg-rose-950/50 text-ui-textMuted hover:text-rose-300 transition"
-          title="Close (Esc)"
+        <button
+          type="button"
+          class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary"
+          aria-label="Close"
+          @click="close"
         >
           <X class="w-3.5 h-3.5" />
         </button>
       </div>
     </div>
 
-    <!-- Body Content (Hidden when minimized) -->
-    <div v-show="!isMinimized" class="p-2.5 flex flex-col space-y-2.5 bg-ui-panel text-xs rounded-b-xs">
-      <!-- Mode & Alignment Dual Row -->
-      <div class="grid grid-cols-2 gap-2 bg-ui-input/80 border border-ui-borderSubtle rounded-xs p-1.5">
-        <!-- Placement Mode: CAD Draw vs Place -->
-        <div class="flex flex-col space-y-1">
-          <span class="text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider px-0.5">Mode</span>
-          <div class="grid grid-cols-2 gap-1 bg-ui-surface p-0.5 rounded-xs border border-ui-borderSubtle">
-            <button 
-              @click="placementMode = PrimitivePlacementMode.CAD_DRAW" 
-              class="py-1 rounded-xs text-[10px] font-medium transition text-center"
-              :class="placementMode === PrimitivePlacementMode.CAD_DRAW ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40 font-semibold shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary'"
-              title="CAD Draw Mode: Click and drag footprint on any surface, then extrude height"
-            >
-              CAD Draw
-            </button>
-            <button 
-              @click="placementMode = PrimitivePlacementMode.PLACE" 
-              class="py-1 rounded-xs text-[10px] font-medium transition text-center"
-              :class="placementMode === PrimitivePlacementMode.PLACE ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40 font-semibold shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary'"
-              title="Place Mode: One-click instant drop on any surface"
-            >
-              Direct
-            </button>
-          </div>
-        </div>
-
-        <!-- Surface Alignment: Surface Normal vs World -->
-        <div class="flex flex-col space-y-1">
-          <span class="text-[10px] font-semibold text-ui-textMuted uppercase tracking-wider px-0.5">Align To</span>
-          <div class="grid grid-cols-2 gap-1 bg-ui-surface p-0.5 rounded-xs border border-ui-borderSubtle">
-            <button 
-              @click="orientation = 'SURFACE'" 
-              class="py-1 rounded-xs text-[10px] font-medium transition text-center"
-              :class="orientation === 'SURFACE' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40 font-semibold shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary'"
-              title="Orient perpendicular to clicked surface normal"
-            >
-              Surface
-            </button>
-            <button 
-              @click="orientation = 'WORLD'" 
-              class="py-1 rounded-xs text-[10px] font-medium transition text-center"
-              :class="orientation === 'WORLD' ? 'bg-ui-active text-ui-textAccent border border-ui-accent/40 font-semibold shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary'"
-              title="Align upright to World axes"
-            >
-              World
-            </button>
-          </div>
-        </div>
+    <div v-show="!isMinimized" class="px-2.5 py-2 flex flex-col gap-2">
+      <div class="inspector-seg is-stretch" aria-label="Placement">
+        <button
+          type="button"
+          class="inspector-seg-btn"
+          :class="{ 'is-active': placementMode === PrimitivePlacementMode.CAD_DRAW }"
+          title="Draw footprint, then height"
+          @click="setPlacementMode(PrimitivePlacementMode.CAD_DRAW)"
+        >Draw</button>
+        <button
+          type="button"
+          class="inspector-seg-btn"
+          :class="{ 'is-active': placementMode === PrimitivePlacementMode.PLACE }"
+          title="Click to drop at exact size"
+          @click="setPlacementMode(PrimitivePlacementMode.PLACE)"
+        >Place</button>
+      </div>
+      <div class="inspector-seg is-stretch" aria-label="Align">
+        <button
+          type="button"
+          class="inspector-seg-btn"
+          :class="{ 'is-active': liveOrientation === 'SURFACE' }"
+          title="Follow the clicked surface"
+          @click="setOrientation('SURFACE')"
+        >Surface</button>
+        <button
+          type="button"
+          class="inspector-seg-btn"
+          :class="{ 'is-active': liveOrientation === 'WORLD' }"
+          title="Stay upright on world axes"
+          @click="setOrientation('WORLD')"
+        >World</button>
       </div>
 
-      <!-- Search Input -->
       <div class="relative">
-        <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-ui-textMuted pointer-events-none" />
-        <input 
+        <BlenderIcon name="search" :size="12" class="absolute left-2 top-1/2 -translate-y-1/2 text-ui-textMuted pointer-events-none" />
+        <input
           v-model="searchQuery"
-          type="text" 
-          placeholder="Filter primitives (cube, stairs, arch, cone)..." 
-          class="w-full bg-ui-input border border-ui-borderSubtle hover:border-ui-borderDefault focus:border-ui-accent rounded-xs pl-8 pr-3 py-1.5 text-xs text-ui-textPrimary placeholder-ui-textMuted focus:outline-none transition font-sans"
+          type="search"
+          aria-label="Filter primitives"
+          placeholder="Filter…"
+          class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs pl-7 pr-2 py-1 text-[11px] text-ui-textPrimary placeholder-ui-textMuted focus:outline-none focus:border-ui-accent"
         />
       </div>
 
-      <!-- Category Tabs (When Not Searching) -->
-      <div v-if="!searchQuery" class="flex items-center space-x-1 bg-ui-input/60 p-0.5 rounded-xs border border-ui-borderSubtle">
-        <button 
-          @click="activeTab = 'basic'"
-          class="flex-1 py-1 px-2 rounded-xs text-[11px] font-medium transition flex items-center justify-center space-x-1.5"
-          :class="activeTab === 'basic' ? 'bg-ui-surface text-ui-textPrimary border border-ui-borderDefault shadow-xs font-semibold' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
-        >
-          <Box class="w-3 h-3 text-amber-400" />
-          <span>Basic</span>
-        </button>
-
-        <button 
-          @click="activeTab = 'shapes'"
-          class="flex-1 py-1 px-2 rounded-xs text-[11px] font-medium transition flex items-center justify-center space-x-1.5"
-          :class="activeTab === 'shapes' ? 'bg-ui-surface text-ui-textPrimary border border-ui-borderDefault shadow-xs font-semibold' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
-        >
-          <Shapes class="w-3 h-3 text-sky-400" />
-          <span>Shapes</span>
-        </button>
-
-        <button 
-          @click="activeTab = 'build'"
-          class="flex-1 py-1 px-2 rounded-xs text-[11px] font-medium transition flex items-center justify-center space-x-1.5"
-          :class="activeTab === 'build' ? 'bg-ui-surface text-ui-textPrimary border border-ui-borderDefault shadow-xs font-semibold' : 'text-ui-textMuted hover:text-ui-textSecondary hover:bg-ui-hover'"
-        >
-          <Building2 class="w-3 h-3 text-emerald-400" />
-          <span>CAD Build</span>
-        </button>
+      <div v-if="!searchQuery" class="inspector-seg is-stretch" aria-label="Category">
+        <button type="button" class="inspector-seg-btn" :class="{ 'is-active': activeTab === 'BASIC' }" @click="activeTab = 'BASIC'">Basic</button>
+        <button type="button" class="inspector-seg-btn" :class="{ 'is-active': activeTab === 'SHAPES' }" @click="activeTab = 'SHAPES'">Shapes</button>
+        <button type="button" class="inspector-seg-btn" :class="{ 'is-active': activeTab === 'BUILD' }" @click="activeTab = 'BUILD'">Build</button>
       </div>
 
-      <!-- Grid of Primitives -->
-      <div class="grid grid-cols-2 gap-1.5 max-h-60 overflow-y-auto pr-0.5">
-        <button 
-          v-for="item in filteredPrimitives" 
+      <div class="grid grid-cols-2 gap-1 max-h-52 overflow-y-auto custom-scrollbar">
+        <button
+          v-for="item in filteredPrimitives"
           :key="item.type"
+          type="button"
+          class="inspector-chip w-full justify-start"
+          :class="{ 'is-active': chosenType === item.type }"
           @click="selectPrimitive(item.type)"
-          class="px-2.5 py-1.5 rounded bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle hover:border-amber-500/50 flex items-center space-x-2.5 transition active:scale-[0.98] text-left group shadow-xs"
         >
-          <div class="flex items-center justify-center shrink-0">
-            <BlenderIcon :name="(item.icon as any)" :size="18" :color="item.color" />
-          </div>
-
-          <div class="flex flex-col min-w-0 flex-1">
-            <span class="font-semibold text-ui-textPrimary group-hover:text-amber-300 text-xs truncate transition">{{ item.label }}</span>
-            <span class="text-[10px] text-ui-textMuted truncate">{{ item.desc }}</span>
-          </div>
+          <BlenderIcon :name="(primitiveIcons[item.type] as any)" :size="14" />
+          <span class="truncate">{{ item.label }}</span>
         </button>
       </div>
 
-      <details open class="border-t border-ui-borderSubtle pt-2">
-        <summary class="cursor-pointer text-ui-textPrimary font-semibold">{{ PrimitiveRegistry.get(chosenType)?.label }} settings</summary>
-        <div class="grid grid-cols-2 gap-2 mt-2 max-h-40 overflow-y-auto">
-          <label v-for="key in fields" :key="key" class="flex flex-col gap-1 text-[10px] text-ui-textMuted">
+      <div class="border-t border-ui-borderSubtle pt-2 space-y-1.5">
+        <p class="text-[10px] font-semibold text-ui-textSecondary">{{ chosenLabel }}</p>
+        <div class="grid grid-cols-2 gap-1.5">
+          <label v-for="key in fields" :key="key" class="flex flex-col gap-0.5 text-[10px] text-ui-textMuted">
             {{ fieldLabels[key] || key.charAt(0).toUpperCase() + key.slice(1) }}
-            <input v-if="typeof settings[key] === 'boolean'" type="checkbox" :checked="settings[key]" @change="updateSetting(key, $event)" />
-            <input v-else type="number" :value="settings[key]" :step="/segments|rings|sides|steps|subdivisions/i.test(key) ? 1 : 0.1" min="0" class="w-full bg-ui-input border border-ui-borderSubtle rounded px-2 py-1 text-ui-textPrimary" @change="updateSetting(key, $event)" />
+            <input
+              v-if="typeof settings[key] === 'boolean'"
+              type="checkbox"
+              :checked="settings[key]"
+              class="accent-ui-accent"
+              @change="updateSetting(key, $event)"
+            />
+            <input
+              v-else
+              type="number"
+              :value="settings[key]"
+              :step="/segments|rings|sides|steps|subdivisions/i.test(key) ? 1 : 0.1"
+              min="0"
+              class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 font-mono text-[10px] text-ui-textPrimary"
+              @change="updateSetting(key, $event)"
+            />
           </label>
         </div>
-        <p class="text-[10px] text-ui-textMuted mt-2">{{ placementMode === PrimitivePlacementMode.PLACE ? 'Set exact dimensions, then click the surface to place.' : 'Draw the size. Type a size or height; scroll adjusts detail.' }}</p>
-      </details>
-
-      <!-- Footer Info -->
-      <div class="pt-1.5 border-t border-ui-borderSubtle text-[10px] text-ui-textMuted font-mono flex items-center justify-between">
-        <span class="flex items-center gap-1">
-          <kbd class="px-1 py-0.5 bg-ui-input rounded-xs border border-ui-borderSubtle text-ui-textSecondary">Esc</kbd> or × to close
-        </span>
-        <span class="text-ui-textMuted">Stays open while you place</span>
+        <p class="text-[10px] text-ui-textMuted leading-snug">{{ sessionHint }}</p>
+        <p v-if="placing?.dimensionText" class="font-mono text-[10px] inspector-value">{{ placing.dimensionText }}</p>
+        <div v-if="placing" class="grid grid-cols-2 gap-1">
+          <UiButton size="xs" @click="stepBack">Back</UiButton>
+          <UiButton size="xs" variant="accent" :disabled="!canConfirm" @click="confirmPlacement">Confirm</UiButton>
+        </div>
       </div>
     </div>
   </div>

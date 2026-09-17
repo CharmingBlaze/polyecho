@@ -4,7 +4,6 @@ import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import { useHistoryStore } from '../../stores/historyStore'
 import { useAnimationStore } from '../../stores/animationStore'
-import { useLayoutStore } from '../../stores/layoutStore'
 import { useKeymapStore } from '../../stores/keymapStore'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import PolyEchoLogo from '../icons/PolyEchoLogo.vue'
@@ -26,7 +25,7 @@ import {
   revealInFolder,
   showDesktopAbout
 } from '../../core/desktop/desktopApi'
-import { EDITOR_EVENTS, requestCameraView, requestFillFace, requestModalTool, requestPrimitiveMenu } from '../../core/commands/editorCommands'
+import { EDITOR_EVENTS, requestCameraView, requestFillFace, requestModalTool } from '../../core/commands/editorCommands'
 
 type NavMenu = 'file' | 'edit' | 'mesh' | 'workspace' | 'space' | 'view' | 'snap' | 'overlays' | 'shade' | null
 type CameraView = 'persp' | 'top' | 'front' | 'right' | 'iso'
@@ -35,7 +34,6 @@ const projectStore = useProjectStore()
 const toolStore = useToolStore()
 const historyStore = useHistoryStore()
 const animationStore = useAnimationStore()
-const layoutStore = useLayoutStore()
 const keymapStore = useKeymapStore()
 
 const undoDescription = computed(() =>
@@ -74,12 +72,6 @@ function toggleDropdown(name: NavMenu) {
 
 function closeDropdowns() {
   activeDropdown.value = null
-}
-
-function openPrimitivesPanel(e: MouseEvent) {
-  closeDropdowns()
-  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-  requestPrimitiveMenu({ x: rect.left, y: rect.bottom + 6 })
 }
 
 function setCameraView(view: CameraView) {
@@ -391,7 +383,7 @@ onUnmounted(() => {
     <input ref="importGltfInput" type="file" accept=".gltf,.glb" class="hidden" @change="handleImportGltf" />
     <input ref="importTextureInput" type="file" accept="image/*" class="hidden" @change="handleImportTexture" />
 
-    <!-- 1. LEFT: Logo + File, Edit, Add Menus + Space/Snap/Symmetry -->
+    <!-- 1. LEFT: Logo + File, Edit, Mesh + Space/Snap/Symmetry -->
     <div class="flex items-center space-x-1 shrink-0 z-20">
       <PolyEchoLogo class="hidden min-[1366px]:flex mr-2 ml-0.5" />
 
@@ -640,20 +632,6 @@ onUnmounted(() => {
           </button>
         </div>
       </div>
-
-      <!-- Add: open primitives panel and leave it up until closed -->
-      <button
-        type="button"
-        class="h-6 px-2 rounded-xs flex items-center gap-1 text-[11.5px] font-semibold border transition cursor-pointer"
-        :class="layoutStore.showPrimitivePanel
-          ? 'bg-ui-accentSubtle text-ui-textAccent border-ui-accent/40'
-          : 'bg-amber-500/15 text-amber-200 border-amber-500/40 hover:bg-amber-500/25 hover:text-amber-100'"
-        title="Add primitives (Shift+A). Stays open until you close it."
-        @click="openPrimitivesPanel"
-      >
-        <BlenderIcon name="mesh-cube" :size="13" />
-        Add
-      </button>
 
       <div class="w-px h-3.5 bg-ui-borderSubtle mx-0.5 shrink-0"></div>
 
@@ -931,7 +909,7 @@ onUnmounted(() => {
             <input type="checkbox" v-model="toolStore.viewport.showAxes" class="rounded-xs accent-ui-accent" />
           </label>
           <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5 hover:bg-ui-hover rounded-xs">
-            <span class="flex items-center gap-1.5">
+            <span class="flex items-center gap-1.5" title="Voluma combined translate / rotate / scale">
               <BlenderIcon name="gizmo-combined" :size="12" />
               Combined gizmo
             </span>

@@ -25,6 +25,18 @@ export class ScaleOperator extends ModalOperator {
 
     const basis = PivotManager.getBasis(this.orientation, this.ctx.camera, undefined, this.ctx.objectEuler)
 
+    if (this.ctx.isObjectMode) {
+      let sx = factor, sy = factor, sz = factor
+      if (this.constraint === 'X') { sy = 1; sz = 1 }
+      else if (this.constraint === 'Y') { sx = 1; sz = 1 }
+      else if (this.constraint === 'Z') { sx = 1; sy = 1 }
+      else if (this.constraint === 'XY') sz = 1
+      else if (this.constraint === 'XZ') sy = 1
+      else if (this.constraint === 'YZ') sx = 1
+      this.applyObjectScale(sx, sy, sz)
+      return
+    }
+
     const targetVertIds = this.collectTargetVertIds()
 
     for (const [vId] of this.ctx.mesh.vertices) {

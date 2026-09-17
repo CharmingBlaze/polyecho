@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
+import { useLayoutStore } from '../../stores/layoutStore'
 import { resolveMeshBoneParentId } from '../../core/animation/Armature'
 import UiSection from '../ui/UiSection.vue'
 import UiButton from '../ui/UiButton.vue'
@@ -18,15 +19,24 @@ import {
   RefreshCw,
   Sparkles
 } from 'lucide-vue-next'
+import BlenderIcon from '../icons/BlenderIcon.vue'
 
 const animationStore = useAnimationStore()
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
+const layoutStore = useLayoutStore()
 
 const activeMesh = computed(() => projectStore.activeMesh)
 const selectedBone = computed(() => animationStore.selectedBone)
 const selectedVertexIds = computed(() => projectStore.selectedVertexIds)
-const canPaint = computed(() => !!activeMesh.value && !!selectedBone.value && !resolveMeshBoneParentId(activeMesh.value, animationStore.armature.bones))
+const rigidParentId = computed(() =>
+  activeMesh.value ? resolveMeshBoneParentId(activeMesh.value, animationStore.armature.bones) : null
+)
+const canPaint = computed(() => !!activeMesh.value && !!selectedBone.value && !rigidParentId.value)
+
+watch(() => animationStore.isWeightPaintActive, (active) => {
+  if (active) layoutStore.setInspectorTab('weights', 'rig')
+})
 
 // Quick numeric presets
 const weightPresets = [0.0, 0.25, 0.5, 0.75, 1.0]
@@ -140,21 +150,27 @@ function handleRemoveWeight(boneId: string) {
 
 <template>
   <div class="flex flex-col select-none text-xs font-sans">
-    <div class="h-7 bg-ui-header border-b border-ui-borderSubtle px-2.5 flex items-center justify-between">
-      <div class="flex items-center space-x-1.5">
-        <Paintbrush class="w-3 h-3 text-sky-400" />
-        <span class="text-[11px] font-medium text-ui-textMuted">Weights</span>
+    <div class="inspector-head">
+      <div class="inspector-head-kicker">
+        <BlenderIcon name="vertex-group" :size="12" />
+        <span>Weights</span>
       </div>
-      <span class="font-semibold text-ui-textPrimary truncate max-w-[140px] text-[11px]">
-        {{ selectedBone?.name || activeMesh?.name || 'No target' }}
-      </span>
+      <span class="inspector-head-name">{{ activeMesh?.name || selectedBone?.name || 'No object' }}</span>
+    </div>
+
+    <div class="px-2.5 py-1.5 border-b border-ui-borderSubtle">
+      <div class="text-[10px] text-ui-textSecondary truncate">
+        <span class="font-semibold text-ui-textPrimary">{{ selectedBone?.name || 'No bone' }}</span>
+        <span class="text-ui-textMuted"> · {{ animationStore.isWeightPaintActive ? 'Paint' : animationStore.isTestPoseActive ? 'Pose' : 'Select' }}</span>
+      </div>
     </div>
 
     <UiSection title="Mode" :icon="Paintbrush" :default-open="true">
-      <div class="grid grid-cols-3 gap-1">
-        <UiButton size="xs" :variant="!animationStore.isWeightPaintActive && !animationStore.isTestPoseActive ? 'accent' : 'default'" @click="animationStore.toggleWeightPaint(false); animationStore.toggleTestPose(false); toolStore.setSelectMode('vertex')">Select verts</UiButton>
-        <UiButton size="xs" :variant="animationStore.isTestPoseActive ? 'accent' : 'default'" @click="animationStore.toggleWeightPaint(false); animationStore.toggleTestPose(true)">Pose</UiButton>
-        <UiButton size="xs" :disabled="!canPaint" :variant="animationStore.isWeightPaintActive ? 'accent' : 'default'" @click="animationStore.toggleWeightPaint(true)">Paint</UiButton>
+      <p v-if="rigidParentId" class="text-[10px] text-ui-textSecondary leading-snug">This mesh is rigid-attached. Unbind it in Bind, or use automatic weights, before painting.</p>
+      <div class="inspector-seg is-stretch">
+        <button type="button" class="inspector-seg-btn" :class="{ 'is-active': !animationStore.isWeightPaintActive && !animationStore.isTestPoseActive }" @click="animationStore.toggleWeightPaint(false); animationStore.toggleTestPose(false); toolStore.setSelectMode('vertex')">Select verts</button>
+        <button type="button" class="inspector-seg-btn" :class="{ 'is-active': animationStore.isTestPoseActive }" @click="animationStore.toggleWeightPaint(false); animationStore.toggleTestPose(true)">Pose</button>
+        <button type="button" class="inspector-seg-btn" :disabled="!canPaint" :class="{ 'is-active': animationStore.isWeightPaintActive }" @click="animationStore.toggleWeightPaint(true)">Paint</button>
       </div>
     </UiSection>
 
@@ -162,7 +178,7 @@ function handleRemoveWeight(boneId: string) {
       <select
         v-if="animationStore.armature.bones.length"
         :value="animationStore.selectedBoneId || ''"
-        class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-xs cursor-pointer"
+        class="inspector-select w-full"
         @change="animationStore.selectBone(($event.target as HTMLSelectElement).value)"
       >
         <option value="" class="bg-ui-panel">Select bone</option>
@@ -172,29 +188,29 @@ function handleRemoveWeight(boneId: string) {
     </UiSection>
 
     <UiSection title="Brush" :icon="Wand2" :default-open="true">
-      <div class="grid grid-cols-2 gap-1">
-        <UiButton :variant="animationStore.weightPaintTool === 'draw' ? 'accent' : 'default'" title="Blend toward the target weight" @click="animationStore.weightPaintTool = 'draw'"><Paintbrush class="w-3 h-3" /> Draw</UiButton>
-        <UiButton :variant="animationStore.weightPaintTool === 'subtract' ? 'accent' : 'default'" title="Reduce this bone's influence" @click="animationStore.weightPaintTool = 'subtract'"><Eraser class="w-3 h-3" /> Subtract</UiButton>
-        <UiButton :variant="animationStore.weightPaintTool === 'smooth' ? 'accent' : 'default'" title="Blend neighboring weights" @click="animationStore.weightPaintTool = 'smooth'"><Sparkles class="w-3 h-3" /> Smooth</UiButton>
-        <UiButton :variant="animationStore.weightPaintTool === 'fill' ? 'accent' : 'default'" title="Set all vertices inside the brush to the target weight" @click="animationStore.weightPaintTool = 'fill'"><Layers class="w-3 h-3" /> Fill brush</UiButton>
-        <UiButton class="col-span-2" :variant="animationStore.weightPaintTool === 'sample' ? 'accent' : 'default'" title="Pick a weight from the model" @click="animationStore.weightPaintTool = 'sample'"><Pipette class="w-3 h-3" /> Sample weight</UiButton>
+      <div class="flex flex-wrap gap-1">
+        <button type="button" class="inspector-chip" :class="{ 'is-active': animationStore.weightPaintTool === 'draw' }" title="Blend toward the target weight" @click="animationStore.weightPaintTool = 'draw'"><Paintbrush class="w-3 h-3" /> Draw</button>
+        <button type="button" class="inspector-chip" :class="{ 'is-active': animationStore.weightPaintTool === 'subtract' }" title="Reduce this bone's influence" @click="animationStore.weightPaintTool = 'subtract'"><Eraser class="w-3 h-3" /> Subtract</button>
+        <button type="button" class="inspector-chip" :class="{ 'is-active': animationStore.weightPaintTool === 'smooth' }" title="Blend neighboring weights" @click="animationStore.weightPaintTool = 'smooth'"><Sparkles class="w-3 h-3" /> Smooth</button>
+        <button type="button" class="inspector-chip" :class="{ 'is-active': animationStore.weightPaintTool === 'fill' }" title="Set all vertices inside the brush to the target weight" @click="animationStore.weightPaintTool = 'fill'"><Layers class="w-3 h-3" /> Fill brush</button>
+        <button type="button" class="inspector-chip" :class="{ 'is-active': animationStore.weightPaintTool === 'sample' }" title="Pick a weight from the model" @click="animationStore.weightPaintTool = 'sample'"><Pipette class="w-3 h-3" /> Sample weight</button>
       </div>
       <div class="flex items-center justify-between text-[10px]">
         <span class="text-ui-textMuted cursor-ew-resize" @mousedown="startScrubNumeric($event, () => animationStore.weightBrushWeight, val => animationStore.weightBrushWeight = val, 0, 1, 0.02, 2)">Weight</span>
-        <span class="font-mono">{{ Math.round(animationStore.weightBrushWeight * 100) }}%</span>
+        <span class="font-mono inspector-value">{{ Math.round(animationStore.weightBrushWeight * 100) }}%</span>
       </div>
-      <input type="range" min="0" max="1" step="0.01" v-model.number="animationStore.weightBrushWeight" class="w-full accent-ui-accent h-1 bg-ui-input rounded-xs" />
-      <div class="grid grid-cols-5 gap-1">
-        <UiButton v-for="pw in weightPresets" :key="pw" size="xs" :variant="Math.abs(animationStore.weightBrushWeight - pw) < 0.01 ? 'accent' : 'default'" @click="animationStore.weightBrushWeight = pw">{{ pw }}</UiButton>
+      <input type="range" min="0" max="1" step="0.01" v-model.number="animationStore.weightBrushWeight" class="inspector-range" />
+      <div class="inspector-seg is-stretch">
+        <button v-for="pw in weightPresets" :key="pw" type="button" class="inspector-seg-btn" :class="{ 'is-active': Math.abs(animationStore.weightBrushWeight - pw) < 0.01 }" @click="animationStore.weightBrushWeight = pw">{{ pw }}</button>
       </div>
       <div class="grid grid-cols-2 gap-2">
         <div>
-          <div class="flex justify-between text-[10px] text-ui-textMuted"><span>Radius</span><span class="font-mono text-ui-textPrimary">{{ animationStore.weightBrushRadius }}</span></div>
-          <input type="range" min="0.05" max="3" step="0.05" v-model.number="animationStore.weightBrushRadius" class="w-full accent-ui-accent h-1" />
+          <div class="flex justify-between text-[10px] text-ui-textMuted"><span>Radius</span><span class="font-mono inspector-value">{{ animationStore.weightBrushRadius }}</span></div>
+          <input type="range" min="0.05" max="3" step="0.05" v-model.number="animationStore.weightBrushRadius" class="inspector-range" />
         </div>
         <div>
-          <div class="flex justify-between text-[10px] text-ui-textMuted"><span>Strength</span><span class="font-mono text-ui-textPrimary">{{ Math.round(animationStore.weightBrushStrength * 100) }}%</span></div>
-          <input type="range" min="0.05" max="1" step="0.05" v-model.number="animationStore.weightBrushStrength" class="w-full accent-ui-accent h-1" />
+          <div class="flex justify-between text-[10px] text-ui-textMuted"><span>Strength</span><span class="font-mono inspector-value">{{ Math.round(animationStore.weightBrushStrength * 100) }}%</span></div>
+          <input type="range" min="0.05" max="1" step="0.05" v-model.number="animationStore.weightBrushStrength" class="inspector-range" />
         </div>
       </div>
     </UiSection>
@@ -204,7 +220,7 @@ function handleRemoveWeight(boneId: string) {
         <UiButton size="xs" :disabled="!selectedVertexIds.length || !selectedBone" @click="handleFloodFillSelection">Fill sel</UiButton>
         <UiButton size="xs" :disabled="!selectedVertexIds.length || !selectedBone" @click="handleAssign100">Assign 100</UiButton>
       </div>
-      <div v-for="inf in aggregateWeights" :key="inf.boneId" class="flex items-center justify-between text-[10px] px-1.5 py-0.5 rounded-xs" :class="inf.isSelected ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textSecondary'">
+      <div v-for="inf in aggregateWeights" :key="inf.boneId" class="flex items-center justify-between text-[10px] px-1.5 py-0.5 rounded-xs" :class="inf.isSelected ? 'bg-ui-active text-ui-textPrimary' : 'text-ui-textSecondary'">
         <span class="truncate">{{ inf.boneName }}</span>
         <span class="font-mono flex items-center gap-1">{{ (inf.avgWeight * 100).toFixed(0) }}%
           <button type="button" class="text-ui-textMuted hover:text-rose-400" @click="handleRemoveWeight(inf.boneId)"><Trash2 class="w-3 h-3" /></button>
@@ -214,10 +230,10 @@ function handleRemoveWeight(boneId: string) {
     </UiSection>
 
     <UiSection title="Brush options" :icon="RefreshCw" :default-open="false">
-      <div class="grid grid-cols-3 gap-1">
-        <UiButton size="xs" :variant="animationStore.weightBrushFalloff === 'smooth' ? 'accent' : 'default'" @click="animationStore.weightBrushFalloff = 'smooth'">Smooth</UiButton>
-        <UiButton size="xs" :variant="animationStore.weightBrushFalloff === 'linear' ? 'accent' : 'default'" @click="animationStore.weightBrushFalloff = 'linear'">Linear</UiButton>
-        <UiButton size="xs" :variant="animationStore.weightBrushFalloff === 'constant' ? 'accent' : 'default'" @click="animationStore.weightBrushFalloff = 'constant'">Hard</UiButton>
+      <div class="inspector-seg is-stretch">
+        <button type="button" class="inspector-seg-btn" :class="{ 'is-active': animationStore.weightBrushFalloff === 'smooth' }" @click="animationStore.weightBrushFalloff = 'smooth'">Smooth</button>
+        <button type="button" class="inspector-seg-btn" :class="{ 'is-active': animationStore.weightBrushFalloff === 'linear' }" @click="animationStore.weightBrushFalloff = 'linear'">Linear</button>
+        <button type="button" class="inspector-seg-btn" :class="{ 'is-active': animationStore.weightBrushFalloff === 'constant' }" @click="animationStore.weightBrushFalloff = 'constant'">Hard</button>
       </div>
       <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
         <span>Normalize</span>

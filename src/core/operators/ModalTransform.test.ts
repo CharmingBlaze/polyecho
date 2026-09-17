@@ -100,3 +100,78 @@ describe('modal G/R/S numeric evaluate', () => {
     expect(ctx.mesh.vertices.get(ids[1])!.position.distanceTo(expectB)).toBeLessThan(1e-4)
   })
 })
+
+describe('object-mode G/R/S', () => {
+  function objectContext() {
+    const cube = createCube('Cube', 2)
+    cube.position = { x: 1, y: 0, z: 0 }
+    cube.rotation = { x: 0, y: 0, z: 0 }
+    cube.scale = { x: 1, y: 0.4, z: 1 }
+    const { mesh } = MeshBridge.meshObjectToEditableMesh(cube)
+    const camera = new THREE.PerspectiveCamera(50, 800 / 600, 0.1, 100)
+    camera.position.set(8, 8, 8)
+    camera.lookAt(0, 0, 0)
+    camera.updateMatrixWorld()
+    return {
+      cube,
+      mesh,
+      ctx: {
+        mesh,
+        selectedVertIds: [...mesh.vertices.keys()],
+        selectedFaceIds: [],
+        selectedEdgeIds: [],
+        selectedMeshIds: [cube.id],
+        isObjectMode: true,
+        camera,
+        viewportElement: fakeViewport(),
+        pivotMode: 'MEDIAN' as const,
+        allMeshes: [cube],
+        targetMeshId: cube.id,
+        onUpdatePreview: () => {},
+        onCommit: () => {},
+        onCancel: () => {},
+      } satisfies OperatorContext
+    }
+  }
+
+  it('G moves MeshObject.position and leaves local verts', () => {
+    const { cube, mesh, ctx } = objectContext()
+    const vertId = [...mesh.vertices.keys()][0]
+    const local = mesh.vertices.get(vertId)!.position.clone()
+    const op = new MoveOperator()
+    op.begin(ctx, { x: 400, y: 300 })
+    op.keyDown(key('x'))
+    op.keyDown(key('1'))
+    expect(cube.position.x).toBeCloseTo(2)
+    expect(cube.scale.y).toBeCloseTo(0.4)
+    expect(mesh.vertices.get(vertId)!.position.x).toBeCloseTo(local.x)
+    expect(mesh.vertices.get(vertId)!.position.y).toBeCloseTo(local.y)
+  })
+
+  it('S scales MeshObject.scale around the origin', () => {
+    const { cube, mesh, ctx } = objectContext()
+    const vertId = [...mesh.vertices.keys()][0]
+    const local = mesh.vertices.get(vertId)!.position.clone()
+    const op = new ScaleOperator()
+    op.begin(ctx, { x: 400, y: 300 })
+    op.keyDown(key('2'))
+    expect(cube.scale.x).toBeCloseTo(2)
+    expect(cube.scale.y).toBeCloseTo(0.8)
+    expect(cube.position.x).toBeCloseTo(1)
+    expect(mesh.vertices.get(vertId)!.position.distanceTo(local)).toBeLessThan(1e-6)
+  })
+
+  it('R rotates MeshObject.rotation and keeps verts', () => {
+    const { cube, mesh, ctx } = objectContext()
+    const vertId = [...mesh.vertices.keys()][0]
+    const local = mesh.vertices.get(vertId)!.position.clone()
+    const op = new RotateOperator()
+    op.begin(ctx, { x: 400, y: 300 })
+    op.keyDown(key('z'))
+    op.keyDown(key('9'))
+    op.keyDown(key('0'))
+    expect(cube.rotation.z).toBeCloseTo(90)
+    expect(cube.position.x).toBeCloseTo(1)
+    expect(mesh.vertices.get(vertId)!.position.distanceTo(local)).toBeLessThan(1e-6)
+  })
+})

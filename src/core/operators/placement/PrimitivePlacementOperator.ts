@@ -515,19 +515,16 @@ export class PrimitivePlacementOperator extends ModalOperator {
   }
 
   updateStatus() {
-    const modeLabel = this.mode === PrimitivePlacementMode.PLACE ? 'Place' : 'CAD Draw'
     const orientLabel = this.placementOrientation === 'WORLD' ? 'World' : 'Surface'
-
+    const label = PrimitiveRegistry.get(this.primitiveType)?.label || this.primitiveType
     if (this.mode === PrimitivePlacementMode.PLACE) {
-      this.statusText = `${this.primitiveType} [${modeLabel}] (LMB: Place on Surface | O: Align [${orientLabel}] | Esc: Exit) | ${this.dimensionText}`
+      this.statusText = `${label} · Place · ${orientLabel} · ${this.dimensionText || 'click a surface'}`
+    } else if (this.state === PrimitivePlacementState.WAITING_FOR_START) {
+      this.statusText = `${label} · Draw · click to start`
+    } else if (this.state === PrimitivePlacementState.DRAWING_PRIMARY) {
+      this.statusText = `${label} · Draw · ${this.dimensionText}`
     } else {
-      if (this.state === PrimitivePlacementState.WAITING_FOR_START) {
-        this.statusText = `${this.primitiveType} [${modeLabel}] (LMB: Click Ground/Surface to Start Footprint | Esc: Exit)`
-      } else if (this.state === PrimitivePlacementState.DRAWING_PRIMARY) {
-        this.statusText = `${this.primitiveType} [${modeLabel}] (Type size · Shift: Square · Scroll: Detail | LMB: Lock Base | RMB: Back | Esc: Exit) | ${this.dimensionText}`
-      } else {
-        this.statusText = `${this.primitiveType} [${modeLabel}] (Type height | LMB: Finish | RMB: Back | Esc: Exit) | ${this.dimensionText}`
-      }
+      this.statusText = `${label} · Height · ${this.dimensionText}`
     }
   }
 }

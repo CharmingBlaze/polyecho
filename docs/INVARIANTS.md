@@ -56,14 +56,18 @@ Breaking any of these usually looks like “selection vanished”, “undo corru
 - **F** is Fill in Model (`requestFillFace` → camera-local dir → `performFillFace`) and Poly Draw in Blockout. Do not bind both in the same workspace.
 - Grab increment-snap is **Ctrl**, not `snapping.grid`. Magnet defaults **on**; rounding G delta to `gridSize` makes small moves disappear.
 - Vertex/edge/face snap is a **rigid** offset for the whole selection (`SnapManager.findRigidSnapOffset`), on grab, component gizmo drag, and object gizmo (other meshes). Toggle UI is the magnet chevron on `HeaderMenu.vue` (increment sizes + vertex/edge/face targets).
-- Live Mirror X/Y/Z (`LiveSymmetry.ts`) follows **existing** opposite verts (≈5 cm). It does not clone topology. Wire both gizmo drag and G/R/S. Object-mode grab skips it (whole mesh).
+- Live Mirror X/Y/Z (`LiveSymmetry.ts`) follows **existing** opposite verts (≈5 cm). It does not clone topology. Wire both gizmo drag and G/R/S. Object-mode grab skips it (whole mesh) and writes `MeshObject` TRS, not verts, so the gizmo origin stays with the object.
 
 ## Transform gizmo
 
 - `updateTransformGizmo` in `Viewport3D.vue` must attach in object mode **and** in vertex/edge/face when that selection is non-empty. Do not put component-mode centroids inside `if (selectMode === 'object')`.
+- Object-mode gizmo writes apply a world **delta** from the identity-scale proxy onto each mesh’s drag-start TRS (`applyWorldDeltaToObjectTRS`). Do not copy the proxy’s scale/rotation onto `MeshObject` — attach resets the proxy to (1,1,1), so a later translate would flatten a scaled object and commit that into history.
+- `objectChange` must not write the document unless a gizmo drag session is active (history already recorded on start). Esc sets `skipGizmoCommit` and finishes the gesture **once** (undo, no commit). Pointer-up must not commit a cancelled drag or double-commit after `dragging-changed`.
+- Vertex / edge / face still use the same proxy as a delta handle on verts. Origin, bones, and sockets keep their own writers. Do not rebuild or re-attach the gizmo while `isGizmoDragging`.
 - After Blockout/triple-view, restore `transformControls.getHelper().visible` only when a gizmo target is attached (`object` set). An empty scene or no selection must leave the helper hidden.
+- Combined gizmo is `@voluma/three-transform-gizmo`. Add it to the **scene root** (it writes its own world matrix). Do not parent it to `gizmoGroup` or any transformed group. Classic `TransformControls` stays on Move / Rotate / Scale tools.
 - Blockout gizmos use the pane camera plus pane-local pointer NDC (`getGizmoPointer`). Before each triple-view render, set `transformControls.camera` to that pane and `updateMatrixWorld` so vertex/object handles stay on the selection and match that view’s zoom. Do not set `transformControls.enabled = false` when the hover axis is set. Do not detach the mesh gizmo because a reference image is selected.
-- Vertex edit handles are screen-space squares (`VertexMarkers.ts`), not `gl_PointSize`. Set `uResolution` to the current pane size before each viewport render so they stay the same CSS pixel size when zooming. They use depth test so verts behind the mesh are hidden (X-Ray turns that off).
+- Vertex edit handles are screen-space circles (`VertexMarkers.ts`), not `gl_PointSize`. Fill color is the instanced `aMarkerColor` attribute (idle / orange selected); hover uses a larger overlay with cyan or yellow. Do not name that attribute `instanceColor` — Three reserves it and leaves markers white. Set `uResolution` to the current pane size before each viewport render so they stay the same CSS pixel size when zooming. They use depth test so verts behind the mesh are hidden (X-Ray turns that off).
 
 ## Skinning
 

@@ -2,8 +2,11 @@
 import { computed } from 'vue'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useProjectStore } from '../../stores/projectStore'
+import { useToolStore } from '../../stores/toolStore'
+import { inspectRig } from '../../core/animation/RiggingWorkflow'
 import UiSection from '../ui/UiSection.vue'
 import UiButton from '../ui/UiButton.vue'
+import BlenderIcon from '../icons/BlenderIcon.vue'
 import { 
   Trash2, 
   RotateCcw, 
@@ -16,8 +19,11 @@ import {
 
 const animationStore = useAnimationStore()
 const projectStore = useProjectStore()
+const toolStore = useToolStore()
 
 const selectedBone = computed(() => animationStore.selectedBone)
+const activeMesh = computed(() => projectStore.activeMesh)
+const health = computed(() => inspectRig(activeMesh.value, animationStore.armature.bones))
 
 const boneLength = computed({
   get: () => {
@@ -71,6 +77,13 @@ function handleRemoveSocket(socketId: string) {
   animationStore.removeSocket(selectedBone.value.id, socketId)
 }
 
+function onRotationInput(axis: 'x' | 'y' | 'z', event: Event) {
+  if (!selectedBone.value) return
+  const value = Number((event.target as HTMLInputElement).value)
+  if (!Number.isFinite(value)) return
+  selectedBone.value.rotation[axis] = value
+}
+
 function startScrubVector(e: MouseEvent, targetObj: { x: number; y: number; z: number }, axis: 'x' | 'y' | 'z', step = 0.05, precision = 2) {
   e.preventDefault()
   projectStore.recordState(`Adjust ${axis.toUpperCase()}`)
@@ -115,20 +128,25 @@ function toggleSpring(on: boolean) {
 
 <template>
   <div class="flex flex-col select-none text-xs font-sans">
-    <div class="h-7 bg-ui-header border-b border-ui-borderSubtle px-2.5 flex items-center justify-between">
-      <div class="flex items-center space-x-1.5">
-        <Sliders class="w-3 h-3 text-amber-400" />
-        <span class="text-[11px] font-medium text-ui-textMuted">Bone</span>
+    <div class="inspector-head">
+      <div class="inspector-head-kicker">
+        <BlenderIcon name="bone" :size="12" />
+        <span>Bone</span>
       </div>
-      <span class="font-semibold text-ui-textPrimary truncate max-w-[150px] text-[11px]">
-        {{ selectedBone?.name || 'None selected' }}
-      </span>
+      <span class="inspector-head-name">{{ activeMesh?.name || selectedBone?.name || 'No object' }}</span>
+    </div>
+
+    <div class="px-2.5 py-1.5 border-b border-ui-borderSubtle">
+      <div class="text-[10px] text-ui-textSecondary truncate">
+        <span class="font-semibold text-ui-textPrimary">{{ selectedBone?.name || 'No bone' }}</span>
+        <span class="text-ui-textMuted"> · {{ animationStore.isTestPoseActive ? 'Pose' : 'Edit rest' }}</span>
+      </div>
     </div>
 
     <UiSection title="Mode" :icon="Sliders" :default-open="true">
-      <div class="grid grid-cols-2 gap-1">
-        <UiButton size="xs" :variant="!animationStore.isTestPoseActive ? 'accent' : 'default'" @click="animationStore.toggleTestPose(false)">Edit rest</UiButton>
-        <UiButton size="xs" :variant="animationStore.isTestPoseActive ? 'accent' : 'default'" @click="animationStore.toggleTestPose(true)">Pose</UiButton>
+      <div class="inspector-seg is-stretch">
+        <button type="button" class="inspector-seg-btn" :class="{ 'is-active': !animationStore.isTestPoseActive }" @click="animationStore.toggleTestPose(false)">Edit rest</button>
+        <button type="button" class="inspector-seg-btn" :class="{ 'is-active': animationStore.isTestPoseActive }" @click="animationStore.toggleTestPose(true)">Pose</button>
       </div>
       <UiButton v-if="animationStore.isTestPoseActive" size="xs" class="w-full" @click="animationStore.resetAllBonesToRest">
         <RotateCcw class="w-3 h-3" /> Reset pose
@@ -145,7 +163,7 @@ function toggleSpring(on: boolean) {
         />
         <select
           :value="selectedBone.parentId || 'root'"
-          class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-xs cursor-pointer"
+          class="inspector-select w-full"
           @change="handleReparent(($event.target as HTMLSelectElement).value)"
         >
           <option value="root" class="bg-ui-panel">None (root)</option>
@@ -196,7 +214,7 @@ function toggleSpring(on: boolean) {
           <span>Length</span>
           <span class="font-mono text-ui-textPrimary">{{ boneLength }}</span>
         </div>
-        <input type="range" aria-label="Bone length" min="0.1" max="5" step="0.05" @pointerdown="projectStore.recordState('Change Bone Length')" @keydown="projectStore.recordState('Change Bone Length')" v-model.number="boneLength" class="w-full accent-ui-accent h-1" />
+        <input type="range" aria-label="Bone length" min="0.1" max="5" step="0.05" @pointerdown="projectStore.recordState('Change Bone Length')" @keydown="projectStore.recordState('Change Bone Length')" v-model.number="boneLength" class="inspector-range" />
         <div class="grid grid-cols-4 gap-1">
           <UiButton size="xs" @click="adjustBoneLength(-0.1)">−</UiButton>
           <UiButton size="xs" @click="adjustBoneLength(0.1)">+</UiButton>
@@ -211,7 +229,7 @@ function toggleSpring(on: boolean) {
           <input
             type="checkbox"
             :checked="selectedBone.ikConstraint?.enabled || false"
-            class="accent-amber-500"
+            class="accent-ui-accent"
             @change="toggleIk(($event.target as HTMLInputElement).checked)"
           />
         </label>
@@ -221,11 +239,11 @@ function toggleSpring(on: boolean) {
             <span>Chain</span>
             <span class="font-mono text-ui-textPrimary">{{ selectedBone.ikConstraint.chainLength }}</span>
           </div>
-          <input type="range" min="2" max="6" step="1" v-model.number="selectedBone.ikConstraint.chainLength" class="w-full accent-amber-500 h-1" />
+          <input type="range" min="2" max="6" step="1" v-model.number="selectedBone.ikConstraint.chainLength" class="inspector-range" />
           <label class="text-[9px] text-ui-textMuted">Target</label>
           <select
             :value="selectedBone.ikConstraint.targetBoneId || ''"
-            class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-xs cursor-pointer"
+            class="inspector-select w-full"
             @change="selectedBone.ikConstraint!.targetBoneId = ($event.target as HTMLSelectElement).value || undefined"
           >
             <option value="" class="bg-ui-panel">Viewport target / last pose</option>
@@ -234,7 +252,7 @@ function toggleSpring(on: boolean) {
           <label class="text-[9px] text-ui-textMuted">Pole (bend direction)</label>
           <select
             :value="selectedBone.ikConstraint.poleTargetBoneId || ''"
-            class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-xs cursor-pointer"
+            class="inspector-select w-full"
             @change="selectedBone.ikConstraint!.poleTargetBoneId = ($event.target as HTMLSelectElement).value || undefined"
           >
             <option value="" class="bg-ui-panel">No pole</option>
@@ -243,11 +261,11 @@ function toggleSpring(on: boolean) {
           <div class="grid grid-cols-2 gap-2">
             <div>
               <div class="flex justify-between text-[9px] text-ui-textMuted"><span>Iterations</span><span>{{ selectedBone.ikConstraint.iterations || 10 }}</span></div>
-              <input v-model.number="selectedBone.ikConstraint.iterations" type="range" min="1" max="32" step="1" class="w-full accent-amber-500 h-1" title="Higher values improve longer-chain IK convergence" />
+              <input v-model.number="selectedBone.ikConstraint.iterations" type="range" min="1" max="32" step="1" class="inspector-range" title="Higher values improve longer-chain IK convergence" />
             </div>
             <div>
               <div class="flex justify-between text-[9px] text-ui-textMuted"><span>Influence</span><span>{{ Math.round((selectedBone.ikConstraint.weight ?? 1) * 100) }}%</span></div>
-              <input v-model.number="selectedBone.ikConstraint.weight" type="range" min="0" max="1" step="0.05" class="w-full accent-amber-500 h-1" title="Blend between the keyed pose and the IK solve" />
+              <input v-model.number="selectedBone.ikConstraint.weight" type="range" min="0" max="1" step="0.05" class="inspector-range" title="Blend between the keyed pose and the IK solve" />
             </div>
           </div>
         </template>
@@ -256,7 +274,7 @@ function toggleSpring(on: boolean) {
       <UiSection title="Sockets" :icon="Wrench" :badge="selectedBone.sockets?.length || 0" :default-open="false">
         <UiButton size="xs" class="w-full" @click="handleAddSocket"><Plus class="w-3 h-3" /> Add</UiButton>
         <div v-for="s in selectedBone.sockets || []" :key="s.id" class="flex items-center gap-1">
-          <input v-model="s.name" class="flex-1 bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-[10px] text-sky-300" />
+          <input v-model="s.name" class="flex-1 bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-[10px] text-ui-textPrimary" />
           <button type="button" class="text-ui-textMuted hover:text-rose-400" @click="handleRemoveSocket(s.id)"><Trash2 class="w-3 h-3" /></button>
         </div>
       </UiSection>
@@ -267,34 +285,41 @@ function toggleSpring(on: boolean) {
           <input
             type="checkbox"
             :checked="selectedBone.springConstraint?.enabled || false"
-            class="accent-emerald-500"
+            class="accent-ui-accent"
             @change="toggleSpring(($event.target as HTMLInputElement).checked)"
           />
         </label>
         <template v-if="selectedBone.springConstraint?.enabled">
           <div class="flex justify-between text-[10px] text-ui-textMuted"><span>Stiff</span><span class="font-mono">{{ selectedBone.springConstraint.stiffness }}</span></div>
-          <input type="range" min="0.05" max="1" step="0.05" v-model.number="selectedBone.springConstraint.stiffness" class="w-full accent-emerald-500 h-1" />
+          <input type="range" min="0.05" max="1" step="0.05" v-model.number="selectedBone.springConstraint.stiffness" class="inspector-range" />
           <div class="flex justify-between text-[10px] text-ui-textMuted"><span>Damp</span><span class="font-mono">{{ selectedBone.springConstraint.damping }}</span></div>
-          <input type="range" min="0.05" max="1" step="0.05" v-model.number="selectedBone.springConstraint.damping" class="w-full accent-emerald-500 h-1" />
+          <input type="range" min="0.05" max="1" step="0.05" v-model.number="selectedBone.springConstraint.damping" class="inspector-range" />
           <div class="flex justify-between text-[10px] text-ui-textMuted"><span>Gravity</span><span class="font-mono">{{ selectedBone.springConstraint.gravity }}</span></div>
-          <input type="range" min="0" max="1" step="0.05" v-model.number="selectedBone.springConstraint.gravity" class="w-full accent-emerald-500 h-1" />
+          <input type="range" min="0" max="1" step="0.05" v-model.number="selectedBone.springConstraint.gravity" class="inspector-range" />
         </template>
       </UiSection>
     </template>
 
-    <UiSection v-else title="Select" :icon="GitCommitVertical" :default-open="true">
-      <p class="text-[9px] text-ui-textMuted">Pick a bone in the viewport or Skel tab.</p>
+    <UiSection title="Test" :icon="RotateCcw" :default-open="false">
+      <p class="text-[10px] text-ui-textMuted leading-snug">Temporary pose. No keyframes are recorded.</p>
+      <p class="text-[10px] text-ui-textSecondary">{{ health.ready ? 'Binding checks passed' : 'Before you animate' }}</p>
+      <p v-if="health.unweighted" class="text-[10px] text-ui-textSecondary">{{ health.unweighted }} vertices have no bone influence.</p>
+      <p v-if="health.invalid" class="text-[10px] text-ui-textSecondary">{{ health.invalid }} vertices have invalid or unnormalized weights.</p>
+      <p v-if="health.brokenBones" class="text-[10px] text-ui-textSecondary">{{ health.brokenBones }} bones need length or parent fixed.</p>
+      <p v-if="health.rigid" class="text-[10px] text-ui-textMuted">Solid attachment found.</p>
+      <template v-if="selectedBone && animationStore.isTestPoseActive">
+        <p class="text-[10px] text-ui-textMuted truncate">{{ selectedBone.name }}</p>
+        <div class="flex justify-between text-[10px] text-ui-textMuted"><span>X</span><span class="font-mono inspector-value">{{ Math.round(selectedBone.rotation.x) }}°</span></div>
+        <input type="range" min="-90" max="90" step="1" :value="selectedBone.rotation.x" aria-label="Test rotation X" class="inspector-range" @input="onRotationInput('x', $event)" />
+        <div class="flex justify-between text-[10px] text-ui-textMuted"><span>Y</span><span class="font-mono inspector-value">{{ Math.round(selectedBone.rotation.y) }}°</span></div>
+        <input type="range" min="-90" max="90" step="1" :value="selectedBone.rotation.y" aria-label="Test rotation Y" class="inspector-range" @input="onRotationInput('y', $event)" />
+        <div class="flex justify-between text-[10px] text-ui-textMuted"><span>Z</span><span class="font-mono inspector-value">{{ Math.round(selectedBone.rotation.z) }}°</span></div>
+        <input type="range" min="-90" max="90" step="1" :value="selectedBone.rotation.z" aria-label="Test rotation Z" class="inspector-range" @input="onRotationInput('z', $event)" />
+      </template>
       <div class="grid grid-cols-2 gap-1">
-        <UiButton size="xs" variant="primary" @click="animationStore.addRootBone(`Bone_Root_${animationStore.armature.bones.length + 1}`)">Add</UiButton>
-        <UiButton size="xs" :variant="animationStore.clickToPlaceMode ? 'accent' : 'default'" @click="animationStore.clickToPlaceMode = !animationStore.clickToPlaceMode">Draw</UiButton>
+        <UiButton size="xs" :disabled="!animationStore.armature.bones.length" @click="animationStore.resetAllBonesToRest()">Reset pose</UiButton>
+        <UiButton size="xs" variant="accent" :disabled="!animationStore.armature.bones.length" @click="toolStore.setAppMode('animate')">Animation</UiButton>
       </div>
-      <button
-        v-for="b in animationStore.armature.bones"
-        :key="b.id"
-        type="button"
-        class="w-full text-left px-2 py-1 rounded-xs text-[10px] hover:bg-ui-hover text-ui-textSecondary"
-        @click="animationStore.selectBone(b.id)"
-      >{{ b.name }}</button>
     </UiSection>
   </div>
 </template>

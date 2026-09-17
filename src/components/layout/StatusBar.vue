@@ -59,9 +59,9 @@ const contextualHints = computed(() => {
       return 'Tileset paint: LMB paints the 3D object · Clip keeps strokes in the selected tile · RMB: Pan'
     }
     if (toolStore.uvWorkspaceTab === 'uv') {
-      return 'U: Smart UV | Ctrl+Shift+E: Mark seam | 1/2/3/4: Vertex/Edge/Face/Island | A: Select all | P: Pin | V: Stitch | F: Frame | RMB/Space: Pan'
+      return 'U: Smart UV | Ctrl+Shift+E: Mark seam | 1/2/3/4: Vertex/Edge/Face/Island | A: Select all | P: Pin | V: Stitch | F: Frame | N: Inspector | RMB/Space: Pan'
     }
-    return 'LMB: Paint | Ctrl+LMB: Secondary | RMB: Pan | B/E/G/I: Brush/Eraser/Fill/Picker | M: Marquee | X: Swap colors'
+    return 'LMB: Paint | Ctrl+LMB: Secondary | RMB: Pan | B/E/G/I: Brush/Eraser/Fill/Picker | [ / ] size | N: Inspector | M: Marquee | X: Swap colors'
   } else if (toolStore.appMode === 'rig') {
     return 'LMB: Select bone | E: Extrude bone | G/R/S: Move/Rotate/Scale | Inspector: Skeleton → Attach → Weights → Test | N: Panel'
   } else if (toolStore.appMode === 'animate') {

@@ -44,9 +44,13 @@ Atlas cells: the UV canvas draws the same tile size as the tileset picker and re
 - **Apply / Set**: `applyTargetTexelDensity(mesh, density, texSize, faceIndices?)` rescales target UV islands around their centroids.
 - **Equalize**: `equalizeTexelDensity(mesh)` normalizes island scale across all faces to maintain consistent pixel density.
 
+## Layout
+
+The app left toolbar is hidden in UV/Paint; select modes and paint tools live on the in-canvas strips. UV Layout and Paint share the same 3D vs canvas split (default 50/50). Opening the UV editor fits the texture into the 2D view once; pan and zoom stay put after that (F / Frame still frames a selection). **Inspect** starts closed and opens when UV corners are selected; dismissing it keeps it closed until the selection is cleared. Workspace chrome (UV/Paint tabs, Smart UV, inspect sections, sliders) uses the shared inspector family (`inspector-seg`, `inspector-range`, `inspector-head`). Island drawing, cyan selection, and red seams stay on the canvas.
+
 ## Paint feedback and inspector
 
-Both editors keep workspace tabs, command menus, and asset controls on separate rows so split panes do not clip commands. Paint has a dedicated contextual tool settings row, a palette above the status bar, and pointer-isolated canvas overlays. The shared help button lists shortcuts; UV transform buttons are disabled until a selection exists.
+UV Layout and Paint keep Texture / Smart UV / Edit menus on the same header row as the UV/Paint tabs. If the pane is tight, those menus scroll sideways. Paint also has a dedicated contextual tool settings row, a palette above the status bar, and pointer-isolated canvas overlays. The shared help button lists shortcuts; UV transform buttons are disabled until a selection exists.
 
 The inspector follows the workspace tab: UV shows unwrap settings (cut angle and pixel margin) and atlas controls; Paint shows brush size, opacity, shape, foreground color, and pen pressure. The paint canvas previews the brush footprint with a contrasting outline. Dither and shading strokes interpolate between pointer samples, excluding the previous sample so stationary movement does not repeatedly shade a pixel. Leaving the texture breaks stroke interpolation to avoid drawing a bridge on re-entry.
 

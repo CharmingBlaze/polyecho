@@ -50,7 +50,7 @@ describe('animation workspace', () => {
     expect(bone.scale.x).toBe(2)
     expect(animation.activeClip.tracks).toHaveLength(0)
   })
-  it('deletes only the target key and offers advanced pose tools', async () => {
+  it('deletes only the target key and keeps scale pose fields available', async () => {
     const animation = await mount()
     const first = animation.addRootBone('Hip')
     const second = animation.addRootBone('Hand')
@@ -60,8 +60,6 @@ describe('animation workspace', () => {
     await nextTick()
     await click('Delete target key')
     expect(animation.activeClip.tracks.find(t => t.targetId === second.id)?.rotationKeys).toHaveLength(1)
-    expect(host.querySelector('[aria-label="Scale X"]')).toBeNull()
-    await click('Advanced')
     expect(host.querySelector('[aria-label="Scale X"]')).not.toBeNull()
   })
   it('creates clips with the chosen timing and loop setting', async () => {

@@ -661,6 +661,14 @@ onUnmounted(() => {
 
               <div class="flex items-center justify-between py-1 border-b border-ui-borderSubtle/40">
                 <div>
+                  <span class="text-ui-textPrimary font-medium">Stylus mode notifications</span>
+                  <p class="text-[10px] text-ui-textMuted">Show the floating Move / Rotate / Scale panel. Off by default. Tool status stays in the status bar.</p>
+                </div>
+                <input type="checkbox" v-model="toolStore.stylusModeNotifications" class="rounded-xs text-amber-500" />
+              </div>
+
+              <div class="flex items-center justify-between py-1 border-b border-ui-borderSubtle/40">
+                <div>
                   <span class="text-ui-textPrimary font-medium">Stylus Pressure Curve</span>
                   <p class="text-[10px] text-ui-textMuted">Pressure response curve for graphic drawing tablets.</p>
                 </div>

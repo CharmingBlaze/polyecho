@@ -1,36 +1,70 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import UiSection from '../ui/UiSection.vue'
 import UiButton from '../ui/UiButton.vue'
 import UiNumberField from '../ui/UiNumberField.vue'
 import BlenderIcon from '../icons/BlenderIcon.vue'
-import { requestFillFace, requestModalTool } from '../../core/commands/editorCommands'
+import { requestFillFace } from '../../core/commands/editorCommands'
 
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
 
 const activeMesh = computed(() => projectStore.activeMesh)
+const selectMode = computed(() => toolStore.selectMode)
 const isEdit = computed(() =>
-  toolStore.selectMode === 'vertex' || toolStore.selectMode === 'edge' || toolStore.selectMode === 'face'
+  selectMode.value === 'vertex' || selectMode.value === 'edge' || selectMode.value === 'face'
 )
-const hasFaces = computed(() => projectStore.selectedFaceIds.length > 0)
-const hasEdges = computed(() => projectStore.selectedEdgeIds.length > 0)
-const hasVerts = computed(() => projectStore.selectedVertexIds.length >= 2)
+const vertCount = computed(() => projectStore.selectedVertexIds.length)
+const edgeCount = computed(() => projectStore.selectedEdgeIds.length)
+const faceCount = computed(() => projectStore.selectedFaceIds.length)
+const hasFaces = computed(() => faceCount.value > 0)
+const hasEdges = computed(() => edgeCount.value > 0)
+const hasVerts = computed(() => vertCount.value >= 2)
 const canSubdivide = computed(() => {
   if (!activeMesh.value) return false
-  if (toolStore.selectMode === 'object') return activeMesh.value.faces.length > 0
-  return isEdit.value && (hasFaces.value || hasEdges.value || projectStore.selectedVertexIds.length > 0)
+  if (selectMode.value === 'object') return activeMesh.value.faces.length > 0
+  return isEdit.value && (hasFaces.value || hasEdges.value || vertCount.value > 0)
+})
+const canSeparate = computed(() => hasFaces.value || hasEdges.value || vertCount.value > 0)
+const canFlatten = computed(() => hasFaces.value || hasEdges.value || vertCount.value > 0)
+
+const modeLabel = computed(() => {
+  if (selectMode.value === 'vertex') return 'Vertex'
+  if (selectMode.value === 'edge') return 'Edge'
+  if (selectMode.value === 'face') return 'Face'
+  if (selectMode.value === 'origin') return 'Origin'
+  return 'Object'
 })
 
-function enterEdit(mode: 'vertex' | 'edge' | 'face') {
-  toolStore.selectMode = mode
-}
+const selectionHint = computed(() => {
+  if (selectMode.value === 'vertex') {
+    return vertCount.value ? `${vertCount.value} vert${vertCount.value === 1 ? '' : 's'}` : 'Select vertices'
+  }
+  if (selectMode.value === 'edge') {
+    return edgeCount.value ? `${edgeCount.value} edge${edgeCount.value === 1 ? '' : 's'}` : 'Select edges'
+  }
+  if (selectMode.value === 'face') {
+    return faceCount.value ? `${faceCount.value} face${faceCount.value === 1 ? '' : 's'}` : 'Select faces'
+  }
+  const n = projectStore.selectedMeshIds.length
+  return n ? `${n} object${n === 1 ? '' : 's'}` : 'Object'
+})
 
-function startModal(tool: 'extrude' | 'inset' | 'bevel' | 'loop_cut' | 'knife' | 'grab' | 'rotate' | 'scale') {
-  requestModalTool(tool)
-}
+const sections = reactive({
+  subdivide: true,
+  face: false,
+  edge: false,
+  vert: false,
+  mesh: true
+})
+
+watch(selectMode, (mode) => {
+  if (mode === 'face') sections.face = true
+  else if (mode === 'edge') sections.edge = true
+  else if (mode === 'vertex') sections.vert = true
+}, { immediate: true })
 
 function subdivide() {
   const mode = toolStore.selectMode
@@ -53,89 +87,47 @@ function deleteSel() {
 
 <template>
   <div class="flex flex-col select-none text-xs font-sans">
-    <div class="h-7 bg-ui-header border-b border-ui-borderSubtle px-2.5 flex items-center justify-between">
-      <div class="flex items-center space-x-1.5">
-        <BlenderIcon name="tools" :size="13" />
-        <span class="text-[11px] font-medium text-ui-textMuted">Mesh Tools</span>
+    <div class="inspector-head">
+      <div class="inspector-head-kicker">
+        <BlenderIcon name="tools" :size="12" />
+        <span>Mesh Tools</span>
       </div>
-      <span class="font-semibold text-ui-textPrimary truncate max-w-[150px]">{{ activeMesh?.name || 'No object' }}</span>
+      <span class="inspector-head-name">{{ activeMesh?.name || 'No object' }}</span>
     </div>
 
     <div v-if="!activeMesh" class="p-6 text-center text-ui-textMuted italic text-xs">
       Select a mesh to use edit tools.
     </div>
 
-    <div v-else class="flex flex-col divide-y divide-ui-borderSubtle">
-      <div v-if="!isEdit" class="p-2 space-y-2 bg-amber-950/20">
-        <p class="text-[10.5px] text-amber-200/90 leading-snug">
-          Subdivide works on the whole object here. Extrude, Inset, Bevel, and Knife need Vertex, Edge, or Face mode (Tab).
-        </p>
-        <div class="grid grid-cols-3 gap-1">
-          <UiButton size="xs" title="Vertex mode (1)" @click="enterEdit('vertex')">
-            <BlenderIcon name="vertex-select" :size="12" />
-            <span>Vertex</span>
-          </UiButton>
-          <UiButton size="xs" title="Edge mode (2)" @click="enterEdit('edge')">
-            <BlenderIcon name="edge-select" :size="12" />
-            <span>Edge</span>
-          </UiButton>
-          <UiButton size="xs" title="Face mode (3)" @click="enterEdit('face')">
-            <BlenderIcon name="face-select" :size="12" />
-            <span>Face</span>
-          </UiButton>
+    <div v-else class="flex flex-col">
+      <div class="px-2.5 py-1.5 border-b border-ui-borderSubtle space-y-1">
+        <div class="text-[10px] text-ui-textSecondary truncate">
+          <span class="font-semibold text-ui-textPrimary">{{ modeLabel }}</span>
+          <span class="text-ui-textMuted"> · {{ selectionHint }}</span>
         </div>
+        <p v-if="toolStore.appMode === 'blockout'" class="text-[10px] leading-snug text-ui-textMuted">
+          Shape Draw, Poly Draw, and Poly Build are on the left toolbar.
+        </p>
       </div>
 
-      <UiSection title="Add" blender-icon="tool-extrude" hint="modal" :default-open="true">
+      <UiSection title="Subdivide" blender-icon="tool-subdivide" hint="W" v-model:is-open="sections.subdivide">
         <div class="grid grid-cols-2 gap-1">
-          <UiButton size="xs" :disabled="!isEdit" title="Extrude Region (E)" @click="startModal('extrude')">
-            <BlenderIcon name="tool-extrude" :size="12" />
-            <span>Extrude</span>
-          </UiButton>
-          <UiButton size="xs" :disabled="!isEdit || !hasFaces" title="Inset Faces (I)" @click="startModal('inset')">
-            <BlenderIcon name="tool-inset" :size="12" />
-            <span>Inset</span>
-          </UiButton>
-          <UiButton size="xs" :disabled="!isEdit" title="Bevel (Ctrl+B)" @click="startModal('bevel')">
-            <BlenderIcon name="tool-bevel" :size="12" />
-            <span>Bevel</span>
-          </UiButton>
-          <UiButton size="xs" :disabled="!isEdit" title="Loop Cut and Slide (Ctrl+R)" @click="startModal('loop_cut')">
-            <BlenderIcon name="tool-loopcut" :size="12" />
-            <span>Loop Cut</span>
-          </UiButton>
-          <UiButton size="xs" class="col-span-2" :disabled="!isEdit" title="Knife (K)" @click="startModal('knife')">
-            <BlenderIcon name="tool-knife" :size="12" />
-            <span>Knife</span>
-          </UiButton>
-        </div>
-      </UiSection>
-
-      <UiSection title="Subdivide" blender-icon="tool-subdivide" hint="W" :default-open="true">
-        <p class="text-[10px] text-ui-textMuted leading-snug">
-          Object mode splits every face on the selected mesh. Edit mode splits the current faces or edges, sharing new verts like Blender Subdivide.
-        </p>
-        <div class="grid grid-cols-2 gap-1">
-          <div>
-            <div class="text-[9.5px] text-ui-textMuted font-semibold mb-0.5">Number of Cuts</div>
-            <UiNumberField
-              v-model="toolStore.subdivideCuts"
-              :min="1"
-              :max="10"
-              :step="1"
-              :precision="0"
-            />
-          </div>
-          <div>
-            <div class="text-[9.5px] text-ui-textMuted font-semibold mb-0.5">Smoothness</div>
-            <UiNumberField
-              v-model="toolStore.subdivideSmoothness"
-              :min="0"
-              :max="1"
-              :step="0.05"
-              :precision="2"
-            />
-          </div>
+          <UiNumberField
+            v-model="toolStore.subdivideCuts"
+            label="Cuts"
+            :min="1"
+            :max="10"
+            :step="1"
+            :precision="0"
+          />
+          <UiNumberField
+            v-model="toolStore.subdivideSmoothness"
+            label="Smooth"
+            :min="0"
+            :max="1"
+            :step="0.05"
+            :precision="2"
+          />
         </div>
         <UiButton
           size="xs"
@@ -150,9 +142,14 @@ function deleteSel() {
         </UiButton>
       </UiSection>
 
-      <UiSection title="Face" blender-icon="face-select" :default-open="true">
+      <UiSection
+        title="Faces"
+        blender-icon="face-select"
+        :badge="faceCount || undefined"
+        v-model:is-open="sections.face"
+      >
         <div class="grid grid-cols-2 gap-1">
-          <UiButton size="xs" :disabled="!isEdit" title="Fill (F)" @click="requestFillFace()">
+          <UiButton size="xs" :disabled="!isEdit" :title="toolStore.appMode === 'blockout' ? 'Fill a boundary (Mesh menu). F in Blockout is Poly Draw.' : 'Fill (F)'" @click="requestFillFace()">
             <BlenderIcon name="fill-face" :size="12" />
             <span>Fill</span>
           </UiButton>
@@ -168,14 +165,19 @@ function deleteSel() {
             <BlenderIcon name="face-select" :size="12" />
             <span>Triangulate</span>
           </UiButton>
-          <UiButton size="xs" class="col-span-2" title="Flip Normals (Shift+N)" @click="projectStore.performFlipNormals()">
+          <UiButton size="xs" class="col-span-2" title="Flip Normals (Shift+N). Uses selected faces, or the whole mesh." @click="projectStore.performFlipNormals()">
             <BlenderIcon name="flip-normals" :size="12" />
             <span>Flip Normals</span>
           </UiButton>
         </div>
       </UiSection>
 
-      <UiSection title="Edge" blender-icon="edge-select" :default-open="false">
+      <UiSection
+        title="Edges"
+        blender-icon="edge-select"
+        :badge="edgeCount || undefined"
+        v-model:is-open="sections.edge"
+      >
         <div class="grid grid-cols-2 gap-1">
           <UiButton size="xs" :disabled="!hasEdges" title="Bridge Edge Loops" @click="projectStore.performBridgeEdges()">
             <BlenderIcon name="bridge-edges" :size="12" />
@@ -188,43 +190,38 @@ function deleteSel() {
         </div>
       </UiSection>
 
-      <UiSection title="Vertex" blender-icon="vertex-select" :default-open="false">
+      <UiSection
+        title="Vertices"
+        blender-icon="vertex-select"
+        :badge="vertCount || undefined"
+        v-model:is-open="sections.vert"
+      >
+        <div class="text-[9px] font-semibold text-ui-textMuted uppercase tracking-wide">Merge</div>
+        <div class="grid grid-cols-4 gap-1">
+          <UiButton size="xs" :disabled="!hasVerts" title="Merge at Center (M)" @click="merge('center')">Center</UiButton>
+          <UiButton size="xs" :disabled="!hasVerts" title="Merge at First" @click="merge('first')">First</UiButton>
+          <UiButton size="xs" :disabled="!hasVerts" title="Merge at Last" @click="merge('last')">Last</UiButton>
+          <UiButton size="xs" title="Merge by Distance" @click="merge('distance')">Dist</UiButton>
+        </div>
         <div class="grid grid-cols-2 gap-1">
-          <UiButton size="xs" :disabled="!hasVerts" title="Merge at Center (M)" @click="merge('center')">
-            <BlenderIcon name="tool-merge" :size="12" />
-            <span>Merge Center</span>
-          </UiButton>
-          <UiButton size="xs" :disabled="!hasVerts" title="Merge at First" @click="merge('first')">
-            <span>Merge First</span>
-          </UiButton>
-          <UiButton size="xs" :disabled="!hasVerts" title="Merge at Last" @click="merge('last')">
-            <span>Merge Last</span>
-          </UiButton>
-          <UiButton size="xs" title="Merge by Distance" @click="merge('distance')">
-            <span>By Distance</span>
-          </UiButton>
-          <UiButton size="xs" :disabled="projectStore.selectedVertexIds.length !== 2" title="Connect Vertex Path (J)" @click="projectStore.performConnectVertices()">
+          <UiButton size="xs" :disabled="vertCount !== 2" title="Connect Vertex Path (J)" @click="projectStore.performConnectVertices()">
             <BlenderIcon name="connect-verts" :size="12" />
             <span>Connect</span>
           </UiButton>
-          <UiButton size="xs" :disabled="projectStore.selectedVertexIds.length === 0" title="Dissolve Vertices (Ctrl+X)" @click="projectStore.performDissolve('vertex')">
+          <UiButton size="xs" :disabled="vertCount === 0" title="Dissolve Vertices (Ctrl+X)" @click="projectStore.performDissolve('vertex')">
             <BlenderIcon name="dissolve" :size="12" />
             <span>Dissolve</span>
           </UiButton>
         </div>
       </UiSection>
 
-      <UiSection title="Mesh" blender-icon="mesh-cube" :default-open="false">
+      <UiSection title="Mesh" blender-icon="mesh-cube" v-model:is-open="sections.mesh">
         <div class="grid grid-cols-2 gap-1">
-          <UiButton size="xs" title="Delete (X)" variant="danger" @click="deleteSel">
-            <BlenderIcon name="trash" :size="12" />
-            <span>Delete</span>
-          </UiButton>
           <UiButton size="xs" title="Duplicate (Shift+D)" @click="projectStore.duplicateSelection(toolStore.selectMode)">
             <BlenderIcon name="duplicate" :size="12" />
             <span>Duplicate</span>
           </UiButton>
-          <UiButton size="xs" :disabled="!hasFaces" title="Separate Selection (P)" @click="projectStore.performSeparateMesh()">
+          <UiButton size="xs" :disabled="!canSeparate" title="Separate Selection (P)" @click="projectStore.performSeparateMesh()">
             <BlenderIcon name="separate-mesh" :size="12" />
             <span>Separate</span>
           </UiButton>
@@ -232,21 +229,21 @@ function deleteSel() {
             <BlenderIcon name="join-mesh" :size="12" />
             <span>Join</span>
           </UiButton>
-          <UiButton size="xs" title="Flatten X" @click="projectStore.performFlatten('x')">
-            <BlenderIcon name="flatten-mesh" :size="12" />
-            <span>Flatten X</span>
-          </UiButton>
-          <UiButton size="xs" title="Flatten Y" @click="projectStore.performFlatten('y')">
-            <span>Flatten Y</span>
-          </UiButton>
-          <UiButton size="xs" title="Flatten Z" @click="projectStore.performFlatten('z')">
-            <span>Flatten Z</span>
-          </UiButton>
           <UiButton size="xs" title="Clean degenerate geometry" @click="projectStore.performCleanupMesh()">
             <BlenderIcon name="clean-mesh" :size="12" />
             <span>Clean</span>
           </UiButton>
         </div>
+        <div class="flex items-center gap-1">
+          <span class="text-[9.5px] text-ui-textMuted font-semibold w-11 shrink-0">Flatten</span>
+          <UiButton size="xs" class="flex-1" :disabled="!canFlatten" title="Flatten X" @click="projectStore.performFlatten('x')">X</UiButton>
+          <UiButton size="xs" class="flex-1" :disabled="!canFlatten" title="Flatten Y" @click="projectStore.performFlatten('y')">Y</UiButton>
+          <UiButton size="xs" class="flex-1" :disabled="!canFlatten" title="Flatten Z" @click="projectStore.performFlatten('z')">Z</UiButton>
+        </div>
+        <UiButton size="xs" class="w-full" variant="danger" title="Delete (X)" @click="deleteSel">
+          <BlenderIcon name="trash" :size="12" />
+          <span>Delete</span>
+        </UiButton>
       </UiSection>
     </div>
   </div>

@@ -86,7 +86,7 @@ Related helper methods on `projectStore`:
 
 | UI | New | Select | Apply |
 | :--- | :--- | :--- | :--- |
-| **Material Inspector** | `createMaterial` | `selectMaterial` | **Use** / Apply to Sel. Look header + texture thumb (click → Texture tab). Surface / Consoles / Dither strip. |
+| **Material Inspector** | `createMaterial` | `selectMaterial` | **Use** / Apply to Sel. Slot + texture map, then Surface / Consoles / Dither. |
 | **Object Inspector (Transform)** | — | — | Collapsed Shading links jump to Material / Texture tabs (no assignment dropdowns) |
 | **UV / Paint props** | — | — | Unwrap, paint-target readout, and collapsed Material link |
 | **Outliner / Hierarchy** | — | — | context menu "Assign Material" |

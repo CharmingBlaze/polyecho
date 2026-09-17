@@ -92,22 +92,23 @@ const activeModifiersCount = computed(() => {
 
 <template>
   <div class="flex flex-col select-none text-xs font-sans">
-    <div class="h-7 bg-ui-header border-b border-ui-borderSubtle px-2.5 flex items-center justify-between">
-      <div class="flex items-center space-x-1.5">
-        <Wrench class="w-3 h-3 text-sky-400" />
-        <span class="text-[11px] font-medium text-ui-textMuted">Modifiers</span>
+    <div class="inspector-head">
+      <div class="inspector-head-kicker">
+        <Wrench class="w-3 h-3" />
+        <span>Modifiers</span>
       </div>
-      <span class="font-semibold text-ui-textPrimary truncate max-w-[150px]">{{ activeMesh?.name || 'No object' }}</span>
+      <span class="inspector-head-name">{{ activeMesh?.name || 'No object' }}</span>
     </div>
 
-    <div class="p-2 space-y-2">
-      <div class="relative">
+    <div>
+      <div class="relative px-2.5 py-1.5 border-b border-ui-borderSubtle">
         <button
           @click="showAddMenu = !showAddMenu"
-          class="w-full py-1.5 px-3 bg-ui-input hover:bg-ui-hover text-ui-textPrimary border border-ui-borderDefault rounded-xs flex items-center justify-between font-medium transition shadow-xs"
+          :disabled="!activeMesh"
+          class="w-full py-1.5 px-3 bg-ui-input hover:bg-ui-hover text-ui-textPrimary border border-ui-borderDefault rounded-xs flex items-center justify-between font-medium transition shadow-xs disabled:opacity-40 disabled:pointer-events-none"
         >
           <div class="flex items-center gap-2">
-            <Wrench class="w-3.5 h-3.5 text-sky-400" />
+            <Wrench class="w-3.5 h-3.5 text-ui-textMuted" />
             <span>Add Modifier</span>
           </div>
           <ChevronDown class="w-3.5 h-3.5 text-ui-textMuted" />
@@ -125,7 +126,7 @@ const activeModifiersCount = computed(() => {
               class="w-full text-left px-2.5 py-1.5 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary"
             >
               <div class="flex items-center gap-2">
-                <FlipHorizontal class="w-3.5 h-3.5 text-amber-400" />
+                <FlipHorizontal class="w-3.5 h-3.5 text-ui-textMuted" />
                 <span>Mirror</span>
               </div>
               <span class="text-[10px] text-ui-textMuted font-mono">Bisect</span>
@@ -136,7 +137,7 @@ const activeModifiersCount = computed(() => {
               class="w-full text-left px-2.5 py-1.5 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary"
             >
               <div class="flex items-center gap-2">
-                <Layers class="w-3.5 h-3.5 text-sky-400" />
+                <Layers class="w-3.5 h-3.5 text-ui-textMuted" />
                 <span>Subdivision Surface</span>
               </div>
               <span class="text-[10px] text-ui-textMuted font-mono">Catmull–Clark</span>
@@ -147,7 +148,7 @@ const activeModifiersCount = computed(() => {
               class="w-full text-left px-2.5 py-1.5 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary"
             >
               <div class="flex items-center gap-2">
-                <Shield class="w-3.5 h-3.5 text-emerald-400" />
+                <Shield class="w-3.5 h-3.5 text-ui-textMuted" />
                 <span>Solidify</span>
               </div>
               <span class="text-[10px] text-ui-textMuted font-mono">Shell + rim</span>
@@ -156,7 +157,10 @@ const activeModifiersCount = computed(() => {
         </div>
       </div>
 
-      <div v-if="activeMesh && activeModifiersCount > 0" class="space-y-2">
+      <div v-if="!activeMesh" class="rounded-xs border border-ui-borderSubtle bg-ui-surface p-3 text-[11px] leading-relaxed text-ui-textMuted">
+        Select a mesh to add Mirror, Subdivision, or Solidify.
+      </div>
+      <div v-else-if="activeMesh && activeModifiersCount > 0" class="space-y-2">
         <div
           v-if="activeMesh.mirror"
           class="bg-ui-panel border border-ui-borderDefault rounded-xs overflow-hidden shadow-xs"
@@ -165,7 +169,7 @@ const activeModifiersCount = computed(() => {
             <button @click="toggleSection('mirror')" class="flex items-center gap-1.5 font-semibold text-ui-textPrimary text-[11px]">
               <ChevronDown v-if="openModifiers.mirror" class="w-3 h-3 text-ui-textMuted" />
               <ChevronRight v-else class="w-3 h-3 text-ui-textMuted" />
-              <FlipHorizontal class="w-3.5 h-3.5 text-amber-400" />
+              <FlipHorizontal class="w-3.5 h-3.5 text-ui-textMuted" />
               <span>Mirror</span>
             </button>
 
@@ -202,21 +206,21 @@ const activeModifiersCount = computed(() => {
                 <button
                   @click="toggleMirrorFlag('axisX')"
                   class="px-2.5 py-0.5 rounded-xs border text-[10px] font-bold transition"
-                  :class="activeMesh.mirror.axisX ? 'bg-rose-500/20 text-rose-300 border-rose-500/50' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault'"
+                  :class="activeMesh.mirror.axisX ? 'inspector-chip is-active' : 'inspector-chip'"
                 >
                   X
                 </button>
                 <button
                   @click="toggleMirrorFlag('axisY')"
                   class="px-2.5 py-0.5 rounded-xs border text-[10px] font-bold transition"
-                  :class="activeMesh.mirror.axisY ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault'"
+                  :class="activeMesh.mirror.axisY ? 'inspector-chip is-active' : 'inspector-chip'"
                 >
                   Y
                 </button>
                 <button
                   @click="toggleMirrorFlag('axisZ')"
                   class="px-2.5 py-0.5 rounded-xs border text-[10px] font-bold transition"
-                  :class="activeMesh.mirror.axisZ ? 'bg-sky-500/20 text-sky-300 border-sky-500/50' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault'"
+                  :class="activeMesh.mirror.axisZ ? 'inspector-chip is-active' : 'inspector-chip'"
                 >
                   Z
                 </button>
@@ -284,7 +288,7 @@ const activeModifiersCount = computed(() => {
             <button @click="toggleSection('subdivision')" class="flex items-center gap-1.5 font-semibold text-ui-textPrimary text-[11px]">
               <ChevronDown v-if="openModifiers.subdivision" class="w-3 h-3 text-ui-textMuted" />
               <ChevronRight v-else class="w-3 h-3 text-ui-textMuted" />
-              <Layers class="w-3.5 h-3.5 text-sky-400" />
+              <Layers class="w-3.5 h-3.5 text-ui-textMuted" />
               <span>Subdivision Surface</span>
             </button>
 
@@ -321,14 +325,14 @@ const activeModifiersCount = computed(() => {
                 <button
                   @click="setSubdivType('catmull-clark')"
                   class="px-2 py-0.5 rounded-xs border text-[10px] font-bold"
-                  :class="(activeMesh.subdivision.type || 'catmull-clark') === 'catmull-clark' ? 'bg-sky-500/20 text-sky-300 border-sky-500/50' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault'"
+                  :class="(activeMesh.subdivision.type || 'catmull-clark') === 'catmull-clark' ? 'inspector-chip is-active' : 'inspector-chip'"
                 >
                   Catmull–Clark
                 </button>
                 <button
                   @click="setSubdivType('simple')"
                   class="px-2 py-0.5 rounded-xs border text-[10px] font-bold"
-                  :class="activeMesh.subdivision.type === 'simple' ? 'bg-sky-500/20 text-sky-300 border-sky-500/50' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault'"
+                  :class="activeMesh.subdivision.type === 'simple' ? 'inspector-chip is-active' : 'inspector-chip'"
                 >
                   Simple
                 </button>
@@ -342,7 +346,7 @@ const activeModifiersCount = computed(() => {
                   :key="lv"
                   @click="setSubdivLevel(lv)"
                   class="px-2.5 py-0.5 rounded-xs border text-[10px] font-bold"
-                  :class="activeMesh.subdivision.level === lv ? 'bg-sky-500/20 text-sky-300 border-sky-500/50' : 'bg-ui-input text-ui-textMuted border-ui-borderDefault'"
+                  :class="activeMesh.subdivision.level === lv ? 'inspector-chip is-active' : 'inspector-chip'"
                 >
                   {{ lv }}
                 </button>
@@ -359,7 +363,7 @@ const activeModifiersCount = computed(() => {
             <button @click="toggleSection('solidify')" class="flex items-center gap-1.5 font-semibold text-ui-textPrimary text-[11px]">
               <ChevronDown v-if="openModifiers.solidify" class="w-3 h-3 text-ui-textMuted" />
               <ChevronRight v-else class="w-3 h-3 text-ui-textMuted" />
-              <Shield class="w-3.5 h-3.5 text-emerald-400" />
+              <Shield class="w-3.5 h-3.5 text-ui-textMuted" />
               <span>Solidify</span>
             </button>
 
