@@ -73,8 +73,16 @@ function zlibStore(data: Uint8Array): Uint8Array {
   return concat(blocks)
 }
 
+/** Supplies the IDAT payload: a zlib-wrapped DEFLATE stream over the filtered scanlines. */
+export type PngDeflate = (raw: Uint8Array) => Uint8Array
+
 /** 8-bit RGBA PNG from canvas-style pixel bytes (row 0 = top). */
-export function encodePngRgba(width: number, height: number, rgba: ArrayLike<number>): Uint8Array {
+export function encodePngRgba(
+  width: number,
+  height: number,
+  rgba: ArrayLike<number>,
+  deflate: PngDeflate = zlibStore
+): Uint8Array {
   const stride = width * 4
   const raw = new Uint8Array((stride + 1) * height)
   for (let y = 0; y < height; y++) {
@@ -90,7 +98,7 @@ export function encodePngRgba(width: number, height: number, rgba: ArrayLike<num
   return concat([
     PNG_SIG,
     chunk('IHDR', ihdr),
-    chunk('IDAT', zlibStore(raw)),
+    chunk('IDAT', deflate(raw)),
     chunk('IEND', new Uint8Array(0))
   ])
 }
