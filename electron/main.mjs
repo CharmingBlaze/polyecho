@@ -9,6 +9,11 @@ const DEV_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5180'
 
 app.setName('PolyEcho')
 
+// Must match build.appId: electron-builder stamps that value onto the NSIS
+// shortcut, and Windows groups taskbar entries by it. Set late and a direct
+// launch of the exe gets a path-derived id and pins as a second entry.
+if (process.platform === 'win32') app.setAppUserModelId('com.polyecho.app')
+
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
