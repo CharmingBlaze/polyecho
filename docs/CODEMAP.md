@@ -183,6 +183,7 @@ Cursor ↔ DeepSeek architecture mailbox. Protocol: `docs/collab/README.md`. Do 
 | `docs/collab/BACKLOG.md` | Architecture slices (K1–K5 seed + proposed) |
 | `docs/collab/REVIEW.md` | Cursor’s last code check |
 | `docs/collab/REJECTED.md` | Stale claims not to re-propose |
-| `docs/collab/PROMPT_DEEPSEEK.md` | Paste into DeepSeek (first turn) |
-| `docs/collab/PROMPT_DEEPSEEK_NEXT.md` | Paste into DeepSeek (after the plan is accepted) |
+| `docs/collab/PROMPT_DEEPSEEK.md` | Paste into DeepSeek (first architecture turn) |
+| `docs/collab/PROMPT_DEEPSEEK_NEXT.md` | Paste into DeepSeek (docs follow-up) |
+| `docs/collab/PROMPT_DEEPSEEK_CODE.md` | Paste into DeepSeek (implementation; current slice T1.1) |
 | `docs/collab/PROMPT_CURSOR.md` | How Cursor reviews a drop |
