@@ -175,7 +175,7 @@ Pointer: `docs/INPUT.md` (RMB pans views). Icons: `docs/ICONS.md`.
 
 ## Agent collab
 
-Cursor ↔ DeepSeek architecture mailbox. Protocol: `docs/collab/README.md`. Do not treat `docs/SUGGESTIONS_AND_IMPROVEMENTS.md` as a roadmap.
+Cursor ↔ DeepSeek mailbox (docs + code). Protocol: `docs/collab/README.md`. Do not treat `docs/SUGGESTIONS_AND_IMPROVEMENTS.md` as a roadmap.
 
 | Path | Role |
 | :--- | :--- |
