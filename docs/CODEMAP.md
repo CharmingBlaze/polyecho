@@ -32,6 +32,7 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/composables/useTextureApply.ts` | Apply-to-object + shared-material prompt |
 | `src/composables/useFloatingDrag.ts` | Pointer-capture drag for floating chrome |
 | `src/composables/useFastTitleTips.ts` | Fast icon hover labels (replaces slow OS `title`) |
+| `src/composables/useTilesetWindow.ts` | Floating tileset panel + stamp/paint session (clip bounds stay after the panel closes). |
 | `src/components/modals/TextureSharePrompt.vue` | This object vs all objects on material |
 | `src/stores/toolStore.ts` | Modes, tools, snap, viewport flags; UV/Paint tab + last modeling select mode |
 | `src/test/setup.ts` | Vitest canvas 2D stub (`canvas2dStub.ts`) |
@@ -49,17 +50,28 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | :--- | :--- |
 | `src/core/mesh/MeshKernel.ts` | `EditableMesh` + snapshots |
 | `src/core/mesh/MeshBridge.ts` | `MeshObject` ↔ `EditableMesh` |
+| `src/core/mesh/MeshRepository.ts` | Per-project resident kernels; document compatibility boundary; modal preview publication |
+| `src/core/mesh/MeshTransaction.ts` | Atomic edit/rollback, structured failures, topology/position/attribute change summaries and object-scoped element references |
+| `src/core/mesh/MeshBuilder.ts` | Validated construction using the existing kernel mutations |
+| `src/core/mesh/attributes/AttributeInterpolator.ts` | Independent vertex attribute copies, edge weight/color and corner UV interpolation |
+| `src/core/mesh/MeshResidency.test.ts`, `src/stores/meshResidency.test.ts` | Identity, attributes, resident commits, rollback, history and project round-trip regressions |
 | `src/core/mesh/HalfEdgeTopology.ts` | Half-edge helpers |
 | `src/core/mesh/MeshTopologyService.ts` | Topology queries + one-shot bridge / grid-fill / cleanup / subdivide / poke / triangulate |
 | `src/core/mesh/MeshValidator.ts` | Sanity checks |
-| `src/core/mesh/operations/*Kernel.ts` | Interactive + one-shot kernels (extrude/inset/bevel/merge/dissolve/…). Poly Draw box-unwraps the solid on confirm. |
+| `src/core/mesh/operations/*Kernel.ts` | Interactive + one-shot kernels (extrude/inset/bevel/merge/dissolve/…). Poly Draw box-unwraps the solid on confirm. Loop Cut / Knife batch splits use `TopologyOps.splitFaceUnchecked` and validate once on commit. |
 | `src/core/geometry/MeshOrigin.ts` | Place object origin at local AABB center (Poly Draw / Poly Build) |
 | `src/core/geometry/MeshTransform.ts` | `MeshObject` world matrix (degrees → radians) |
 | `src/core/geometry/ObjectPick.ts` | Ray / overlay pick among visible meshes (Knife / Loop Cut retarget) |
 | `src/core/geometry/ObjectSymmetry.ts` | Flip mesh through origin (H/V/Z), wrap Euler degrees, used by inspector Flip / Rotate / Mirror Copy |
 | `src/core/geometry/Primitives.ts` | Legacy cube / plane helpers |
 | `src/core/geometry/Converters.ts` | Three.js `BufferGeometry`, including object shade flat/smooth/auto-smooth normals |
+| `src/core/geometry/PolygonGeometry.ts` | Polygon area / planarity helpers used by validation and n-gon picking |
+| `src/core/geometry/SurfaceGeometry.ts` | Concave-aware surface triangles and perspective edge parameters |
+| `src/core/geometry/ComponentPicking.ts` | Vertex / edge / face hit tests with consistent pixel thresholds |
+| `src/core/geometry/SelectionConversion.ts` | Convert the current selection when switching vertex / edge / face mode |
+| `src/core/geometry/GeometryTolerance.ts` | Shared scale-relative epsilon for degeneracy and planarity |
 | `src/core/render/VertexMarkers.ts` | Screen-space vertex squares (Blockbench-style outline, constant pixel size at any zoom) |
+| `src/core/render/BoneDisplay.ts` | Faceted bone shafts, L/R colors, pickable envelopes |
 | `src/core/geometry/ScreenGeometry.ts` | Screen rays, overlay mapping (`rayFromClient` / `worldToOverlay` match renderer `clientWidth`), Blockout column splits (including maximized pane = full canvas), dashed Poly Draw / Poly Build preview |
 | `src/core/geometry/EdgeUtils.ts` | Loops / rings; `undirectedEdgeId` / `parseUndirectedEdgeId` (ids may contain `_`) |
 | `src/core/geometry/UVUnwrap.ts` | Planar / box / cylindrical / Smart UV + pack |
@@ -89,6 +101,8 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/core/operators/adoptEditMesh.ts` | Retarget Knife / Loop Cut to the mesh under the pointer |
 | `src/core/operators/placement/PrimitivePlacementOperator.ts` | Shift+A placement |
 | `src/core/operators/PolyDrawOperator.ts` | Blockout / Modeling outline + extrude |
+| `src/core/operators/ShapeDrawOperator.ts` | Blockout Shape Draw (outline / path / sections) |
+| `src/core/shapeDraw/` | Recipe, quad grid, topology, persistence (`ShapeRecipe.ts`, `QuadGrid.ts`, `ShapeTopology.ts`) |
 | `src/core/operators/PolyBuildOperator.ts` | Blockout: snap to existing mesh verts, then fill quads |
 | `src/core/mesh/operations/PolyDrawKernel.ts` | Planar face from clicked points |
 | `src/core/commands/editorCommands.ts` | Window events into the viewport (`requestModalTool`, `requestFillFace`, …) |
@@ -104,12 +118,19 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | Path | Role |
 | :--- | :--- |
 | `src/core/painting/PixelCanvas.ts` | `PixelBuffer` (layers, composite, fill, dither). `toPngBytes()` writes a real PNG. |
+| `src/core/painting/PaintLayerStorage.ts` | Per-layer PNG bytes in `.psxproj` / autosave |
+| `src/core/painting/PaintSelection.ts` | Marquee, clipboard, constrained paint |
+| `src/core/painting/StrokePath.ts` | Pointer-sample interpolation for brushes |
 | `src/core/painting/encodePng.ts` | 8-bit RGBA PNG from pixel bytes (no canvas `toDataURL`) |
-| `src/core/painting/DefaultTextures.ts` | Default atlas |
-| `src/core/uv/` | Seams, pack, atlas bake, island find/stitch (`UVIslands.ts`: shared 3D edge + welded UVs), cell math (`AtlasCells.ts`) |
+| `src/core/painting/DefaultTextures.ts` | Starter texture (retro atlas, solid colors, checker) + File → Properties pref |
+| `src/core/uv/` | Seams, pack, atlas bake, island find/stitch (`UVIslands.ts`: shared 3D edge + welded UVs), cell math (`AtlasCells.ts`), face-to-tile mapping (`TileMapping.ts`), 3D stamp (`TilesetStamp.ts`), UV island edit (`UVEditing.ts`) |
+| `src/core/painting/TilePixels.ts` | Atlas cell pixel bounds + tile transforms |
 | `src/core/shaders/PSXShader.ts` | Retro viewport shader |
 | `src/core/animation/Armature.ts` | Track sampling; `resolveMeshBoneParentId` / `setMeshBoneParent` |
 | `src/core/animation/AutoSkinning.ts` | Weight assignment |
+| `src/core/animation/HumanoidRig.ts` | Landmark markers + 15/19-bone humanoid draft |
+| `src/core/animation/JointFitting.ts` | Guided joint placement with connected-endpoint + L/R mirror |
+| `src/core/animation/RiggingWorkflow.ts` | Skeleton templates, attach, checks, exclusive paint/test modes |
 | `src/core/animation/IKSolver.ts` | Two-bone + CCD; `applyIKConstraints` |
 | `src/core/animation/SpringPhysics.ts` | Spring bones |
 | `src/core/export/` | GLB, OBJ, Blockbench, sprites, turntable. Texture maps keyed by **texture id** (`buildExportTextureMap`). `gltfBinary.ts` reads/writes GLB chunks, injects clip marker `extras`, and embeds painted PNGs. `engineHandoffScene.ts` is the character fixture; `npm run handoff:glb` writes `samples/engine-handoff.glb`. The handoff test also runs the Khronos `gltf-validator`. |
@@ -127,12 +148,12 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | Folder | Role |
 | :--- | :--- |
 | `src/components/layout/` | Header, toolbars, status |
-| `src/components/viewport/` | 3D view (`Viewport3D`: picking, gizmo, fill camera, modal start). Space/pivot/snap/shade/overlays/x-ray live in `HeaderMenu.vue`. |
+| `src/components/viewport/` | 3D view (`Viewport3D`: picking, gizmo, fill camera, modal start). Space/pivot/snap/shade/overlays/x-ray live in `HeaderMenu.vue`. `ShapeDrawPanel.vue` / `PolyDrawPanel.vue` are Blockout overlays. |
 | `src/components/inspector/MeshToolsProps.vue` | Modeling Tools tab: Subdivide (cuts/smoothness), extrude/inset/bevel, merge, poke, triangulate |
 | `src/components/outliner/` | Object tree |
-| `src/components/uvpaint/` | UV editor, pixel editor (`PixelCanvas.vue` is the UV/Paint tab router), palettes |
-| `src/components/animation/` | Timeline (no separate DopeSheet component) |
-| `src/components/rigging/` | Rig inspector: Skel (`SkeletonPanel` + `BoneTreeNode`), Bone (`RiggingPanel`), Bind, Weights |
+| `src/components/uvpaint/` | UV editor, pixel editor (`PixelCanvas.vue` is the UV/Paint tab router), palettes, `PaintLayers.vue`, `TilesetEditor.vue` (floating atlas / tilemap panel) |
+| `src/components/animation/` | Timeline (no separate DopeSheet component); `PosePopout.vue` for copy/paste/mirror pose |
+| `src/components/rigging/` | Rig inspector: `RiggingWorkspace.vue` (Skeleton / Attach / Weights / Test), `SkeletonPanel`, `HumanoidRigWizard.vue`, `RigFitPopout.vue`, Bind, Weights |
 | `src/components/modals/` | Export, import, **new image** (`NewTextureModal`), prefs, palette, command search |
 | `src/components/ui/` | Shared buttons, menus, fields |
 | `src/components/icons/BlenderIcon.vue` | Editor glyphs — add names here (`docs/ICONS.md`) |

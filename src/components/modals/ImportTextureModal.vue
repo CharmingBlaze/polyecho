@@ -3,6 +3,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import { PixelBuffer } from '../../core/painting/PixelCanvas'
+import { inferPixelTileGrid } from '../../core/painting/TilePixels'
 import { 
   Image as ImageIcon, 
   X, 
@@ -381,13 +382,14 @@ async function handleImport() {
     return
   }
 
+  const inferred = inferPixelTileGrid(targetW, targetH)
   const newTex = projectStore.createTexture(
     texName,
     targetW,
     targetH,
     buffer.toDataURL(),
     buffer,
-    { record: false, select: true }
+    { record: false, select: true, atlas: inferred || undefined }
   )
 
   projectStore.selectTexture(newTex.id)
@@ -398,8 +400,9 @@ async function handleImport() {
 </script>
 
 <template>
+  <Teleport to="body">
   <div 
-    class="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center z-50 select-none p-4 animate-in fade-in duration-150"
+    class="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center z-[20000] select-none p-4 animate-in fade-in duration-150"
     @click.self="handleClose"
   >
     <div class="bg-ui-surface border border-ui-borderDefault rounded-xs w-[680px] shadow-2xl overflow-hidden flex flex-col text-ui-textPrimary font-sans">
@@ -692,4 +695,5 @@ async function handleImport() {
 
     </div>
   </div>
+  </Teleport>
 </template>

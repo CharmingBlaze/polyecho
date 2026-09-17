@@ -6,6 +6,7 @@ import { useAnimationStore } from '../../stores/animationStore'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import { useLayoutStore } from '../../stores/layoutStore'
 import { requestFillFace, requestModalTool, requestPrimitiveMenu, requestSmartUvProject } from '../../core/commands/editorCommands'
+import { operatorManager } from '../../core/operators/OperatorManager'
 
 const toolStore = useToolStore()
 const projectStore = useProjectStore()
@@ -18,17 +19,33 @@ const isRigging = computed(() => toolStore.appMode === 'rig')
 const isAnimating = computed(() => toolStore.appMode === 'animate')
 const isUVPaint = computed(() => toolStore.appMode === 'uvpaint')
 const isUVEditing = computed(() => isUVPaint.value && toolStore.uvWorkspaceTab === 'uv')
+const modalName = computed(() => {
+  void operatorManager.state.value.previewTick
+  return operatorManager.state.value.active ? operatorManager.state.value.operatorName : ''
+})
+
+function isModal(name: string) {
+  return modalName.value === name
+}
+
+function modalClass(name: string, idle = 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover') {
+  return isModal(name) ? 'bg-ui-active text-ui-textAccent shadow-inner' : idle
+}
 
 function setSelectMode(mode: 'object' | 'vertex' | 'edge' | 'face') {
   toolStore.selectMode = mode
-  projectStore.clearSubSelections()
 }
 
-function handleSetTool(tool: any) {
+function handleSetTool(tool: 'select' | 'move' | 'rotate' | 'scale') {
   toolStore.setModelTool(tool)
 }
 
+function handleBoxSelect() {
+  toolStore.toggleBoxSelect()
+}
+
 function handleStartModal(toolName: string) {
+  toolStore.isBoxSelectActive = false
   requestModalTool(toolName as any)
 }
 
@@ -51,7 +68,7 @@ function toggleCombinedGizmo() {
 
 <template>
   <aside 
-    class="w-10 bg-ui-panel border-r border-ui-borderSubtle flex flex-col items-center py-2.5 gap-1.5 select-none z-20 shrink-0 font-sans shadow-sm"
+    class="w-10 bg-ui-panel border-r border-ui-borderSubtle flex flex-col items-center py-2.5 gap-1.5 select-none z-20 shrink-0 font-sans shadow-sm overflow-y-auto overflow-x-hidden"
   >
     <!-- 1. MODELING WORKSPACE TOOLS -->
     <template v-if="isModeling">
@@ -107,9 +124,10 @@ function toggleCombinedGizmo() {
 
       <!-- Select Box -->
       <button 
-        @click="handleSetTool('select')"
+        @click="handleBoxSelect"
         class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
-        :class="toolStore.modelTool === 'select' ? 'bg-ui-active text-ui-textAccent shadow-inner' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+        :class="toolStore.isBoxSelectActive ? 'bg-ui-active text-ui-textAccent shadow-inner' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+        :aria-pressed="toolStore.isBoxSelectActive"
         title="Select Box (B)"
       >
         <BlenderIcon name="select-box" :size="18" />
@@ -120,7 +138,7 @@ function toggleCombinedGizmo() {
         @click="handleSetTool('move')"
         class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
         :class="toolStore.modelTool === 'move' ? 'bg-ui-active text-ui-textAccent shadow-inner' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-        title="Move / Translate (G)"
+        title="Move gizmo — G starts grab"
       >
         <BlenderIcon name="tool-move" :size="18" />
       </button>
@@ -130,7 +148,7 @@ function toggleCombinedGizmo() {
         @click="handleSetTool('rotate')"
         class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
         :class="toolStore.modelTool === 'rotate' ? 'bg-ui-active text-ui-textAccent shadow-inner' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-        title="Rotate (R)"
+        title="Rotate gizmo — R starts rotate"
       >
         <BlenderIcon name="tool-rotate" :size="18" />
       </button>
@@ -140,7 +158,7 @@ function toggleCombinedGizmo() {
         @click="handleSetTool('scale')"
         class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
         :class="toolStore.modelTool === 'scale' ? 'bg-ui-active text-ui-textAccent shadow-inner' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-        title="Scale (S)"
+        title="Scale gizmo — S starts scale"
       >
         <BlenderIcon name="tool-scale" :size="18" />
       </button>
@@ -171,7 +189,8 @@ function toggleCombinedGizmo() {
         <!-- Extrude -->
         <button 
           @click="handleStartModal('extrude')"
-          class="w-8 h-8 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition relative group cursor-pointer"
+          class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
+          :class="modalClass('Extrude')"
           title="Extrude Region (E)"
         >
           <BlenderIcon name="tool-extrude" :size="18" />
@@ -180,7 +199,8 @@ function toggleCombinedGizmo() {
         <!-- Inset -->
         <button 
           @click="handleStartModal('inset')"
-          class="w-8 h-8 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition relative group cursor-pointer"
+          class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
+          :class="modalClass('Inset')"
           title="Inset Faces (I)"
         >
           <BlenderIcon name="tool-inset" :size="18" />
@@ -189,16 +209,18 @@ function toggleCombinedGizmo() {
         <!-- Bevel -->
         <button 
           @click="handleStartModal('bevel')"
-          class="w-8 h-8 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition relative group cursor-pointer"
-          title="Bevel Edges / Vertices (Ctrl+B)"
+          class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
+          :class="modalClass('Bevel')"
+          title="Bevel Edges (Ctrl+B)"
         >
           <BlenderIcon name="tool-bevel" :size="18" />
         </button>
 
         <!-- Loop Cut -->
         <button 
-          @click="handleStartModal('loopcut')"
-          class="w-8 h-8 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition relative group cursor-pointer"
+          @click="handleStartModal('loop_cut')"
+          class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
+          :class="modalClass('Loop Cut')"
           title="Loop Cut and Slide (Ctrl+R)"
         >
           <BlenderIcon name="tool-loopcut" :size="18" />
@@ -207,7 +229,8 @@ function toggleCombinedGizmo() {
         <!-- Knife -->
         <button 
           @click="handleStartModal('knife')"
-          class="w-8 h-8 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition relative group cursor-pointer"
+          class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
+          :class="modalClass('Knife')"
           title="Knife Topology (K)"
         >
           <BlenderIcon name="tool-knife" :size="18" />
@@ -229,24 +252,6 @@ function toggleCombinedGizmo() {
           title="Merge at Center (M)"
         >
           <BlenderIcon name="tool-merge" :size="18" />
-        </button>
-
-        <!-- Poly Draw -->
-        <button 
-          @click="handleStartModal('polydraw')"
-          class="w-8 h-8 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition relative group cursor-pointer"
-        title="Poly Draw: trace a silhouette, close, then pull thickness (F)"
-        >
-          <BlenderIcon name="tool-draw" :size="18" />
-        </button>
-
-        <!-- Poly Build -->
-        <button 
-          @click="handleStartModal('polybuild')"
-          class="w-8 h-8 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition relative group cursor-pointer"
-          title="Poly Build: click verts into faces, Tab walks the other way (V)"
-        >
-          <BlenderIcon name="connect-verts" :size="18" />
         </button>
       </template>
     </template>
@@ -305,9 +310,10 @@ function toggleCombinedGizmo() {
 
       <!-- Select Box -->
       <button 
-        @click="handleSetTool('select')"
+        @click="handleBoxSelect"
         class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
-        :class="toolStore.modelTool === 'select' ? 'bg-ui-active text-ui-textAccent shadow-inner' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+        :class="toolStore.isBoxSelectActive ? 'bg-ui-active text-ui-textAccent shadow-inner' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+        :aria-pressed="toolStore.isBoxSelectActive"
         title="Select Box (B)"
       >
         <BlenderIcon name="select-box" :size="18" />
@@ -318,7 +324,7 @@ function toggleCombinedGizmo() {
         @click="handleSetTool('move')"
         class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
         :class="toolStore.modelTool === 'move' ? 'bg-ui-active text-ui-textAccent shadow-inner' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-        title="Move / Translate (G)"
+        title="Move gizmo — G starts grab"
       >
         <BlenderIcon name="tool-move" :size="18" />
       </button>
@@ -328,7 +334,7 @@ function toggleCombinedGizmo() {
         @click="handleSetTool('rotate')"
         class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
         :class="toolStore.modelTool === 'rotate' ? 'bg-ui-active text-ui-textAccent shadow-inner' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-        title="Rotate (R)"
+        title="Rotate gizmo — R starts rotate"
       >
         <BlenderIcon name="tool-rotate" :size="18" />
       </button>
@@ -338,7 +344,7 @@ function toggleCombinedGizmo() {
         @click="handleSetTool('scale')"
         class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
         :class="toolStore.modelTool === 'scale' ? 'bg-ui-active text-ui-textAccent shadow-inner' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-        title="Scale (S)"
+        title="Scale gizmo — S starts scale"
       >
         <BlenderIcon name="tool-scale" :size="18" />
       </button>
@@ -364,27 +370,42 @@ function toggleCombinedGizmo() {
       <div class="w-6 h-px bg-ui-borderSubtle my-0.5"></div>
 
       <!-- Poly Draw (Primary Blockout Tool) -->
+      <button
+        @click="handleStartModal('shapedraw')"
+        class="w-8 h-8 flex items-center justify-center rounded-xs transition cursor-pointer"
+        :class="modalClass('Shape Draw', 'text-emerald-300 hover:bg-ui-hover')"
+        title="Shape Draw: draw any outline, shape its volume, and keep editing"
+        aria-label="Shape Draw"
+        :aria-pressed="isModal('Shape Draw')"
+      >
+        <BlenderIcon name="tool-shape-draw" :size="20" />
+      </button>
       <button 
         @click="handleStartModal('polydraw')"
-        class="w-8 h-8 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition relative group cursor-pointer"
+        class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
+        :class="modalClass('Poly Draw')"
         title="Poly Draw: trace a silhouette, close, then pull thickness (F)"
+        :aria-pressed="isModal('Poly Draw')"
       >
-        <BlenderIcon name="tool-draw" :size="18" />
+        <BlenderIcon name="tool-poly-draw" :size="20" />
       </button>
 
       <!-- Poly Build -->
       <button 
         @click="handleStartModal('polybuild')"
-        class="w-8 h-8 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition relative group cursor-pointer"
+        class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
+        :class="modalClass('Poly Build')"
         title="Poly Build: click verts into faces, Tab walks the other way (V)"
+        :aria-pressed="isModal('Poly Build')"
       >
-        <BlenderIcon name="connect-verts" :size="18" />
+        <BlenderIcon name="tool-poly-build" :size="20" />
       </button>
 
       <!-- Extrude -->
       <button 
         @click="handleStartModal('extrude')"
-        class="w-8 h-8 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition relative group cursor-pointer"
+        class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
+        :class="modalClass('Extrude')"
         title="Extrude Region (E)"
       >
         <BlenderIcon name="tool-extrude" :size="18" />
@@ -392,8 +413,9 @@ function toggleCombinedGizmo() {
 
       <!-- Loop Cut -->
       <button 
-        @click="handleStartModal('loopcut')"
-        class="w-8 h-8 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition relative group cursor-pointer"
+        @click="handleStartModal('loop_cut')"
+        class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
+        :class="modalClass('Loop Cut')"
         title="Loop Cut (Ctrl+R)"
       >
         <BlenderIcon name="tool-loopcut" :size="18" />
@@ -402,10 +424,20 @@ function toggleCombinedGizmo() {
       <!-- Knife -->
       <button 
         @click="handleStartModal('knife')"
-        class="w-8 h-8 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition relative group cursor-pointer"
+        class="w-8 h-8 flex items-center justify-center rounded-xs transition relative group cursor-pointer"
+        :class="modalClass('Knife')"
         title="Knife Topology (K)"
       >
         <BlenderIcon name="tool-knife" :size="18" />
+      </button>
+
+      <!-- Fill (Model F; in Blockout F is Poly Draw) -->
+      <button
+        @click="requestFillFace()"
+        class="w-8 h-8 flex items-center justify-center rounded-xs text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover transition relative group cursor-pointer"
+        title="Fill a boundary (Mesh menu). F in Blockout is Poly Draw."
+      >
+        <BlenderIcon name="fill-face" :size="18" />
       </button>
     </template>
 
@@ -437,6 +469,14 @@ function toggleCombinedGizmo() {
 
     <template v-else-if="isUVPaint">
       <button 
+        @click="toolStore.setPaintTool('select')"
+        class="w-8 h-8 flex items-center justify-center rounded-xs transition cursor-pointer"
+        :class="toolStore.paintTool === 'select' ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textSecondary hover:bg-ui-hover'"
+        title="Marquee Selection (M)"
+      >
+        <BlenderIcon name="select-box" :size="18" />
+      </button>
+      <button 
         @click="toolStore.setPaintTool('brush')"
         class="w-8 h-8 flex items-center justify-center rounded-xs transition cursor-pointer"
         :class="toolStore.paintTool === 'brush' ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textSecondary hover:bg-ui-hover'"
@@ -467,6 +507,30 @@ function toggleCombinedGizmo() {
         title="Color Picker (I)"
       >
         <BlenderIcon name="picker" :size="18" />
+      </button>
+      <button 
+        @click="toolStore.setPaintTool('line')"
+        class="w-8 h-8 flex items-center justify-center rounded-xs transition cursor-pointer"
+        :class="toolStore.paintTool === 'line' ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textSecondary hover:bg-ui-hover'"
+        title="Line (L)"
+      >
+        <BlenderIcon name="line" :size="18" />
+      </button>
+      <button 
+        @click="toolStore.setPaintTool('rect')"
+        class="w-8 h-8 flex items-center justify-center rounded-xs transition cursor-pointer"
+        :class="toolStore.paintTool === 'rect' ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textSecondary hover:bg-ui-hover'"
+        title="Rectangle (U)"
+      >
+        <BlenderIcon name="rect" :size="18" />
+      </button>
+      <button 
+        @click="toolStore.setPaintTool('circle')"
+        class="w-8 h-8 flex items-center justify-center rounded-xs transition cursor-pointer"
+        :class="toolStore.paintTool === 'circle' ? 'bg-ui-active text-ui-textAccent' : 'text-ui-textSecondary hover:bg-ui-hover'"
+        title="Circle (C)"
+      >
+        <BlenderIcon name="circle" :size="18" />
       </button>
       <button 
         @click="toolStore.setPaintTool('dither')"

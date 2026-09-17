@@ -6,16 +6,17 @@ Designed from the ground up for indie game developers, retro game creators (PS1/
 
 ## Core Workflow
 
-PolyEcho combines four integrated workspaces:
+PolyEcho combines five integrated workspaces:
 
 ```
-[ MODEL ] ➔ [ UV / PAINT ] ➔ [ RIG ] ➔ [ ANIMATE ] ➔ [ GLB / OBJ EXPORT ]
+[ BLOCKOUT ] ➔ [ MODEL ] ➔ [ UV / PAINT ] ➔ [ RIG ] ➔ [ ANIMATE ] ➔ [ GLB / OBJ EXPORT ]
 ```
 
-1. **Model**: Box modeling, quad & n-gon topology editing, Blender-style modal CAD gizmos (`G`, `R`, `S`, `E`, `I`, `Ctrl+B`, `K`, `Ctrl+R`, `Shift+A`).
-2. **UV / Paint**: Interactive pixel canvas, Bayer 8x8 dithering brushes, retro color palette indexing (PSX, Pico-8, GameBoy, NES), and 3D vertex painting.
-3. **Rig**: Visual bone extrusion, hierarchical joint parenting, symmetrize (L/R), and 1-click rigid limb part assignment or 4-influence smooth skinning.
-4. **Animate**: Multi-action clip library (`Idle`, `Walk`, `Attack`, etc.), dope-sheet timeline, automatic/manual keyframing, pose mirroring, timeline event markers, and GLB Animator-inspired real-time clip blending.
+1. **Blockout**: Front/Side/Persp volume sketching with Poly Draw, Poly Build, and Shape Draw (outline, path, or sections → editable mesh).
+2. **Model**: Box modeling, quad & n-gon topology editing, Blender-style modal CAD gizmos (`G`, `R`, `S`, `E`, `I`, `Ctrl+B`, `K`, `Ctrl+R`, `Shift+A`).
+3. **UV / Paint**: Interactive pixel canvas with layers, tileset atlas stamping, Bayer 8x8 dithering brushes, retro color palette indexing (PSX, Pico-8, GameBoy, NES), and 3D vertex painting.
+4. **Rig**: Visual bone extrusion, humanoid auto-rigger, hierarchical joint parenting, symmetrize (L/R), and 1-click rigid limb part assignment or 4-influence smooth skinning.
+5. **Animate**: Multi-action clip library (`Idle`, `Walk`, `Attack`, etc.), dope-sheet timeline, automatic/manual keyframing, pose mirroring, timeline event markers, and GLB Animator-inspired real-time clip blending.
 
 ---
 
@@ -36,9 +37,11 @@ PolyEcho combines four integrated workspaces:
   - Flip Face Normals & Recalculate Outside Normals.
   - Safe Mesh Cleanup (removes zero-length edges, orphan vertices, degenerate polygons).
 - **Interactive CAD Placement (`Shift+A`)**: Draw primitives (Box, Plane, Cylinder, Cone, Sphere, Icosphere) directly on grids or surface geometry with snap alignment.
+- **Shape Draw (Blockout)**: Outline, path, or cross-sections with live volume, then **Make Editable Mesh**.
 
 ### 2. Retro Texture & UV Painting
-- 2D Pixel Canvas with layers, flood fill, color picker, Bayer matrix dithering, and eraser.
+- 2D Pixel Canvas with **layers**, marquee selection, flood fill, color picker, Bayer matrix dithering, and eraser.
+- **Tileset atlas** panel: pick cells, paint tiles, stamp faces in 3D with rotation/inset.
 - Automatic planar, box, and cylindrical UV unwrap solvers.
 - Real-time 3D Viewport pixel painting and vertex color painting.
 - Authentic retro color quantization presets.
@@ -46,6 +49,7 @@ PolyEcho combines four integrated workspaces:
 ### 3. Rigging & Part Parenting
 - **Rigid Part Animation (Default)**: Assign distinct mesh objects to bones with 100% influence for robots, low-poly characters, and props.
 - **Smooth Skinned Mesh**: Distance-based automatic vertex weight assignment normalized up to 4 bone influences.
+- **Humanoid auto-rigger**: place chin/shoulder/elbow/wrist/pelvis/knee/ankle markers, then apply a 15- or 19-bone draft without replacing existing clips.
 - Visual joint manipulators, bone extrusion (`E`), bone subdivision, and X-axis symmetrization.
 
 ### 4. Game Animation System

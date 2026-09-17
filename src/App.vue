@@ -5,6 +5,8 @@ import LeftToolbar from './components/layout/LeftToolbar.vue'
 import RightSidebar from './components/layout/RightSidebar.vue'
 import Viewport3D from './components/viewport/Viewport3D.vue'
 import PixelCanvas from './components/uvpaint/PixelCanvas.vue'
+import TilesetEditor from './components/uvpaint/TilesetEditor.vue'
+import { closeTilesetPanel, tilesetImageId, tilesetPanelOpen } from './composables/useTilesetWindow'
 import Timeline from './components/animation/Timeline.vue'
 import StatusBar from './components/layout/StatusBar.vue'
 import ExportModal from './components/modals/ExportModal.vue'
@@ -14,6 +16,9 @@ import BlenderPieMenu from './components/viewport/BlenderPieMenu.vue'
 import CommandPaletteModal from './components/modals/CommandPaletteModal.vue'
 import PreferencesModal from './components/modals/PreferencesModal.vue'
 import BoneHierarchyPopout from './components/rigging/BoneHierarchyPopout.vue'
+import RigFitPopout from './components/rigging/RigFitPopout.vue'
+import HumanoidRigWizard from './components/rigging/HumanoidRigWizard.vue'
+import PosePopout from './components/animation/PosePopout.vue'
 import BlenderIcon from './components/icons/BlenderIcon.vue'
 
 import { useToolStore } from './stores/toolStore'
@@ -106,23 +111,16 @@ watch(
       // Painting benefits much more from horizontal room than a permanently
       // visible inspector. The slim dock remains available to reopen it.
       layoutStore.showRightSidebar = false
+      return
     }
     if (mode === 'blockout') {
       // Tracing uses Front / Side / Persp; keep the inspector docked until needed.
       layoutStore.showRightSidebar = false
-      layoutStore.setInspectorTab('refs', 'blockout')
+      return
     }
-    if (mode === 'model') {
-      // Returning from UV/Paint should restore the practical object inspector.
-      layoutStore.showRightSidebar = true
-      layoutStore.setInspectorTab('props', 'model')
-    }
-    if (mode === 'rig') {
-      // Rigging needs the Skeleton / Bone / Bind / Weights inspector within
-      // reach; UV/Paint may have tucked it away on the previous workspace.
-      layoutStore.showRightSidebar = true
-      layoutStore.setInspectorTab('props', 'rig')
-    }
+    // Model / Rig / Animate need the inspector (clips, skeleton, transforms).
+    layoutStore.showRightSidebar = true
+    layoutStore.restoreInspectorTab(mode)
   }
 )
 
@@ -171,14 +169,10 @@ function toggleUvSplitPreset() {
   }
 }
 
-function bindGeometryMode() {
-  return toolStore.selectMode === 'object'
-    ? 'object'
-    : (toolStore.selectMode === 'edge' ? 'edges' : (toolStore.selectMode === 'vertex' ? 'vertices' : 'faces'))
-}
-
 function ensureMeshContext() {
-  if (!isMeshWorkspace() && toolStore.appMode !== 'uvpaint') toolStore.setAppMode('model')
+  if (!isMeshWorkspace() && toolStore.appMode !== 'uvpaint' && toolStore.appMode !== 'rig' && toolStore.appMode !== 'animate') {
+    toolStore.setAppMode('model')
+  }
   if (!projectStore.activeMesh && projectStore.meshes.length > 0) {
     projectStore.activeMeshId = projectStore.meshes[0].id
     projectStore.selectedMeshIds = [projectStore.meshes[0].id]
@@ -279,14 +273,15 @@ function runKeymapAction(id: string) {
       requestCameraView('iso')
       return
     case 'select_all':
-      if (toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'uv') return
+      if (toolStore.appMode === 'uvpaint') return
       projectStore.selectAll(toolStore.selectMode)
       return
     case 'deselect_all':
+      if (toolStore.appMode === 'uvpaint') return
       projectStore.deselectAll()
       return
     case 'box_select':
-      if (isMeshWorkspace()) toolStore.isBoxSelectActive = !toolStore.isBoxSelectActive
+      if (isMeshWorkspace()) toolStore.toggleBoxSelect()
       return
     case 'duplicate':
       if (toolStore.appMode === 'animate') animationStore.duplicateKeysAtCurrentFrame()
@@ -300,29 +295,30 @@ function runKeymapAction(id: string) {
       return
     case 'mode_vertex':
       ensureMeshContext()
-      toolStore.selectMode = 'vertex'
+      toolStore.enterSelectMode('vertex')
       return
     case 'mode_edge':
       ensureMeshContext()
-      toolStore.selectMode = 'edge'
+      toolStore.enterSelectMode('edge')
       return
     case 'mode_face':
       ensureMeshContext()
-      toolStore.selectMode = 'face'
+      toolStore.enterSelectMode('face')
       return
     case 'mode_object':
       ensureMeshContext()
-      toolStore.selectMode = 'object'
+      toolStore.enterSelectMode('object')
       return
     case 'mode_origin':
+      if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') return
       ensureMeshContext()
-      toolStore.selectMode = 'origin'
+      toolStore.enterSelectMode('origin')
       return
     case 'mode_bone':
-      if (toolStore.appMode !== 'animate') toolStore.setAppMode('rig')
-      toolStore.selectMode = 'bone'
+      toolStore.enterSelectMode('bone')
       return
     case 'toggle_edit_object':
+      if (toolStore.appMode === 'uvpaint' || toolStore.appMode === 'rig' || toolStore.appMode === 'animate') return
       ensureMeshContext()
       toolStore.selectMode = toolStore.selectMode === 'object' ? 'face' : 'object'
       return
@@ -352,7 +348,7 @@ function runKeymapAction(id: string) {
     case 'bevel':
       if (isMeshWorkspace()) requestModalTool('bevel')
       else if (toolStore.appMode === 'rig') {
-        animationStore.bindSelectedGeometry(bindGeometryMode())
+        animationStore.bindSelectedGeometry(toolStore.bindGeometryKind())
       }
       return
     case 'loopcut':
@@ -377,7 +373,8 @@ function runKeymapAction(id: string) {
           projectStore.performSubdivide(toolStore.selectMode)
         }
       }
-      else if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') toolStore.setModelTool('move')
+      else if (toolStore.appMode === 'rig') toolStore.setRigTool('select_bone')
+      else if (toolStore.appMode === 'animate') toolStore.setModelTool('select')
       return
     case 'poke_faces':
       if (isMeshWorkspace()) projectStore.performPokeFaces()
@@ -534,7 +531,7 @@ function runKeymapAction(id: string) {
       return
     case 'bind_geometry':
       if (toolStore.appMode === 'rig') {
-        animationStore.bindSelectedGeometry(bindGeometryMode())
+        animationStore.bindSelectedGeometry(toolStore.bindGeometryKind())
       }
       return
     case 'unbind_geometry':
@@ -785,7 +782,11 @@ onUnmounted(() => {
     <AddPrimitivePopout />
     <BlenderPieMenu />
     <CommandPaletteModal />
+    <TilesetEditor v-if="tilesetPanelOpen && tilesetImageId" :image-id="tilesetImageId" @close="closeTilesetPanel" />
     <BoneHierarchyPopout />
+    <RigFitPopout />
+    <HumanoidRigWizard v-if="animationStore.showHumanoidRigWizard" />
+    <PosePopout />
     <div
       v-show="fastTip.visible"
       class="fixed z-[80] max-w-xs px-2 py-1 bg-ui-header border border-ui-borderStrong rounded-xs text-[10px] font-mono text-ui-textPrimary shadow-xl pointer-events-none select-none whitespace-pre-wrap"

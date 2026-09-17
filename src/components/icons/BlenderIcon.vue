@@ -3,6 +3,12 @@ import { computed } from 'vue'
 
 const props = withDefaults(defineProps<{
   name: 
+    // Workspace navigation
+    | 'workspace-model'
+    | 'workspace-blockout'
+    | 'workspace-paint'
+    | 'workspace-rig'
+    | 'workspace-animation'
     // Selection modes
     | 'vertex-select' 
     | 'edge-select' 
@@ -14,6 +20,9 @@ const props = withDefaults(defineProps<{
     | 'tool-scale'
     | 'gizmo-combined'
     // Modeling tools
+    | 'tool-shape-draw'
+    | 'tool-poly-draw'
+    | 'tool-poly-build'
     | 'tool-extrude' 
     | 'tool-inset' 
     | 'tool-bevel'
@@ -219,13 +228,51 @@ const sizePx = computed(() => typeof props.size === 'number' ? `${props.size}px`
       <path d="M12 4C16.4183 4 20 7.58172 20 12" stroke="#f59e0b" stroke-width="1.8" stroke-linecap="round" />
     </g>
 
-    <!-- COMBINED TRS GIZMO (readable at 12px header size) -->
-    <g v-else-if="name === 'gizmo-combined'">
-      <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.5" fill="none" />
-      <line x1="12" y1="3.5" x2="12" y2="20.5" stroke="#10b981" stroke-width="1.7" stroke-linecap="round" />
-      <line x1="3.5" y1="12" x2="20.5" y2="12" stroke="#ef4444" stroke-width="1.7" stroke-linecap="round" />
-      <line x1="6.2" y1="17.8" x2="17.8" y2="6.2" stroke="#38bdf8" stroke-width="1.5" stroke-linecap="round" />
-      <rect x="10.2" y="10.2" width="3.6" height="3.6" rx="0.4" fill="currentColor" />
+    <!-- Tabler Icons: cube (MIT; public/licenses/tabler-icons.txt) -->
+    <g v-else-if="name === 'workspace-model'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 16.008v-8.018a1.98 1.98 0 0 0 -1 -1.717l-7 -4.008a2.016 2.016 0 0 0 -2 0l-7 4.008c-.619 .355 -1 1.01 -1 1.718v8.018c0 .709 .381 1.363 1 1.717l7 4.008a2.016 2.016 0 0 0 2 0l7 -4.008c.619 -.355 1 -1.01 1 -1.718" />
+      <path d="M12 22v-10" />
+      <path d="M12 12l8.73 -5.04" />
+      <path d="M3.27 6.96l8.73 5.04" />
+    </g>
+    <!-- Tabler Icons: blocks (MIT; public/licenses/tabler-icons.txt) -->
+    <g v-else-if="name === 'workspace-blockout'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M14 4a1 1 0 0 1 1 -1h5a1 1 0 0 1 1 1v5a1 1 0 0 1 -1 1h-5a1 1 0 0 1 -1 -1l0 -5" />
+      <path d="M3 14h12a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-10a2 2 0 0 1 2 -2h3a2 2 0 0 1 2 2v12" />
+    </g>
+    <!-- Tabler Icons: palette (MIT; public/licenses/tabler-icons.txt) -->
+    <g v-else-if="name === 'workspace-paint'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 21a9 9 0 0 1 0 -18c4.97 0 9 3.582 9 8c0 1.06 -.474 2.078 -1.318 2.828c-.844 .75 -1.989 1.172 -3.182 1.172h-2.5a2 2 0 0 0 -1 3.75a1.3 1.3 0 0 1 -1 2.25" />
+      <path d="M7.5 10.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" />
+      <path d="M11.5 7.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" />
+      <path d="M15.5 10.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" />
+    </g>
+    <!-- Tabler Icons: bone (MIT; public/licenses/tabler-icons.txt) -->
+    <g v-else-if="name === 'workspace-rig'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M15 3a3 3 0 0 1 3 3a3 3 0 1 1 -2.12 5.122l-4.758 4.758a3 3 0 1 1 -5.117 2.297l0 -.177l-.176 0a3 3 0 1 1 2.298 -5.115l4.758 -4.758a3 3 0 0 1 2.12 -5.122l-.005 -.005" />
+    </g>
+    <!-- Tabler Icons: movie (MIT; public/licenses/tabler-icons.txt) -->
+    <g v-else-if="name === 'workspace-animation'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2l0 -12" />
+      <path d="M8 4l0 16" />
+      <path d="M16 4l0 16" />
+      <path d="M4 8l4 0" />
+      <path d="M4 16l4 0" />
+      <path d="M4 12l16 0" />
+      <path d="M16 8l4 0" />
+      <path d="M16 16l4 0" />
+    </g>
+
+    <!-- Tabler Icons: transform-point (MIT; public/licenses/tabler-icons.txt) -->
+    <g v-else-if="name === 'gizmo-combined'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 4a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -2" />
+      <path d="M3 18a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -2" />
+      <path d="M17 4a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -2" />
+      <path d="M17 18a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -2" />
+      <path d="M11 5h2" />
+      <path d="M5 11v2" />
+      <path d="M19 11v2" />
+      <path d="M11 19h2" />
     </g>
 
     <!-- TRANSFORM SCALE (Blender Box Scale Gizmo) -->
@@ -234,6 +281,37 @@ const sizePx = computed(() => typeof props.size === 'number' ? `${props.size}px`
       <rect x="3" y="17" width="4" height="4" fill="currentColor" />
       <rect x="17" y="3" width="4" height="4" fill="#f59e0b" />
       <path d="M19 11V5H13M5 13V19H11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+    </g>
+
+    <!-- Tabler Icons: vector-bezier-2 (MIT; public/licenses/tabler-icons.txt) -->
+    <g v-else-if="name === 'tool-shape-draw'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 4a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -2" />
+      <path d="M17 18a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -2" />
+      <path d="M7 5l7 0" />
+      <path d="M10 19l7 0" />
+      <path d="M8 19a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" />
+      <path d="M14 5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" />
+      <path d="M7 5.5a5 6.5 0 0 1 5 6.5a5 6.5 0 0 0 5 6.5" />
+    </g>
+    <!-- Tabler Icons: polygon (MIT; public/licenses/tabler-icons.txt) -->
+    <g v-else-if="name === 'tool-poly-draw'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10 5a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
+      <path d="M17 8a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
+      <path d="M3 11a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
+      <path d="M13 19a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
+      <path d="M6.5 9.5l3.5 -3" />
+      <path d="M14 5.5l3 1.5" />
+      <path d="M18.5 10l-2.5 7" />
+      <path d="M13.5 17.5l-7 -5" />
+    </g>
+    <!-- Tabler Icons: vector-triangle (MIT; public/licenses/tabler-icons.txt) -->
+    <g v-else-if="name === 'tool-poly-build'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10 5a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -2" />
+      <path d="M3 18a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -2" />
+      <path d="M17 18a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -2" />
+      <path d="M6.5 17.1l5 -9.1" />
+      <path d="M17.5 17.1l-5 -9.1" />
+      <path d="M7 19l10 0" />
     </g>
 
     <!-- EXTRUDE (Blender Extrude Face Upwards) -->
@@ -271,18 +349,28 @@ const sizePx = computed(() => typeof props.size === 'number' ? `${props.size}px`
     </g>
 
     <!-- KNIFE TOOL -->
-    <g v-else-if="name === 'tool-knife'">
-      <path d="M4 20L11 13L15 17L8 24Z" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.3" />
-      <path d="M19 3L21 5L13 13L11 11L19 3Z" stroke="#f43f5e" stroke-width="1.6" fill="#f43f5e" fill-opacity="0.3" />
-      <line x1="3" y1="21" x2="12" y2="12" stroke="#f43f5e" stroke-width="1.8" stroke-linecap="round" />
+    <!-- Tabler Icons: slice (MIT; public/licenses/tabler-icons.txt) -->
+    <g v-else-if="name === 'tool-knife'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 19l15 -15l3 3l-6 6l2 2a14 14 0 0 1 -14 4" />
     </g>
 
+
     <!-- LOOP CUT -->
-    <g v-else-if="name === 'tool-loopcut'">
-      <rect x="4" y="4" width="16" height="16" stroke="currentColor" stroke-width="1.5" fill="none" />
-      <line x1="12" y1="2" x2="12" y2="22" stroke="#f59e0b" stroke-width="2" stroke-dasharray="3 2" />
-      <circle cx="12" cy="12" r="2" fill="#f59e0b" />
+    <!-- Tabler Icons: section (MIT; public/licenses/tabler-icons.txt) -->
+    <g v-else-if="name === 'tool-loopcut'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M20 20h.01" />
+      <path d="M4 20h.01" />
+      <path d="M8 20h.01" />
+      <path d="M12 20h.01" />
+      <path d="M16 20h.01" />
+      <path d="M20 4h.01" />
+      <path d="M4 4h.01" />
+      <path d="M8 4h.01" />
+      <path d="M12 4h.01" />
+      <path d="M16 4l0 .01" />
+      <path d="M4 9a1 1 0 0 1 1 -1h14a1 1 0 0 1 1 1v6a1 1 0 0 1 -1 1h-14a1 1 0 0 1 -1 -1l0 -6" />
     </g>
+
 
     <!-- MERGE (Blender Merge at Center) -->
     <g v-else-if="name === 'tool-merge'">

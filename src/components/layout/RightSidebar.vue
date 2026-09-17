@@ -9,6 +9,7 @@ import TextureProps from '../inspector/TextureProps.vue'
 import ReferenceProps from '../inspector/ReferenceProps.vue'
 import ModifiersProps from '../inspector/ModifiersProps.vue'
 import RiggingPanel from '../rigging/RiggingPanel.vue'
+import RiggingWorkspace from '../rigging/RiggingWorkspace.vue'
 import BindingsPanel from '../rigging/BindingsPanel.vue'
 import WeightsPanel from '../rigging/WeightsPanel.vue'
 import SkeletonPanel from '../rigging/SkeletonPanel.vue'
@@ -216,8 +217,9 @@ watch(
 
     <!-- 2. BODY CONTENT: BASED ON VIEW MODE -->
     <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
+      <RiggingWorkspace v-if="toolStore.appMode === 'rig' && panelViewMode === 'props'" />
       <!-- OPTION A: FULL OUTLINER MODE -->
-      <div v-if="panelViewMode === 'outliner'" class="flex-1 min-h-0 flex flex-col overflow-hidden bg-ui-panel">
+      <div v-else-if="panelViewMode === 'outliner'" class="flex-1 min-h-0 flex flex-col overflow-hidden bg-ui-panel">
         <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
           <OutlinerTree />
         </div>
@@ -303,7 +305,8 @@ watch(
         </div>
 
         <!-- Properties Pane with Left Icon Bar -->
-        <div class="flex-1 min-h-0 flex overflow-hidden bg-ui-panel">
+        <RiggingWorkspace v-if="toolStore.appMode === 'rig'" />
+        <div v-else class="flex-1 min-h-0 flex overflow-hidden bg-ui-panel">
           <!-- Vertical Icon Strip -->
           <div class="w-8 bg-ui-header/80 border-r border-ui-borderSubtle flex flex-col items-center py-1.5 gap-1 shrink-0 select-none">
             <button
@@ -327,13 +330,10 @@ watch(
 
           <!-- Active Property Sheet -->
           <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-1">
-            <SkeletonPanel v-if="toolStore.appMode === 'rig' && activeTab === 'skeleton'" />
-            <BindingsPanel v-else-if="toolStore.appMode === 'rig' && activeTab === 'bindings'" />
-            <WeightsPanel v-else-if="toolStore.appMode === 'rig' && activeTab === 'weights'" />
 
-            <div v-else-if="activeTab === 'props'" class="h-full flex flex-col">
-              <RiggingPanel v-if="toolStore.appMode === 'rig'" />
-              <AnimationInspector v-else-if="toolStore.appMode === 'animate'" />
+            <div v-if="activeTab === 'props'" class="h-full flex flex-col">
+
+              <AnimationInspector v-if="toolStore.appMode === 'animate'" />
               <UVPaintProps v-else-if="toolStore.appMode === 'uvpaint'" />
               <TransformProps v-else />
             </div>

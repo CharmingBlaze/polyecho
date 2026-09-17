@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import * as THREE from 'three'
+import { boneDisplayMetrics } from '../../core/render/BoneDisplay'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
 import { TransformGizmo } from '@voluma/three-transform-gizmo'
@@ -10,7 +11,7 @@ import { useAnimationStore } from '../../stores/animationStore'
 import { useLayoutStore } from '../../stores/layoutStore'
 import { useHistoryStore, type AppSnapshot } from '../../stores/historyStore'
 import { useThemeStore, type ThemeColors } from '../../stores/themeStore'
-import { meshToThreeGeometry, computeBoneWorldMatrix, updateThreeGeometryAttributes, resolveMeshShadeMode, buildSelectionOverlayGeometries, buildBoneSkinMatrices, meshHasSkinWeights } from '../../core/geometry/Converters'
+import { faceTriIndexSets, meshToThreeGeometry, computeBoneWorldMatrix, updateThreeGeometryAttributes, resolveMeshShadeMode, buildSelectionOverlayGeometries, buildBoneSkinMatrices, meshHasSkinWeights } from '../../core/geometry/Converters'
 import { setIKTargetAndSolve, solveCCDIK } from '../../core/animation/IKSolver'
 import { resolveMeshBoneParentId } from '../../core/animation/Armature'
 import { sampleTrack } from '../../core/animation/Armature'
@@ -42,6 +43,12 @@ import { KnifeOperator } from '../../core/operators/knife/KnifeOperator'
 import { LoopCutOperator } from '../../core/operators/loopCut/LoopCutOperator'
 import { PrimitivePlacementOperator, PrimitivePlacementMode } from '../../core/operators/placement/PrimitivePlacementOperator'
 import { PolyDrawOperator } from '../../core/operators/PolyDrawOperator'
+import { ShapeDrawOperator } from '../../core/operators/ShapeDrawOperator'
+import ShapeDrawPanel from './ShapeDrawPanel.vue'
+import PolyDrawPanel from './PolyDrawPanel.vue'
+import { convertComponentSelection, type ComponentMode } from '../../core/geometry/SelectionConversion'
+import { closestScreenSegment, visibleWorldPoint } from '../../core/geometry/ComponentPicking'
+import { cloneRecipe, geometrySignature, shapeSourceIsCurrent } from '../../core/shapeDraw/ShapeRecipe'
 import { PolyBuildOperator } from '../../core/operators/PolyBuildOperator'
 import { ScreenGeometry, type ViewQuadrant } from '../../core/geometry/ScreenGeometry'
 import { meshObjectWorldMatrix } from '../../core/geometry/MeshTransform'
@@ -57,6 +64,15 @@ import { useFloatingDrag } from '../../composables/useFloatingDrag'
 import { GripHorizontal } from 'lucide-vue-next'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import { EDITOR_EVENTS, requestCameraView } from '../../core/commands/editorCommands'
+import { paintWithinSelection } from '../../core/painting/PaintSelection'
+import { stampFacesToRegion } from '../../core/uv/TilesetStamp'
+import {
+  tilesetActiveBounds,
+  tilesetImageId,
+  tilesetPaintClip,
+  tilesetStamp,
+  tilesetUseMode
+} from '../../composables/useTilesetWindow'
 
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
@@ -441,10 +457,10 @@ function worldToLocal(mesh: MeshObject, world: THREE.Vector3, invMat?: THREE.Mat
 
 function pushWorldFan(mesh: MeshObject, faceVerts: Vertex[], positions: number[]) {
   const mat = meshWorldMatrix(mesh)
-  for (let i = 1; i < faceVerts.length - 1; i++) {
-    const a = localToWorld(mesh, faceVerts[0].position, mat, _hoverA)
-    const b = localToWorld(mesh, faceVerts[i].position, mat, _hoverB)
-    const c = localToWorld(mesh, faceVerts[i + 1].position, mat, _hoverC)
+  for (const [i, j, k] of faceTriIndexSets(faceVerts)) {
+    const a = localToWorld(mesh, faceVerts[i].position, mat, _hoverA)
+    const b = localToWorld(mesh, faceVerts[j].position, mat, _hoverB)
+    const c = localToWorld(mesh, faceVerts[k].position, mat, _hoverC)
     positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z)
   }
 }
@@ -744,8 +760,10 @@ function initThree() {
   canvas.addEventListener('pointermove', onPointerMove, { capture: true })
   canvas.addEventListener('pointerup', onPointerUp, { capture: true })
   canvas.addEventListener('pointerleave', onPointerUp, { capture: true })
+  canvas.addEventListener('pointerleave', clearTopologyHover)
   canvas.addEventListener('wheel', onWheel, { passive: false })
   canvas.addEventListener('contextmenu', preventCanvasContextMenu)
+  canvas.addEventListener('dblclick', reopenShapeOnDoubleClick)
   window.addEventListener('resize', onWindowResize)
 
   animate()
@@ -782,7 +800,9 @@ function initHoverVisuals() {
 
   const boneMat = new THREE.MeshBasicMaterial({
     color: 0xfef08a,
-    depthTest: false
+    depthTest: false,
+    depthWrite: false,
+    wireframe: true
   })
   hoverBoneMesh = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 8), boneMat)
   hoverBoneMesh.visible = false
@@ -1416,6 +1436,7 @@ function syncOnionSkins() {
 }
 
 function rebuildMeshes() {
+  clearTopologyHover()
   if (isGizmoDragging || !layers || rebuildMeshesBusy) return
   rebuildMeshesBusy = true
   try {
@@ -1482,8 +1503,6 @@ function rebuildMeshes() {
     let edgeLinesGeomUsed = false
     let ptsGeomUsed = false
 
-    const shade = resolveMeshShadeMode(meshObj, toolStore.viewport.shadeMode)
-    const isSmooth = shade !== 'flat'
     const meshMatObj = projectStore.materials.find(m => m.id === meshObj.materialId) || projectStore.materials[0]
     const previewPaintTarget =
       toolStore.appMode === 'uvpaint' &&
@@ -1516,7 +1535,7 @@ function rebuildMeshes() {
         roughness: 0.65,
         metalness: 0.05,
         side: sideSetting,
-        flatShading: !isSmooth,
+        flatShading: false,
         transparent: isXRay,
         opacity: isXRay ? 0.65 : 1.0,
         depthWrite: !isXRay
@@ -1602,7 +1621,7 @@ function rebuildMeshes() {
         emissiveIntensity: emissiveIntensity,
         vertexColors: true,
         side: sideSetting,
-        flatShading: true,
+        flatShading: false,
         wireframe: isWireframe,
         alphaTest: alphaTest,
         transparent: isTransparent,
@@ -1640,7 +1659,7 @@ function rebuildMeshes() {
         emissiveIntensity: emissiveIntensity,
         vertexColors: true,
         side: sideSetting,
-        flatShading: !isSmooth,
+        flatShading: false,
         transparent: isTransparent,
         opacity: isXRay ? 0.55 : matOpacity,
         depthWrite: !isTransparent
@@ -1665,13 +1684,20 @@ function rebuildMeshes() {
         emissiveIntensity: emissiveIntensity,
         vertexColors: true,
         side: sideSetting,
-        flatShading: !isSmooth,
+        flatShading: false,
         wireframe: isWireframe,
         alphaTest: alphaTest,
         transparent: isTransparent,
         opacity: isXRay ? 0.55 : matOpacity,
         depthWrite: !isTransparent
       })
+    }
+
+    // Bias polygon depth, not vertex positions. Polygon offset on GL lines has no effect.
+    if (toolStore.isMeshWorkspace()) {
+      mat.polygonOffset = true
+      mat.polygonOffsetFactor = 1
+      mat.polygonOffsetUnits = 1
     }
 
     // PASS 1: Base Model Geometry
@@ -1702,13 +1728,13 @@ function rebuildMeshes() {
     }
 
     // PASS 5: Wireframe overlay — dark crease lines (Blockbench-style), biased in front of the fill.
-    // Skip on the active mesh in edge/vertex mode so cyan/orange/hover lines are not covered.
+    // Edge mode has its own cage; vertex mode still needs connected polygon boundaries.
     const showCreaseWire = (isXRay || meshMatObj?.wireframe || toolStore.isMeshWorkspace())
       && toolStore.viewport.shading !== 'wireframe'
-      && !(isSelectedMesh && (toolStore.selectMode === 'edge' || toolStore.selectMode === 'vertex'))
+      && !(isSelectedMesh && toolStore.selectMode === 'edge')
     if (showCreaseWire) {
       const wireMat = new THREE.LineBasicMaterial({
-        color: isSelectedMesh ? 0x0b0f19 : 0x1e293b,
+        color: isSelectedMesh ? 0x94a3b8 : 0x1e293b,
         depthTest: !isXRay,
         depthWrite: false,
         transparent: true,
@@ -1772,8 +1798,12 @@ function rebuildMeshes() {
       const selFaceMat = new THREE.MeshBasicMaterial({
         color: 0xf59e0b,
         transparent: true,
-        opacity: 0.55,
+        opacity: 0.3,
         side: THREE.DoubleSide,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
         depthTest: !isXRay
       })
       const selFaceMesh = new THREE.Mesh(selectedFacesGeometry, selFaceMat)
@@ -1925,6 +1955,7 @@ function boneLayoutSignature() {
     animationStore.isTestPoseActive ? 1 : 0,
     animationStore.showBones ? 1 : 0,
     animationStore.xrayBones ? 1 : 0,
+    animationStore.boneDisplaySize,
     toolStore.viewport.xray ? 1 : 0,
     animationStore.selectedBoneId || '',
     animationStore.selectedSocketId || '',
@@ -1962,6 +1993,14 @@ function poseBoneEndpoints(bone: (typeof animationStore.armature.bones)[number])
   return _boneDir.length()
 }
 
+function boneWorldPerPixel() {
+  const height = Math.max(1, containerRef.value?.clientHeight || 720)
+  const camera = activeCamera || cameraPersp
+  if (camera instanceof THREE.OrthographicCamera) return (camera.top - camera.bottom) / camera.zoom / height
+  if (camera instanceof THREE.PerspectiveCamera) return 2 * camera.position.distanceTo(_boneStart) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / camera.zoom / height
+  return 0
+}
+
 function applyBoneVisualPose(group: THREE.Object3D, length: number) {
   if (length < 0.001) {
     group.visible = false
@@ -1971,7 +2010,7 @@ function applyBoneVisualPose(group: THREE.Object3D, length: number) {
   group.position.copy(_boneStart)
   _boneDir.multiplyScalar(1 / length)
   group.quaternion.setFromUnitVectors(_boneYUp, _boneDir)
-  const radial = Math.min(length, 0.2 / 0.15)
+  const radial = boneDisplayMetrics(length, boneWorldPerPixel(), animationStore.boneDisplaySize).radial
   group.scale.set(radial, length, radial)
 }
 
@@ -1990,6 +2029,13 @@ function updateBonePoses() {
     if (child.userData.boneVisual === 'joint') {
       child.visible = length >= 0.001
       child.position.copy(_boneStart)
+      child.scale.setScalar(boneDisplayMetrics(length, boneWorldPerPixel(), animationStore.boneDisplaySize).joint)
+      continue
+    }
+    if (child.userData.boneVisual === 'tip') {
+      child.visible = length >= 0.001
+      child.position.copy(_boneEnd)
+      child.scale.setScalar(boneDisplayMetrics(length, boneWorldPerPixel(), animationStore.boneDisplaySize).tip)
       continue
     }
     if (child.userData.socketId) {
@@ -2010,6 +2056,7 @@ function syncBones() {
     return
   }
   const sig = boneLayoutSignature()
+  boneGroup.visible = true
   if (sig !== lastBoneLayoutSig || boneGroup.children.length === 0) {
     buildBoneVisuals()
     return
@@ -2048,33 +2095,44 @@ function buildBoneVisuals() {
     ]
     sharedBoneOctGeom = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(unitPositions, 3))
     sharedBoneOctGeom.computeVertexNormals()
+    const colors: number[] = []
+    for (let face = 0; face < 8; face++) {
+      const shade = [1, .72, .5, .82, .92, .64, .46, .76][face]
+      for (let corner = 0; corner < 3; corner++) colors.push(shade, shade, shade)
+    }
+    sharedBoneOctGeom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
     sharedBoneWireGeom = new THREE.WireframeGeometry(sharedBoneOctGeom)
   }
 
   for (const bone of animationStore.armature.bones) {
     const isSelected = !overlayOnly && bone.id === animationStore.selectedBoneId
+    const sideColor = /[._]L$/.test(bone.name) ? 0x83b7d5 : /[._]R$/.test(bone.name) ? 0xcf969a : 0xb9c6ce
+    const color = isSelected ? 0xffc15a : sideColor
     const octGeom = sharedBoneOctGeom
 
     const octMat = new THREE.MeshBasicMaterial({
-      color: isSelected ? 0xf59e0b : 0x06b6d4,
+      color,
+      vertexColors: true,
       transparent: true,
-      opacity: overlayOnly ? (isSelected ? 0.35 : 0.18) : (isSelected ? 0.75 : 0.4),
+      opacity: overlayOnly ? .2 : 1,
       side: THREE.DoubleSide,
       depthTest: !isXRay,
       depthWrite: false
     })
     const octMesh = new THREE.Mesh(octGeom, octMat)
+    octMesh.userData.boneId = bone.id
     octMesh.renderOrder = 999
 
     const wireGeom = sharedBoneWireGeom!
     const wireMat = new THREE.LineBasicMaterial({
-      color: isSelected ? 0xfef08a : 0x38bdf8,
-      transparent: overlayOnly,
-      opacity: overlayOnly ? 0.35 : 1,
+      color: isSelected ? 0xffecb5 : 0xdceaf5,
+      transparent: true,
+      opacity: overlayOnly ? .25 : .8,
       depthTest: !isXRay,
       depthWrite: false
     })
     const wire = new THREE.LineSegments(wireGeom, wireMat)
+    wire.raycast = () => {}
     wire.renderOrder = 1000
 
     const shaft = new THREE.Group()
@@ -2082,9 +2140,11 @@ function buildBoneVisuals() {
     shaft.add(octMesh, wire)
     boneGroup.add(shaft)
 
-    const jointGeom = new THREE.SphereGeometry(0.08, 8, 8)
+    const jointGeom = new THREE.SphereGeometry(1, 12, 8)
     const jointMat = new THREE.MeshBasicMaterial({
-      color: isSelected ? 0xf59e0b : 0x06b6d4,
+      color,
+      transparent: true,
+      opacity: overlayOnly ? .3 : 1,
       depthTest: !isXRay,
       depthWrite: false
     })
@@ -2092,6 +2152,10 @@ function buildBoneVisuals() {
     jointMesh.renderOrder = 1001
     jointMesh.userData = { boneId: bone.id, boneVisual: 'joint' }
     boneGroup.add(jointMesh)
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 6), jointMat.clone())
+    tip.renderOrder = 1001
+    tip.userData = { boneId: bone.id, boneVisual: 'tip' }
+    boneGroup.add(tip)
 
     for (const s of bone.sockets || []) {
       const isSockSelected = animationStore.selectedSocketId === s.id
@@ -2113,6 +2177,7 @@ function buildBoneVisuals() {
 }
 
 function isTransformGizmoAttached(): boolean {
+  if (operatorManager.activeOperator instanceof ShapeDrawOperator) return false
   return !!(transformControls && (transformControls as { object?: THREE.Object3D | null }).object)
 }
 
@@ -2138,6 +2203,10 @@ function updateTransformGizmo() {
 
 function applyTransformGizmoTarget() {
   if (!transformControls || !scene) return
+  if (animationStore.jointPlacementActive && toolStore.appMode === 'rig') {
+    transformControls.detach()
+    return
+  }
 
   // Socket Gizmo in Rig / Animation workspace
   if (toolStore.appMode === 'rig' || toolStore.appMode === 'animate') {
@@ -3170,87 +3239,60 @@ function commitProxyTransform() {
   rebuildMeshes()
 }
 
-// Screen-Space NDC calculations
-function pickPixelNdc(px: number) {
-  const h = containerRef.value?.clientHeight || 800
-  return (px * 2) / h
+function selectableSurfaceObjects() {
+  return layers.modelGroup.children.filter(object => {
+    const mesh = projectStore.meshes.find(m => m.id === (object.userData.meshId || object.name))
+    return object.visible && (!mesh || mesh.visible)
+  })
 }
 
-function surfaceHitDistance(): number {
-  if (toolStore.viewport.xray || !layers) return Infinity
-  const hits = raycaster.intersectObjects(layers.modelGroup.children, true)
-  return hits[0]?.distance ?? Infinity
+function selectionPointVisible(world: THREE.Vector3) {
+  return visibleWorldPoint(world, activeCamera, selectableSurfaceObjects(), toolStore.viewport.xray)
 }
 
 function findClosestVertexScreen(mesh: MeshObject, maxDistPx = 14): Vertex | null {
-  let closestV: Vertex | null = null
-  let minDist = pickPixelNdc(maxDistPx)
+  if (mesh.locked || !mesh.visible) return null
+  let closest: Vertex | null = null, best = maxDistPx, depth = Infinity
   const mat = meshWorldMatrix(mesh)
-  const camPos = new THREE.Vector3()
-  activeCamera.getWorldPosition(camPos)
-  const occludeAt = surfaceHitDistance()
-
+  const pane = ScreenGeometry.paneRect(ScreenGeometry.overlayRect(renderer.domElement), activeQuadrant.value)
   for (const v of mesh.vertices) {
-    const worldPos = localToWorld(mesh, v.position, mat)
-    const ndc = worldPos.project(activeCamera)
-    if (ndc.z > 1 || ndc.z < -1) continue
-
-    const d = Math.hypot(ndc.x - mouse.x, ndc.y - mouse.y)
-    if (d >= minDist) continue
-    // New Blockout verts often sit on the draw plane inside the volume.
-    // If the handle is under the cursor, pick it even when a face is closer.
-    const dist3 = camPos.distanceTo(worldPos)
-    if (dist3 > occludeAt + 0.06 && d > pickPixelNdc(10)) continue
-    minDist = d
-    closestV = v
+    const world = localToWorld(mesh, v.position, mat), ndc = world.clone().project(activeCamera)
+    const distance = Math.hypot((ndc.x - mouse.x) * pane.width / 2, (ndc.y - mouse.y) * pane.height / 2)
+    if (distance > best + 0.25 || !selectionPointVisible(world)) continue
+    if (Math.abs(distance - best) < 0.25 && ndc.z >= depth) continue
+    best = distance; depth = ndc.z; closest = v
   }
-  return closestV
+  return closest
 }
 
 function findClosestEdgeScreen(mesh: MeshObject, maxDistPx = 10): Edge | null {
-  const edges = getMeshEdges(mesh)
-  const vertMap = new Map<string, Vertex>()
-  for (const v of mesh.vertices) {
-    vertMap.set(v.id, v)
-  }
-
-  let closestE: Edge | null = null
-  let minDist = pickPixelNdc(maxDistPx)
+  if (mesh.locked || !mesh.visible) return null
+  const vertices = new Map(mesh.vertices.map(v => [v.id, v]))
   const mat = meshWorldMatrix(mesh)
-  const camPos = new THREE.Vector3()
-  activeCamera.getWorldPosition(camPos)
-  const occludeAt = surfaceHitDistance()
-
-  for (const edge of edges) {
-    const v1 = vertMap.get(edge.v1)
-    const v2 = vertMap.get(edge.v2)
-    if (!v1 || !v2) continue
-
-    const w1 = localToWorld(mesh, v1.position, mat)
-    const w2 = localToWorld(mesh, v2.position, mat)
-    const midDist = camPos.distanceTo(w1.clone().lerp(w2, 0.5))
-    if (midDist > occludeAt + 0.08) continue
-
-    const p1 = w1.project(activeCamera)
-    const p2 = w2.clone().project(activeCamera)
-    if ((p1.z > 1 && p2.z > 1) || (p1.z < -1 && p2.z < -1)) continue
-
-    const d = distanceToSegment2D(mouse.x, mouse.y, p1.x, p1.y, p2.x, p2.y)
-    if (d < minDist) {
-      minDist = d
-      closestE = edge
-    }
+  const pane = ScreenGeometry.paneRect(ScreenGeometry.overlayRect(renderer.domElement), activeQuadrant.value)
+  let closest: Edge | null = null, best = maxDistPx, depth = Infinity
+  for (const edge of getMeshEdges(mesh)) {
+    const a = vertices.get(edge.v1), b = vertices.get(edge.v2)
+    if (!a || !b) continue
+    const wa = localToWorld(mesh, a.position, mat), wb = localToWorld(mesh, b.position, mat)
+    const pa = wa.clone().project(activeCamera), pb = wb.clone().project(activeCamera)
+    if (pa.z < -1 || pb.z < -1 || (pa.z > 1 && pb.z > 1)) continue
+    const hit = closestScreenSegment(mouse, pa, pb, pane.width, pane.height)
+    if (hit.distance > best + 0.25) continue
+    // Convert projected interpolation to world interpolation for perspective cameras.
+    const ca = wa.clone().applyMatrix4(activeCamera.matrixWorldInverse)
+    const cb = wb.clone().applyMatrix4(activeCamera.matrixWorldInverse)
+    const t = (activeCamera as THREE.PerspectiveCamera).isPerspectiveCamera
+      ? (hit.t / -cb.z) / ((1 - hit.t) / -ca.z + hit.t / -cb.z) : hit.t
+    const world = wa.clone().lerp(wb, t), z = world.clone().project(activeCamera).z
+    if (!selectionPointVisible(world)) continue
+    if (Math.abs(hit.distance - best) < 0.25 && z >= depth) continue
+    best = hit.distance; depth = z; closest = edge
   }
-  return closestE
+  return closest
 }
 
-function distanceToSegment2D(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
-  const l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1)
-  if (l2 === 0) return Math.hypot(px - x1, py - y1)
-  let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2
-  t = Math.max(0, Math.min(1, t))
-  return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)))
-}
+
 
 function getGizmoPointer(this: { domElement?: HTMLElement }, event: PointerEvent) {
   const el = this.domElement
@@ -3332,7 +3374,7 @@ function endViewNavigation() {
 
 function isPolySketchOperator() {
   const op = operatorManager.activeOperator
-  return op instanceof PolyDrawOperator || op instanceof PolyBuildOperator
+  return op instanceof PolyDrawOperator || op instanceof PolyBuildOperator || op instanceof ShapeDrawOperator
 }
 
 function beginPolySketchNav() {
@@ -3366,7 +3408,7 @@ function updateActiveCameraAndQuadrant(event: PointerEvent | MouseEvent) {
   const mousePxY = p.y
 
   const navigating = isViewNavigating || (('buttons' in event) && ((event.buttons & 2) === 2))
-  const isGizmoActive = !navigating && (isGizmoDragging || transformControls.dragging || (transformControls as any).axis !== null)
+  const isGizmoActive = !(operatorManager.activeOperator instanceof ShapeDrawOperator) && !navigating && (isGizmoDragging || transformControls.dragging || (transformControls as any).axis !== null)
 
   if (isTripleView()) {
     if (navigating && viewNavPane) {
@@ -3671,6 +3713,17 @@ function onWheel(event: WheelEvent) {
 }
 
 // Raycasting for Selection & Hover Highlighting
+function reopenShapeOnDoubleClick(event: MouseEvent) {
+  if (toolStore.appMode !== 'blockout' || operatorManager.state.value.active) return
+  updateActiveCameraAndQuadrant(event)
+  raycaster.setFromCamera(mouse, activeCamera)
+  const hit = raycaster.intersectObjects(layers.modelGroup.children, true).find(h => h.object.visible && h.object.userData.meshId)
+  const object = projectStore.meshes.find(mesh => mesh.id === hit?.object.userData.meshId)
+  if (!object || object.locked || !shapeSourceIsCurrent(object)) return
+  projectStore.selectMesh(object.id)
+  startModalOperator('shapedraw')
+}
+
 function onPointerDown(event: PointerEvent) {
   if (operatorManager.state.value.active) {
     if (isPolySketchOperator() && event.button === 1) {
@@ -3728,7 +3781,20 @@ function onPointerDown(event: PointerEvent) {
   raycaster.setFromCamera(mouse, activeCamera)
 
   // 1. Marquee Box Selection Trigger (Ctrl + LMB Drag, or when One-Shot Box Select is active)
-  const isBoxSelectRequested = (event.ctrlKey || toolStore.isBoxSelectActive || isBoxSelectArmed.value) && toolStore.appMode !== 'uvpaint'
+  if (toolStore.appMode === 'rig' && animationStore.jointPlacementActive && animationStore.selectedBone) {
+    const head = animationStore.selectedBone.head
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(activeCamera.getWorldDirection(new THREE.Vector3()), new THREE.Vector3(head.x, head.y, head.z))
+    const point = raycaster.ray.intersectPlane(plane, new THREE.Vector3())
+    if (point) {
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      pointerDownHitMesh = true
+      animationStore.placeRigJoint({ x: point.x, y: point.y, z: point.z })
+      syncBones()
+    }
+    return
+  }
+  const isBoxSelectRequested = ((event.ctrlKey && !event.altKey) || toolStore.isBoxSelectActive || isBoxSelectArmed.value) && toolStore.appMode !== 'uvpaint'
   if (isBoxSelectRequested) {
     isMarqueeSelecting.value = true
     orbitControls.enabled = false
@@ -3743,6 +3809,8 @@ function onPointerDown(event: PointerEvent) {
     event.stopImmediatePropagation()
     return
   }
+
+  if (toolStore.appMode === 'uvpaint' && tryStampTilesetFace(event)) return
 
   if (toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'paint') {
     const paintHit = getPaintRaycastHit()
@@ -3940,9 +4008,12 @@ function applyIdleLmbSelection(event: PointerEvent) {
     pointerDownHitMesh = true
     const hit = intersects[0]
     const meshObj = projectStore.meshes.find(m => m.id === hit.object.name)
-    if (!meshObj) return
+    if (!meshObj || meshObj.locked || !meshObj.visible) return
+    if (!isSelectionAllowed) return
+    if (activeMesh?.id !== meshObj.id) projectStore.clearSubSelections()
 
     projectStore.activeMeshId = meshObj.id
+    if (toolStore.selectMode !== 'object') projectStore.selectedMeshIds = [meshObj.id]
     projectStore.selectedReferenceId = ''
 
     if (toolStore.selectMode === 'object') {
@@ -4114,13 +4185,14 @@ function applyMarqueeSelection(isShift = false, isAlt = false) {
   // 1. VERTEX MODE
   if (toolStore.selectMode === 'vertex') {
     const activeMesh = projectStore.activeMesh
-    if (!activeMesh) return
+    if (!activeMesh || activeMesh.locked) return
     const newlySelected: string[] = []
 
     const mat = meshWorldMatrix(activeMesh)
     for (const v of activeMesh.vertices) {
-      const screenPt = projectWorldToScreen(localToWorld(activeMesh, v.position, mat))
-      if (isInsideBox(screenPt.x, screenPt.y)) {
+      const world = localToWorld(activeMesh, v.position, mat)
+      const screenPt = projectWorldToScreen(world)
+      if (isInsideBox(screenPt.x, screenPt.y) && selectionPointVisible(world)) {
         newlySelected.push(v.id)
       }
     }
@@ -4140,7 +4212,7 @@ function applyMarqueeSelection(isShift = false, isAlt = false) {
   // 2. EDGE MODE
   else if (toolStore.selectMode === 'edge') {
     const activeMesh = projectStore.activeMesh
-    if (!activeMesh) return
+    if (!activeMesh || activeMesh.locked) return
     const allEdges = getMeshEdges(activeMesh)
     const vertMap = new Map(activeMesh.vertices.map(v => [v.id, v]))
     const newlySelected: string[] = []
@@ -4154,7 +4226,7 @@ function applyMarqueeSelection(isShift = false, isAlt = false) {
       const p2 = projectWorldToScreen(localToWorld(activeMesh, v2.position, mat))
       const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 }
 
-      if (isInsideBox(p1.x, p1.y) || isInsideBox(p2.x, p2.y) || isInsideBox(mid.x, mid.y)) {
+      if ((isInsideBox(p1.x, p1.y) || isInsideBox(p2.x, p2.y) || isInsideBox(mid.x, mid.y)) && selectionPointVisible(localToWorld(activeMesh, v1.position, mat).lerp(localToWorld(activeMesh, v2.position, mat), 0.5))) {
         newlySelected.push(edge.id)
       }
     }
@@ -4173,7 +4245,7 @@ function applyMarqueeSelection(isShift = false, isAlt = false) {
   // 3. FACE MODE
   else if (toolStore.selectMode === 'face') {
     const activeMesh = projectStore.activeMesh
-    if (!activeMesh) return
+    if (!activeMesh || activeMesh.locked) return
     const vertMap = new Map(activeMesh.vertices.map(v => [v.id, v]))
     const newlySelected: string[] = []
 
@@ -4194,7 +4266,7 @@ function applyMarqueeSelection(isShift = false, isAlt = false) {
       }
       const centroidPt = projectWorldToScreen(new THREE.Vector3(avgX / faceVerts.length, avgY / faceVerts.length, avgZ / faceVerts.length))
 
-      if (anyVertInside || isInsideBox(centroidPt.x, centroidPt.y)) {
+      if ((anyVertInside || isInsideBox(centroidPt.x, centroidPt.y)) && selectionPointVisible(new THREE.Vector3(avgX / faceVerts.length, avgY / faceVerts.length, avgZ / faceVerts.length))) {
         newlySelected.push(face.id)
       }
     }
@@ -4215,7 +4287,7 @@ function applyMarqueeSelection(isShift = false, isAlt = false) {
   else if (toolStore.selectMode === 'object') {
     const newlySelected: string[] = []
     for (const mesh of projectStore.meshes) {
-      if (!mesh.visible) continue
+      if (!mesh.visible || mesh.locked) continue
       let anyInside = false
       for (const v of mesh.vertices) {
         const p = projectWorldToScreen(localToWorld(mesh, v.position))
@@ -4337,25 +4409,66 @@ function onPointerUp(event?: PointerEvent) {
 // BLENDER MODAL INTERACTIVE TRANSFORM ENGINE
 // G (Grab), R (Rotate), S (Scale), E (Extrude), I (Inset), B (Bevel), K (Knife), Ctrl+R (Loop Cut), Primitive Placement
 // ----------------------------------------------------
+function loopCutAction(action: 'less' | 'more' | 'center' | 'advance') {
+  const op = operatorManager.activeOperator
+  if (!(op instanceof LoopCutOperator)) return
+  if (action === 'less' || action === 'more') op.setCutCount(op.cutCount + (action === 'more' ? 1 : -1))
+  else if (action === 'center') op.centerAndConfirm()
+  else op.advance()
+  if (operatorManager.activeOperator) { operatorManager.state.value.statusText = op.statusText; operatorManager.state.value.previewTick++ }
+}
+
+function knifeAction(action: 'toggleCutThrough' | 'toggleAngleSnap' | 'cycleAngle' | 'newCut' | 'undoPoint' | 'redoPoint') {
+  const op = operatorManager.activeOperator
+  if (!(op instanceof KnifeOperator)) return
+  op[action]()
+  operatorManager.state.value.statusText = op.statusText
+  operatorManager.state.value.previewTick++
+}
+
 function startModalOperator(tool: string, options?: any) {
   if (!toolStore.isMeshWorkspace()) return
-  const useEmptyKernel = tool === 'polydraw' || tool === 'primitive' || tool === 'add_primitive'
+  if (tool === 'shapedraw' && !options?.fresh && projectStore.activeMesh?.locked) return
+  if (operatorManager.state.value.active) operatorManager.cancel()
+  const shapeTarget = tool === 'shapedraw' && !options?.fresh && projectStore.activeMesh && shapeSourceIsCurrent(projectStore.activeMesh)
+    ? projectStore.activeMesh : null
+  const shapeOp = tool === 'shapedraw' ? new ShapeDrawOperator(shapeTarget?.shapeSource?.recipe) : null
+  const useEmptyKernel = tool === 'polydraw' || (tool === 'shapedraw' && !shapeTarget) || tool === 'primitive' || tool === 'add_primitive'
   if (tool === 'polybuild' && !projectStore.activeMesh) {
     projectStore.addEditableMesh(new EditableMesh(), `Mesh_${projectStore.meshes.length + 1}`)
   }
-  const activeMesh = useEmptyKernel && tool === 'polydraw' ? null : projectStore.activeMesh
+  const activeMesh = tool === 'shapedraw' ? shapeTarget : useEmptyKernel && tool === 'polydraw' ? null : projectStore.activeMesh
   const polybuildStartedEmpty = tool === 'polybuild' && !!activeMesh && activeMesh.vertices.length === 0
   const retargetCuts = tool === 'knife' || tool === 'loop_cut' || tool === 'loopcut'
 
   // Bridge active mesh to EditableMesh kernel (or empty mesh if placing new primitive)
   let documentMesh = activeMesh
-  let bridgeData = activeMesh 
-    ? MeshBridge.meshObjectToEditableMesh(activeMesh)
+  let bridgeData = activeMesh && !useEmptyKernel
+    ? shapeOp ? MeshBridge.meshObjectToEditableMesh(activeMesh) : projectStore.acquireEditableMesh(activeMesh)
     : { mesh: new EditableMesh(), strToNumVertId: new Map(), numToStrVertId: new Map(), strToNumFaceId: new Map(), numToStrFaceId: new Map() }
   let editableMesh = bridgeData.mesh
 
-  if (tool === 'inset' && toolStore.selectMode === 'object') return
-  if (tool === 'extrude' && toolStore.selectMode === 'object') return
+  if (activeMesh?.locked) return
+  if ((tool === 'extrude' || tool === 'inset' || tool === 'bevel') && !activeMesh) return
+  if ((tool === 'extrude' || tool === 'inset' || tool === 'bevel') && toolStore.selectMode === 'object') {
+    const bevelEdges = tool === 'bevel' && projectStore.selectedEdgeIds.length > 0
+    toolStore.selectMode = bevelEdges ? 'edge' : 'face'
+    const ready = tool === 'bevel'
+      ? projectStore.selectedEdgeIds.length > 0 || projectStore.selectedFaceIds.length > 0
+      : projectStore.selectedFaceIds.length > 0
+    if (!ready) {
+      projectStore.meshEditError = {
+        success: false,
+        code: 'operation-failed',
+        reason: tool === 'bevel'
+          ? 'Select edges or faces in Edit Mode, then Bevel (Ctrl+B).'
+          : tool === 'inset'
+            ? 'Select faces in Edit Mode (Tab), then Inset (I).'
+            : 'Select faces in Edit Mode (Tab), then Extrude (E).'
+      }
+      return
+    }
+  }
 
   // Derive selection IDs — never silently fall back to the whole mesh in component mode
   let selVertIds = projectStore.selectedVertexIds
@@ -4461,6 +4574,13 @@ function startModalOperator(tool: string, options?: any) {
     objectMatrix: activeMesh ? meshWorldMatrix(activeMesh) : undefined,
     targetMeshId: documentMesh?.id,
     onUpdatePreview: () => {
+      if (shapeOp) {
+        if (documentMesh) for (const group of [layers.modelGroup, layers.wireframeGroup, layers.selectionGroup]) group.traverse(child => {
+          if (child.userData.meshId === documentMesh!.id || child.name.startsWith(`${documentMesh!.id}_`)) child.visible = false
+        })
+        operatorManager.state.value.previewTick++
+        return
+      }
       if (documentMesh && tool !== 'primitive' && tool !== 'add_primitive' && tool !== 'polydraw') {
         const updatedMeshObj = MeshBridge.editableMeshToMeshObject(
           editableMesh,
@@ -4468,12 +4588,31 @@ function startModalOperator(tool: string, options?: any) {
           bridgeData.numToStrVertId,
           bridgeData.numToStrFaceId
         )
-        projectStore.replaceMesh(updatedMeshObj)
+        projectStore.publishEditableMesh(updatedMeshObj, bridgeData, true)
         updateActiveMeshVisualsFast()
       }
     },
     onCommit: (actionName: string) => {
-      if (tool === 'polydraw' && editableMesh.faces.size > 0) {
+      if (shapeOp && editableMesh.faces.size > 0) {
+        const recipe = cloneRecipe(shapeOp.recipe)
+        if (documentMesh) {
+          const updated = MeshBridge.editableMeshToMeshObject(editableMesh, documentMesh)
+          if (shapeOp.bake) delete updated.shapeSource
+          else updated.shapeSource = { recipe, evaluatedSignature: geometrySignature(updated) }
+          projectStore.replaceMesh(updated)
+          projectStore.clearSubSelections()
+          if (modalBaseline) {
+            const baseline = modalBaseline
+            historyStore.pushAction({ description: shapeOp.bake ? 'Make Shape Editable Mesh' : 'Edit Shape Draw', timestamp: Date.now(), snapshot: baseline,
+              undo: () => historyStore.applySnapshot(baseline), redo: () => historyStore.applySnapshot(baseline) })
+          }
+        } else {
+          const created = projectStore.addEditableMesh(editableMesh, `Shape_${projectStore.meshes.length + 1}`)
+          recipe.origin.x -= created.position.x; recipe.origin.y -= created.position.y; recipe.origin.z -= created.position.z
+          if (!shapeOp.bake) created.shapeSource = { recipe, evaluatedSignature: geometrySignature(created) }
+        }
+        toolStore.selectMode = 'object'
+      } else if (tool === 'polydraw' && editableMesh.faces.size > 0) {
         projectStore.addEditableMesh(editableMesh, `Block_${projectStore.meshes.length + 1}`)
       } else if (documentMesh && tool !== 'primitive' && tool !== 'add_primitive') {
         const priorVertIds = new Set(documentMesh.vertices.map(v => v.id))
@@ -4483,7 +4622,24 @@ function startModalOperator(tool: string, options?: any) {
           bridgeData.numToStrVertId,
           bridgeData.numToStrFaceId
         )
-        projectStore.replaceMesh(updatedMeshObj)
+        projectStore.publishEditableMesh(updatedMeshObj, bridgeData)
+        if (['extrude', 'inset', 'bevel', 'knife', 'loopcut', 'loop_cut'].includes(tool)) {
+          const mapVertex = (id: number) => bridgeData.numToStrVertId.get(id) || `v_${id}`
+          projectStore.selectedFaceIds = ctx.selectedFaceIds.filter(id => editableMesh.faces.has(id)).map(id => bridgeData.numToStrFaceId.get(id) || `f_${id}`)
+          projectStore.selectedVertexIds = ctx.selectedVertIds.filter(id => editableMesh.vertices.has(id)).map(mapVertex)
+          const vertices = new Set(projectStore.selectedVertexIds)
+          projectStore.selectedEdgeIds = getMeshEdges(updatedMeshObj).filter(e => vertices.has(e.v1) && vertices.has(e.v2)).map(e => e.id)
+          if (['knife','loopcut','loop_cut'].includes(tool)) {
+            const key = (a: string, b: string) => JSON.stringify([a,b].sort())
+            const cutEdges = new Set(ctx.selectedEdgeIds.flatMap(id => {
+              const edge = editableMesh.edges.get(id)
+              return edge ? [key(mapVertex(edge.v1),mapVertex(edge.v2))] : []
+            }))
+            projectStore.selectedEdgeIds = getMeshEdges(updatedMeshObj).filter(e => cutEdges.has(key(e.v1,e.v2))).map(e => e.id)
+          }
+          updatedMeshObj.vertices.forEach(v => { v.selected = vertices.has(v.id) })
+          updatedMeshObj.faces.forEach(f => { f.selected = projectStore.selectedFaceIds.includes(f.id) })
+        }
         if (tool === 'polybuild') {
           const born = updatedMeshObj.vertices.filter(v => !priorVertIds.has(v.id)).map(v => v.id)
           if (polybuildStartedEmpty || born.length > 0) {
@@ -4512,16 +4668,17 @@ function startModalOperator(tool: string, options?: any) {
       if (tool === 'polydraw' || tool === 'polybuild') toolStore.setModelTool('move')
       rebuildMeshes()
     },
+    validateCommit: () => projectStore.validateEditableMesh(editableMesh),
     onCancel: () => {
       modalBaseline = null
-      if (documentMesh && tool !== 'primitive' && tool !== 'add_primitive' && tool !== 'polydraw') {
+      if (!shapeOp && documentMesh && tool !== 'primitive' && tool !== 'add_primitive' && tool !== 'polydraw') {
         const restored = MeshBridge.editableMeshToMeshObject(
           editableMesh,
           documentMesh,
           bridgeData.numToStrVertId,
           bridgeData.numToStrFaceId
         )
-        projectStore.replaceMesh(restored)
+        projectStore.publishEditableMesh(restored, bridgeData)
       }
       endPolySketchNav()
       orbitControls.enabled = true
@@ -4544,7 +4701,7 @@ function startModalOperator(tool: string, options?: any) {
         )
         return true
       }
-      bridgeData = MeshBridge.meshObjectToEditableMesh(doc)
+      bridgeData = projectStore.acquireEditableMesh(doc)
       editableMesh = bridgeData.mesh
       documentMesh = doc
       ctx.mesh = editableMesh
@@ -4591,6 +4748,16 @@ function startModalOperator(tool: string, options?: any) {
     operatorManager.start(new KnifeOperator(), ctx, pointerPos)
   } else if (tool === 'loop_cut' || tool === 'loopcut') {
     operatorManager.start(new LoopCutOperator(), ctx, pointerPos)
+  } else if (shapeOp) {
+    // A panel click has no drawing-pane camera. Start with a coherent front pane;
+    // pointer navigation will select another pane as soon as the user enters it.
+    if (isTripleView()) {
+      ctx.camera = cameraFront
+      ctx.quadrant = 'col_front'
+      ctx.viewportKind = 'front'
+    }
+    operatorManager.start(shapeOp, ctx, pointerPos)
+    beginPolySketchNav()
   } else if (tool === 'polydraw') {
     operatorManager.start(new PolyDrawOperator(), ctx, pointerPos)
     beginPolySketchNav()
@@ -4743,6 +4910,13 @@ function refreshFaceEdgeSelectionOverlays(): boolean {
   return true
 }
 
+function clearTopologyHover() {
+  if (hoverVertexMesh) hoverVertexMesh.visible = false
+  if (hoverEdgeMesh) hoverEdgeMesh.visible = false
+  if (hoverFaceMesh) hoverFaceMesh.visible = false
+  lastHoverFaceId = ''
+}
+
 function updateHoverState() {
   const isSelectionAllowed = isMeshSelectionAllowed()
   const activeMesh = projectStore.activeMesh
@@ -4853,7 +5027,8 @@ function updateHoverState() {
             } else {
               hoverBoneMesh.position.set(bone.head.x, bone.head.y, bone.head.z)
             }
-            hoverBoneMesh.visible = true
+            hoverBoneMesh.scale.setScalar(Math.hypot(bone.tail.x - bone.head.x, bone.tail.y - bone.head.y, bone.tail.z - bone.head.z) * .4 * animationStore.boneDisplaySize)
+            hoverBoneMesh.visible = !animationStore.jointPlacementActive
             hasHover = true
             break
           }
@@ -4889,12 +5064,44 @@ function updateHoverState() {
   }
 
   if (renderer && renderer.domElement) {
-    const nextCursor = toolStore.appMode === 'uvpaint' ? 'crosshair' : (hasHover ? 'pointer' : 'default')
+    const nextCursor = toolStore.appMode === 'uvpaint' && tilesetImageId.value && tilesetUseMode.value === 'stamp'
+      ? 'copy'
+      : toolStore.appMode === 'uvpaint' ? 'crosshair' : (hasHover ? 'pointer' : 'default')
     if (lastViewportCursor !== nextCursor) {
       lastViewportCursor = nextCursor
       renderer.domElement.style.cursor = nextCursor
     }
   }
+}
+
+function tryStampTilesetFace(event: PointerEvent): boolean {
+  if (!tilesetImageId.value || tilesetUseMode.value !== 'stamp' || event.button !== 0) return false
+  const hit = raycaster
+    .intersectObjects(layers.modelGroup.children, true)
+    .find(candidate => candidate.object.userData.meshId)
+  if (!hit) return false
+  const meshId = hit.object.userData.meshId as string
+  const faceIndex = typeof hit.faceIndex === 'number' ? hit.faceIndex : -1
+  const paintFaceMap = hit.object.userData.paintFaceMap as PaintFaceInfo[] | undefined
+  const face = faceIndex >= 0 ? paintFaceMap?.[faceIndex] : null
+  const mesh = projectStore.meshes.find(candidate => candidate.id === meshId)
+  const tex = projectStore.textures.find(candidate => candidate.id === tilesetImageId.value)
+  if (!face?.id || !mesh || mesh.locked || !tex) return false
+
+  pointerDownHitMesh = true
+  event.preventDefault()
+  event.stopImmediatePropagation()
+  const material = projectStore.materials.find(candidate => candidate.id === mesh.materialId)
+  if (material?.textureId !== tex.id) projectStore.applyTextureToMesh(mesh.id, tex.id, 'this_object')
+  projectStore.selectMesh(mesh.id)
+  projectStore.selectTexture(tex.id)
+  toolStore.selectMode = 'face'
+  const faceIds = event.shiftKey ? [...new Set([...projectStore.selectedFaceIds, face.id])] : [face.id]
+  projectStore.selectedFaceIds = faceIds
+  projectStore.recordState('Stamp atlas tile on faces')
+  const count = stampFacesToRegion(mesh, [face.id], tex, tilesetActiveBounds(tex.width, tex.height, tex.atlas?.cols || 2, tex.atlas?.rows || 2), { ...tilesetStamp })
+  if (count) projectStore.markGeometryUpdated()
+  return true
 }
 
 function is3DPaintToolSupported() {
@@ -4980,28 +5187,31 @@ function paintRaycastHit(paintHit = getPaintRaycastHit()) {
     ? snapColorToPalette(toolStore.primaryColor, projectStore.activePalette.colors)
     : toolStore.primaryColor
   const canConnect = Boolean(lastPaintHit && paintFacesAreContinuous(lastPaintHit, paintHit))
+  const clip = tilesetPaintClip(targetTex.id, pb.width, pb.height, targetTex.atlas?.cols || 2, targetTex.atlas?.rows || 2)
 
-  if (toolStore.paintTool === 'brush') {
-    if (canConnect && lastPaintHit) {
-      pb.paintLineAtUV(lastPaintHit.uv.u, lastPaintHit.uv.v, uv.u, uv.v, activeDrawColor, effectiveSize, 'brush', toolStore.brushOpacity, toolStore.brushShape)
-    } else {
-      pb.drawBrush(px, py, activeDrawColor, effectiveSize, toolStore.brushOpacity, toolStore.brushShape)
+  paintWithinSelection(pb, clip, () => {
+    if (toolStore.paintTool === 'brush') {
+      if (canConnect && lastPaintHit) {
+        pb.paintLineAtUV(lastPaintHit.uv.u, lastPaintHit.uv.v, uv.u, uv.v, activeDrawColor, effectiveSize, 'brush', toolStore.brushOpacity, toolStore.brushShape)
+      } else {
+        pb.drawBrush(px, py, activeDrawColor, effectiveSize, toolStore.brushOpacity, toolStore.brushShape)
+      }
+    } else if (toolStore.paintTool === 'eraser') {
+      if (canConnect && lastPaintHit) {
+        pb.paintLineAtUV(lastPaintHit.uv.u, lastPaintHit.uv.v, uv.u, uv.v, activeDrawColor, effectiveSize, 'eraser', 1, toolStore.brushShape)
+      } else {
+        pb.erase(px, py, effectiveSize, toolStore.brushShape)
+      }
+    } else if (toolStore.paintTool === 'bucket') {
+      pb.floodFill(px, py, activeDrawColor)
+    } else if (toolStore.paintTool === 'dither') {
+      pb.drawDither(px, py, activeDrawColor, effectiveSize)
+    } else if (toolStore.paintTool === 'picker') {
+      toolStore.primaryColor = pb.getPixelHex(px, py)
+    } else if (toolStore.paintTool === 'shade') {
+      pb.paintAtUV(uv.u, uv.v, activeDrawColor, effectiveSize, 'shade-light')
     }
-  } else if (toolStore.paintTool === 'eraser') {
-    if (canConnect && lastPaintHit) {
-      pb.paintLineAtUV(lastPaintHit.uv.u, lastPaintHit.uv.v, uv.u, uv.v, activeDrawColor, effectiveSize, 'eraser', 1, toolStore.brushShape)
-    } else {
-      pb.erase(px, py, effectiveSize, toolStore.brushShape)
-    }
-  } else if (toolStore.paintTool === 'bucket') {
-    pb.floodFill(px, py, activeDrawColor)
-  } else if (toolStore.paintTool === 'dither') {
-    pb.drawDither(px, py, activeDrawColor, effectiveSize)
-  } else if (toolStore.paintTool === 'picker') {
-    toolStore.primaryColor = pb.getPixelHex(px, py)
-  } else if (toolStore.paintTool === 'shade') {
-    pb.paintAtUV(uv.u, uv.v, activeDrawColor, effectiveSize, 'shade-light')
-  }
+  })
 
   lastPaintHit = { meshId: paintHit.meshId, face: paintHit.face, uv: { ...paintHit.uv } }
   if (!lastPaintTextureId) lastPaintTextureId = targetTex.id
@@ -5252,9 +5462,10 @@ function onWindowResize() {
   canvasCssWidth.value = width
 
   const op = operatorManager.activeOperator
-  if (op instanceof PolyDrawOperator || op instanceof PolyBuildOperator) {
+  if (op instanceof PolyDrawOperator || op instanceof PolyBuildOperator || op instanceof ShapeDrawOperator) {
     op.relayout()
   }
+  if (op instanceof KnifeOperator || op instanceof LoopCutOperator) op.relayout()
 }
 
 function animate() {
@@ -5270,17 +5481,17 @@ function animate() {
     }
   }
 
-  if (
-    animationStore.armature.bones.length > 0 &&
-    (animationStore.isPlaying || animationStore.isTestPoseActive || isGizmoDragging)
-  ) {
+  // Object-only clips need the same live transform refresh as skeletal clips.
+  // Frame/property watchers defer to this render loop while playback is active.
+  if (animationStore.isPlaying || animationStore.isTestPoseActive || isGizmoDragging) {
     if (isSkeletalPoseMode()) refreshLiveDeform()
-    syncBones()
+    if (animationStore.armature.bones.length > 0) syncBones()
   }
 
   if (orbitControls && orbitControls.enabled && !isGizmoDragging && !transformControls.dragging && !isViewNavigating) {
     orbitControls.update()
   }
+  if (bonesAreInteractive() && animationStore.showBones && !animationStore.isPlaying && !animationStore.isTestPoseActive && !isGizmoDragging) syncBones()
 
   if (!renderer || !containerRef.value) return
   if (renderer.getContext().isContextLost()) {
@@ -5380,6 +5591,7 @@ watch(() => projectStore.selectedReferenceId, () => {
   updateTransformGizmo()
 })
 watch(() => toolStore.appMode, async () => {
+  if (operatorManager.activeOperator instanceof ShapeDrawOperator) operatorManager.cancel()
   toolStore.isBoxSelectActive = false
   isBoxSelectArmed.value = false
   if (orbitControls) orbitControls.enabled = true
@@ -5406,7 +5618,20 @@ watch(() => toolStore.uvWorkspaceTab, async () => {
   await nextTick()
   scheduleRecover(50)
 })
-watch(() => toolStore.selectMode, () => {
+watch(() => toolStore.selectMode, (mode, previous) => {
+  clearTopologyHover()
+  const mesh = projectStore.activeMesh
+  const modes = ['vertex', 'edge', 'face']
+  if (mesh && !operatorManager.state.value.active && modes.includes(mode) && modes.includes(previous)) {
+    const selection = convertComponentSelection(mesh, previous as ComponentMode, mode as ComponentMode, {
+      vertices: projectStore.selectedVertexIds, edges: projectStore.selectedEdgeIds, faces: projectStore.selectedFaceIds
+    })
+    projectStore.selectedVertexIds = selection.vertices
+    projectStore.selectedEdgeIds = selection.edges
+    projectStore.selectedFaceIds = selection.faces
+    mesh.vertices.forEach(v => { v.selected = selection.vertices.includes(v.id) })
+    mesh.faces.forEach(f => { f.selected = selection.faces.includes(f.id) })
+  }
   toolStore.isBoxSelectActive = false
   isBoxSelectArmed.value = false
   if (orbitControls) orbitControls.enabled = true
@@ -5446,6 +5671,8 @@ watch(() => animationStore.selectedSocketId, () => {
   updateTransformGizmo()
 })
 watch(() => animationStore.xrayBones, syncBones)
+watch(() => animationStore.boneDisplaySize, syncBones)
+watch(() => animationStore.jointPlacementActive, updateTransformGizmo)
 watch(() => animationStore.isTestPoseActive, () => {
   syncBones()
   scheduleRebuildMeshes()
@@ -5480,6 +5707,9 @@ watch(
 watch(() => toolStore.isBoxSelectActive, (active) => {
   if (orbitControls) {
     orbitControls.enabled = !active
+  }
+  if (transformControls) {
+    transformControls.enabled = !active && !operatorManager.state.value.active
   }
 })
 
@@ -5529,6 +5759,7 @@ function handleStartPrimitivePlacementEvent(e: any) {
 }
 
 function handleGlobalPointerMove(e: PointerEvent) {
+  if ((operatorManager.activeOperator instanceof ShapeDrawOperator || operatorManager.activeOperator instanceof KnifeOperator || operatorManager.activeOperator instanceof LoopCutOperator || operatorManager.activeOperator instanceof PrimitivePlacementOperator) && e.target !== renderer?.domElement) return
   lastHoverClientPos = { x: e.clientX, y: e.clientY }
   lastPointerCtrl = e.ctrlKey || e.metaKey
   if (operatorManager.state.value.active) {
@@ -5547,6 +5778,8 @@ function handleGlobalPointerMove(e: PointerEvent) {
 }
 
 function handleGlobalKeyDown(e: KeyboardEvent) {
+  if (operatorManager.state.value.active &&
+    (e.target as HTMLElement | null)?.closest?.('input, select, textarea, [contenteditable="true"]')) return
   if (e.key === 'Escape') {
     if (toolStore.isBoxSelectActive || isBoxSelectArmed.value) {
       toolStore.isBoxSelectActive = false
@@ -5602,6 +5835,7 @@ function handleGlobalWheel(e: WheelEvent) {
 
 function handleGlobalPointerDown(e: MouseEvent) {
   if (!operatorManager.state.value.active) return
+  if ((operatorManager.activeOperator instanceof ShapeDrawOperator || operatorManager.activeOperator instanceof KnifeOperator || operatorManager.activeOperator instanceof LoopCutOperator || operatorManager.activeOperator instanceof PrimitivePlacementOperator) && e.target !== renderer?.domElement) return
 
   if (isPolySketchOperator() && e.button === 1) return
 
@@ -5912,10 +6146,12 @@ onUnmounted(() => {
   }
   if (renderer && renderer.domElement && containerRef.value) {
     renderer.domElement.removeEventListener('wheel', onWheel)
+    renderer.domElement.removeEventListener('dblclick', reopenShapeOnDoubleClick)
     renderer.domElement.removeEventListener('pointerdown', onPointerDown, { capture: true } as EventListenerOptions)
     renderer.domElement.removeEventListener('pointermove', onPointerMove, { capture: true } as EventListenerOptions)
     renderer.domElement.removeEventListener('pointerup', onPointerUp, { capture: true } as EventListenerOptions)
     renderer.domElement.removeEventListener('pointerleave', onPointerUp, { capture: true } as EventListenerOptions)
+    renderer.domElement.removeEventListener('pointerleave', clearTopologyHover)
     renderer.domElement.removeEventListener('webglcontextlost', handleWebGLContextLost)
     renderer.domElement.removeEventListener('webglcontextrestored', handleWebGLContextRestored)
     renderer.domElement.removeEventListener('contextmenu', preventCanvasContextMenu)
@@ -6093,7 +6329,8 @@ onUnmounted(() => {
           class="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1 bg-ui-panel/90 backdrop-blur-xs border border-ui-borderStrong rounded-full shadow-lg font-sans text-[11px]"
         >
           <div class="w-2 h-2 rounded-full" :class="animationStore.clickToPlaceMode ? 'bg-amber-400 animate-pulse' : animationStore.isWeightPaintActive ? 'bg-sky-400 animate-pulse' : 'bg-emerald-400'"></div>
-          <span v-if="animationStore.clickToPlaceMode" class="text-amber-300 font-semibold">
+          <span v-if="animationStore.jointPlacementActive" class="text-amber-300 font-semibold">Fit {{ animationStore.selectedBone?.name }} · click to place pivot</span>
+          <span v-else-if="animationStore.clickToPlaceMode" class="text-amber-300 font-semibold">
             Draw Bone Active: Click Head, then Click Tail in 3D (Press B or Esc to exit)
           </span>
           <span v-else-if="animationStore.isWeightPaintActive" class="text-sky-300 font-semibold flex items-center gap-1.5">
@@ -6102,7 +6339,10 @@ onUnmounted(() => {
             <span class="text-ui-textMuted text-[10px]">({{ animationStore.weightPaintTool.toUpperCase() }} · Radius: {{ animationStore.weightBrushRadius }}m · W: {{ Number(animationStore.weightBrushWeight).toFixed(2) }})</span>
           </span>
           <span v-else-if="animationStore.armature.bones.length === 0" class="text-ui-textPrimary">
-            Rig Mode: Press <strong class="text-ui-textAccent">B</strong> or click <strong class="text-ui-textAccent">+ Add Bone</strong>
+            Choose a <strong class="text-ui-textAccent">starter skeleton</strong> or press <strong class="text-ui-textAccent">B</strong> to draw joints
+          </span>
+          <span v-else-if="animationStore.isTestPoseActive" class="text-ui-textSecondary">
+            Test pose: rotate a joint · no keyframes recorded
           </span>
           <span v-else class="text-ui-textSecondary">
             Rig Mode: <strong class="text-ui-textPrimary">{{ animationStore.selectedBone ? animationStore.selectedBone.name : 'Select joint' }}</strong> · <span class="text-ui-textMuted">Extrude: E · Bind: Ctrl+B</span>
@@ -6608,37 +6848,129 @@ onUnmounted(() => {
       <!-- Knife Path Preview Lines -->
       <template v-if="operatorManager.activeOperator instanceof KnifeOperator">
         <g :key="operatorManager.state.value.previewTick">
-        <!-- Confirmed Path Segments -->
-        <line
-          v-for="(pt, idx) in (operatorManager.activeOperator as KnifeOperator).points.slice(1)"
-          :key="'kp_' + idx"
-          :x1="(operatorManager.activeOperator as KnifeOperator).points[idx].screen.x"
-          :y1="(operatorManager.activeOperator as KnifeOperator).points[idx].screen.y"
-          :x2="pt.screen.x"
-          :y2="pt.screen.y"
-          stroke="#eab308"
-          stroke-width="2"
-        />
-        <!-- Active Floating Segment to Cursor -->
-        <line
-          v-if="(operatorManager.activeOperator as KnifeOperator).points.length > 0 && (operatorManager.activeOperator as KnifeOperator).currentHoverPoint"
-          :x1="(operatorManager.activeOperator as KnifeOperator).points[(operatorManager.activeOperator as KnifeOperator).points.length - 1].screen.x"
-          :y1="(operatorManager.activeOperator as KnifeOperator).points[(operatorManager.activeOperator as KnifeOperator).points.length - 1].screen.y"
-          :x2="(operatorManager.activeOperator as KnifeOperator).cursorOverlay.x"
-          :y2="(operatorManager.activeOperator as KnifeOperator).cursorOverlay.y"
-          stroke="#eab308"
-          stroke-width="2"
-          stroke-dasharray="4 3"
-        />
-        <circle
-          v-if="(operatorManager.activeOperator as KnifeOperator).currentHoverPoint"
-          :cx="(operatorManager.activeOperator as KnifeOperator).cursorOverlay.x"
-          :cy="(operatorManager.activeOperator as KnifeOperator).cursorOverlay.y"
-          r="5"
-          :fill="(operatorManager.activeOperator as KnifeOperator).currentHoverPoint!.targetType === 'VERTEX' ? '#22c55e' : (operatorManager.activeOperator as KnifeOperator).currentHoverPoint!.targetType === 'MIDPOINT' ? '#06b6d4' : '#eab308'"
-          stroke="#ffffff"
-          stroke-width="1.5"
-        />
+          <!-- Angle Snapping Guideline -->
+          <line
+            v-if="(operatorManager.activeOperator as KnifeOperator).guideRay"
+            :x1="(operatorManager.activeOperator as KnifeOperator).guideRay!.x1"
+            :y1="(operatorManager.activeOperator as KnifeOperator).guideRay!.y1"
+            :x2="(operatorManager.activeOperator as KnifeOperator).guideRay!.x2"
+            :y2="(operatorManager.activeOperator as KnifeOperator).guideRay!.y2"
+            stroke="#38bdf8"
+            stroke-width="1.25"
+            stroke-dasharray="6 4"
+            opacity="0.75"
+          />
+
+          <!-- Completed Cut Chains -->
+          <g v-for="(chain, cIdx) in (operatorManager.activeOperator as KnifeOperator).completedChains" :key="'cc_' + cIdx">
+            <line
+              v-for="(pt, idx) in chain.slice(1)"
+              :key="'ccl_' + idx"
+              :x1="chain[idx].screen.x"
+              :y1="chain[idx].screen.y"
+              :x2="pt.screen.x"
+              :y2="pt.screen.y"
+              stroke="#f59e0b"
+              stroke-width="2"
+            />
+            <circle
+              v-for="(pt, idx) in chain"
+              :key="'ccp_' + idx"
+              :cx="pt.screen.x"
+              :cy="pt.screen.y"
+              :r="pt.targetType === 'VERTEX' ? 4.5 : pt.targetType === 'MIDPOINT' ? 4 : 3.5"
+              :fill="pt.targetType === 'VERTEX' ? '#22c55e' : pt.targetType === 'MIDPOINT' ? '#06b6d4' : '#f59e0b'"
+              stroke="#0f172a"
+              stroke-width="1.25"
+            />
+          </g>
+
+          <!-- Active Cut Chain Segments -->
+          <line
+            v-for="(pt, idx) in (operatorManager.activeOperator as KnifeOperator).currentChain.slice(1)"
+            :key="'kp_' + idx"
+            :x1="(operatorManager.activeOperator as KnifeOperator).currentChain[idx].screen.x"
+            :y1="(operatorManager.activeOperator as KnifeOperator).currentChain[idx].screen.y"
+            :x2="pt.screen.x"
+            :y2="pt.screen.y"
+            stroke="#eab308"
+            stroke-width="2.25"
+          />
+
+          <!-- Confirmed Points along Active Chain -->
+          <circle
+            v-for="(pt, idx) in (operatorManager.activeOperator as KnifeOperator).currentChain"
+            :key="'kpt_' + idx"
+            :cx="pt.screen.x"
+            :cy="pt.screen.y"
+            :r="idx === 0 ? 5 : pt.targetType === 'VERTEX' ? 4.5 : pt.targetType === 'MIDPOINT' ? 4 : 3.5"
+            :fill="pt.targetType === 'VERTEX' ? '#22c55e' : pt.targetType === 'MIDPOINT' ? '#06b6d4' : '#eab308'"
+            stroke="#0f172a"
+            stroke-width="1.5"
+          />
+
+          <!-- Active Floating Segment to Cursor -->
+          <line
+            v-if="(operatorManager.activeOperator as KnifeOperator).currentChain.length > 0 && (operatorManager.activeOperator as KnifeOperator).currentHoverPoint"
+            :x1="(operatorManager.activeOperator as KnifeOperator).currentChain[(operatorManager.activeOperator as KnifeOperator).currentChain.length - 1].screen.x"
+            :y1="(operatorManager.activeOperator as KnifeOperator).currentChain[(operatorManager.activeOperator as KnifeOperator).currentChain.length - 1].screen.y"
+            :x2="(operatorManager.activeOperator as KnifeOperator).cursorOverlay.x"
+            :y2="(operatorManager.activeOperator as KnifeOperator).cursorOverlay.y"
+            stroke="#eab308"
+            stroke-width="2"
+            stroke-dasharray="4 3"
+          />
+
+          <!-- Loop Closure Indicator Ring around First Point -->
+          <circle
+            v-if="(operatorManager.activeOperator as KnifeOperator).isLoopClosing && (operatorManager.activeOperator as KnifeOperator).currentChain.length >= 2"
+            :cx="(operatorManager.activeOperator as KnifeOperator).currentChain[0].screen.x"
+            :cy="(operatorManager.activeOperator as KnifeOperator).currentChain[0].screen.y"
+            r="12"
+            fill="none"
+            stroke="#22c55e"
+            stroke-width="2"
+            stroke-dasharray="3 3"
+          />
+
+          <!-- Active Cursor Hover Point -->
+          <circle
+            v-if="(operatorManager.activeOperator as KnifeOperator).currentHoverPoint"
+            :cx="(operatorManager.activeOperator as KnifeOperator).cursorOverlay.x"
+            :cy="(operatorManager.activeOperator as KnifeOperator).cursorOverlay.y"
+            :r="(operatorManager.activeOperator as KnifeOperator).isLoopClosing ? 6 : 5"
+            :fill="(operatorManager.activeOperator as KnifeOperator).isLoopClosing ? '#22c55e' : (operatorManager.activeOperator as KnifeOperator).currentHoverPoint!.targetType === 'VERTEX' ? '#22c55e' : (operatorManager.activeOperator as KnifeOperator).currentHoverPoint!.targetType === 'MIDPOINT' ? '#06b6d4' : '#eab308'"
+            stroke="#ffffff"
+            stroke-width="1.5"
+          />
+
+          <!-- Live Measurement Floating Pill (Distance & Angle) -->
+          <g
+            v-if="(operatorManager.activeOperator as KnifeOperator).measurementText && (operatorManager.activeOperator as KnifeOperator).currentChain.length > 0"
+            :transform="`translate(${(operatorManager.activeOperator as KnifeOperator).cursorOverlay.x + 14}, ${(operatorManager.activeOperator as KnifeOperator).cursorOverlay.y - 12})`"
+          >
+            <rect
+              x="0"
+              y="-12"
+              :width="(operatorManager.activeOperator as KnifeOperator).measurementText.length * 7.2 + 16"
+              height="20"
+              rx="4"
+              fill="#090d16"
+              fill-opacity="0.9"
+              stroke="#334155"
+              stroke-width="1"
+            />
+            <text
+              x="8"
+              y="2"
+              fill="#f8fafc"
+              font-size="10.5"
+              font-family="monospace"
+              font-weight="600"
+            >
+              {{ (operatorManager.activeOperator as KnifeOperator).measurementText }}
+            </text>
+          </g>
         </g>
       </template>
     </svg>
@@ -6671,12 +7003,30 @@ onUnmounted(() => {
       <button @click="toolStore.isBoxSelectActive = false" class="ml-1 text-slate-400 hover:text-white">&times;</button>
     </div>
 
+    <PolyDrawPanel />
+    <ShapeDrawPanel v-if="toolStore.appMode === 'blockout'" @start="fresh => startModalOperator('shapedraw', { fresh })" />
+
+    <div v-if="operatorManager.activeOperator instanceof LoopCutOperator" data-floating-panel
+      class="absolute top-3 left-1/2 -translate-x-1/2 z-50 w-[440px] max-w-[95%] bg-ui-panel border border-ui-borderStrong rounded shadow-xl p-3 text-xs pointer-events-auto">
+      <div class="flex justify-between items-center mb-2"><strong>Loop Cut</strong><button @click="operatorManager.cancel()" title="Cancel (Esc)">×</button></div>
+      <p class="text-ui-textSecondary leading-relaxed mb-2">{{ operatorManager.state.value.statusText }}</p>
+      <div class="flex flex-wrap items-center gap-2">
+        <template v-if="(operatorManager.activeOperator as LoopCutOperator).loopState === 'FINDING_RING'">
+          <button class="px-2 py-1 bg-ui-input rounded" @click="loopCutAction('less')" title="Fewer cuts">−</button>
+          <span>{{ (operatorManager.activeOperator as LoopCutOperator).cutCount }} cuts</span>
+          <button class="px-2 py-1 bg-ui-input rounded" @click="loopCutAction('more')" title="More cuts">+</button>
+        </template>
+        <button class="px-2 py-1 bg-ui-input rounded disabled:opacity-40" :disabled="!(operatorManager.activeOperator as LoopCutOperator).ringEdgeIds.length" @click="loopCutAction('center')">Apply centered</button>
+        <button class="px-2 py-1 bg-emerald-700 rounded text-white disabled:opacity-40" :disabled="!(operatorManager.activeOperator as LoopCutOperator).ringEdgeIds.length" @click="loopCutAction('advance')">{{ (operatorManager.activeOperator as LoopCutOperator).loopState === 'SLIDING' ? 'Apply' : 'Slide' }}</button>
+      </div>
+    </div>
+
     <!-- Blender Modal Operator Interactive HUD (Floating, Movable & Closable) -->
     <div 
-      v-if="operatorManager.state.value.active && !(operatorManager.activeOperator instanceof LoopCutOperator)"
+      v-if="operatorManager.state.value.active && !(operatorManager.activeOperator instanceof LoopCutOperator) && !(operatorManager.activeOperator instanceof ShapeDrawOperator)"
       data-floating-panel
       class="fixed z-50 flex flex-col bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl font-sans select-none pointer-events-auto max-w-[95vw] hud-panel"
-      :class="operatorManager.activeOperator instanceof PolyBuildOperator ? 'min-w-[300px]' : 'min-w-[360px]'"
+      :class="operatorManager.activeOperator instanceof KnifeOperator ? 'w-[480px] min-w-0' : operatorManager.activeOperator instanceof PolyBuildOperator ? 'min-w-[300px]' : 'min-w-[360px]'"
       :style="{ left: `${hudPos.x}px`, top: `${hudPos.y}px` }"
     >
       <!-- Panel Header Bar (Draggable) -->
@@ -6701,12 +7051,15 @@ onUnmounted(() => {
       <!-- Panel Body: Status and Controls -->
       <div class="p-2 flex flex-col gap-2 bg-ui-panel text-xs rounded-b-xs">
         <!-- Live Status & Instruction Text -->
-        <div class="text-[11px] text-ui-textSecondary font-mono bg-ui-input/70 px-2 py-1 rounded-xs border border-ui-borderSubtle">
-          {{ operatorManager.state.value.statusText }}
+        <div class="text-[11px] text-ui-textSecondary font-mono bg-ui-input/70 px-2 py-1 rounded-xs border border-ui-borderSubtle break-words">
+          <template v-if="operatorManager.activeOperator instanceof KnifeOperator">
+            {{ (operatorManager.activeOperator as KnifeOperator).error || `${(operatorManager.activeOperator as KnifeOperator).currentChain.length} points · ${(operatorManager.activeOperator as KnifeOperator).completedChains.length} completed strokes · Axis: ${(operatorManager.activeOperator as KnifeOperator).axisLock || 'free'}` }}
+          </template>
+          <template v-else>{{ operatorManager.state.value.statusText }}</template>
         </div>
 
         <!-- Interactive Controls Row -->
-        <div class="flex items-center justify-between gap-2 pt-0.5">
+        <div class="flex items-center justify-between gap-2 pt-0.5" :class="{ 'flex-wrap': operatorManager.activeOperator instanceof KnifeOperator }">
           <template v-if="operatorManager.activeOperator instanceof PolyBuildOperator">
             <div class="text-[10px] text-ui-textMuted leading-snug pr-1">
               Empty = new · old vert = reuse · first = close · Tab = other way
@@ -6717,6 +7070,72 @@ onUnmounted(() => {
               {{ (operatorManager.activeOperator as PolyDrawOperator).phase === 'extrude'
                 ? 'Drag toward or away · F flips thickness'
                 : 'Trace silhouette · close the ring · then pull thickness' }}
+            </div>
+          </template>
+          <template v-else-if="operatorManager.activeOperator instanceof KnifeOperator">
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <!-- Cut-Through Toggle -->
+              <button
+                type="button"
+                @click="knifeAction('toggleCutThrough')"
+                class="px-2 py-0.5 rounded-xs text-[10px] font-semibold border transition active:scale-95 cursor-pointer"
+                :class="(operatorManager.activeOperator as KnifeOperator).cutThrough
+                  ? 'bg-amber-500/25 text-amber-300 border-amber-400/50 hover:bg-amber-500/35'
+                  : 'bg-ui-surface text-ui-textMuted border-ui-borderSubtle hover:text-ui-textSecondary'"
+                title="Cut through backfacing geometry (C)"
+              >
+                Cut-Through (C): {{ (operatorManager.activeOperator as KnifeOperator).cutThrough ? 'ON' : 'OFF' }}
+              </button>
+
+              <!-- Angle Snapping Toggle -->
+              <button
+                type="button"
+                @click="knifeAction('toggleAngleSnap')"
+                class="px-2 py-0.5 rounded-xs text-[10px] font-semibold border transition active:scale-95 cursor-pointer"
+                :class="(operatorManager.activeOperator as KnifeOperator).angleSnapping
+                  ? 'bg-sky-500/25 text-sky-300 border-sky-400/50 hover:bg-sky-500/35'
+                  : 'bg-ui-surface text-ui-textMuted border-ui-borderSubtle hover:text-ui-textSecondary'"
+                title="Constrain angle increments (A)"
+              >
+                Angle-Snap (A): {{ (operatorManager.activeOperator as KnifeOperator).angleSnapping ? (operatorManager.activeOperator as KnifeOperator).snapAngleDegrees + '°' : 'OFF' }}
+              </button>
+
+              <!-- Angle Increment Cycle -->
+              <button
+                v-if="(operatorManager.activeOperator as KnifeOperator).angleSnapping"
+                type="button"
+                @click="knifeAction('cycleAngle')"
+                class="px-1.5 py-0.5 rounded-xs text-[10px] font-mono text-sky-300 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-400/30 transition active:scale-95 cursor-pointer"
+                title="Cycle snap angle: 30° / 45° / 90°"
+              >
+                {{ (operatorManager.activeOperator as KnifeOperator).snapAngleDegrees }}° ⟳
+              </button>
+
+              <!-- New Cut Button -->
+              <button
+                type="button"
+                @click="knifeAction('newCut')"
+                :disabled="(operatorManager.activeOperator as KnifeOperator).currentChain.length < 2"
+                class="px-2 py-0.5 rounded-xs text-[10px] font-semibold border transition active:scale-95 cursor-pointer"
+                :class="(operatorManager.activeOperator as KnifeOperator).currentChain.length >= 2
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40 hover:bg-emerald-500/30'
+                  : 'bg-ui-surface text-ui-textMuted border-ui-borderSubtle opacity-40'"
+                title="Finish current cut stroke and start a new cut (E)"
+              >
+                New Cut (E)
+              </button>
+
+              <!-- Undo Point Button -->
+              <button
+                type="button"
+                @click="knifeAction('undoPoint')"
+                :disabled="(operatorManager.activeOperator as KnifeOperator).currentChain.length === 0 && (operatorManager.activeOperator as KnifeOperator).completedChains.length === 0"
+                class="px-2 py-0.5 rounded-xs text-[10px] text-ui-textSecondary hover:text-ui-text bg-ui-surface border border-ui-borderSubtle transition active:scale-95 cursor-pointer disabled:opacity-40"
+                title="Undo last point (Ctrl+Z / Backspace)"
+              >
+                Undo
+              </button>
+              <button type="button" @click="knifeAction('redoPoint')" class="px-2 py-0.5 rounded-xs text-[10px] bg-ui-surface border border-ui-borderSubtle" title="Redo cut point (Ctrl+Shift+Z)">Redo</button>
             </div>
           </template>
           <div
@@ -6748,6 +7167,13 @@ onUnmounted(() => {
 
           <!-- Modifiers & Snapping Controls -->
           <div class="flex items-center gap-1">
+            <div
+              v-if="operatorManager.activeOperator instanceof KnifeOperator"
+              class="text-[10px] text-ui-textMuted font-mono px-1 flex items-center gap-2 flex-wrap select-none"
+            >
+              <span><kbd class="px-1 py-0.2 bg-ui-input rounded border border-ui-borderSubtle text-[9px] text-ui-textSecondary">Ctrl</kbd> Free Cut</span>
+              <span><kbd class="px-1 py-0.2 bg-ui-input rounded border border-ui-borderSubtle text-[9px] text-ui-textSecondary">Shift</kbd> Midpoint</span>
+            </div>
             <button
               v-if="operatorManager.activeOperator instanceof PolyBuildOperator"
               type="button"
@@ -6801,7 +7227,7 @@ onUnmounted(() => {
               Flip
             </button>
             <button 
-              v-if="!(operatorManager.activeOperator instanceof PolyBuildOperator) && !(operatorManager.activeOperator instanceof PolyDrawOperator)"
+              v-if="!(operatorManager.activeOperator instanceof PolyBuildOperator) && !(operatorManager.activeOperator instanceof PolyDrawOperator) && !(operatorManager.activeOperator instanceof KnifeOperator)"
               @click="triggerToggleSnap"
               class="px-2 py-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[11px] text-ui-textSecondary font-medium active:scale-95 transition"
               title="Toggle Grid / Angle Snapping (Ctrl)"
@@ -6810,7 +7236,7 @@ onUnmounted(() => {
             </button>
 
             <button 
-              v-if="!(operatorManager.activeOperator instanceof PolyBuildOperator) && !(operatorManager.activeOperator instanceof PolyDrawOperator)"
+              v-if="!(operatorManager.activeOperator instanceof PolyBuildOperator) && !(operatorManager.activeOperator instanceof PolyDrawOperator) && !(operatorManager.activeOperator instanceof KnifeOperator)"
               @click="triggerTogglePrecision"
               class="px-2 py-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[11px] text-ui-textSecondary font-medium active:scale-95 transition"
               title="Precision Mode (Shift)"
@@ -6908,7 +7334,7 @@ onUnmounted(() => {
               <span class="text-[10px] text-amber-400 font-bold">M</span>
             </button>
             <button @click="execSpecial('bevel')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
-              <span>Bevel Vertices</span>
+              <span>Bevel Connecting Edges</span>
               <span class="text-[10px] text-ui-textMuted font-mono">Shift+Ctrl+B</span>
             </button>
             <button @click="execSpecial('fill-face')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">

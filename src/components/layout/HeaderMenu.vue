@@ -156,11 +156,11 @@ const shadingModes = [
 ]
 
 const workspaces = [
-  { id: 'model' as const, label: 'Modeling', icon: 'mesh-cube' as const, desc: '3D Mesh Polygon Editing' },
-  { id: 'blockout' as const, label: 'Blockout', icon: 'tool-draw' as const, desc: 'Multi-View Reference Tracing' },
-  { id: 'uvpaint' as const, label: 'UV / Paint', icon: 'brush' as const, desc: 'UV Unwrap & Pixel Texture Painting' },
-  { id: 'rig' as const, label: 'Rigging', icon: 'bone' as const, desc: 'Skeletal Armature & Weight Painting' },
-  { id: 'animate' as const, label: 'Animation', icon: 'pose' as const, desc: 'Keyframe Timeline & Posing' }
+  { id: 'model' as const, label: 'Modeling', icon: 'workspace-model' as const, desc: '3D Mesh Polygon Editing' },
+  { id: 'blockout' as const, label: 'Blockout', icon: 'workspace-blockout' as const, desc: 'Multi-View Reference Tracing' },
+  { id: 'uvpaint' as const, label: 'UV / Paint', icon: 'workspace-paint' as const, desc: 'UV Unwrap & Pixel Texture Painting' },
+  { id: 'rig' as const, label: 'Rigging', icon: 'workspace-rig' as const, desc: 'Skeletal Armature & Weight Painting' },
+  { id: 'animate' as const, label: 'Animation', icon: 'workspace-animation' as const, desc: 'Keyframe Timeline & Posing' }
 ]
 
 function toggleSymmetry(axis: 'X' | 'Y' | 'Z') {
@@ -582,7 +582,7 @@ onUnmounted(() => {
           </button>
           <button @click="requestFillFace(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2"><BlenderIcon name="fill-face" :size="14" /> Fill</span>
-            <span class="text-ui-textMuted font-mono text-[10px]">F</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">{{ toolStore.appMode === 'model' ? 'F' : '' }}</span>
           </button>
           <button @click="projectStore.performGridFill(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
             Grid Fill
@@ -841,7 +841,7 @@ onUnmounted(() => {
           :aria-label="w.label + ' workspace'"
           :aria-current="toolStore.appMode === w.id ? 'page' : undefined"
         >
-          <BlenderIcon :name="w.icon" :size="13" :class="toolStore.appMode === w.id ? 'text-ui-textAccent' : ''" />
+          <BlenderIcon :name="w.icon" :size="16" :class="toolStore.appMode === w.id ? 'text-ui-textAccent' : ''" />
           <span class="hidden min-[1280px]:inline">{{ w.label }}</span>
           <span
             v-if="toolStore.appMode === w.id"

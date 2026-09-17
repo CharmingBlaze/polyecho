@@ -20,8 +20,11 @@ import {
   Download,
   Upload,
   Copy,
-  Trash2
+  Trash2,
+  Image
 } from 'lucide-vue-next'
+import { DEFAULT_TEXTURE_PRESETS, fillDefaultTexture } from '../../core/painting/DefaultTextures'
+import { PixelBuffer } from '../../core/painting/PixelCanvas'
 
 const emit = defineEmits<{
   (e: 'close'): void
@@ -152,6 +155,23 @@ function handleKeyRecord(e: KeyboardEvent) {
 const stylusCurve = ref<'linear' | 'soft' | 'hard'>('linear')
 const maxUndoSteps = ref<number>(50)
 const autoSaveInterval = ref<number>(5) // minutes
+
+const starterPreview = computed(() => {
+  const pb = new PixelBuffer(64, 64)
+  fillDefaultTexture(pb, projectStore.defaultTexturePref)
+  return pb.toDataURL()
+})
+
+function chooseStarter(kind: (typeof DEFAULT_TEXTURE_PRESETS)[number]['kind']) {
+  projectStore.setDefaultTexturePref({ kind })
+}
+
+function chooseStarterColor(event: Event) {
+  projectStore.setDefaultTexturePref({
+    kind: 'color',
+    color: (event.target as HTMLInputElement).value
+  })
+}
 
 onMounted(() => {
   window.addEventListener('keydown', handleKeyRecord, true)
@@ -544,6 +564,54 @@ onUnmounted(() => {
                 </select>
               </div>
 
+              <div class="flex items-start justify-between py-2 border-b border-ui-borderSubtle/40 gap-3">
+                <div class="min-w-0">
+                  <span class="text-ui-textPrimary font-medium flex items-center gap-1.5">
+                    <Image class="w-3.5 h-3.5 text-amber-400" />
+                    Starter texture
+                  </span>
+                  <p class="text-[10px] text-ui-textMuted mt-0.5">Image used for new projects and Restore starter texture. Solid colors replace the retro atlas on the default cube.</p>
+                </div>
+                <div class="flex flex-col items-end gap-2 shrink-0">
+                  <img
+                    :src="starterPreview"
+                    alt="Starter texture preview"
+                    class="w-16 h-16 rounded-xs border border-ui-borderDefault bg-ui-input object-contain"
+                    style="image-rendering: pixelated"
+                  />
+                  <div class="flex flex-wrap gap-1 justify-end max-w-[18rem]">
+                    <button
+                      v-for="preset in DEFAULT_TEXTURE_PRESETS"
+                      :key="preset.kind"
+                      type="button"
+                      class="px-1.5 py-1 rounded-xs border text-[10px] font-bold uppercase flex items-center gap-1"
+                      :class="projectStore.defaultTexturePref.kind === preset.kind ? 'border-amber-500 bg-amber-500/20 text-amber-200' : 'border-ui-borderSubtle text-ui-textMuted hover:bg-ui-hover'"
+                      @click="chooseStarter(preset.kind)"
+                    >
+                      <span
+                        v-if="preset.kind !== 'color'"
+                        class="w-2.5 h-2.5 rounded-xs border border-black/30 shrink-0"
+                        :class="preset.kind === 'checker' ? 'starter-check' : ''"
+                        :style="preset.kind === 'checker' ? undefined : { backgroundColor: preset.swatch }"
+                      />
+                      {{ preset.label }}
+                    </button>
+                  </div>
+                  <label
+                    v-if="projectStore.defaultTexturePref.kind === 'color'"
+                    class="flex items-center gap-2 text-[10px] text-ui-textMuted"
+                  >
+                    Color
+                    <input
+                      type="color"
+                      class="w-8 h-6 rounded-xs border border-ui-borderDefault bg-transparent cursor-pointer"
+                      :value="projectStore.defaultTexturePref.color"
+                      @change="chooseStarterColor"
+                    />
+                  </label>
+                </div>
+              </div>
+
               <div class="flex items-center justify-between py-1 border-b border-ui-borderSubtle/40">
                 <div>
                   <span class="text-ui-textPrimary font-medium">Wireframe Overlay Opacity</span>
@@ -713,3 +781,9 @@ onUnmounted(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.starter-check {
+  background: repeating-conic-gradient(#d1d5db 0% 25%, #6b7280 0% 50%) 0 0 / 6px 6px;
+}
+</style>

@@ -6,12 +6,15 @@ import { useAnimationStore } from '../../stores/animationStore'
 import { useRuntimeStore } from '../../stores/runtimeStore'
 import { MODEL_PROFILES, validateMeshAgainstProfile } from '../../core/profiles/ModelProfiles'
 import { isDesktopApp, revealCrashLog } from '../../core/desktop/desktopApi'
+import { tilesetImageId, tilesetUseMode } from '../../composables/useTilesetWindow'
+import { operatorManager } from '../../core/operators/OperatorManager'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 
 const toolStore = useToolStore()
 const projectStore = useProjectStore()
 const animationStore = useAnimationStore()
 const runtimeStore = useRuntimeStore()
+const operatorState = computed(() => operatorManager.state.value)
 
 const activeProfile = computed(() => {
   return MODEL_PROFILES.find(p => p.id === toolStore.activeProfileId) || MODEL_PROFILES[0]
@@ -22,29 +25,47 @@ const profileIssues = computed(() => {
   return validateMeshAgainstProfile(projectStore.activeMesh, activeProfile.value, texSize)
 })
 
+const statusModeLabel = computed(() => {
+  if (operatorState.value.active && operatorState.value.operatorName) return operatorState.value.operatorName
+  if (toolStore.isBoxSelectActive) return 'Box Select'
+  return toolStore.appMode
+})
+
 const contextualHints = computed(() => {
+  if (operatorState.value.active && operatorState.value.statusText) {
+    return operatorState.value.statusText
+  }
+  if (toolStore.isBoxSelectActive) {
+    return 'Drag a rectangle · Shift add · Esc cancel'
+  }
   if (toolStore.appMode === 'model') {
     if (toolStore.selectMode === 'vertex') {
       return 'LMB: Select Vert | Drag: Orbit | RMB: Pan | Shift: Add | Alt: Linked | G/R/S | M: Merge | Del: Delete'
     } else if (toolStore.selectMode === 'edge') {
       return 'LMB: Select Edge | Drag: Orbit | RMB: Pan | Shift: Add | Alt: Loop | Ctrl+Alt: Ring | G/R/S | Ctrl+R: Loop Cut'
     } else if (toolStore.selectMode === 'face') {
-      return 'LMB: Select Face | Drag: Orbit | RMB: Pan | Shift: Add | Alt: Linked | G/R/S | E: Extrude | I: Inset | Del: Delete'
+      return 'LMB: Select Face | Drag: Orbit | RMB: Pan | Shift: Add | Alt: Linked | G/R/S | E: Extrude | I: Inset | F: Fill | Del: Delete'
     } else if (toolStore.selectMode === 'origin') {
       return 'LMB: Move Pivot Point | RMB: Pan | G: Move Origin | Esc: Finish Pivot'
     }
     return 'LMB: Select Object | Drag: Orbit | RMB: Pan | G: Move | R: Rotate | S: Scale | Shift+A: Add | Tab: Edit Mode'
   } else if (toolStore.appMode === 'blockout') {
-    return 'RMB: Pan view · Drag bars to resize · F: Poly Draw · V: Poly Build (new or old verts, close the loop)'
+    return 'Shape Draw (green) · F: Poly Draw · V: Poly Build · Tab: Edit Mode · E: Extrude faces · RMB: Pan · N: Refs'
   } else if (toolStore.appMode === 'uvpaint') {
+    if (tilesetImageId.value && tilesetUseMode.value === 'stamp') {
+      return 'Tileset stamp: LMB face applies the active tile · Shift: add faces · Edit: open the atlas panel'
+    }
+    if (tilesetImageId.value && tilesetUseMode.value === 'paint') {
+      return 'Tileset paint: LMB paints the 3D object · Clip keeps strokes in the selected tile · RMB: Pan'
+    }
     if (toolStore.uvWorkspaceTab === 'uv') {
       return 'U: Smart UV | Ctrl+Shift+E: Mark seam | 1/2/3/4: Vertex/Edge/Face/Island | A: Select all | P: Pin | V: Stitch | F: Frame | RMB/Space: Pan'
     }
-    return 'LMB: Paint | Ctrl+LMB: Secondary | RMB: Pan | B/E/G/I: Brush/Eraser/Fill/Picker | Space+Drag: Pan'
+    return 'LMB: Paint | Ctrl+LMB: Secondary | RMB: Pan | B/E/G/I: Brush/Eraser/Fill/Picker | M: Marquee | X: Swap colors'
   } else if (toolStore.appMode === 'rig') {
-    return 'LMB: Select Bone | Drag: Orbit | RMB: Pan | E: Extrude Bone | R: Rotate Joint | Parent: 100% Rigid Influence'
+    return 'LMB: Select bone | E: Extrude bone | G/R/S: Move/Rotate/Scale | Inspector: Skeleton → Attach → Weights → Test | N: Panel'
   } else if (toolStore.appMode === 'animate') {
-    return 'RMB: Pan (view / timeline / graph) | Space: Play | I/K: Insert key | Shift+D: Duplicate keys | Ctrl+C/V: Copy/paste pose | Auto-key: ' + (animationStore.autoKey ? 'ON' : 'OFF')
+    return 'RMB: Pan (view / timeline / graph) | Space: Play | I/K: Insert key | G/R/S: Pose | Shift+D: Duplicate keys | Ctrl+C/V: Copy/paste pose | Auto-key: ' + (animationStore.autoKey ? 'ON' : 'OFF')
   }
   return 'LMB: Select | RMB: Pan view'
 })
@@ -53,9 +74,12 @@ const contextualHints = computed(() => {
 <template>
   <footer class="h-6 bg-ui-header border-t border-ui-borderSubtle px-2.5 flex items-center justify-between text-[11px] font-sans text-ui-textMuted select-none shrink-0 z-30">
     <!-- Left: Contextual Shortcut Hints -->
-    <div class="flex items-center space-x-2 truncate max-w-[45%]">
-      <span class="font-semibold text-[10px] uppercase text-ui-textSecondary shrink-0">{{ toolStore.appMode }}:</span>
-      <span class="text-ui-textMuted truncate text-[10px] font-mono">{{ contextualHints }}</span>
+    <div class="flex items-center space-x-2 truncate" :class="operatorState.active || toolStore.isBoxSelectActive ? 'max-w-[62%]' : 'max-w-[45%]'">
+      <span class="font-semibold text-[10px] uppercase text-ui-textSecondary shrink-0">{{ statusModeLabel }}:</span>
+      <button v-if="projectStore.meshEditError" type="button"
+        class="text-amber-300 truncate text-[10px]" :title="projectStore.meshEditError.reason + ' (click to dismiss)'"
+        @click="projectStore.meshEditError = null">{{ projectStore.meshEditError.reason }}</button>
+      <span v-else class="text-ui-textMuted truncate text-[10px] font-mono">{{ contextualHints }}</span>
       <button
         v-if="runtimeStore.lastError"
         type="button"
@@ -102,11 +126,14 @@ const contextualHints = computed(() => {
         <span class="text-ui-textMuted">Tris <span class="text-ui-textPrimary font-mono tabular-nums font-medium">{{ projectStore.stats?.tris ?? 0 }}</span></span>
         <span class="text-ui-textMuted">Verts <span class="text-ui-textPrimary font-mono tabular-nums font-medium">{{ projectStore.stats?.verts ?? 0 }}</span></span>
         <span class="text-ui-textMuted">Faces <span class="text-ui-textPrimary font-mono tabular-nums font-medium">{{ projectStore.stats?.faces ?? 0 }}</span></span>
-        <span v-if="(projectStore.stats?.selectedVerts ?? 0) > 0" class="text-ui-textAccent font-mono tabular-nums">
-          Sel: {{ projectStore.stats?.selectedVerts }}v
+        <span v-if="toolStore.selectMode === 'vertex' && projectStore.selectedVertexIds.length" class="text-ui-textAccent font-mono tabular-nums">
+          Sel: {{ projectStore.selectedVertexIds.length }}v
         </span>
-        <span v-else-if="(projectStore.stats?.selectedFaces ?? 0) > 0" class="text-ui-textAccent font-mono tabular-nums">
-          Sel: {{ projectStore.stats?.selectedFaces }}f
+        <span v-else-if="toolStore.selectMode === 'edge' && projectStore.selectedEdgeIds.length" class="text-ui-textAccent font-mono tabular-nums">
+          Sel: {{ projectStore.selectedEdgeIds.length }}e
+        </span>
+        <span v-else-if="toolStore.selectMode === 'face' && projectStore.selectedFaceIds.length" class="text-ui-textAccent font-mono tabular-nums">
+          Sel: {{ projectStore.selectedFaceIds.length }}f
         </span>
       </div>
 
