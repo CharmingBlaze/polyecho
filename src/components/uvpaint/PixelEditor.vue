@@ -1,11 +1,19 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, shallowRef, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import TextureSharePrompt from '../modals/TextureSharePrompt.vue'
 import { useTextureApply } from '../../composables/useTextureApply'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import ImportTextureModal from '../modals/ImportTextureModal.vue'
+import {
+  openTileset,
+  tilesetActiveBounds,
+  tilesetClipPaint,
+  tilesetImageId,
+  tilesetRegion,
+  tilesetTileIndex
+} from '../../composables/useTilesetWindow'
 import NewTextureModal from '../modals/NewTextureModal.vue'
 import PaletteLibraryModal from '../modals/PaletteLibraryModal.vue'
 import { DEFAULT_PALETTES, loadCustomPalettes, saveCustomPalettes, snapColorToPalette, type Palette } from '../../utils/color'
@@ -15,10 +23,17 @@ import {
 } from 'lucide-vue-next'
 import { generateShadingRamp } from '../../utils/color'
 import { EDITOR_EVENTS } from '../../core/commands/editorCommands'
+import PaintLayers from './PaintLayers.vue'
+import { useHistoryStore } from '../../stores/historyStore'
+import { marqueeRect, containsPixel, translateSelection, copySelectedPixels, moveSelectedPixels, flipSelectedPixels, paintWithinSelection, type PaintRect } from '../../core/painting/PaintSelection'
+import { PixelBuffer } from '../../core/painting/PixelCanvas'
+import { visitStrokePixels } from '../../core/painting/StrokePath'
 import { saveBlobDocument } from '../../core/desktop/desktopApi'
 
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
+const historyStore = useHistoryStore()
+const imageApplied = computed(() => projectStore.materials.find(m => m.id === projectStore.activeMesh?.materialId)?.textureId === projectStore.activeTextureId)
 const {
   isOpen: sharePromptOpen,
   sharedCount: sharePromptCount,
@@ -32,17 +47,8 @@ const {
 // ----------------------------------------------------
 const showNewTextureModal = ref(false)
 
-function bindTextureToActiveObject(textureId: string) {
-  const mesh = projectStore.activeMesh
-  if (!mesh) {
-    projectStore.selectTexture(textureId)
-    return
-  }
-  projectStore.applyTextureToMesh(mesh.id, textureId, 'this_object')
-}
-
 function handleTextureBindingChange(newTexId: string) {
-  bindTextureToActiveObject(newTexId)
+  projectStore.selectTexture(newTexId)
   nextTick(() => {
     renderCanvas()
   })
@@ -54,8 +60,8 @@ function handleCreateNewTexture(payload: { name: string; width: number; height: 
   else if (payload.fill === 'black') tex.pixelBuffer.clear('#111111')
   else if (payload.fill === 'primary') tex.pixelBuffer.clear(toolStore.primaryColor || '#ffffff')
   if (payload.fill !== 'transparent') projectStore.markTextureUpdated(tex.id)
-  if (projectStore.activeMesh) {
-    projectStore.applyTextureToMesh(projectStore.activeMesh.id, tex.id, 'this_object')
+  if (projectStore.activeMesh && !projectStore.activeMesh.locked) {
+    projectStore.applyTextureToMesh(projectStore.activeMesh.id, tex.id, 'this_object', { record: false })
   }
   showNewTextureModal.value = false
   nextTick(() => {
@@ -104,12 +110,13 @@ const zoom = ref<number>(6)
 const isFitToView = ref<boolean>(true)
 const showUvOverlay = ref<boolean>(true)
 const showPixelGrid = ref<boolean>(true)
-const showLayers = ref<boolean>(false)
+const showLayers = ref<boolean>(true)
 // PixelBuffer is deliberately non-reactive (canvas-heavy). Bump this after a
 // layer mutation so the small layer popover stays in sync.
 const layerRevision = ref(0)
 const paintTools = [
-  { id: 'brush', icon: 'brush', key: 'B', title: 'Pencil / Brush Tool' },
+  { id: 'select', icon: 'rect', key: 'M', title: 'Marquee Selection' },
+  { id: 'brush', icon: 'brush', key: 'B', title: 'Pencil' },
   { id: 'eraser', icon: 'eraser', key: 'E', title: 'Eraser Tool' },
   { id: 'bucket', icon: 'fill', key: 'G', title: 'Paint Bucket / Fill Tool' },
   { id: 'picker', icon: 'picker', key: 'I', title: 'Eyedropper Color Picker' },
@@ -135,6 +142,147 @@ let dragStartCoords: { x: number; y: number } | null = null
 let dragCurrentCoords: { x: number; y: number } | null = null
 let lastDrawCoords: { x: number; y: number } | null = null
 
+// Selection is a 2D editing boundary on the active layer, independent of mesh UV selection.
+const paintSelection = ref<PaintRect | null>(null)
+function tilesetHighlight(): PaintRect | null {
+  const tex = projectStore.activeTexture
+  if (!tex || tilesetImageId.value !== tex.id) return null
+  const bounds = tilesetActiveBounds(tex.width, tex.height, tex.atlas?.cols || 2, tex.atlas?.rows || 2)
+  return { x: bounds.x, y: bounds.y, w: bounds.width, h: bounds.height }
+}
+function paintClip(): PaintRect | null {
+  return paintSelection.value
+}
+const pixelClipboard = shallowRef<ImageData | null>(null)
+const selectionGesture = ref<'marquee' | 'move' | null>(null)
+let gestureStart: { x: number; y: number } | null = null
+let gestureSource: PaintRect | null = null
+let selectionPreview: PixelBuffer | null = null
+let selectionMoveBase: PixelBuffer | null = null
+let selectionCutPixels: ImageData | null = null
+let shapePreview: PixelBuffer | null = null
+let shapeLayerSnapshot: ImageData | null = null
+const canPaintLayer = computed(() => { layerRevision.value; projectStore.textureRevision; return projectStore.pixelBuffer.activeLayer?.visible !== false })
+
+function needsBrushCursor() {
+  return !isPanning.value && ['brush', 'eraser', 'dither', 'shade'].includes(toolStore.paintTool)
+}
+
+function beginSelectionMovePreview(source: PaintRect) {
+  const pb = projectStore.pixelBuffer
+  selectionCutPixels = copySelectedPixels(pb, source)
+  selectionMoveBase = pb.clone()
+  const layer = selectionMoveBase.activeLayer
+  if (layer) {
+    layer.ctx.clearRect(source.x, source.y, source.w, source.h)
+    selectionMoveBase.commitLayers()
+  }
+  updateSelectionMovePreview(source)
+}
+
+function updateSelectionMovePreview(dest: PaintRect) {
+  if (!selectionMoveBase || !selectionCutPixels) return
+  if (!selectionPreview || selectionPreview.width !== selectionMoveBase.width || selectionPreview.height !== selectionMoveBase.height) {
+    selectionPreview = new PixelBuffer(selectionMoveBase.width, selectionMoveBase.height)
+  }
+  const ctx = selectionPreview.ctx
+  ctx.clearRect(0, 0, selectionPreview.width, selectionPreview.height)
+  ctx.drawImage(selectionMoveBase.canvas, 0, 0)
+  ctx.putImageData(selectionCutPixels, dest.x, dest.y)
+}
+
+function endSelectionMovePreview() {
+  selectionMoveBase = null
+  selectionCutPixels = null
+  selectionPreview = null
+}
+
+function prepareShapePreview() {
+  const pb = projectStore.pixelBuffer
+  shapePreview = pb.clone()
+  const layer = shapePreview.activeLayer
+  shapeLayerSnapshot = layer ? layer.ctx.getImageData(0, 0, pb.width, pb.height) : null
+}
+
+function getShapePreviewBuffer() {
+  const source = projectStore.pixelBuffer
+  if (!shapePreview || shapePreview.width !== source.width || shapePreview.height !== source.height || !shapeLayerSnapshot) {
+    prepareShapePreview()
+  } else {
+    const layer = shapePreview.activeLayer
+    if (layer) layer.ctx.putImageData(shapeLayerSnapshot, 0, 0)
+  }
+  return shapePreview!
+}
+
+function clearShapePreview() {
+  shapePreview = null
+  shapeLayerSnapshot = null
+}
+
+function deselectPixels() {
+  paintSelection.value = null
+  selectionGesture.value = null
+  endSelectionMovePreview()
+  scheduleRender()
+}
+
+function selectAllPixels() {
+  const pb = projectStore.pixelBuffer
+  paintSelection.value = { x: 0, y: 0, w: pb.width, h: pb.height }
+  toolStore.setPaintTool('select')
+}
+
+function editSelectedPixels(action: 'copy' | 'cut' | 'delete' | 'fill' | 'flipX' | 'flipY') {
+  const rect = paintSelection.value
+  if (!rect || selectionGesture.value) return
+  const pb = projectStore.pixelBuffer
+  if (action === 'copy' || action === 'cut') pixelClipboard.value = copySelectedPixels(pb, rect)
+  if (action === 'copy' || !canPaintLayer.value) return
+  projectStore.recordPixels(`${action === 'cut' ? 'Cut' : action === 'delete' ? 'Delete' : action === 'fill' ? 'Fill' : 'Flip'} Selected Pixels`)
+  const ctx = pb.activeLayer!.ctx
+  if (action === 'delete' || action === 'cut') ctx.clearRect(rect.x, rect.y, rect.w, rect.h)
+  else if (action === 'fill') { ctx.fillStyle = resolveDrawColor(); ctx.fillRect(rect.x, rect.y, rect.w, rect.h) }
+  else flipSelectedPixels(pb, rect, action === 'flipX' ? 'x' : 'y')
+  refreshLayers()
+}
+
+function pastePixels() {
+  const pixels = pixelClipboard.value
+  if (!pixels || selectionGesture.value) return
+  const pb = projectStore.pixelBuffer
+  projectStore.recordPixels('Paste Pixels as Layer')
+  const layer = pb.addLayer('Pasted pixels')
+  const x = Math.max(0, Math.min(pb.width - pixels.width, paintSelection.value?.x ?? Math.floor((pb.width - pixels.width) / 2)))
+  const y = Math.max(0, Math.min(pb.height - pixels.height, paintSelection.value?.y ?? Math.floor((pb.height - pixels.height) / 2)))
+  layer.ctx.putImageData(pixels, x, y)
+  paintSelection.value = { x, y, w: Math.min(pixels.width, pb.width), h: Math.min(pixels.height, pb.height) }
+  toolStore.setPaintTool('select')
+  showLayers.value = true
+  refreshLayers()
+}
+
+function nudgeSelection(dx: number, dy: number) {
+  const source = paintSelection.value
+  if (!source || !canPaintLayer.value || selectionGesture.value) return
+  const pb = projectStore.pixelBuffer
+  const target = translateSelection(source, dx, dy, pb.width, pb.height)
+  if (target.x === source.x && target.y === source.y) return
+  projectStore.recordPixels('Move Selected Pixels')
+  moveSelectedPixels(pb, source, target)
+  paintSelection.value = target
+  refreshLayers()
+}
+
+function reorderPaintLayer(id: string, direction: -1 | 1) {
+  const pb = projectStore.pixelBuffer
+  const index = pb.layers.findIndex(l => l.id === id)
+  if (index < 0 || index + direction < 0 || index + direction >= pb.layers.length) return
+  projectStore.recordPixels('Reorder Paint Layer')
+  pb.moveLayer(id, direction)
+  refreshLayers()
+}
+
 // Custom Resize Modal State
 const showResizeModal = ref(false)
 const resizeW = ref(64)
@@ -153,12 +301,8 @@ const activePalette = computed<string[]>({
 
 const layers = computed(() => {
   layerRevision.value
+  projectStore.textureRevision
   return projectStore.pixelBuffer.layers
-})
-
-const activeLayerId = computed(() => {
-  layerRevision.value
-  return projectStore.pixelBuffer.activeLayerId
 })
 
 function refreshLayers() {
@@ -204,6 +348,7 @@ function toggleLayerVisibility(layerId: string) {
 function setActiveLayerOpacity(value: number) {
   const layer = projectStore.pixelBuffer.activeLayer
   if (!layer) return
+  projectStore.recordPixels('Change Layer Opacity')
   layer.opacity = Math.max(0, Math.min(1, value / 100))
   refreshLayers()
 }
@@ -319,7 +464,8 @@ function onTextureChanged() {
 
 function handleTextureImported(texId?: string) {
   const id = texId || projectStore.activeTextureId
-  if (id && projectStore.activeMesh) {
+  if (id) projectStore.selectTexture(id)
+  if (id && projectStore.activeMesh && !projectStore.activeMesh.locked) {
     projectStore.applyTextureToMesh(projectStore.activeMesh.id, id, 'this_object')
   }
   showImportModal.value = false
@@ -339,7 +485,7 @@ function downloadTexturePng() {
 }
 
 function resetRetroAtlas() {
-  projectStore.restoreDefaultTexture()
+  projectStore.generateRetroAtlasOnActive()
   renderCanvas()
 }
 
@@ -380,14 +526,27 @@ function isTypingTarget(target: EventTarget | null) {
 }
 
 function onKeyDown(e: KeyboardEvent) {
+  if ((e.target as HTMLElement)?.closest?.('.tileset-dialog')) return
   if (toolStore.appMode !== 'uvpaint' || toolStore.uvWorkspaceTab !== 'paint') return
   if (isTypingTarget(e.target)) return
-  if (e.key === 'Escape' && activeDropdown.value) {
-    e.preventDefault()
-    closeDropdowns()
-    showLayers.value = false
-    return
-  }
+  const mod = e.ctrlKey || e.metaKey
+  const key = e.key.toLowerCase()
+  let handled = true
+  if (mod && key === 'a') selectAllPixels()
+  else if (mod && key === 'd') deselectPixels()
+  else if (mod && key === 'c') editSelectedPixels('copy')
+  else if (mod && key === 'x') editSelectedPixels('cut')
+  else if (mod && key === 'v') pastePixels()
+  else if (!mod && !e.altKey && key === 'm') toolStore.setPaintTool('select')
+  else if ((key === 'delete' || key === 'backspace') && paintSelection.value) editSelectedPixels('delete')
+  else if (key === 'escape' && activeDropdown.value) closeDropdowns()
+  else if (key === 'escape' && paintSelection.value) deselectPixels()
+  else if (key === 'escape' && showLayers.value) showLayers.value = false
+  else if (!mod && !e.altKey && paintSelection.value && ['arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(key)) {
+    const step = e.shiftKey ? 10 : 1
+    nudgeSelection(key === 'arrowleft' ? -step : key === 'arrowright' ? step : 0, key === 'arrowup' ? -step : key === 'arrowdown' ? step : 0)
+  } else handled = false
+  if (handled) { e.preventDefault(); e.stopImmediatePropagation(); return }
   if (e.code === 'Space' && !isTypingTarget(e.target)) {
     e.preventDefault()
     isSpacePressed.value = true
@@ -417,14 +576,21 @@ function applyAdjustment(action: string) {
   const pb = projectStore.pixelBuffer
   projectStore.recordPixels(`Apply ${action}`)
 
-  if (action === 'invert') pb.invertColors()
-  else if (action === 'brighten') pb.adjustBrightness(20)
-  else if (action === 'darken') pb.adjustBrightness(-20)
-  else if (action === 'grayscale') pb.desaturate()
-  else if (action === 'outline') pb.generateOutline(toolStore.primaryColor)
-  else if (action === 'flipH') pb.flip(true, false)
-  else if (action === 'flipV') pb.flip(false, true)
-  else if (action === 'rot90') pb.rotate(90)
+  if (paintSelection.value && (action === 'flipH' || action === 'flipV')) {
+    flipSelectedPixels(pb, paintSelection.value, action === 'flipH' ? 'x' : 'y')
+  } else {
+    if (action === 'rot90') deselectPixels()
+    paintWithinSelection(pb, paintClip(), () => {
+      if (action === 'invert') pb.invertColors()
+      else if (action === 'brighten') pb.adjustBrightness(20)
+      else if (action === 'darken') pb.adjustBrightness(-20)
+      else if (action === 'grayscale') pb.desaturate()
+      else if (action === 'outline') pb.generateOutline(toolStore.primaryColor)
+      else if (action === 'flipH') pb.flip(true, false)
+      else if (action === 'flipV') pb.flip(false, true)
+      else if (action === 'rot90') pb.rotate(90)
+    })
+  }
 
   if (projectStore.activeTexture) {
     projectStore.activeTexture.width = pb.width
@@ -449,6 +615,16 @@ function getPixelCoords(e: PointerEvent): { x: number; y: number } | null {
 
   if (px < 0 || px >= pb.width || py < 0 || py >= pb.height) return null
   return { x: px, y: py }
+}
+
+function getClampedPixelCoords(e: PointerEvent) {
+  const rect = containerRef.value?.getBoundingClientRect()
+  if (!rect) return null
+  const pb = projectStore.pixelBuffer
+  return {
+    x: Math.max(0, Math.min(pb.width - 1, Math.floor((e.clientX - rect.left - panOffset.value.x) / zoom.value))),
+    y: Math.max(0, Math.min(pb.height - 1, Math.floor((e.clientY - rect.top - panOffset.value.y) / zoom.value))),
+  }
 }
 
 let renderPending = false
@@ -500,6 +676,16 @@ function fillCheckerboard(
   ctx.restore()
 }
 
+function drawShape(buffer: PixelBuffer, start: { x: number; y: number }, end: { x: number; y: number }) {
+  const color = resolveDrawColor(drawUsesSecondary)
+  const { brushSize: size, brushOpacity: opacity, brushFilled: filled, paintTool: tool } = toolStore
+  paintWithinSelection(buffer, paintClip(), () => {
+    if (tool === 'line') buffer.drawLine(start.x, start.y, end.x, end.y, color, size, opacity)
+    else if (tool === 'rect') buffer.drawRect(start.x, start.y, end.x, end.y, color, size, filled, opacity)
+    else if (tool === 'circle') buffer.drawCircle(start.x, start.y, Math.round(Math.hypot(end.x - start.x, end.y - start.y)), color, size, filled, opacity)
+  })
+}
+
 function renderCanvas() {
   const canvas = canvasRef.value
   const container = containerRef.value
@@ -516,7 +702,11 @@ function renderCanvas() {
     canvas.height = h
   }
 
-  const pb = projectStore.pixelBuffer
+  let pb = selectionPreview || projectStore.pixelBuffer
+  if (isDrawing && dragStartCoords && dragCurrentCoords && ['line', 'rect', 'circle'].includes(toolStore.paintTool)) {
+    pb = getShapePreviewBuffer()
+    drawShape(pb, dragStartCoords, dragCurrentCoords)
+  }
 
   // Initialize panOffset to center if uninitialized
   if (panOffset.value.x === 0 && panOffset.value.y === 0) {
@@ -565,59 +755,6 @@ function renderCanvas() {
   ctx.lineWidth = 1.5
   ctx.strokeRect(ox, oy, texW, texH)
 
-  // 5. Draw Interactive Live Shape Preview (Line, Rect, Circle)
-  if (isDrawing && dragStartCoords && dragCurrentCoords) {
-    const isSecondary = drawUsesSecondary
-    const color = isSecondary ? toolStore.secondaryColor : toolStore.primaryColor
-    const size = toolStore.brushSize
-    const opacity = toolStore.brushOpacity
-    const filled = toolStore.brushFilled
-
-    ctx.save()
-    ctx.globalAlpha = opacity
-
-    if (toolStore.paintTool === 'line') {
-      ctx.strokeStyle = color
-      ctx.lineWidth = Math.max(1, size * zoom.value)
-      ctx.beginPath()
-      ctx.moveTo(ox + (dragStartCoords.x + 0.5) * zoom.value, oy + (dragStartCoords.y + 0.5) * zoom.value)
-      ctx.lineTo(ox + (dragCurrentCoords.x + 0.5) * zoom.value, oy + (dragCurrentCoords.y + 0.5) * zoom.value)
-      ctx.stroke()
-    } else if (toolStore.paintTool === 'rect') {
-      const minX = Math.min(dragStartCoords.x, dragCurrentCoords.x)
-      const minY = Math.min(dragStartCoords.y, dragCurrentCoords.y)
-      const rw = (Math.abs(dragCurrentCoords.x - dragStartCoords.x) + 1) * zoom.value
-      const rh = (Math.abs(dragCurrentCoords.y - dragStartCoords.y) + 1) * zoom.value
-
-      if (filled) {
-        ctx.fillStyle = color
-        ctx.fillRect(ox + minX * zoom.value, oy + minY * zoom.value, rw, rh)
-      } else {
-        ctx.strokeStyle = color
-        ctx.lineWidth = Math.max(1, size * zoom.value)
-        ctx.strokeRect(ox + minX * zoom.value, oy + minY * zoom.value, rw, rh)
-      }
-    } else if (toolStore.paintTool === 'circle') {
-      const cx = ox + (dragStartCoords.x + 0.5) * zoom.value
-      const cy = oy + (dragStartCoords.y + 0.5) * zoom.value
-      const dx = (dragCurrentCoords.x - dragStartCoords.x) * zoom.value
-      const dy = (dragCurrentCoords.y - dragStartCoords.y) * zoom.value
-      const radius = Math.sqrt(dx * dx + dy * dy)
-
-      ctx.beginPath()
-      ctx.arc(cx, cy, radius, 0, Math.PI * 2)
-      if (filled) {
-        ctx.fillStyle = color
-        ctx.fill()
-      } else {
-        ctx.strokeStyle = color
-        ctx.lineWidth = Math.max(1, size * zoom.value)
-        ctx.stroke()
-      }
-    }
-    ctx.restore()
-  }
-
   // 6. Pixel Grid (Only show when zoomed in enough)
   if (showPixelGrid.value && zoom.value >= 4 && pb.width <= 512) {
     const z = zoom.value
@@ -654,6 +791,54 @@ function renderCanvas() {
       ctx.stroke()
     }
   }
+
+  // Contrast outline stays visible over both light and dark texture pixels.
+  const cursor = cursorCoords.value
+  if (cursor && !isPanning.value && ['brush', 'eraser', 'dither', 'shade'].includes(toolStore.paintTool)) {
+    const size = toolStore.brushSize
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(ox, oy, texW, texH)
+    ctx.clip()
+    ctx.beginPath()
+    if (toolStore.brushShape === 'circle' && size > 2 && ['brush', 'eraser'].includes(toolStore.paintTool)) {
+      ctx.arc(ox + (cursor.x - Math.floor(size / 2) + size / 2) * zoom.value, oy + (cursor.y - Math.floor(size / 2) + size / 2) * zoom.value, size * zoom.value / 2, 0, Math.PI * 2)
+    } else {
+      ctx.rect(ox + (cursor.x - Math.floor(size / 2)) * zoom.value, oy + (cursor.y - Math.floor(size / 2)) * zoom.value, size * zoom.value, size * zoom.value)
+    }
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)'
+    ctx.lineWidth = 3
+    ctx.stroke()
+    ctx.strokeStyle = '#ffffff'
+    ctx.lineWidth = 1
+    ctx.stroke()
+    ctx.restore()
+  }
+  const tileClip = tilesetHighlight()
+  if (tileClip) {
+    ctx.save()
+    ctx.strokeStyle = 'rgba(251, 191, 36, 0.95)'
+    ctx.lineWidth = 1.5
+    ctx.strokeRect(ox + tileClip.x * zoom.value + 0.5, oy + tileClip.y * zoom.value + 0.5, tileClip.w * zoom.value, tileClip.h * zoom.value)
+    ctx.restore()
+  }
+  if (paintSelection.value) {
+    const r = paintSelection.value
+    ctx.save()
+    ctx.lineWidth = 1
+    ctx.strokeStyle = '#000000'
+    ctx.strokeRect(ox + r.x * zoom.value + 0.5, oy + r.y * zoom.value + 0.5, r.w * zoom.value, r.h * zoom.value)
+    ctx.setLineDash([4, 4])
+    ctx.strokeStyle = '#ffffff'
+    ctx.strokeRect(ox + r.x * zoom.value + 0.5, oy + r.y * zoom.value + 0.5, r.w * zoom.value, r.h * zoom.value)
+    ctx.restore()
+  }
+
+}
+
+function onPointerLeave() {
+  cursorCoords.value = null
+  scheduleRender()
 }
 
 function onPointerDown(e: PointerEvent) {
@@ -697,6 +882,18 @@ function onPointerDown(e: PointerEvent) {
   const coords = getPixelCoords(e)
   if (!coords) return
 
+  if (toolStore.paintTool === 'select') {
+    gestureStart = coords
+    gestureSource = paintSelection.value ? { ...paintSelection.value } : null
+    selectionGesture.value = gestureSource && containsPixel(gestureSource, coords) && !e.shiftKey && canPaintLayer.value ? 'move' : 'marquee'
+    if (selectionGesture.value === 'marquee') paintSelection.value = marqueeRect(coords, coords)
+    else if (gestureSource) beginSelectionMovePreview(gestureSource)
+    scheduleRender()
+    return
+  }
+  if (toolStore.paintTool !== 'picker' && !canPaintLayer.value) return
+  const clip = paintClip()
+  if (clip && !containsPixel(clip, coords) && toolStore.paintTool !== 'picker') return
   isDrawing = true
   drawUsesSecondary = e.ctrlKey || e.metaKey
   dragStartCoords = { ...coords }
@@ -705,6 +902,7 @@ function onPointerDown(e: PointerEvent) {
 
   const tool = toolStore.paintTool
   if (tool === 'line' || tool === 'rect' || tool === 'circle') {
+    prepareShapePreview()
     renderCanvas()
     return
   }
@@ -759,17 +957,34 @@ function onPointerMove(e: PointerEvent) {
   }
 
   const coords = getPixelCoords(e)
+  if (selectionGesture.value && gestureStart) {
+    const point = coords || getClampedPixelCoords(e)
+    if (point) {
+      if (selectionGesture.value === 'marquee') paintSelection.value = marqueeRect(gestureStart, point)
+      else if (gestureSource) {
+        const pb = projectStore.pixelBuffer
+        paintSelection.value = translateSelection(gestureSource, point.x - gestureStart.x, point.y - gestureStart.y, pb.width, pb.height)
+        updateSelectionMovePreview(paintSelection.value)
+      }
+      scheduleRender()
+    }
+    return
+  }
 
-  if (!isDrawing) {
+  {
     if (coords) {
       const prev = cursorCoords.value
       if (!prev || prev.x !== coords.x || prev.y !== coords.y) {
         cursorCoords.value = { x: coords.x, y: coords.y, hex: projectStore.pixelBuffer.getPixelHex(coords.x, coords.y) }
+        if (needsBrushCursor()) scheduleRender()
       }
     } else if (cursorCoords.value) {
       cursorCoords.value = null
+      if (needsBrushCursor()) scheduleRender()
     }
   }
+
+  if (!coords) lastDrawCoords = null
 
   if (isDrawing && coords) {
     dragCurrentCoords = { ...coords }
@@ -792,6 +1007,22 @@ function onPointerUp(e: PointerEvent) {
     activePenPointerId = null
   }
 
+  if (selectionGesture.value) {
+    if (selectionGesture.value === 'move' && gestureSource && paintSelection.value && e.type !== 'pointercancel') {
+      const target = paintSelection.value
+      if (target.x !== gestureSource.x || target.y !== gestureSource.y) {
+        projectStore.recordPixels('Move Selected Pixels')
+        moveSelectedPixels(projectStore.pixelBuffer, gestureSource, target)
+        refreshLayers()
+      }
+    } else if (e.type === 'pointercancel') paintSelection.value = gestureSource
+    selectionGesture.value = null
+    gestureStart = null
+    gestureSource = null
+    endSelectionMovePreview()
+    scheduleRender()
+    return
+  }
   if (isPanning.value) {
     isPanning.value = false
     return
@@ -804,25 +1035,9 @@ function onPointerUp(e: PointerEvent) {
   const tool = toolStore.paintTool
   const shouldPersist = strokeDirty || (coords && dragStartCoords && (tool === 'line' || tool === 'rect' || tool === 'circle'))
 
-  if (coords && dragStartCoords && (tool === 'line' || tool === 'rect' || tool === 'circle')) {
+  if (e.type !== 'pointercancel' && coords && dragStartCoords && (tool === 'line' || tool === 'rect' || tool === 'circle')) {
     projectStore.recordPixels(`Draw ${tool}`)
-    const isSecondary = drawUsesSecondary
-    const color = resolveDrawColor(isSecondary)
-    const size = toolStore.brushSize
-    const opacity = toolStore.brushOpacity
-    const filled = toolStore.brushFilled
-    const pb = projectStore.pixelBuffer
-
-    if (tool === 'line') {
-      pb.drawLine(dragStartCoords.x, dragStartCoords.y, coords.x, coords.y, color, size, opacity)
-    } else if (tool === 'rect') {
-      pb.drawRect(dragStartCoords.x, dragStartCoords.y, coords.x, coords.y, color, size, filled, opacity)
-    } else if (tool === 'circle') {
-      const dx = coords.x - dragStartCoords.x
-      const dy = coords.y - dragStartCoords.y
-      const radius = Math.round(Math.sqrt(dx * dx + dy * dy))
-      pb.drawCircle(dragStartCoords.x, dragStartCoords.y, radius, color, size, filled, opacity)
-    }
+    drawShape(projectStore.pixelBuffer, dragStartCoords, coords)
 
     strokeDirty = true
   }
@@ -836,6 +1051,8 @@ function onPointerUp(e: PointerEvent) {
   dragStartCoords = null
   dragCurrentCoords = null
   lastDrawCoords = null
+  clearShapePreview()
+  scheduleRender()
 }
 
 function resolveDrawColor(isSecondary = false): string {
@@ -854,34 +1071,40 @@ function drawPixel(x: number, y: number, isSecondary = false, pressure = 1.0) {
   const opacity = toolStore.brushOpacity * (usePressure && pressure > 0 ? pressure : 1.0)
   const shape = toolStore.brushShape
 
-  if (toolStore.paintTool === 'eraser') {
-    if (lastDrawCoords) pb.eraseLine(lastDrawCoords.x, lastDrawCoords.y, x, y, size, shape)
-    else pb.erase(x, y, size, shape)
-  } else if (toolStore.paintTool === 'bucket') {
-    pb.floodFill(x, y, color)
-  } else if (toolStore.paintTool === 'picker') {
+  if (toolStore.paintTool === 'picker') {
     const picked = pb.getPixelHex(x, y)
     if (isSecondary) toolStore.secondaryColor = picked
     else toolStore.primaryColor = picked
     renderCanvas()
     return
-  } else if (toolStore.paintTool === 'dither') {
-    pb.drawDither(x, y, color, size)
-  } else if (toolStore.paintTool === 'shade') {
-    const effectiveMode = isSecondary ? (shadeMode.value === 'lighten' ? 'darken' : 'lighten') : shadeMode.value
-    pb.drawShade(
-      x, 
-      y, 
-      effectiveMode, 
-      size, 
-      shadeStep.value, 
-      shadeHueShift.value, 
-      shadePaletteConstraint.value ? activePalette.value : undefined
-    )
-  } else {
-    if (lastDrawCoords) pb.drawLine(lastDrawCoords.x, lastDrawCoords.y, x, y, color, size, opacity, shape)
-    else pb.drawBrush(x, y, color, size, opacity, shape)
   }
+  paintWithinSelection(pb, paintClip(), () => {
+    if (toolStore.paintTool === 'eraser') {
+      if (lastDrawCoords) pb.eraseLine(lastDrawCoords.x, lastDrawCoords.y, x, y, size, shape)
+      else pb.erase(x, y, size, shape)
+    } else if (toolStore.paintTool === 'bucket') {
+      pb.floodFill(x, y, color)
+    } else if (toolStore.paintTool === 'dither' || toolStore.paintTool === 'shade') {
+      const wasDeferred = pb.compositeDeferred
+      pb.suspendComposite()
+      try {
+        visitStrokePixels(lastDrawCoords, { x, y }, (px, py) => {
+          if (toolStore.paintTool === 'dither') pb.drawDither(px, py, color, size)
+          else {
+            const mode = isSecondary ? (shadeMode.value === 'lighten' ? 'darken' : 'lighten') : shadeMode.value
+            pb.drawShade(px, py, mode, size, shadeStep.value, shadeHueShift.value,
+              shadePaletteConstraint.value ? activePalette.value : undefined)
+          }
+        })
+      } finally {
+        pb.compositeDeferred = wasDeferred
+        pb.commitLayers()
+      }
+    } else {
+      if (lastDrawCoords) pb.drawLine(lastDrawCoords.x, lastDrawCoords.y, x, y, color, size, opacity, shape)
+      else pb.drawBrush(x, y, color, size, opacity, shape)
+    }
+  })
 
   lastDrawCoords = { x, y }
   strokeDirty = true
@@ -980,18 +1203,25 @@ watch(() => projectStore.textureRevision, scheduleRender)
 watch(() => projectStore.geometryRevision, scheduleRender)
 watch(() => projectStore.activeMeshId, scheduleRender)
 watch(() => projectStore.activeTextureId, () => {
+  deselectPixels()
   nextTick(() => {
     resetPanZoom()
     scheduleRender()
   })
 })
+watch(paintSelection, scheduleRender)
+watch([tilesetClipPaint, tilesetImageId, tilesetTileIndex, tilesetRegion], scheduleRender)
+watch(() => [projectStore.pixelBuffer.width, projectStore.pixelBuffer.height], deselectPixels)
+watch(() => projectStore.pixelBuffer, () => { endSelectionMovePreview(); clearShapePreview(); selectionGesture.value = null; layerRevision.value++ })
+watch(() => [toolStore.brushSize, toolStore.brushShape, toolStore.paintTool], scheduleRender)
+watch(isPanning, scheduleRender)
 watch(zoom, scheduleRender)
 watch(showPixelGrid, scheduleRender)
 watch(showUvOverlay, scheduleRender)
 
 onMounted(() => {
   window.addEventListener('click', closeDropdowns)
-  window.addEventListener('keydown', onKeyDown)
+  window.addEventListener('keydown', onKeyDown, true)
   window.addEventListener('keyup', onKeyUp)
   window.addEventListener(EDITOR_EVENTS.toggleUvOverlay, onToggleUvOverlay)
   nextTick(() => {
@@ -1007,10 +1237,12 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('click', closeDropdowns)
-  window.removeEventListener('keydown', onKeyDown)
+  window.removeEventListener('keydown', onKeyDown, true)
   window.removeEventListener('keyup', onKeyUp)
   window.removeEventListener(EDITOR_EVENTS.toggleUvOverlay, onToggleUvOverlay)
   containerResizeObserver?.disconnect()
+  endSelectionMovePreview()
+  clearShapePreview()
   if (renderRafId !== null) {
     cancelAnimationFrame(renderRafId)
     renderRafId = null
@@ -1031,82 +1263,42 @@ defineExpose({
 </script>
 
 <template>
-  <div class="pixel-editor h-full w-full bg-ui-panel flex flex-col select-none overflow-hidden touch-none relative font-mono text-xs">
+  <div class="pixel-editor h-full w-full bg-ui-panel flex flex-col select-none overflow-hidden touch-none relative font-sans text-xs">
     <input ref="fileInputRef" type="file" accept="image/*" @change="handleTextureUpload" class="hidden" />
 
-    <div class="pixel-header-row bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center gap-2 shrink-0 z-30 select-none h-8.5 min-h-[34px]">
-      <!-- Unified Asset Pipeline Hierarchy (OBJ -> TEX) -->
-      <div class="asset-pipeline flex items-center gap-1.5 min-w-0">
-        <!-- 1. Active 3D Object -->
-        <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px] text-ui-textSecondary shrink-0">
-          <span class="asset-label text-ui-textMuted font-bold text-[8.5px]">OBJ:</span>
-          <select 
-            :value="projectStore.activeMeshId"
-            @change="handleActiveObjectChange(($event.target as HTMLSelectElement).value)"
-            class="bg-transparent text-ui-textPrimary font-bold focus:outline-none cursor-pointer max-w-[100px] truncate"
-            title="Active 3D Object"
-          >
-            <option v-for="m in projectStore.meshes" :key="m.id" :value="m.id" class="bg-ui-panel text-ui-textPrimary">
-              {{ m.name }} ({{ m.faces.length }}f)
-            </option>
-          </select>
-        </div>
-
-        <span class="asset-arrow text-ui-textMuted text-[9px] font-bold shrink-0">→</span>
-
-        <!-- 2. Active Texture Map bound to this Object -->
-        <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px] text-ui-textSecondary shrink-0">
-          <span class="asset-label text-ui-textMuted font-bold text-[8.5px]">TEX:</span>
-          <select 
-            :value="projectStore.activeTextureId" 
-            @change="handleTextureBindingChange(($event.target as HTMLSelectElement).value)"
-            class="bg-transparent text-emerald-400 font-bold font-mono focus:outline-none cursor-pointer max-w-[125px] truncate"
-            title="Paint target — the image this canvas edits"
-          >
-            <option v-for="t in projectStore.textures" :key="t.id" :value="t.id" class="bg-ui-panel text-ui-textPrimary">
-              {{ t.name }} ({{ t.width }}x{{ t.height }})
-            </option>
-          </select>
-          <button
-            type="button"
-            class="px-1 py-0.5 text-[8.5px] font-bold text-sky-300 hover:bg-ui-hover rounded-xs"
-            title="Apply this paint target to the active object"
-            @click="handleApplyPaintTargetToMesh"
-          >
-            <span class="asset-apply-label">Apply</span>
-          </button>
-          <button 
-            @click="showNewTextureModal = true"
-            class="p-0.5 hover:bg-ui-hover text-emerald-400 rounded-xs transition cursor-pointer"
-            title="New image — pick any size"
-          >
-            <BlenderIcon name="plus" :size="12" />
-          </button>
-        </div>
-
-        <!-- Texture Import / Export Action Pill Group -->
-        <div class="flex items-center bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle shrink-0">
-          <button 
-            @click="fileInputRef?.click()" 
-            class="flex items-center px-1.5 py-0.5 hover:bg-ui-hover text-ui-textAccent rounded-xs transition cursor-pointer"
-            title="Import Texture Image"
-          >
-            <BlenderIcon name="import" :size="12" />
-          </button>
-
-          <button 
-            @click="downloadTexturePng" 
-            class="flex items-center px-1.5 py-0.5 hover:bg-ui-hover text-emerald-400 rounded-xs transition cursor-pointer"
-            title="Export Texture PNG"
-          >
-            <BlenderIcon name="export" :size="12" />
-          </button>
-        </div>
-      </div>
+    <div class="paint-document-bar">
+      <label class="paint-document-picker"><span>Image</span><select :value="projectStore.activeTextureId" @change="handleTextureBindingChange(($event.target as HTMLSelectElement).value)" aria-label="Image to paint">
+        <option v-for="texture in projectStore.textures" :key="texture.id" :value="texture.id">{{ texture.name }}</option>
+      </select></label>
+      <button @click="openTileset(projectStore.activeTextureId)" title="Browse, edit, and apply atlas tiles">Tileset</button>
+      <span class="paint-document-spacer"></span>
+      <label class="paint-object-picker"><span>Object</span><select :value="projectStore.activeMeshId" @change="handleActiveObjectChange(($event.target as HTMLSelectElement).value)" aria-label="Texture preview object"><option v-for="mesh in projectStore.meshes" :key="mesh.id" :value="mesh.id">{{ mesh.name }}</option></select></label>
+      <span v-if="imageApplied" class="paint-applied">Applied ✓</span>
+      <button v-else :disabled="!projectStore.activeMesh" class="paint-apply" @click="handleApplyPaintTargetToMesh">Apply image</button>
     </div>
 
     <Teleport defer to="#uv-paint-command-slot">
       <div class="editor-command-strip flex items-center gap-1.5">
+        <div class="relative" @click.stop>
+          <button @click="toggleDropdown('editPixels')" class="paint-menu-button">Edit ▾</button>
+          <div v-if="activeDropdown === 'editPixels'" class="header-dropdown-menu paint-edit-menu">
+            <button :disabled="!historyStore.undoStack.length" @click="historyStore.undo(); closeDropdowns()">Undo <kbd>Ctrl Z</kbd></button>
+            <button :disabled="!historyStore.redoStack.length" @click="historyStore.redo(); closeDropdowns()">Redo <kbd>Ctrl Shift Z</kbd></button>
+            <hr />
+            <button @click="selectAllPixels(); closeDropdowns()">Select all pixels <kbd>Ctrl A</kbd></button>
+            <button :disabled="!paintSelection" @click="deselectPixels(); closeDropdowns()">Deselect <kbd>Ctrl D</kbd></button>
+            <hr />
+            <button :disabled="!paintSelection" @click="editSelectedPixels('copy'); closeDropdowns()">Copy pixels <kbd>Ctrl C</kbd></button>
+            <button :disabled="!paintSelection || !canPaintLayer" @click="editSelectedPixels('cut'); closeDropdowns()">Cut pixels <kbd>Ctrl X</kbd></button>
+            <button :disabled="!pixelClipboard" @click="pastePixels(); closeDropdowns()">Paste as new layer <kbd>Ctrl V</kbd></button>
+            <button :disabled="!paintSelection || !canPaintLayer" @click="editSelectedPixels('delete'); closeDropdowns()">Delete pixels <kbd>Del</kbd></button>
+            <hr />
+            <button :disabled="!paintSelection || !canPaintLayer" @click="editSelectedPixels('fill'); closeDropdowns()">Fill selection</button>
+            <button :disabled="!paintSelection || !canPaintLayer" @click="editSelectedPixels('flipX'); closeDropdowns()">Flip selection horizontally</button>
+            <button :disabled="!paintSelection || !canPaintLayer" @click="editSelectedPixels('flipY'); closeDropdowns()">Flip selection vertically</button>
+          </div>
+        </div>
+
         <!-- Image Menu Dropdown -->
         <div class="relative" @click.stop>
           <button 
@@ -1121,6 +1313,7 @@ defineExpose({
           <div v-if="activeDropdown === 'image'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-52 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
             <div class="px-3 py-0.5 text-[9px] font-bold text-ui-textMuted uppercase">File</div>
             <button @click="showNewTextureModal = true; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover text-amber-300 font-bold">New Image...</button>
+            <button @click="fileInputRef?.click(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover text-ui-textAccent font-bold">Import Image...</button>
             <div class="h-px bg-ui-borderSubtle my-1"></div>
             <div class="px-3 py-0.5 text-[9px] font-bold text-ui-textMuted uppercase">Adjustments</div>
             <button @click="applyAdjustment('brighten'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Brightness (+10%)</button>
@@ -1282,6 +1475,20 @@ defineExpose({
           </div>
         </div>
 
+      </div>
+    </Teleport>
+
+    <NewTextureModal
+      v-if="showNewTextureModal"
+      :bind-hint="projectStore.activeMesh?.name"
+      @close="showNewTextureModal = false"
+      @create="handleCreateNewTexture"
+    />
+
+    <div class="paint-context-bar" aria-label="Active paint tool settings">
+      <button class="paint-history" :disabled="!historyStore.undoStack.length" @click="historyStore.undo()" title="Undo (Ctrl Z)" aria-label="Undo paint edit">↶</button>
+      <button class="paint-history" :disabled="!historyStore.redoStack.length" @click="historyStore.redo()" title="Redo (Ctrl Shift Z)" aria-label="Redo paint edit">↷</button>
+      <strong class="paint-context-name">{{ paintTools.find(t => t.id === toolStore.paintTool)?.title.replace(' Tool', '') || toolStore.paintTool }}</strong>
         <div class="h-4 w-px bg-ui-borderSubtle mx-1"></div>
 
         <!-- Contextual Shading Quick Bar when Shading Brush Active -->
@@ -1315,30 +1522,24 @@ defineExpose({
         <div v-if="toolStore.paintTool === 'shade'" class="h-4 w-px bg-ui-borderSubtle mx-1"></div>
 
         <!-- Brush Size Segmented Buttons -->
-        <div class="flex items-center gap-1">
-          <span class="text-[9px] text-ui-textMuted font-bold uppercase">Size:</span>
-          <div class="flex items-center bg-ui-input rounded-xs border border-ui-borderSubtle p-0.5">
-            <button
-              v-for="s in [1, 2, 4, 8, 16]"
-              :key="s"
-              @click="clampBrushSize(s)"
-              class="px-1.5 py-0.5 text-[9px] font-bold rounded-xs transition cursor-pointer"
-              :class="toolStore.brushSize === s ? 'bg-ui-active text-ui-textAccent shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
-            >{{ s }}</button>
-          </div>
+        <p v-if="toolStore.paintTool === 'select'" class="text-ui-textMuted text-[10px]">Drag to select · drag inside to move · Shift-drag replaces selection</p>
+        <p v-else-if="toolStore.paintTool === 'picker'" class="text-ui-textMuted text-[10px]">Click the texture to sample a color.</p>
+        <p v-else-if="toolStore.paintTool === 'bucket'" class="text-ui-textMuted text-[10px]">Click to fill a connected area of the same color.</p>
+        <div v-else class="flex items-center gap-1">
+          <span class="text-[9px] text-ui-textMuted font-bold uppercase">Size</span>
           <input
             :value="toolStore.brushSize"
             @input="clampBrushSize(Number(($event.target as HTMLInputElement).value))"
             type="number"
             min="1"
             max="128"
-            class="w-10 h-5 bg-ui-input border border-ui-borderSubtle rounded-xs text-center text-[9px] font-bold text-ui-textPrimary focus:outline-none focus:border-ui-accent"
+            class="w-12 h-6 bg-ui-input border border-ui-borderSubtle rounded-xs text-center text-[9px] font-bold text-ui-textPrimary focus:outline-none focus:border-ui-accent"
             title="Brush size, 1–128 px ([ and ] adjust)"
             aria-label="Brush size in pixels"
           />
 
-          <div class="flex items-center gap-1 ml-1" title="Brush opacity">
-            <span class="text-[9px] text-ui-textMuted font-bold uppercase">α</span>
+          <div v-if="['brush', 'line', 'rect', 'circle'].includes(toolStore.paintTool)" class="flex items-center gap-1 ml-1" title="Brush opacity">
+            <span class="text-[9px] text-ui-textMuted font-bold uppercase">Opacity</span>
             <input
               v-model.number="toolStore.brushOpacity"
               type="range"
@@ -1358,21 +1559,27 @@ defineExpose({
             :class="toolStore.brushFilled ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textMuted'"
           >{{ toolStore.brushFilled ? 'Filled' : 'Outline' }}</button>
           <button
-            v-else
+            v-else-if="toolStore.paintTool === 'brush' || toolStore.paintTool === 'eraser'"
             @click="toolStore.brushShape = toolStore.brushShape === 'square' ? 'circle' : 'square'"
             class="px-1.5 py-0.5 text-[9px] font-bold rounded-xs border border-ui-borderSubtle bg-ui-input text-ui-textSecondary hover:text-ui-textPrimary transition cursor-pointer"
             title="Toggle Square / Round Brush Shape"
           >{{ toolStore.brushShape === 'square' ? 'Square' : 'Round' }}</button>
         </div>
-      </div>
-    </Teleport>
+    </div>
 
-    <NewTextureModal
-      v-if="showNewTextureModal"
-      :bind-hint="projectStore.activeMesh?.name"
-      @close="showNewTextureModal = false"
-      @create="handleCreateNewTexture"
-    />
+    <div v-if="paintSelection || toolStore.paintTool === 'select'" class="paint-selection-bar">
+      <template v-if="paintSelection">
+      <strong>{{ paintSelection.w }} × {{ paintSelection.h }} px</strong>
+      <span class="text-ui-textMuted">Selection · active layer</span>
+      <button @click="editSelectedPixels('copy')">Copy</button>
+      <button :disabled="!canPaintLayer" @click="editSelectedPixels('fill')">Fill</button>
+      <button :disabled="!canPaintLayer" @click="editSelectedPixels('flipX')">Flip H</button>
+      <button :disabled="!canPaintLayer" @click="editSelectedPixels('flipY')">Flip V</button>
+      <button @click="deselectPixels">Deselect ×</button>
+      </template>
+      <span v-else class="text-ui-textMuted">Select an area to copy, fill, flip, or move pixels. Arrow keys nudge by 1 px.</span>
+    </div>
+    <div v-if="!canPaintLayer" class="paint-layer-notice">The active layer is hidden. Show it in Layers to paint.</div>
 
     <!-- 3. MAIN WORKSPACE WITH TOOL RAIL, CANVAS & FLOATING OVERLAYS -->
     <div class="pixel-workspace relative flex-1 min-h-0 flex overflow-hidden">
@@ -1386,9 +1593,11 @@ defineExpose({
             @click="toolStore.setPaintTool(tool.id)"
             class="w-8 h-8 flex items-center justify-center rounded-xs transition cursor-pointer relative group"
             :class="toolStore.paintTool === tool.id ? 'bg-ui-active text-ui-textAccent border border-ui-borderDefault shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+            :aria-label="tool.title"
+            :aria-pressed="toolStore.paintTool === tool.id"
             :title="tool.title + ' (' + tool.key + ')'"
           >
-            <BlenderIcon :name="tool.icon" :size="16" />
+            <BlenderIcon :name="tool.icon" :size="16" /><span class="paint-tool-key">{{ tool.key }}</span>
           </button>
         </div>
 
@@ -1426,12 +1635,12 @@ defineExpose({
         @pointerdown="onPointerDown"
         @pointermove="onPointerMove"
         @pointerup="onPointerUp"
-        @pointerleave="onPointerUp"
+        @pointerleave="onPointerLeave"
         @pointercancel="onPointerUp"
         @contextmenu.prevent
       >
         <!-- Top Right Floating View Controls -->
-        <div class="pixel-view-group" aria-label="Canvas View Controls">
+        <div class="pixel-view-group" @pointerdown.stop @pointermove.stop @pointerup.stop @wheel.stop aria-label="Canvas View Controls">
           <div class="relative">
             <button
               @click="showLayers = !showLayers"
@@ -1442,57 +1651,6 @@ defineExpose({
               <span>Layers</span>
               <span class="text-[8px] opacity-70">{{ layers.length }}</span>
             </button>
-            <div v-if="showLayers" class="absolute right-0 top-full mt-1 w-52 bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-1.5 text-[10px] text-ui-textPrimary">
-              <div class="flex items-center justify-between px-1 pb-1 border-b border-ui-borderSubtle">
-                <span class="font-bold text-ui-textMuted uppercase text-[9px]">Paint layers</span>
-                <button @click="addPaintLayer" class="px-1.5 py-0.5 rounded-xs bg-ui-active text-ui-textAccent hover:bg-ui-hover font-bold" title="Add layer">+ Add</button>
-              </div>
-              <div class="max-h-44 overflow-y-auto py-1 space-y-0.5">
-                <div
-                  v-for="layer in layers.slice().reverse()"
-                  :key="layer.id"
-                  @click="selectPaintLayer(layer.id)"
-                  class="group flex items-center gap-1 p-1 rounded-xs cursor-pointer border"
-                  :class="activeLayerId === layer.id ? 'bg-ui-active border-ui-borderDefault' : 'border-transparent hover:bg-ui-hover'"
-                >
-                  <button @click.stop="toggleLayerVisibility(layer.id)" class="w-4 text-center text-[10px] text-ui-textSecondary hover:text-ui-textPrimary" :title="layer.visible ? 'Hide layer' : 'Show layer'">{{ layer.visible ? '◉' : '○' }}</button>
-                  <span class="min-w-0 flex-1 truncate font-medium">{{ layer.name }}</span>
-                  <button @click.stop="duplicatePaintLayer(layer.id)" class="hidden group-hover:block px-1 text-ui-textMuted hover:text-ui-textAccent" title="Duplicate layer">⧉</button>
-                  <button v-if="layers.length > 1" @click.stop="deletePaintLayer(layer.id)" class="hidden group-hover:block px-1 text-ui-textMuted hover:text-rose-400" title="Delete layer">×</button>
-                </div>
-              </div>
-              <div v-if="projectStore.pixelBuffer.activeLayer" class="pt-1 border-t border-ui-borderSubtle flex items-center gap-1">
-                <input
-                  :value="projectStore.pixelBuffer.activeLayer.name"
-                  class="w-20 min-w-0 bg-ui-input border border-ui-borderSubtle rounded-xs px-1 py-0.5 text-[9px] text-ui-textPrimary focus:outline-none focus:border-ui-accent"
-                  aria-label="Active layer name"
-                  @click.stop
-                  @change="renameActivePaintLayer(($event.target as HTMLInputElement).value)"
-                  @keydown.enter="($event.target as HTMLInputElement).blur()"
-                />
-                <input
-                  :value="Math.round(projectStore.pixelBuffer.activeLayer.opacity * 100)"
-                  @pointerdown="projectStore.recordPixels('Change Layer Opacity')"
-                  @input="setActiveLayerOpacity(Number(($event.target as HTMLInputElement).value))"
-                  type="range" min="0" max="100" step="1" class="flex-1 h-1 accent-amber-400 cursor-pointer"
-                  aria-label="Active layer opacity"
-                />
-                <span class="w-7 text-right font-mono text-ui-textMuted">{{ Math.round(projectStore.pixelBuffer.activeLayer.opacity * 100) }}%</span>
-              </div>
-              <select
-                v-if="projectStore.pixelBuffer.activeLayer"
-                :value="projectStore.pixelBuffer.activeLayer.blendMode"
-                @change="setActiveLayerBlendMode(($event.target as HTMLSelectElement).value)"
-                class="mt-1 w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1 py-0.5 text-[9px] text-ui-textSecondary focus:outline-none focus:border-ui-accent"
-                aria-label="Active layer blend mode"
-              >
-                <option value="normal">Normal blend</option>
-                <option value="multiply">Multiply</option>
-                <option value="screen">Screen</option>
-                <option value="overlay">Overlay</option>
-                <option value="additive">Additive</option>
-              </select>
-            </div>
           </div>
           <button
             @click="showUvOverlay = !showUvOverlay"
@@ -1518,16 +1676,15 @@ defineExpose({
             <BlenderIcon name="view-fit" :size="14" />
           </button>
         </div>
-
         <canvas 
           ref="canvasRef" 
           class="w-full h-full block touch-none"
         ></canvas>
 
         <!-- Docked Bottom Swatch Strip (Quick Palette Bar + Color Shading Bar) -->
-        <div class="pixel-palette-dock absolute bottom-8 left-3 z-10 flex items-center gap-2 p-1 bg-ui-header/95 backdrop-blur-md border border-ui-borderStrong rounded-xs shadow-lg max-w-[calc(100%-24px)] overflow-x-auto">
+        <div @pointerdown.stop @pointermove.stop @pointerup.stop @wheel.stop class="pixel-palette-dock absolute bottom-8 left-3 z-10 flex items-center gap-2 p-1 bg-ui-header/95 backdrop-blur-md border border-ui-borderStrong rounded-xs shadow-lg max-w-[calc(100%-24px)] overflow-x-auto">
           <!-- Palette Swatches -->
-          <div class="flex items-center gap-1.5 shrink-0">
+          <div class="palette-main flex items-center gap-1.5">
             <button 
               @click="showPaletteLibraryModal = true"
               class="flex items-center gap-1 px-1.5 py-0.5 bg-ui-input hover:bg-ui-hover text-amber-400 hover:text-amber-300 text-[9.5px] font-bold rounded-xs border border-ui-borderSubtle whitespace-nowrap transition cursor-pointer"
@@ -1537,7 +1694,7 @@ defineExpose({
               <span class="text-[8px] opacity-70">▼</span>
             </button>
 
-            <div class="flex items-center gap-0.5 flex-nowrap max-w-md overflow-x-auto py-0.5">
+            <div class="palette-swatches flex items-center gap-0.5 flex-nowrap overflow-x-auto py-1 px-1">
               <button
                 v-for="(c, idx) in activePalette"
                 :key="idx"
@@ -1574,7 +1731,7 @@ defineExpose({
           <div class="h-4 w-px bg-ui-borderSubtle shrink-0"></div>
 
           <!-- 5-Tone Color Shading Options Bar -->
-          <div class="pixel-shading-dock flex items-center gap-1 shrink-0 bg-ui-input/60 px-1.5 py-0.5 rounded-xs border border-ui-borderSubtle">
+          <div v-if="toolStore.paintTool === 'shade'" class="pixel-shading-dock flex items-center gap-1 shrink-0 bg-ui-input/60 px-1.5 py-0.5 rounded-xs border border-ui-borderSubtle">
             <span class="text-[8.5px] font-bold text-amber-300 uppercase whitespace-nowrap">Shading:</span>
             <div class="flex items-center gap-1">
               <button 
@@ -1630,12 +1787,18 @@ defineExpose({
         <div class="pixel-status-hud">
           <span>{{ projectStore.pixelBuffer.width }} × {{ projectStore.pixelBuffer.height }}</span>
           <span class="text-ui-textAccent font-bold uppercase">{{ toolStore.paintTool }}</span>
+          <span class="truncate">{{ projectStore.pixelBuffer.activeLayer?.name }}</span>
+          <span v-if="paintSelection">{{ paintSelection.w }}×{{ paintSelection.h }} selected</span>
           <span v-if="cursorCoords" class="text-ui-textMuted font-mono">
             X:{{ cursorCoords.x }} Y:{{ cursorCoords.y }} [{{ cursorCoords.hex }}]
           </span>
           <span class="text-ui-textMuted hidden md:inline">RMB / Space+Drag / MMB pan · Ctrl+LMB secondary · Wheel zoom</span>
         </div>
       </div>
+      <PaintLayers v-if="showLayers" :buffer="projectStore.pixelBuffer" :revision="layerRevision + projectStore.textureRevision"
+        @close="showLayers = false" @add="addPaintLayer" @select="selectPaintLayer" @duplicate="duplicatePaintLayer"
+        @remove="deletePaintLayer" @visibility="toggleLayerVisibility" @reorder="reorderPaintLayer"
+        @rename="renameActivePaintLayer" @opacity="setActiveLayerOpacity" @blend="setActiveLayerBlendMode" />
     </div>
 
     <!-- Custom Canvas Resize Modal Dialog -->
@@ -1720,23 +1883,23 @@ defineExpose({
   .editor-command-strip { gap: 2px; }
   .editor-command-strip > .relative > button { padding-left: 5px; padding-right: 5px; font-size: 10px; }
   .editor-command-strip > .h-4 { margin-left: 1px; margin-right: 1px; }
-  .pixel-palette-dock { left: 6px; right: 6px; bottom: 6px; max-width: none; gap: 4px; }
+  .pixel-palette-dock { left: 6px; right: 6px; bottom: 36px; max-width: none; gap: 4px; }
   .pixel-palette-dock .max-w-md { max-width: 180px; }
-  .pixel-status-hud { bottom: 6px; right: 6px; }
+  .pixel-status-hud { bottom: 0; right: 0; }
 }
 
 @container (max-width: 700px) {
   .pixel-shading-dock { display: none; }
   .pixel-palette-dock > .h-4 { display: none; }
   .pixel-palette-dock .max-w-md { max-width: 112px; }
-  .pixel-palette-dock [title="Open Palette Library"] { display: none; }
+
   .editor-command-strip > .relative > button { padding-left: 4px; padding-right: 4px; }
-  .editor-command-strip > .relative > button span:not(:last-child) { display: none; }
+
   .pixel-status-hud .hidden { display: none; }
 }
 
 @container (max-width: 520px) {
-  .pixel-header-row { display: none; }
+  .pixel-header-row { overflow-x: auto; }
   .pixel-tool-rail { width: 34px; min-width: 34px; }
   .pixel-tool-rail .w-8 { width: 28px; height: 28px; }
   .pixel-palette-dock { padding: 3px; }
@@ -1848,4 +2011,50 @@ defineExpose({
   backdrop-filter: blur(6px);
   pointer-events: none;
 }
+
+.paint-context-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px 10px; background: var(--ui-bg-panel); border-bottom: 1px solid var(--ui-border-subtle); min-height: 36px; flex-shrink: 0; }
+.paint-context-name { color: var(--ui-text-accent); font-size: 10px; margin-right: 4px; }
+.paint-context-bar > .h-4 { display: none; }
+.paint-tool-key { position: absolute; bottom: 1px; right: 3px; font-size: 8px; opacity: .6; }
+.pixel-tool-rail { overflow-y: auto; padding-bottom: 8px; }
+.pixel-tool-rail > div { flex-shrink: 0; }
+.pixel-status-hud { left: 0; right: 0; bottom: 0; min-height: 26px; border-radius: 0; border-width: 1px 0 0; gap: 10px; padding: 4px 10px; white-space: nowrap; overflow: hidden; }
+.pixel-palette-dock { bottom: 36px; left: 8px; right: 8px; max-width: none; }
+.palette-main { flex: 1; min-width: 0; }
+.palette-main > button { flex-shrink: 0; }
+.palette-swatches { flex: 1; min-width: 0; }
+.palette-swatches > button { width: 18px; height: 18px; }
+@container (max-width: 420px) { .palette-main > button:last-child { display: none; } }
+.pixel-view-group { height: 34px; }
+
+.paint-menu-button { padding: 4px 8px; color: var(--ui-text-secondary); font-weight: 600; }
+.paint-menu-button:hover { background: var(--ui-bg-hover); }
+.paint-edit-menu { position: absolute; top: 100%; left: 0; margin-top: 4px; width: 258px; background: var(--ui-bg-panel); border: 1px solid var(--ui-border-strong); border-radius: 3px; padding: 4px; box-shadow: 0 8px 24px #0008; }
+.paint-edit-menu button { display: flex; width: 100%; align-items: center; justify-content: space-between; padding: 6px 8px; font-size: 11px; color: var(--ui-text-primary); text-align: left; }
+.paint-edit-menu button:hover { background: var(--ui-bg-hover); }
+.paint-edit-menu kbd { font-size: 9px; color: var(--ui-text-muted); }
+.paint-edit-menu hr { margin: 4px 0; border-color: var(--ui-border-subtle); }
+.paint-selection-bar { height: 34px; overflow-x: auto; white-space: nowrap; display: flex; align-items: center; gap: 6px; padding: 5px 10px; border-bottom: 1px solid var(--ui-border-subtle); background: var(--ui-bg-active); flex-shrink: 0; font-size: 10px; }
+.paint-selection-bar strong { color: var(--ui-text-accent); }
+.paint-selection-bar button { flex-shrink: 0; padding: 3px 6px; background: var(--ui-bg-input); border: 1px solid var(--ui-border-subtle); border-radius: 3px; }
+.paint-layer-notice { padding: 5px 10px; font-size: 10px; color: var(--ui-text-accent); background: var(--ui-bg-active); }
+@container (max-width: 650px) {
+  .pixel-workspace > :deep(.paint-layers-panel) { position: absolute; right: 6px; top: 42px; bottom: auto; max-height: calc(100% - 76px); overflow-y: auto; border: 1px solid var(--ui-border-strong); border-radius: 4px; box-shadow: 0 8px 24px #0008; }
+}
+
+.paint-document-bar { display: flex; align-items: center; gap: 5px; min-height: 32px; padding: 3px 8px; border-bottom: 1px solid var(--ui-border-subtle); background: var(--ui-bg-header); flex-shrink: 0; font-size: 10px; }
+.paint-document-bar label { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.paint-document-picker { flex: 1; max-width: 290px; }
+.paint-document-bar label > span { color: var(--ui-text-muted); }
+.paint-document-bar select { min-width: 0; width: 100%; border: 1px solid var(--ui-border-subtle); background: var(--ui-bg-input); color: var(--ui-text-primary); border-radius: 3px; padding: 4px; }
+.paint-object-picker { max-width: 150px; }
+.paint-document-bar button { white-space: nowrap; padding: 4px 6px; border-radius: 3px; background: var(--ui-bg-input); border: 1px solid var(--ui-border-subtle); }
+.paint-document-spacer { flex: 1; }
+.paint-applied { white-space: nowrap; color: var(--ui-text-muted); }
+.paint-document-bar .paint-apply { color: var(--ui-text-accent); border-color: var(--ui-border-strong); }
+.paint-history { font-size: 17px; width: 24px; line-height: 24px; border-radius: 3px; } .paint-history:hover { background: var(--ui-bg-hover); }
+.paint-context-bar { min-height: 32px; padding: 3px 8px; }
+.paint-context-name { font-size: 11px; }
+@container (max-width: 620px) { .paint-document-spacer, .paint-object-picker > span { display: none; } .paint-object-picker { max-width: 85px; } .paint-document-bar { gap: 3px; } }
 </style>
+

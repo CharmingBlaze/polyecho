@@ -8,6 +8,7 @@ import {
   generateUVCheckerboardDataURL,
   ensureMeshUVs
 } from '../../core/geometry/UVUnwrap'
+import { selectedUvCorners, uvBounds, transformUvCorners, relaxUvCorners, type UvCorner, type UvTransform } from '../../core/uv/UVEditing'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import { expandFacesToIslands, expandWeldedUvEdges, findUvIslands, stitchUvEdge } from '../../core/uv/UVIslands'
 import { undirectedEdgeId } from '../../core/geometry/EdgeUtils'
@@ -17,6 +18,8 @@ import ImportTextureModal from '../modals/ImportTextureModal.vue'
 import NewTextureModal from '../modals/NewTextureModal.vue'
 import { useTextureApply } from '../../composables/useTextureApply'
 import { saveBlobDocument } from '../../core/desktop/desktopApi'
+import { resolvePixelTileGrid } from '../../core/painting/TilePixels'
+import { openTileset, tilesetActiveBounds, tilesetCols, tilesetImageId, tilesetMargin, tilesetRegion, tilesetRows, tilesetSpacing, tilesetTileHeight, tilesetTileIndex, tilesetTileWidth, tilesetUseMode } from '../../composables/useTilesetWindow'
 
 const projectStore = useProjectStore()
 const toolStore = useToolStore()
@@ -63,9 +66,44 @@ const uvSelectMode = computed<'vertex' | 'edge' | 'face' | 'island'>({
 const selectedUvVerts = ref<{ faceIndex: number; vertIndex: number }[]>([])
 const selectedUvEdges = ref<{ faceIndex: number; edgeIndex: number }[]>([])
 const selectedFaceIndices = ref<number[]>([])
-const paintAtlas = computed(() => projectStore.activeTexture?.atlas || null)
+const uvDisplayTexture = computed(() => {
+  const mesh = projectStore.activeMesh
+  const material = mesh ? projectStore.materials.find(item => item.id === mesh.materialId) : undefined
+  return projectStore.textures.find(item => item.id === material?.textureId) || projectStore.activeTexture
+})
+function displayPixels() {
+  return uvDisplayTexture.value?.pixelBuffer || projectStore.pixelBuffer
+}
+function tilesetOverlayGrid(tex: { id: string; width: number; height: number; atlas?: { cols: number; rows: number; spacing?: number; margin?: number } | null }) {
+  if (tilesetImageId.value === tex.id && tilesetTileWidth.value > 0 && tilesetTileHeight.value > 0) {
+    return {
+      cols: Math.max(1, tilesetCols.value || Math.floor(tex.width / tilesetTileWidth.value)),
+      rows: Math.max(1, tilesetRows.value || Math.floor(tex.height / tilesetTileHeight.value)),
+      tileW: tilesetTileWidth.value,
+      tileH: tilesetTileHeight.value,
+      spacing: tilesetSpacing.value,
+      margin: tilesetMargin.value
+    }
+  }
+  const grid = resolvePixelTileGrid(tex.width, tex.height, tex.atlas)
+  return {
+    cols: grid.cols,
+    rows: grid.rows,
+    tileW: Math.max(1, Math.floor(tex.width / grid.cols)),
+    tileH: Math.max(1, Math.floor(tex.height / grid.rows)),
+    spacing: tex.atlas?.spacing || 0,
+    margin: tex.atlas?.margin || 0
+  }
+}
+const paintAtlas = computed(() => {
+  const tex = uvDisplayTexture.value || projectStore.activeTexture
+  if (!tex) return { cols: 2, rows: 2 }
+  const grid = tilesetOverlayGrid(tex)
+  return { cols: grid.cols, rows: grid.rows }
+})
 const atlasMenuCells = computed(() => {
-  const a = paintAtlas.value || { cols: 2, rows: 2 }
+  const a = paintAtlas.value
+  if (a.cols * a.rows > 64) return []
   const cells: { col: number; row: number }[] = []
   for (let row = 0; row < a.rows; row++) {
     for (let col = 0; col < a.cols; col++) cells.push({ col, row })
@@ -175,8 +213,11 @@ watch(() => projectStore.selectedFaceIds, (newVal) => {
   renderCanvas()
 }, { immediate: true })
 
+let publishedUvVertexIds: string[] | null = null
+
 // Sync selected vertices from 3D viewport
 watch(() => projectStore.selectedVertexIds, (newVal) => {
+  if (publishedUvVertexIds && newVal.length === publishedUvVertexIds.length && newVal.every(id => publishedUvVertexIds!.includes(id))) return
   if (!activeMesh.value) return
   if (newVal.length > 0) {
     const verts: { faceIndex: number; vertIndex: number }[] = []
@@ -273,46 +314,103 @@ function selectIslandFromFace(faceIndex: number, additive: boolean) {
 }
 
 // Compute Bounding Box of Active Selection (Supports unconstrained / negative UV space)
-const selectionBounds = computed(() => {
-  if (!activeMesh.value) return null
-  const targetFaces = getTargetFaces()
-  if (targetFaces.length === 0) return null
-
-  let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity
-  let count = 0
-
-  for (const fIdx of targetFaces) {
-    const face = activeMesh.value.faces[fIdx]
-    if (!face) continue
-    for (const uv of face.uvs) {
-      if (uv.u < minU) minU = uv.u
-      if (uv.u > maxU) maxU = uv.u
-      if (uv.v < minV) minV = uv.v
-      if (uv.v > maxV) maxV = uv.v
-      count++
-    }
-  }
-
-  if (count === 0 || !isFinite(minU)) return null
-  const w = Math.max(0.0001, maxU - minU)
-  const h = Math.max(0.0001, maxV - minV)
-  return {
-    minU,
-    maxU,
-    minV,
-    maxV,
-    cU: (minU + maxU) / 2,
-    cV: (minV + maxV) / 2,
-    width: w,
-    height: h
-  }
+const targetCorners = computed(() => activeMesh.value ? selectedUvCorners(activeMesh.value, uvSelectMode.value,
+  selectedFaceIndices.value, selectedUvVerts.value, selectedUvEdges.value) : [])
+const selectionBounds = computed(() => activeMesh.value ? uvBounds(activeMesh.value, targetCorners.value) : null)
+const showPrecision = ref(true)
+const precisionTab = ref<'selection' | 'transform' | 'tools'>('selection')
+const coordinateUnits = ref<'pixels' | 'uv'>('pixels')
+const pivotMode = ref<'selection' | 'islands' | 'tile'>('selection')
+const moveU = ref(0), moveV = ref(0), rotateAngle = ref(90), scaleU = ref(1), scaleV = ref(1)
+const lockScale = ref(true)
+const uvFeedback = ref('')
+const textureSize = computed(() => {
+  const pb = displayPixels()
+  return { width: pb.width, height: pb.height }
 })
+const unitU = computed(() => coordinateUnits.value === 'pixels' ? textureSize.value.width : 1)
+const unitV = computed(() => coordinateUnits.value === 'pixels' ? textureSize.value.height : 1)
+const outsideFaces = computed(() => activeMesh.value?.faces.flatMap((f, i) => f.uvs.some(p => p.u < -1e-7 || p.u > 1 + 1e-7 || p.v < -1e-7 || p.v > 1 + 1e-7) ? [i] : []) ?? [])
+const degenerateFaces = computed(() => activeMesh.value?.faces.flatMap((f, i) => {
+  const area = f.uvs.reduce((sum, p, j) => { const q = f.uvs[(j + 1) % f.uvs.length]; return sum + p.u * q.v - q.u * p.v }, 0)
+  return Math.abs(area) < 1e-10 ? [i] : []
+}) ?? [])
+function commitCornerEdits(label: string, edits: (UvCorner & { u: number; v: number })[]) {
+  const mesh = activeMesh.value
+  if (!mesh) return
+  const changes = edits.filter(c => {
+    const p = mesh.faces[c.faceIndex]?.uvs[c.vertIndex]
+    return p && !isPinned(c.faceIndex, c.vertIndex) && Number.isFinite(c.u) && Number.isFinite(c.v) && (Math.abs(p.u - c.u) > 1e-12 || Math.abs(p.v - c.v) > 1e-12)
+  })
+  if (!changes.length) { uvFeedback.value = 'No UVs changed. Check selection and pins.'; return }
+  projectStore.recordState(label)
+  for (const c of changes) Object.assign(mesh.faces[c.faceIndex].uvs[c.vertIndex], { u: c.u, v: c.v })
+  projectStore.markGeometryUpdated()
+  uvFeedback.value = `${label} · ${changes.length} ${changes.length === 1 ? 'corner' : 'corners'}`
+  scheduleRender()
+}
+function precisionTransform(options: Partial<UvTransform>, label = 'Transform UVs') {
+  if (!activeMesh.value) return
+  commitCornerEdits(label, transformUvCorners(activeMesh.value, targetCorners.value,
+    { ...textureSize.value, pivot: pivotMode.value, ...options }, c => isPinned(c.faceIndex, c.vertIndex)))
+}
+function moveSelection() { precisionTransform({ moveU: Number(moveU.value) / unitU.value, moveV: Number(moveV.value) / unitV.value }, 'Move UVs') }
+function resizeSelection() { precisionTransform({ scaleU: Number(scaleU.value), scaleV: Number(lockScale.value ? scaleU.value : scaleV.value) }, 'Scale UVs') }
+function setSelectionCoordinate(axis: 'u' | 'v', event: Event) {
+  const value = Number((event.target as HTMLInputElement).value), b = selectionBounds.value
+  if (!b || !Number.isFinite(value)) return
+  precisionTransform(axis === 'u' ? { moveU: value / unitU.value - b.minU } : { moveV: value / unitV.value - b.minV }, 'Position UVs')
+}
+function setSelectionSize(axis: 'u' | 'v', event: Event) {
+  const value = Number((event.target as HTMLInputElement).value), b = selectionBounds.value
+  if (!b || !Number.isFinite(value) || value <= 0) return
+  const extent = axis === 'u' ? b.width : b.height
+  if (extent < 1e-10) { uvFeedback.value = 'A zero-width selection cannot be resized on that axis.'; return }
+  const factor = value / (axis === 'u' ? unitU.value : unitV.value) / extent
+  precisionTransform(lockScale.value ? { scaleU: factor, scaleV: factor } : axis === 'u' ? { scaleU: factor } : { scaleV: factor }, 'Resize UVs')
+}
+function snapSelectionPixels() {
+  if (!activeMesh.value) return
+  const { width, height } = textureSize.value
+  commitCornerEdits('Snap UVs to pixels', targetCorners.value.map(c => {
+    const p = activeMesh.value!.faces[c.faceIndex].uvs[c.vertIndex]
+    return { ...c, u: Math.round(p.u * width) / width, v: Math.round(p.v * height) / height }
+  }))
+}
+function relaxSelection() {
+  if (!activeMesh.value) return
+  commitCornerEdits('Relax UV interiors', relaxUvCorners(activeMesh.value, targetCorners.value, 20, c => isPinned(c.faceIndex, c.vertIndex)))
+}
+function selectDiagnostic(faces: number[]) {
+  uvSelectMode.value = 'face'
+  selectedFaceIndices.value = [...faces]
+  syncFacesTo3D()
+  frameSelection()
+}
+function selectLinked() {
+  if (!activeMesh.value) return
+  const faces = getTargetFaces()
+  if (!faces.length) return
+  selectedFaceIndices.value = expandFacesToIslands(activeMesh.value, faces)
+  uvSelectMode.value = 'island'
+  syncFacesTo3D()
+  scheduleRender()
+}
+async function exportUvLayout() {
+  if (!activeMesh.value) return
+  const { width, height } = textureSize.value
+  const polygons = activeMesh.value.faces.map(f => `<polygon points="${f.uvs.map(p => `${p.u * width},${(1 - p.v) * height}`).join(' ')}"/>`).join('')
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><g fill="none" stroke="#000000" stroke-width="0.5" stroke-linejoin="round">${polygons}</g></svg>`
+  try {
+    await saveBlobDocument(new Blob([svg], { type: 'image/svg+xml' }), `${activeMesh.value.name}-uv-layout.svg`, [{ name: 'UV Layout', extensions: ['svg'] }])
+  } catch { uvFeedback.value = 'Could not export the UV layout. Please try again.' }
+}
 
 // ----------------------------------------------------
 // COORDINATE CONVERSIONS (Infinite Staging Canvas)
 // ----------------------------------------------------
 function uvToScreen(u: number, v: number): { x: number; y: number } {
-  const pb = projectStore.pixelBuffer
+  const pb = displayPixels()
   const texW = pb.width * zoom.value
   const texH = pb.height * zoom.value
   return {
@@ -321,14 +419,14 @@ function uvToScreen(u: number, v: number): { x: number; y: number } {
   }
 }
 
-function screenToUV(screenX: number, screenY: number): { u: number; v: number } {
-  const pb = projectStore.pixelBuffer
+function screenToUV(screenX: number, screenY: number, snap = false): { u: number; v: number } {
+  const pb = displayPixels()
   const texW = pb.width * zoom.value
   const texH = pb.height * zoom.value
   let u = (screenX - panOffset.value.x) / texW
   let v = 1 - (screenY - panOffset.value.y) / texH
 
-  if (snapToPixels.value) {
+  if (snap && snapToPixels.value) {
     const snapGridU = 1 / pb.width
     const snapGridV = 1 / pb.height
     u = Math.round(u / snapGridU) * snapGridU
@@ -369,7 +467,7 @@ function renderCanvas() {
     canvas.height = h
   }
 
-  const pb = projectStore.pixelBuffer
+  const pb = displayPixels()
 
   // If panOffset hasn't been initialized
   if (panOffset.value.x === 0 && panOffset.value.y === 0) {
@@ -402,44 +500,53 @@ function renderCanvas() {
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke()
   }
 
-  // 2. Draw Active Central 0..1 Texture (or Checkerboard Test Grid)
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.45)'
-  ctx.shadowBlur = 8
-  ctx.shadowOffsetX = 0
-  ctx.shadowOffsetY = 2
+  // 2. Mesh atlas in pixel space — nearest neighbor, no shadow (ViperCAD-style)
+  ctx.imageSmoothingEnabled = false
   if (showCheckerboard.value && checkerboardImage.value) {
     ctx.drawImage(checkerboardImage.value, ox, oy, texW, texH)
   } else {
     ctx.drawImage(pb.canvas, ox, oy, texW, texH)
   }
-  ctx.shadowBlur = 0
-  ctx.shadowOffsetY = 0
 
   // 0..1 Texture Frame
   ctx.strokeStyle = '#4f46e5'
   ctx.lineWidth = 1.5
   ctx.strokeRect(ox, oy, texW, texH)
 
-  const atlasGrid = projectStore.activeTexture?.atlas
+  const sessionTex = uvDisplayTexture.value || projectStore.activeTexture
+  const atlasGrid = sessionTex ? tilesetOverlayGrid(sessionTex) : null
   if (atlasGrid && (atlasGrid.cols > 1 || atlasGrid.rows > 1)) {
     ctx.save()
-    ctx.setLineDash([4, 4])
-    ctx.strokeStyle = 'rgba(245, 158, 11, 0.45)'
+    ctx.setLineDash([])
+    ctx.strokeStyle = 'rgba(180, 205, 235, 0.28)'
     ctx.lineWidth = 1
-    for (let c = 1; c < atlasGrid.cols; c++) {
-      const x = ox + (texW * c) / atlasGrid.cols
-      ctx.beginPath()
-      ctx.moveTo(x, oy)
-      ctx.lineTo(x, oy + texH)
-      ctx.stroke()
+    const strideX = atlasGrid.tileW + atlasGrid.spacing
+    const strideY = atlasGrid.tileH + atlasGrid.spacing
+    const cw = (atlasGrid.tileW / pb.width) * texW
+    const ch = (atlasGrid.tileH / pb.height) * texH
+    for (let row = 0; row < atlasGrid.rows; row++) {
+      for (let col = 0; col < atlasGrid.cols; col++) {
+        const px = ox + ((atlasGrid.margin + col * strideX) / pb.width) * texW
+        const py = oy + ((atlasGrid.margin + row * strideY) / pb.height) * texH
+        ctx.strokeRect(px + 0.5, py + 0.5, Math.max(1, cw - 1), Math.max(1, ch - 1))
+      }
     }
-    for (let r = 1; r < atlasGrid.rows; r++) {
-      const y = oy + (texH * r) / atlasGrid.rows
-      ctx.beginPath()
-      ctx.moveTo(ox, y)
-      ctx.lineTo(ox + texW, y)
-      ctx.stroke()
-    }
+    ctx.restore()
+  }
+
+  if (sessionTex && tilesetImageId.value === sessionTex.id) {
+    const grid = tilesetOverlayGrid(sessionTex)
+    const cell = tilesetActiveBounds(sessionTex.width, sessionTex.height, grid.cols, grid.rows)
+    const x = ox + (cell.x / sessionTex.width) * texW
+    const y = oy + (cell.y / sessionTex.height) * texH
+    const w = (cell.width / sessionTex.width) * texW
+    const h = (cell.height / sessionTex.height) * texH
+    ctx.save()
+    ctx.fillStyle = 'rgba(251, 191, 36, 0.12)'
+    ctx.fillRect(x, y, w, h)
+    ctx.strokeStyle = 'rgba(251, 191, 36, 0.95)'
+    ctx.lineWidth = 2
+    ctx.strokeRect(x + 0.5, y + 0.5, Math.max(1, w - 1), Math.max(1, h - 1))
     ctx.restore()
   }
 
@@ -920,7 +1027,7 @@ function onPointerDown(e: PointerEvent) {
 
   // 4. Face / island click
   const clickedFace = findClickedFace(uv.u, uv.v)
-  if (clickedFace !== null && !e.ctrlKey) {
+  if (clickedFace !== null && !e.ctrlKey && (uvSelectMode.value === 'face' || uvSelectMode.value === 'island')) {
     if (uvSelectMode.value === 'island') {
       selectIslandFromFace(clickedFace, e.shiftKey)
     } else if (e.shiftKey) {
@@ -1021,8 +1128,9 @@ function onPointerMove(e: PointerEvent) {
 
   // Move Selected Faces
   if (activeDrag === 'move') {
-    const deltaU = uv.u - dragStartMouse.u
-    const deltaV = uv.v - dragStartMouse.v
+    const rawU = uv.u - dragStartMouse.u, rawV = uv.v - dragStartMouse.v
+    const deltaU = snapToPixels.value ? Math.round(rawU * textureSize.value.width) / textureSize.value.width : rawU
+    const deltaV = snapToPixels.value ? Math.round(rawV * textureSize.value.height) / textureSize.value.height : rawV
     applyUVTransform((origU, origV) => ({
       u: origU + deltaU,
       v: origV + deltaV
@@ -1031,8 +1139,9 @@ function onPointerMove(e: PointerEvent) {
 
   // Drag UV Vertices
   else if (activeDrag === 'drag_vert') {
-    const deltaU = uv.u - dragStartMouse.u
-    const deltaV = uv.v - dragStartMouse.v
+    const rawU = uv.u - dragStartMouse.u, rawV = uv.v - dragStartMouse.v
+    const deltaU = snapToPixels.value ? Math.round(rawU * textureSize.value.width) / textureSize.value.width : rawU
+    const deltaV = snapToPixels.value ? Math.round(rawV * textureSize.value.height) / textureSize.value.height : rawV
     if (!activeMesh.value) return
     selectedUvVerts.value.forEach(sv => {
       if (isPinned(sv.faceIndex, sv.vertIndex)) return
@@ -1049,8 +1158,9 @@ function onPointerMove(e: PointerEvent) {
 
   // Drag UV Edges
   else if (activeDrag === 'drag_edge') {
-    const deltaU = uv.u - dragStartMouse.u
-    const deltaV = uv.v - dragStartMouse.v
+    const rawU = uv.u - dragStartMouse.u, rawV = uv.v - dragStartMouse.v
+    const deltaU = snapToPixels.value ? Math.round(rawU * textureSize.value.width) / textureSize.value.width : rawU
+    const deltaV = snapToPixels.value ? Math.round(rawV * textureSize.value.height) / textureSize.value.height : rawV
     if (!activeMesh.value) return
     selectedUvEdges.value.forEach(se => {
       const face = activeMesh.value!.faces[se.faceIndex]
@@ -1226,11 +1336,11 @@ function onPointerMove(e: PointerEvent) {
     const sin = Math.sin(-deltaAngle)
 
     applyUVTransform((origU, origV) => {
-      const du = origU - b.cU
-      const dv = origV - b.cV
+      const du = (origU - b.cU) * textureSize.value.width
+      const dv = (origV - b.cV) * textureSize.value.height
       return {
-        u: b.cU + (du * cos - dv * sin),
-        v: b.cV + (du * sin + dv * cos)
+        u: b.cU + (du * cos - dv * sin) / textureSize.value.width,
+        v: b.cV + (du * sin + dv * cos) / textureSize.value.height
       }
     })
   }
@@ -1413,7 +1523,7 @@ function resetPanZoom() {
   const h = containerRef.value.clientHeight
   if (w <= 0 || h <= 0) return
 
-  const pb = projectStore.pixelBuffer
+  const pb = displayPixels()
   // Fit texture into ~78% of available viewport area
   const targetW = w * 0.78
   const targetH = h * 0.78
@@ -1449,7 +1559,8 @@ function syncVerticesTo3D() {
       vertIds.push(face.vertexIds[sv.vertIndex])
     }
   })
-  projectStore.selectedVertexIds = vertIds
+  projectStore.selectedVertexIds = Array.from(new Set(vertIds))
+  publishedUvVertexIds = projectStore.selectedVertexIds
 }
 
 function clearUvSelection() {
@@ -1511,19 +1622,10 @@ function syncEdgesTo3D() {
 function recordDragStartUVs() {
   if (!activeMesh.value) return
   dragStartUvs = []
-  const targetFaces = getTargetFaces()
-  targetFaces.forEach(fIdx => {
-    const face = activeMesh.value!.faces[fIdx]
-    if (!face) return
-    face.uvs.forEach((uv, vIdx) => {
-      dragStartUvs.push({
-        faceIndex: fIdx,
-        vertIndex: vIdx,
-        origU: uv.u,
-        origV: uv.v
-      })
-    })
-  })
+  for (const c of targetCorners.value) {
+    const uv = activeMesh.value.faces[c.faceIndex].uvs[c.vertIndex]
+    dragStartUvs.push({ ...c, origU: uv.u, origV: uv.v })
+  }
 }
 
 function applyUVTransform(transformFn: (origU: number, origV: number) => { u: number; v: number }) {
@@ -1581,17 +1683,8 @@ function exportTexturePng() {
 // ----------------------------------------------------
 const showNewTextureModal = ref(false)
 
-function bindTextureToActiveObject(textureId: string) {
-  const mesh = projectStore.activeMesh
-  if (!mesh) {
-    projectStore.selectTexture(textureId)
-    return
-  }
-  projectStore.applyTextureToMesh(mesh.id, textureId, 'this_object')
-}
-
 function handleTextureBindingChange(newTexId: string) {
-  bindTextureToActiveObject(newTexId)
+  projectStore.selectTexture(newTexId)
   scheduleRender()
 }
 
@@ -1601,8 +1694,8 @@ function handleCreateNewTexture(payload: { name: string; width: number; height: 
   else if (payload.fill === 'black') tex.pixelBuffer.clear('#111111')
   else if (payload.fill === 'primary') tex.pixelBuffer.clear(toolStore.primaryColor || '#ffffff')
   if (payload.fill !== 'transparent') projectStore.markTextureUpdated(tex.id)
-  if (projectStore.activeMesh) {
-    projectStore.applyTextureToMesh(projectStore.activeMesh.id, tex.id, 'this_object')
+  if (projectStore.activeMesh && !projectStore.activeMesh.locked) {
+    projectStore.applyTextureToMesh(projectStore.activeMesh.id, tex.id, 'this_object', { record: false })
   }
   showNewTextureModal.value = false
   scheduleRender()
@@ -1616,43 +1709,9 @@ function handleApplyPaintTargetToMesh() {
 // ----------------------------------------------------
 // QUICK TRANSFORMS & ATLAS SNAPPING
 // ----------------------------------------------------
-function rotateUVs(angleDeg: number) {
-  const b = selectionBounds.value
-  if (!b) return
-  projectStore.recordState(`Rotate UVs ${angleDeg}°`)
-  const rad = (angleDeg * Math.PI) / 180
-  const cos = Math.cos(rad)
-  const sin = Math.sin(rad)
-
-  applyBulkTransform((u, v) => {
-    const du = u - b.cU
-    const dv = v - b.cV
-    return {
-      u: b.cU + (du * cos - dv * sin),
-      v: b.cV + (du * sin + dv * cos)
-    }
-  })
-}
-
-function flipUVs(axis: 'u' | 'v') {
-  const b = selectionBounds.value
-  if (!b) return
-  projectStore.recordState(`Flip UVs ${axis.toUpperCase()}`)
-  applyBulkTransform((u, v) => ({
-    u: axis === 'u' ? b.cU - (u - b.cU) : u,
-    v: axis === 'v' ? b.cV - (v - b.cV) : v
-  }))
-}
-
-function scaleUVs(factor: number) {
-  const b = selectionBounds.value
-  if (!b) return
-  projectStore.recordState(`Scale UVs ${factor}x`)
-  applyBulkTransform((u, v) => ({
-    u: b.cU + (u - b.cU) * factor,
-    v: b.cV + (v - b.cV) * factor
-  }))
-}
+function rotateUVs(angleDeg: number) { precisionTransform({ angle: angleDeg }, `Rotate UVs ${angleDeg}°`) }
+function flipUVs(axis: 'u' | 'v') { precisionTransform(axis === 'u' ? { scaleU: -1 } : { scaleV: -1 }, `Flip UVs ${axis.toUpperCase()}`) }
+function scaleUVs(factor: number) { precisionTransform({ scaleU: factor, scaleV: factor }, `Scale UVs ${factor}×`) }
 
 function snapToQuadrant(quad: 1 | 2 | 3 | 4) {
   const b = selectionBounds.value
@@ -1668,14 +1727,8 @@ function snapToQuadrant(quad: 1 | 2 | 3 | 4) {
 }
 
 function snapToFull() {
-  if (!activeMesh.value) return
+  if (!selectionBounds.value) return
   projectStore.recordState('Fit UV to Full 0..1 Space')
-  if (getTargetFaces().length === 0) {
-    selectedFaceIndices.value = activeMesh.value.faces.map((_, i) => i)
-    fitSelectionToRange(0, 1, 0, 1)
-    selectedFaceIndices.value = []
-    return
-  }
   fitSelectionToRange(0, 1, 0, 1)
 }
 
@@ -1692,8 +1745,8 @@ function fitSelectionToRange(minU: number, maxU: number, minV: number, maxV: num
   const b = selectionBounds.value
   if (!b) return
   applyBulkTransform((u, v) => {
-    const tu = (u - b.minU) / b.width
-    const tv = (v - b.minV) / b.height
+    const tu = (u - b.minU) / Math.max(b.width, 1e-10)
+    const tv = (v - b.minV) / Math.max(b.height, 1e-10)
     return {
       u: minU + tu * (maxU - minU),
       v: minV + tv * (maxV - minV)
@@ -1703,17 +1756,12 @@ function fitSelectionToRange(minU: number, maxU: number, minV: number, maxV: num
 
 function applyBulkTransform(fn: (u: number, v: number) => { u: number; v: number }) {
   if (!activeMesh.value) return
-  const targetFaces = getTargetFaces()
-  targetFaces.forEach(fIdx => {
-    const face = activeMesh.value!.faces[fIdx]
-    if (!face) return
-    face.uvs.forEach((uv, vIdx) => {
-      if (isPinned(fIdx, vIdx)) return
-      const res = fn(uv.u, uv.v)
-      uv.u = res.u
-      uv.v = res.v
-    })
-  })
+  for (const c of targetCorners.value) {
+    if (isPinned(c.faceIndex, c.vertIndex)) continue
+    const uv = activeMesh.value.faces[c.faceIndex].uvs[c.vertIndex]
+    const res = fn(uv.u, uv.v)
+    if (Number.isFinite(res.u) && Number.isFinite(res.v)) Object.assign(uv, res)
+  }
   projectStore.markGeometryUpdated()
   scheduleRender()
 }
@@ -1734,7 +1782,7 @@ function handleSmartUvProject() {
   projectStore.performSmartUvProject({
     angleLimitDegrees: smartUvAngle.value,
     marginPixels: smartUvMargin.value,
-    textureSize: projectStore.pixelBuffer.width,
+    textureSize: displayPixels().width,
     onlyFaceIndices: selected.length > 0 ? selected : undefined
   })
   nextTick(frameSelection)
@@ -1807,22 +1855,7 @@ function stitchSelectedEdges() {
 
 function togglePinSelected() {
   const next = new Set(pinnedUvKeys.value)
-  const corners: { faceIndex: number; vertIndex: number }[] = []
-  if (selectedUvVerts.value.length > 0) {
-    corners.push(...selectedUvVerts.value)
-  } else if (selectedUvEdges.value.length > 0) {
-    for (const se of selectedUvEdges.value) {
-      const face = activeMesh.value?.faces[se.faceIndex]
-      if (!face) continue
-      corners.push({ faceIndex: se.faceIndex, vertIndex: se.edgeIndex })
-      corners.push({ faceIndex: se.faceIndex, vertIndex: (se.edgeIndex + 1) % face.uvs.length })
-    }
-  } else {
-    for (const fIdx of getTargetFaces()) {
-      const face = activeMesh.value?.faces[fIdx]
-      face?.uvs.forEach((_, vIdx) => corners.push({ faceIndex: fIdx, vertIndex: vIdx }))
-    }
-  }
+  const corners = targetCorners.value
   if (corners.length === 0) return
   const allPinned = corners.every(c => next.has(pinKey(c.faceIndex, c.vertIndex)))
   for (const c of corners) {
@@ -1911,8 +1944,8 @@ function frameSelection() {
   const spanV = Math.max(0.05, maxV - minV) + pad
   const w = container.clientWidth || canvas.clientWidth
   const h = container.clientHeight || canvas.clientHeight
-  const texW = projectStore.pixelBuffer.width
-  const texH = projectStore.pixelBuffer.height
+  const texW = displayPixels().width
+  const texH = displayPixels().height
   const fitZoom = Math.max(0.2, Math.min(24, Math.min(w / (spanU * texW), h / (spanV * texH)) * 0.9))
   zoom.value = fitZoom
   const midU = (minU + maxU) / 2
@@ -1940,59 +1973,47 @@ function alignSelection(alignment: 'left' | 'right' | 'top' | 'bottom' | 'center
   if (!activeMesh.value || !selectionBounds.value) return
   projectStore.recordState(`Align UVs (${alignment})`)
   const b = selectionBounds.value
-  const targetFaces = getTargetFaces()
-
-  for (const fIdx of targetFaces) {
-    const face = activeMesh.value.faces[fIdx]
-    if (!face) continue
-    for (let vIdx = 0; vIdx < face.uvs.length; vIdx++) {
-      if (isPinned(fIdx, vIdx)) continue
-      const uv = face.uvs[vIdx]
-      if (alignment === 'left') uv.u = b.minU
-      else if (alignment === 'right') uv.u = b.maxU
-      else if (alignment === 'top') uv.v = b.maxV
-      else if (alignment === 'bottom') uv.v = b.minV
-      else if (alignment === 'center_h') uv.u = b.cU
-      else if (alignment === 'center_v') uv.v = b.cV
-    }
-  }
-  projectStore.markGeometryUpdated()
-  scheduleRender()
+  applyBulkTransform((u, v) => ({
+    u: alignment === 'left' ? b.minU : alignment === 'right' ? b.maxU : alignment === 'center_h' ? b.cU : u,
+    v: alignment === 'top' ? b.maxV : alignment === 'bottom' ? b.minV : alignment === 'center_v' ? b.cV : v
+  }))
 }
 
 function snapToTrimCell(col: number, row: number, totalCols: number, totalRows: number) {
   if (!activeMesh.value || !selectionBounds.value) return
   projectStore.recordState(`Snap to Trim (${col + 1}, ${row + 1})`)
   const b = selectionBounds.value
-  const targetFaces = getTargetFaces()
-
   const cellW = 1.0 / totalCols
   const cellH = 1.0 / totalRows
   const targetU0 = col * cellW
   const targetV0 = 1.0 - (row + 1) * cellH
 
-  for (const fIdx of targetFaces) {
-    const face = activeMesh.value.faces[fIdx]
-    if (!face) continue
-    for (let vIdx = 0; vIdx < face.uvs.length; vIdx++) {
-      if (isPinned(fIdx, vIdx)) continue
-      const uv = face.uvs[vIdx]
-      const normU = (uv.u - b.minU) / b.width
-      const normV = (uv.v - b.minV) / b.height
-      uv.u = Math.max(0, Math.min(1, targetU0 + normU * cellW))
-      uv.v = Math.max(0, Math.min(1, targetV0 + normV * cellH))
-    }
-  }
-  projectStore.markGeometryUpdated()
-  scheduleRender()
+  applyBulkTransform((u, v) => ({
+    u: targetU0 + (u - b.minU) / Math.max(b.width, 1e-10) * cellW,
+    v: targetV0 + (v - b.minV) / Math.max(b.height, 1e-10) * cellH
+  }))
 }
 
-watch(() => projectStore.textureRevision, scheduleRender)
-watch(() => projectStore.activeTextureId, scheduleRender)
-watch(() => projectStore.geometryRevision, scheduleRender)
+function syncUvFromDocument() {
+  const mesh = activeMesh.value
+  if (mesh) {
+    const ids = projectStore.selectedFaceIds
+    selectedFaceIndices.value = mesh.faces.flatMap((face, index) => ids.includes(face.id) ? [index] : [])
+  }
+  scheduleRender()
+}
+watch(() => projectStore.textureRevision, syncUvFromDocument)
+watch([tilesetImageId, tilesetTileIndex, tilesetRegion, tilesetUseMode, tilesetTileWidth, tilesetTileHeight, tilesetCols, tilesetRows, tilesetSpacing, tilesetMargin], syncUvFromDocument)
+watch(() => projectStore.activeTextureId, syncUvFromDocument)
+watch(() => {
+  const t = uvDisplayTexture.value
+  return t ? `${t.id}:${t.width}x${t.height}` : ''
+}, () => nextTick(resetPanZoom))
+watch(() => projectStore.geometryRevision, syncUvFromDocument, { flush: 'sync' })
 watch(zoom, scheduleRender)
 watch(showPixelGrid, scheduleRender)
 watch(() => projectStore.activeMeshId, () => {
+  publishedUvVertexIds = null
   selectedFaceIndices.value = []
   selectedUvVerts.value = []
   selectedUvEdges.value = []
@@ -2029,6 +2050,19 @@ function onUvKeyDown(e: KeyboardEvent) {
   if (toolStore.appMode !== 'uvpaint' || toolStore.uvWorkspaceTab !== 'uv') return
   const tag = (e.target as HTMLElement)?.tagName
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return
+  if ((e.target as HTMLElement)?.isContentEditable) return
+  if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+    const step = e.shiftKey ? 10 : 1
+    const offsets: Record<string, [number, number]> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] }
+    if (offsets[e.key]) {
+      e.preventDefault()
+      const [u, v] = offsets[e.key]
+      precisionTransform({ moveU: u / textureSize.value.width, moveV: v / textureSize.value.height }, 'Nudge UVs')
+      return
+    }
+    if (e.key.toLowerCase() === 'l') { e.preventDefault(); selectLinked(); return }
+    if (e.key === 'Home') { e.preventDefault(); resetPanZoom(); return }
+  }
   if (e.key === 'Escape' && activeDropdown.value) {
     e.preventDefault()
     closeDropdowns()
@@ -2153,9 +2187,10 @@ defineExpose({
   <div class="uv-editor h-full w-full bg-ui-panel flex flex-col select-none overflow-hidden relative font-mono text-xs touch-none">
     <input ref="fileInputRef" type="file" accept="image/*" @change="handleImageImport" class="hidden" />
 
-    <div class="uv-header-row bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center gap-2 shrink-0 z-30 select-none h-8.5 min-h-[34px]">
+    <div class="uv-header-row bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center gap-2 shrink-0 z-30 select-none">
       <div class="asset-pipeline flex items-center gap-1.5 min-w-0">
-        <!-- 1. Active 3D Object -->
+        <!-- Active target: keep the object and image together, without a second
+             utility row competing with the UV tools below. -->
         <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px] text-ui-textSecondary shrink-0">
           <span class="text-ui-textMuted font-bold text-[8.5px]">OBJ:</span>
           <select 
@@ -2168,8 +2203,6 @@ defineExpose({
             </option>
           </select>
         </div>
-
-        <span class="text-ui-textMuted text-[9px] font-bold shrink-0">→</span>
 
         <!-- Paint target (not a mesh bind) -->
         <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-xs bg-ui-input border border-ui-borderSubtle text-[10px] text-ui-textSecondary shrink-0">
@@ -2201,29 +2234,15 @@ defineExpose({
           </button>
         </div>
 
-        <!-- Texture Import / Export Action Pill Group -->
-        <div class="flex items-center bg-ui-input p-0.5 rounded-xs border border-ui-borderSubtle shrink-0">
-          <button 
-            @click="fileInputRef?.click()" 
-            class="flex items-center gap-1 px-2 py-0.5 hover:bg-ui-hover text-ui-textAccent rounded-xs text-[10px] font-bold transition cursor-pointer whitespace-nowrap"
-            title="Add an image to the library (does not replace the current map)"
-          >
-            <BlenderIcon name="import" :size="12" />
-            <span>Import</span>
-          </button>
-
-          <button 
-            @click="exportTexturePng" 
-            class="flex items-center gap-1 px-2 py-0.5 hover:bg-ui-hover text-emerald-400 rounded-xs text-[10px] font-bold transition cursor-pointer whitespace-nowrap"
-            title="Export UV Texture PNG"
-          >
-            <BlenderIcon name="export" :size="12" />
-            <span>Export</span>
-          </button>
-        </div>
+      </div>
+      <div class="uv-header-divider" aria-hidden="true"></div>
+      <div class="uv-workflow-bar uv-header-actions" aria-label="UV selection and quick actions">
+        <button :disabled="!activeMesh" @click="handleSmartUvProject">Unwrap</button>
+        <button :disabled="!activeMesh" @click="handlePackIslands(smartUvMargin)">Pack</button>
+        <button class="uv-panel-toggle" :aria-pressed="showPrecision" @click="showPrecision = !showPrecision" title="Toggle UV inspector">Inspect {{ showPrecision ? '−' : '+' }}</button>
+        <button :disabled="!projectStore.activeTexture" title="Browse, edit, and stamp atlas tiles" @click="projectStore.activeTexture && openTileset(projectStore.activeTexture.id)">Tileset</button>
       </div>
     </div>
-
     <Teleport defer to="#uv-paint-command-slot">
       <div class="uv-command-strip flex items-center gap-1">
         <!-- Texture Menu Dropdown -->
@@ -2409,7 +2428,7 @@ defineExpose({
             <span class="text-[8px] opacity-70">▼</span>
           </button>
 
-          <div v-if="activeDropdown === 'align'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-56 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+          <div v-if="activeDropdown === 'align'" class="header-dropdown-menu absolute right-0 top-full mt-1 w-56 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
             <div class="px-3 py-0.5 text-[9px] font-bold text-ui-textMuted uppercase">Align Island / Vertices</div>
             <div class="grid grid-cols-2 gap-1 px-2 py-1">
               <button @click="alignSelection('left'); closeDropdowns()" class="px-2 py-1 bg-ui-input hover:bg-ui-hover text-center rounded-xs text-[11px]">Left</button>
@@ -2447,7 +2466,7 @@ defineExpose({
             <span class="text-[8px] opacity-70">▼</span>
           </button>
 
-          <div v-if="activeDropdown === 'texel'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-60 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl p-2 z-50 text-xs space-y-2">
+          <div v-if="activeDropdown === 'texel'" class="header-dropdown-menu absolute right-0 top-full mt-1 w-60 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl p-2 z-50 text-xs space-y-2">
             <div class="flex items-center justify-between border-b border-ui-borderSubtle pb-1">
               <span class="text-[10px] font-bold text-amber-300 uppercase">Texel Density (px/unit)</span>
               <span v-if="sampledDensity !== null" class="text-[10px] font-mono text-emerald-400 font-bold">{{ sampledDensity }} px/u</span>
@@ -2499,7 +2518,7 @@ defineExpose({
             <span class="text-[8px] opacity-70">▼</span>
           </button>
 
-          <div v-if="activeDropdown === 'view'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-52 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
+          <div v-if="activeDropdown === 'view'" class="header-dropdown-menu absolute right-0 top-full mt-1 w-52 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
             <button @click="showCheckerboard = !showCheckerboard; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Checkerboard Grid</span>
               <span class="text-amber-400 font-bold">{{ showCheckerboard ? 'ON' : 'OFF' }}</span>
@@ -2529,26 +2548,6 @@ defineExpose({
           </div>
         </div>
 
-      <!-- Right: Diagnostic Toggles -->
-      <div class="flex items-center gap-1 shrink-0">
-        <button 
-          @click="showCheckerboard = !showCheckerboard" 
-          class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs text-[10px] font-bold border transition cursor-pointer whitespace-nowrap"
-          :class="showCheckerboard ? 'bg-ui-active text-ui-textAccent border-ui-accent/40 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
-          title="Toggle Calibration Checkerboard Test Grid"
-        >
-          <span>Checkerboard</span>
-        </button>
-
-        <button 
-          @click="showHeatmap = !showHeatmap" 
-          class="flex items-center space-x-1 px-1.5 py-0.5 rounded-xs text-[10px] font-bold border transition cursor-pointer whitespace-nowrap"
-          :class="showHeatmap ? 'bg-ui-active text-ui-textAccent border-ui-accent/40 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
-          title="Toggle UV Stretch & Distortion Heatmap"
-        >
-          <span>Heatmap</span>
-        </button>
-      </div>
       </div>
     </Teleport>
 
@@ -2559,6 +2558,7 @@ defineExpose({
       @create="handleCreateNewTexture"
     />
 
+    <div class="uv-workbench-body">
     <!-- 3. INFINITE STAGING CANVAS VIEWPORT -->
     <div 
       ref="containerRef" 
@@ -2566,13 +2566,28 @@ defineExpose({
       @wheel="onWheel"
       @contextmenu.prevent
     >
+      <div v-if="!activeMesh" class="uv-empty-state">
+        <BlenderIcon name="uv" :size="28" />
+        <strong>Select an object to edit its UVs</strong>
+        <span>Choose a mesh in the 3D view, then unwrap or arrange its islands here.</span>
+      </div>
       <!-- Vertical Selection & Quick Actions Toolbar (Docked Inside Canvas Left) -->
       <div class="uv-vertical-toolbar" aria-label="UV Selection & Quick Tools">
         <!-- UV Selection Modes -->
         <div class="uv-vert-tool-group">
           <button 
+            @click="uvSelectMode = 'face'"
+            class="uv-vert-tool-btn"
+            :aria-pressed="uvSelectMode === 'face'"
+            :class="{ 'is-active': uvSelectMode === 'face' }"
+            title="Face Select (3)"
+          >
+            <BlenderIcon name="face-select" :size="15" />
+          </button>
+          <button 
             @click="uvSelectMode = 'vertex'"
             class="uv-vert-tool-btn"
+            :aria-pressed="uvSelectMode === 'vertex'"
             :class="{ 'is-active': uvSelectMode === 'vertex' }"
             title="Vertex Select (1)"
           >
@@ -2581,22 +2596,16 @@ defineExpose({
           <button 
             @click="uvSelectMode = 'edge'"
             class="uv-vert-tool-btn"
+            :aria-pressed="uvSelectMode === 'edge'"
             :class="{ 'is-active': uvSelectMode === 'edge' }"
             title="Edge Select (2)"
           >
             <BlenderIcon name="edge-select" :size="15" />
           </button>
           <button 
-            @click="uvSelectMode = 'face'"
-            class="uv-vert-tool-btn"
-            :class="{ 'is-active': uvSelectMode === 'face' }"
-            title="Face Select (3)"
-          >
-            <BlenderIcon name="face-select" :size="15" />
-          </button>
-          <button 
             @click="uvSelectMode = 'island'"
             class="uv-vert-tool-btn"
+            :aria-pressed="uvSelectMode === 'island'"
             :class="{ 'is-active': uvSelectMode === 'island' }"
             title="Island Select (4)"
           >
@@ -2608,29 +2617,30 @@ defineExpose({
 
         <!-- Quick Transform & UV Operations -->
         <div class="uv-vert-tool-group">
-          <button @click="rotateUVs(-90)" class="uv-vert-tool-btn" title="Rotate 90° CCW">
-            <BlenderIcon name="rotate-ccw" :size="15" />
+          <button @click="rotateUVs(-90)" :disabled="!selectionBounds" class="uv-vert-tool-btn" title="Rotate 90° CCW">
+            <BlenderIcon name="rotate-ccw" :size="15" /><span class="uv-tool-label">−90°</span>
           </button>
-          <button @click="rotateUVs(90)" class="uv-vert-tool-btn" title="Rotate 90° CW">
-            <BlenderIcon name="rotate-cw" :size="15" />
+          <button @click="rotateUVs(90)" :disabled="!selectionBounds" class="uv-vert-tool-btn" title="Rotate 90° CW">
+            <BlenderIcon name="rotate-cw" :size="15" /><span class="uv-tool-label">+90°</span>
           </button>
-          <button @click="flipUVs('u')" class="uv-vert-tool-btn" title="Flip Horizontal">
-            <BlenderIcon name="flip-horizontal" :size="15" />
+          <button @click="flipUVs('u')" :disabled="!selectionBounds" class="uv-vert-tool-btn" title="Flip Horizontal">
+            <BlenderIcon name="flip-horizontal" :size="15" /><span class="uv-tool-label">Flip U</span>
           </button>
-          <button @click="flipUVs('v')" class="uv-vert-tool-btn" title="Flip Vertical">
-            <BlenderIcon name="flip-vertical" :size="15" />
+          <button @click="flipUVs('v')" :disabled="!selectionBounds" class="uv-vert-tool-btn" title="Flip Vertical">
+            <BlenderIcon name="flip-vertical" :size="15" /><span class="uv-tool-label">Flip V</span>
           </button>
-          <button @click="handlePackIslands(2)" class="uv-vert-tool-btn text-emerald-400 hover:text-emerald-300" title="Auto-Pack Islands (2px)">
-            <BlenderIcon name="pack-islands" :size="15" />
+          <button @click="handlePackIslands(smartUvMargin)" class="uv-vert-tool-btn text-emerald-400 hover:text-emerald-300" :title="`Pack islands (${smartUvMargin}px margin)`">
+            <BlenderIcon name="pack-islands" :size="15" /><span class="uv-tool-label">Pack</span>
           </button>
           <button @click="handleSmartUvProject" class="uv-vert-tool-btn text-amber-400 hover:text-amber-300" title="Smart UV Project: cut, project, and pack (U)">
-            <BlenderIcon name="uv-smart" :size="15" />
+            <BlenderIcon name="uv-smart" :size="15" /><span class="uv-tool-label">Smart UV</span>
           </button>
         </div>
       </div>
 
       <!-- Top Right Floating View Controls -->
       <div class="uv-view-group" aria-label="UV canvas view controls">
+        <button @click="frameSelection" class="uv-view-toggle" title="Frame selected UVs, or all islands (F)"><BlenderIcon name="view-fit" :size="14" /><span>Frame</span></button>
         <button
           @click="showHeatmap = !showHeatmap"
           class="uv-view-icon"
@@ -2658,7 +2668,6 @@ defineExpose({
           <BlenderIcon name="view-fit" :size="14" />
         </button>
       </div>
-
       <canvas 
         ref="canvasRef" 
         @pointerdown="onPointerDown" 
@@ -2677,12 +2686,59 @@ defineExpose({
         <span v-if="seamCount">Seams: <strong class="text-red-400 font-bold">{{ seamCount }}</strong></span>
         <span v-if="selectedFaceCount">Sel: <strong class="text-amber-300 font-bold">{{ selectedFaceCount }}f</strong></span>
         <span v-if="pinnedUvKeys.size">Pins: <strong class="text-pink-400 font-bold">{{ pinnedUvKeys.size }}</strong></span>
-        <span v-else class="text-ui-textMuted">No selection</span>
+        <span v-if="!selectionBounds" class="text-ui-textMuted">Select UVs to transform</span>
         <span v-if="selectionBounds" class="text-ui-textAccent font-bold">
           Bounds: {{ Math.round(selectionBounds.width * 100) }}% × {{ Math.round(selectionBounds.height * 100) }}%
         </span>
         <span class="text-ui-textMuted hidden md:inline">RMB / Space-drag pan · F frame · V stitch · P pin</span>
       </div>
+    </div>
+    <aside v-if="showPrecision" class="uv-precision-panel" aria-label="UV precision tools">
+      <nav class="uv-inspector-tabs" aria-label="UV inspector sections"><button v-for="tab in (['selection', 'transform', 'tools'] as const)" :key="tab" :aria-pressed="precisionTab === tab" @click="precisionTab = tab">{{ tab.charAt(0).toUpperCase() + tab.slice(1) }}</button></nav>
+      <div class="uv-panel-heading"><strong>Selection</strong><span>{{ targetCorners.length }} {{ targetCorners.length === 1 ? 'corner' : 'corners' }}</span></div>
+      <div class="uv-units"><button :aria-pressed="coordinateUnits === 'pixels'" @click="coordinateUnits = 'pixels'">Pixels</button><button :aria-pressed="coordinateUnits === 'uv'" @click="coordinateUnits = 'uv'">UV units</button></div>
+      <p class="uv-panel-hint">{{ textureSize.width }} × {{ textureSize.height }} texture · U right, V up</p>
+      <fieldset v-show="precisionTab === 'selection'" :disabled="!targetCorners.length" class="uv-panel-section">
+        <div class="uv-field-pair">
+          <label>U position<input aria-label="UV U position" type="number" step="any" :value="selectionBounds ? +(selectionBounds.minU * unitU).toFixed(4) : ''" @change="setSelectionCoordinate('u', $event)" /></label>
+          <label>V position<input aria-label="UV V position" type="number" step="any" :value="selectionBounds ? +(selectionBounds.minV * unitV).toFixed(4) : ''" @change="setSelectionCoordinate('v', $event)" /></label>
+        </div>
+        <div class="uv-field-pair">
+          <label>Width<input aria-label="UV selection width" type="number" min="0" step="any" :value="selectionBounds ? +(selectionBounds.width * unitU).toFixed(4) : ''" @change="setSelectionSize('u', $event)" /></label>
+          <label>Height<input aria-label="UV selection height" type="number" min="0" step="any" :value="selectionBounds ? +(selectionBounds.height * unitV).toFixed(4) : ''" @change="setSelectionSize('v', $event)" /></label>
+        </div>
+        <label class="uv-checkbox"><input v-model="lockScale" type="checkbox" /> Keep proportions</label>
+        <label>Transform pivot<select v-model="pivotMode"><option value="selection">Selection center</option><option value="islands">Individual islands</option><option value="tile">Texture center</option></select></label>
+      </fieldset>
+      <fieldset v-show="precisionTab === 'transform'" :disabled="!targetCorners.length" class="uv-panel-section">
+        <legend>Transform</legend>
+        <form @submit.prevent="moveSelection">
+          <div class="uv-field-pair"><label>Move U<input v-model.number="moveU" aria-label="Move UV U" type="number" step="any" /></label><label>Move V<input v-model.number="moveV" aria-label="Move UV V" type="number" step="any" /></label></div>
+          <button type="submit" class="uv-wide-action">Move selection</button>
+        </form>
+        <form class="uv-inline-action" @submit.prevent="rotateUVs(Number(rotateAngle))"><label>Angle °<input v-model.number="rotateAngle" aria-label="UV rotation angle" type="number" step="any" /></label><button type="submit">Rotate</button></form>
+        <form @submit.prevent="resizeSelection">
+          <div class="uv-field-pair"><label>Scale U<input v-model.number="scaleU" aria-label="UV scale U" type="number" step="any" /></label><label>Scale V<input v-model.number="scaleV" aria-label="UV scale V" :disabled="lockScale" type="number" step="any" /></label></div>
+          <button type="submit" class="uv-wide-action">Scale selection</button>
+        </form>
+        <div class="uv-field-pair"><button @click="flipUVs('u')">Flip U</button><button @click="flipUVs('v')">Flip V</button></div>
+      </fieldset>
+      <fieldset v-show="precisionTab === 'tools'" :disabled="!targetCorners.length" class="uv-panel-section">
+        <legend>Pixel &amp; topology tools</legend>
+        <button class="uv-wide-action" @click="snapSelectionPixels">Snap corners to pixels</button>
+        <div class="uv-field-pair"><button @click="alignSelection('center_h')" title="Align selected corners to the same U coordinate">Align U</button><button @click="alignSelection('center_v')" title="Align selected corners to the same V coordinate">Align V</button></div>
+        <button class="uv-wide-action" @click="relaxSelection" title="Smooth selected interior UVs while preserving island boundaries and pins">Relax interiors</button>
+        <p class="uv-panel-hint">Relax preserves borders and pins. Arrow keys nudge 1 pixel; Shift nudges 10.</p>
+      </fieldset>
+      <div v-show="precisionTab === 'tools'" class="uv-panel-section">
+        <div class="uv-panel-heading"><strong>Inspect</strong><span>{{ uvIslandCount }} islands</span></div>
+        <button class="uv-diagnostic" :disabled="!outsideFaces.length" @click="selectDiagnostic(outsideFaces)"><span>Outside texture</span><b>{{ outsideFaces.length }}</b></button>
+        <button class="uv-diagnostic" :disabled="!degenerateFaces.length" @click="selectDiagnostic(degenerateFaces)"><span>Zero-area faces</span><b>{{ degenerateFaces.length }}</b></button>
+        <div class="uv-field-pair"><button :aria-pressed="showCheckerboard" @click="showCheckerboard = !showCheckerboard">Checker</button><button :aria-pressed="showHeatmap" @click="showHeatmap = !showHeatmap">Stretch</button></div>
+        <button class="uv-wide-action" :disabled="!activeMesh" @click="exportUvLayout">Export UV layout</button>
+      </div>
+      <p class="uv-panel-feedback" role="status" aria-live="polite">{{ uvFeedback || 'Select corners, edges, faces or islands to begin.' }}</p>
+    </aside>
     </div>
     <ImportTextureModal
       v-if="showImportModal && pendingImportFile"
@@ -2700,18 +2756,92 @@ defineExpose({
 </template>
 
 <style scoped>
+.uv-workbench-body { display: flex; flex: 1; min-height: 0; min-width: 0; position: relative; }
+.uv-workflow-bar { display: flex; align-items: center; gap: 5px; padding: 6px 9px; background: var(--ui-bg-header); border-bottom: 1px solid var(--ui-border-subtle); overflow-x: auto; flex-shrink: 0; }
+.uv-workflow-title { color: var(--ui-text-accent); font-size: 9px; font-weight: 700; letter-spacing: 1.2px; white-space: nowrap; margin-right: 8px; }
+.uv-workflow-bar button, .uv-precision-panel button { border: 1px solid var(--ui-border-subtle); background: var(--ui-bg-input); color: var(--ui-text-secondary); border-radius: 4px; padding: 5px 7px; font-size: 10px; white-space: nowrap; cursor: pointer; }
+.uv-workflow-bar button:hover:not(:disabled), .uv-precision-panel button:hover:not(:disabled) { color: var(--ui-text-primary); background: var(--ui-bg-hover); border-color: var(--ui-text-accent); }
+.uv-workflow-bar button:disabled, .uv-precision-panel button:disabled, .uv-precision-panel fieldset:disabled { opacity: .45; cursor: default; }
+.uv-panel-toggle { margin-left: auto; }
+.uv-workflow-bar button[aria-pressed="true"], .uv-precision-panel button[aria-pressed="true"] { color: var(--ui-text-accent); background: var(--ui-bg-active); border-color: var(--ui-text-accent); }
+.uv-precision-panel { width: 220px; flex-shrink: 0; overflow-y: auto; border-left: 1px solid var(--ui-border-strong); background: var(--ui-bg-panel); padding: 12px; color: var(--ui-text-secondary); font-size: 10px; }
+.uv-panel-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 9px; }
+.uv-panel-heading strong, .uv-panel-section legend { color: var(--ui-text-primary); font-weight: 600; font-size: 11px; }
+.uv-panel-heading span { font-size: 9px; color: var(--ui-text-muted); }
+.uv-units { display: flex; gap: 4px; }
+.uv-units button { flex: 1; }
+.uv-panel-section { display: grid; gap: 8px; min-width: 0; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--ui-border-subtle); }
+.uv-panel-section legend { padding-right: 8px; }
+.uv-precision-panel label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.uv-precision-panel input:not([type="checkbox"]), .uv-precision-panel select { width: 100%; min-width: 0; height: 27px; padding: 4px 6px; border: 1px solid var(--ui-border-subtle); border-radius: 3px; color: var(--ui-text-primary); background: var(--ui-bg-input); }
+.uv-precision-panel input:focus, .uv-precision-panel select:focus { outline: 1px solid var(--ui-text-accent); }
+.uv-field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.uv-precision-panel .uv-checkbox { flex-direction: row; align-items: center; gap: 6px; }
+.uv-panel-section form { display: grid; gap: 6px; }
+.uv-panel-section .uv-inline-action { grid-template-columns: 1fr auto; align-items: end; }
+.uv-wide-action { width: 100%; }
+.uv-panel-hint { color: var(--ui-text-muted); font-size: 9px; line-height: 1.6; margin-top: 6px; }
+.uv-diagnostic { display: flex; justify-content: space-between; align-items: center; }
+.uv-diagnostic b { color: var(--ui-text-accent); }
+.uv-panel-feedback { color: var(--ui-text-accent); line-height: 1.6; padding-top: 12px; font-size: 10px; }
+@container (max-width: 600px) {
+  .uv-precision-panel { width: 190px; padding: 9px; }
+  .uv-workflow-title { display: none; }
+  .uv-view-group { max-width: calc(100% - 54px); overflow-x: auto; }
+}
+
 .uv-editor {
   container-type: inline-size;
 }
 
 .uv-header-row {
-  height: 32px;
-  min-height: 32px;
+  height: 38px;
+  min-height: 38px;
   overflow: hidden;
 }
 
 .asset-pipeline {
   min-width: 0;
+  flex-shrink: 0;
+}
+
+.uv-header-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 7px 1px;
+  background: var(--ui-border-subtle);
+  flex-shrink: 0;
+}
+
+/* The context selector and the selection/actions now share one quiet row.
+   Texture import/export remain available from Menus instead of permanently
+   consuming room in the UV workspace. */
+.uv-header-actions {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+
+.uv-header-actions button {
+  min-height: 26px;
+  padding: 4px 6px;
+}
+
+.uv-header-actions .uv-component-tabs {
+  flex-shrink: 0;
+}
+
+.uv-header-actions .uv-component-tabs button {
+  min-height: 22px;
+  padding: 3px 5px;
+}
+
+.uv-header-actions .uv-panel-toggle {
+  margin-left: auto;
 }
 
 .header-dropdown-menu {
@@ -2730,6 +2860,7 @@ defineExpose({
 }
 
 .uv-canvas-viewport {
+  container-type: inline-size;
   color: var(--ui-text-secondary);
   background: var(--ui-bg-root);
   cursor: crosshair;
@@ -2881,4 +3012,36 @@ defineExpose({
   backdrop-filter: blur(6px);
   pointer-events: none;
 }
+
+.uv-tool-label { font-size: 10px; white-space: nowrap; }
+.uv-vert-tool-btn:has(.uv-tool-label) { width: 84px; justify-content: flex-start; gap: 7px; padding: 0 6px; }
+.uv-vert-tool-group { align-items: center; }
+.uv-vertical-toolbar { max-height: calc(100% - 54px); overflow-y: auto; }
+.uv-status-hud { bottom: 0; left: 0; right: 0; min-height: 26px; border-radius: 0; border-width: 1px 0 0; gap: 10px; padding: 4px 10px; white-space: nowrap; overflow: hidden; }
+.uv-empty-state { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; padding: 70px; pointer-events: none; color: var(--ui-text-muted); }
+.uv-empty-state strong { color: var(--ui-text-primary); font-size: 13px; }
+.uv-empty-state span { max-width: 280px; font-size: 11px; line-height: 1.6; }
+.uv-header-row { overflow-x: auto; }
+@container (max-width: 540px) {
+  .uv-tool-label { display: none; }
+  .uv-vert-tool-btn:has(.uv-tool-label) { width: 28px; justify-content: center; padding: 0; }
+  .uv-view-group { right: 6px; gap: 2px; }
+}
+</style>
+
+<style scoped>
+.uv-editor { font-family: var(--font-sans, sans-serif); }
+.uv-component-tabs, .uv-inspector-tabs { display: flex; gap: 2px; background: var(--ui-bg-input); border: 1px solid var(--ui-border-subtle); border-radius: 4px; padding: 2px; }
+.uv-component-tabs button, .uv-inspector-tabs button { border-color: transparent; padding: 4px 6px; }
+.uv-inspector-tabs { margin: 0 0 12px; } .uv-inspector-tabs button { flex: 1; padding: 5px 3px; font-size: 10px; }
+.uv-workflow-bar { min-height: 36px; gap: 5px; flex-wrap: wrap; padding: 4px 8px; }
+.uv-vertical-toolbar > .uv-vert-tool-group:first-child { display: flex; }
+.uv-vertical-toolbar > .uv-vert-divider:nth-child(2) { display: block; }
+.uv-tool-label { display: none; } .uv-vert-tool-btn:has(.uv-tool-label) { width: 28px; justify-content: center; padding: 0; }
+.uv-vertical-toolbar { background: color-mix(in srgb, var(--ui-bg-panel) 90%, transparent); border-color: var(--ui-border-subtle); }
+.uv-precision-panel { width: 210px; padding: 10px; }
+.uv-panel-section { margin-top: 10px; padding-top: 10px; }
+.uv-header-row { min-height: 38px; height: 38px; }
+.uv-header-actions { min-height: 0; flex-wrap: nowrap; padding: 0; }
+@container (max-width: 700px) { .uv-precision-panel { width: 190px; padding: 8px; } }
 </style>

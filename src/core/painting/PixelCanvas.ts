@@ -39,24 +39,6 @@ export interface BufferLayer {
  * All draw mutations write the active layer, then `composite()`.
  * `PixelCanvas.vue` is the UV/Paint tab router — not this class.
  */
-function canvasLooksEmpty(ctx: CanvasRenderingContext2D) {
-  const w = ctx.canvas.width
-  const h = ctx.canvas.height
-  if (w < 1 || h < 1) return true
-  const pts = [
-    [0, 0],
-    [w - 1, 0],
-    [0, h - 1],
-    [w - 1, h - 1],
-    [Math.floor(w / 2), Math.floor(h / 2)]
-  ]
-  for (const [x, y] of pts) {
-    const d = ctx.getImageData(x, y, 1, 1).data
-    if (d[3] > 0) return false
-  }
-  return true
-}
-
 function uvToPixel(u: number, v: number, width: number, height: number): { x: number; y: number } {
   const safeU = Number.isFinite(u) ? Math.max(0, Math.min(1, u)) : 0
   const safeV = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0
@@ -111,9 +93,10 @@ export class PixelBuffer {
     return this.activeLayer?.ctx ?? this.ctx
   }
 
-  /** Keep layer canvases sized and back the photo onto the layer if it was only on the composite. */
+  /** Repair missing backing canvases. An empty paint layer is intentionally transparent. */
   ensureDrawable() {
-    if (this.layers.length === 0) {
+    const needsLegacyImage = this.layers.length === 0
+    if (needsLegacyImage) {
       const baseCanvas = document.createElement('canvas')
       baseCanvas.width = this.width
       baseCanvas.height = this.height
@@ -144,7 +127,7 @@ export class PixelBuffer {
       layer.ctx = layer.canvas.getContext('2d', { willReadFrequently: true })!
     }
 
-    if (canvasLooksEmpty(layer.ctx) && !canvasLooksEmpty(this.ctx)) {
+    if (needsLegacyImage) {
       this.syncToActiveLayer()
     }
   }
@@ -170,7 +153,7 @@ export class PixelBuffer {
     destCtx: CanvasRenderingContext2D,
     mode: 'resample' | 'crop'
   ) {
-    destCtx.imageSmoothingEnabled = mode === 'resample'
+    destCtx.imageSmoothingEnabled = false // Pixel-art resizing uses nearest-neighbor sampling.
     destCtx.clearRect(0, 0, dest.width, dest.height)
     if (mode === 'resample') {
       destCtx.drawImage(source, 0, 0, dest.width, dest.height)
@@ -211,6 +194,16 @@ export class PixelBuffer {
       return true
     }
     return false
+  }
+
+  moveLayer(id: string, direction: -1 | 1): boolean {
+    const index = this.layers.findIndex(layer => layer.id === id)
+    const next = index + direction
+    if (index < 0 || next < 0 || next >= this.layers.length) return false
+    const [layer] = this.layers.splice(index, 1)
+    this.layers.splice(next, 0, layer)
+    this.composite()
+    return true
   }
 
   duplicateLayer(id: string): BufferLayer | null {
@@ -347,9 +340,11 @@ export class PixelBuffer {
     const py = Math.floor(y) - half
 
     if (shape === 'circle' && size > 2) {
-      ctx.beginPath()
-      ctx.arc(Math.floor(x) + 0.5, Math.floor(y) + 0.5, size / 2, 0, Math.PI * 2)
-      ctx.fill()
+      for (let dy = 0; dy < size; dy++) {
+        for (let dx = 0; dx < size; dx++) {
+          if (Math.hypot(dx + 0.5 - size / 2, dy + 0.5 - size / 2) <= size / 2) ctx.fillRect(px + dx, py + dy, 1, 1)
+        }
+      }
     } else {
       ctx.fillRect(px, py, size, size)
     }
@@ -364,12 +359,11 @@ export class PixelBuffer {
     const py = Math.floor(y) - half
 
     if (shape === 'circle' && size > 2) {
-      ctx.save()
-      ctx.globalCompositeOperation = 'destination-out'
-      ctx.beginPath()
-      ctx.arc(Math.floor(x) + 0.5, Math.floor(y) + 0.5, size / 2, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.restore()
+      for (let dy = 0; dy < size; dy++) {
+        for (let dx = 0; dx < size; dx++) {
+          if (Math.hypot(dx + 0.5 - size / 2, dy + 0.5 - size / 2) <= size / 2) ctx.clearRect(px + dx, py + dy, 1, 1)
+        }
+      }
     } else {
       ctx.clearRect(px, py, size, size)
     }
@@ -574,13 +568,13 @@ export class PixelBuffer {
     ctx.globalAlpha = Math.max(0, Math.min(1, opacity))
     ctx.fillStyle = colorHex
 
-    if (filled) {
+    if (filled || size * 2 >= Math.min(w, h)) {
       ctx.fillRect(minX, minY, w, h)
     } else {
-      ctx.fillRect(minX, minY, w, size) // Top
-      ctx.fillRect(minX, maxY - size + 1, w, size) // Bottom
-      ctx.fillRect(minX, minY, size, h) // Left
-      ctx.fillRect(maxX - size + 1, minY, size, h) // Right
+      ctx.fillRect(minX, minY, w, size)
+      ctx.fillRect(minX, maxY - size + 1, w, size)
+      ctx.fillRect(minX, minY + size, size, h - size * 2)
+      ctx.fillRect(maxX - size + 1, minY + size, size, h - size * 2)
     }
     ctx.globalAlpha = 1.0
     this.commitLayers()
@@ -593,12 +587,13 @@ export class PixelBuffer {
     ctx.strokeStyle = colorHex
     ctx.lineWidth = size
 
-    ctx.beginPath()
-    ctx.arc(cx, cy, Math.max(1, radius), 0, Math.PI * 2)
-    if (filled) {
-      ctx.fill()
-    } else {
-      ctx.stroke()
+    const outer = Math.max(0, Math.round(radius)) + 0.5
+    const inner = Math.max(0, outer - size)
+    for (let y = -Math.ceil(outer); y <= Math.ceil(outer); y++) {
+      for (let x = -Math.ceil(outer); x <= Math.ceil(outer); x++) {
+        const distance = Math.hypot(x, y)
+        if (distance <= outer && (filled || distance >= inner)) ctx.fillRect(cx + x, cy + y, 1, 1)
+      }
     }
     ctx.globalAlpha = 1.0
     this.commitLayers()
@@ -1001,18 +996,23 @@ export class PixelBuffer {
   }
 
   loadFromDataURL(url: string, autoResize = true): Promise<void> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const img = new Image()
       img.onload = () => {
-        if (autoResize && (img.naturalWidth !== this.width || img.naturalHeight !== this.height)) {
-          this.resize(img.naturalWidth, img.naturalHeight, 'crop')
+        try {
+          if (autoResize && (img.naturalWidth !== this.width || img.naturalHeight !== this.height)) {
+            this.resize(img.naturalWidth, img.naturalHeight, 'crop')
+          }
+          const destCtx = this.activeLayer?.ctx ?? this.ctx
+          destCtx.clearRect(0, 0, this.width, this.height)
+          destCtx.drawImage(img, 0, 0, this.width, this.height)
+          this.composite()
+          resolve()
+        } catch (error) {
+          reject(error)
         }
-        const destCtx = this.activeLayer?.ctx ?? this.ctx
-        destCtx.clearRect(0, 0, this.width, this.height)
-        destCtx.drawImage(img, 0, 0, this.width, this.height)
-        this.composite()
-        resolve()
       }
+      img.onerror = () => reject(new Error('Could not decode paint image.'))
       img.src = url
     })
   }

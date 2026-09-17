@@ -154,3 +154,117 @@ export function generateRetroAtlas(pb: PixelBuffer) {
 
   pb.resumeComposite()
 }
+
+export const DEFAULT_TEXTURE_ID = 'tex_default'
+export const DEFAULT_TEXTURE_SIZE = 64
+const DEFAULT_TEXTURE_LS_KEY = 'polyecho_default_texture'
+
+export type DefaultTextureKind = 'atlas' | 'white' | 'black' | 'grey' | 'checker' | 'color'
+
+export interface DefaultTexturePref {
+  kind: DefaultTextureKind
+  color: string
+}
+
+export const DEFAULT_TEXTURE_PRESETS: { kind: DefaultTextureKind; label: string; swatch: string }[] = [
+  { kind: 'atlas', label: 'Retro atlas', swatch: '#4b5563' },
+  { kind: 'white', label: 'White', swatch: '#ffffff' },
+  { kind: 'black', label: 'Black', swatch: '#111111' },
+  { kind: 'grey', label: 'Grey', swatch: '#9ca3af' },
+  { kind: 'checker', label: 'Checker', swatch: '#d1d5db' },
+  { kind: 'color', label: 'Custom color', swatch: '' }
+]
+
+const FALLBACK_PREF: DefaultTexturePref = { kind: 'atlas', color: '#808080' }
+const KINDS: DefaultTextureKind[] = ['atlas', 'white', 'black', 'grey', 'checker', 'color']
+
+export function normalizeDefaultTexturePref(raw: unknown): DefaultTexturePref {
+  const obj = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+  const kind = KINDS.includes(obj.kind as DefaultTextureKind) ? obj.kind as DefaultTextureKind : FALLBACK_PREF.kind
+  const color = typeof obj.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(obj.color)
+    ? obj.color.toLowerCase()
+    : FALLBACK_PREF.color
+  return { kind, color }
+}
+
+export function loadDefaultTexturePref(): DefaultTexturePref {
+  if (typeof localStorage === 'undefined') return { ...FALLBACK_PREF }
+  try {
+    const raw = localStorage.getItem(DEFAULT_TEXTURE_LS_KEY)
+    return raw ? normalizeDefaultTexturePref(JSON.parse(raw)) : { ...FALLBACK_PREF }
+  } catch {
+    return { ...FALLBACK_PREF }
+  }
+}
+
+export function saveDefaultTexturePref(pref: DefaultTexturePref) {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(DEFAULT_TEXTURE_LS_KEY, JSON.stringify(normalizeDefaultTexturePref(pref)))
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+export function defaultTextureName(pref: DefaultTexturePref): string {
+  if (pref.kind === 'atlas') return 'Texture_Atlas_64x64'
+  if (pref.kind === 'white') return 'Texture_White_64x64'
+  if (pref.kind === 'black') return 'Texture_Black_64x64'
+  if (pref.kind === 'grey') return 'Texture_Grey_64x64'
+  if (pref.kind === 'checker') return 'Texture_Checker_64x64'
+  return 'Texture_Color_64x64'
+}
+
+export function defaultTextureAtlas(pref: DefaultTexturePref): { cols: number; rows: number } | undefined {
+  return pref.kind === 'atlas' ? { cols: 2, rows: 2 } : undefined
+}
+
+export function generateCheckerTexture(pb: PixelBuffer, light = '#d1d5db', dark = '#6b7280', cell = 8) {
+  pb.suspendComposite()
+  const ctx = pb.layerCtx()
+  for (let y = 0; y < pb.height; y += cell) {
+    for (let x = 0; x < pb.width; x += cell) {
+      const useLight = ((Math.floor(x / cell) + Math.floor(y / cell)) % 2) === 0
+      ctx.fillStyle = useLight ? light : dark
+      ctx.fillRect(x, y, Math.min(cell, pb.width - x), Math.min(cell, pb.height - y))
+    }
+  }
+  pb.resumeComposite()
+}
+
+export function fillDefaultTexture(pb: PixelBuffer, pref: DefaultTexturePref = loadDefaultTexturePref()) {
+  if (pref.kind === 'atlas') {
+    generateRetroAtlas(pb)
+    return
+  }
+  if (pref.kind === 'white') {
+    pb.clear('#ffffff')
+    return
+  }
+  if (pref.kind === 'black') {
+    pb.clear('#111111')
+    return
+  }
+  if (pref.kind === 'grey') {
+    pb.clear('#9ca3af')
+    return
+  }
+  if (pref.kind === 'checker') {
+    generateCheckerTexture(pb)
+    return
+  }
+  pb.clear(pref.color || FALLBACK_PREF.color)
+}
+
+export function createStarterTextureContents(pref: DefaultTexturePref = loadDefaultTexturePref()) {
+  const pixelBuffer = new PixelBuffer(DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE)
+  fillDefaultTexture(pixelBuffer, pref)
+  return {
+    name: defaultTextureName(pref),
+    width: DEFAULT_TEXTURE_SIZE,
+    height: DEFAULT_TEXTURE_SIZE,
+    dataUrl: pixelBuffer.toDataURL(),
+    pixelBuffer,
+    atlas: defaultTextureAtlas(pref)
+  }
+}

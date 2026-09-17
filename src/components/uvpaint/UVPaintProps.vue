@@ -40,6 +40,11 @@ const atlasCells = computed(() => {
       </span>
     </div>
 
+    <div v-if="!projectStore.activeMesh" class="p-3 space-y-2 border-b border-ui-borderSubtle">
+      <p class="text-[11px] leading-relaxed text-amber-200/90">Select a mesh in Modeling first, then unwrap or paint it here.</p>
+      <UiButton size="xs" class="w-full" variant="accent" @click="toolStore.setAppMode('model')">Go to Modeling</UiButton>
+    </div>
+
     <UiSection title="Workspace" blender-icon="uv" :default-open="true">
       <div class="grid grid-cols-2 gap-1">
         <UiButton
@@ -59,9 +64,20 @@ const atlasCells = computed(() => {
       </div>
     </UiSection>
 
-    <UiSection title="Unwrap" blender-icon="uv-smart" :default-open="true">
+    <UiSection v-if="toolStore.uvWorkspaceTab === 'uv'" title="Unwrap" blender-icon="uv-smart" :default-open="true">
+      <p class="text-[10px] text-ui-textMuted">Uses selected faces, or the whole mesh when nothing is selected.</p>
+      <label class="flex items-center justify-between gap-2">Cut angle
+        <input type="number" min="1" max="180" :value="toolStore.smartUvAngle"
+          @change="toolStore.smartUvAngle = Math.max(1, Math.min(180, Number(($event.target as HTMLInputElement).value) || 66))"
+          class="w-16 bg-ui-input rounded-xs px-2 py-1" aria-label="Smart UV cut angle" />
+      </label>
+      <label class="flex items-center justify-between gap-2">Margin (px)
+        <input type="number" min="0" max="64" :value="toolStore.smartUvMargin"
+          @change="toolStore.smartUvMargin = Math.max(0, Math.min(64, Number(($event.target as HTMLInputElement).value) || 0))"
+          class="w-16 bg-ui-input rounded-xs px-2 py-1" aria-label="UV island margin in pixels" />
+      </label>
       <div class="grid grid-cols-2 gap-1">
-        <UiButton size="xs" class="col-span-2" @click="projectStore.performSmartUvProject({
+        <UiButton size="xs" class="col-span-2" :disabled="!projectStore.activeMesh" @click="projectStore.performSmartUvProject({
           angleLimitDegrees: toolStore.smartUvAngle,
           marginPixels: toolStore.smartUvMargin
         })">Smart UV Project</UiButton>
@@ -73,7 +89,7 @@ const atlasCells = computed(() => {
       </div>
     </UiSection>
 
-    <UiSection title="Atlas" blender-icon="grid" :badge="atlasGrid ? `${atlasGrid.cols}×${atlasGrid.rows}` : undefined" :default-open="true">
+    <UiSection v-if="toolStore.uvWorkspaceTab === 'uv'" title="Atlas" blender-icon="grid" :badge="atlasGrid ? `${atlasGrid.cols}×${atlasGrid.rows}` : undefined" :default-open="true">
       <p class="text-[10px] text-ui-textMuted leading-snug">
         Select faces in the UV editor, then a cell. Grid lives on the Texture tab.
       </p>
@@ -90,6 +106,33 @@ const atlasCells = computed(() => {
       <UiButton v-else size="xs" class="w-full" @click="layoutStore.setInspectorTab('texture', toolStore.appMode)">
         Set atlas grid…
       </UiButton>
+    </UiSection>
+
+    <UiSection v-if="toolStore.uvWorkspaceTab === 'paint'" title="Brush" blender-icon="brush" :default-open="true">
+      <div class="flex items-center justify-between">
+        <span class="capitalize text-ui-textAccent">{{ toolStore.paintTool }}</span>
+        <span class="text-ui-textMuted">[ / ] resize</span>
+      </div>
+      <label class="flex items-center justify-between gap-2">Size (px)
+        <input type="number" min="1" max="128" :value="toolStore.brushSize"
+          @change="toolStore.brushSize = Math.max(1, Math.min(128, Math.round(Number(($event.target as HTMLInputElement).value) || 1)))"
+          class="w-16 bg-ui-input rounded-xs px-2 py-1" aria-label="Brush size in pixels" />
+      </label>
+      <label class="flex items-center justify-between gap-2">Opacity
+        <span>{{ Math.round(toolStore.brushOpacity * 100) }}%</span>
+      </label>
+      <input type="range" min="0" max="1" step="0.01" v-model.number="toolStore.brushOpacity" class="w-full" aria-label="Brush opacity" />
+      <div class="grid grid-cols-2 gap-1">
+        <UiButton size="xs" :variant="toolStore.brushShape === 'square' ? 'accent' : 'default'" @click="toolStore.brushShape = 'square'">Square</UiButton>
+        <UiButton size="xs" :variant="toolStore.brushShape === 'circle' ? 'accent' : 'default'" @click="toolStore.brushShape = 'circle'">Round</UiButton>
+      </div>
+      <label class="flex items-center justify-between">Foreground
+        <input type="color" v-model="toolStore.primaryColor" class="w-10 h-6 bg-transparent cursor-pointer" aria-label="Foreground paint color" />
+      </label>
+      <label class="flex items-center justify-between">Pen pressure
+        <input type="checkbox" v-model="toolStore.stylusPressureEnabled" />
+      </label>
+      <p class="text-[10px] text-ui-textMuted leading-relaxed">Ctrl-click paints the secondary color. Space-drag pans. Use the wheel to zoom.</p>
     </UiSection>
 
     <UiSection title="Viewport" blender-icon="eye-open" :default-open="true">

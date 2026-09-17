@@ -66,7 +66,9 @@ Related:
 | Select an object in Model / Rig / Animate | **No** |
 | Switch workspace to UV / Paint | **Yes** (`syncPaintTargetFromMesh`) |
 | Change active object while already in UV / Paint | **Yes** |
-| UV/Paint TEX / New / Import, or Texture library click in UV/Paint | Bind + select (`applyTextureToMesh` `this_object`) |
+| Paint / Texture inspector Library | Select only; use the explicit Apply action to bind |
+| Paint / Texture inspector **New** or **Import** | Creates, then `applyTextureToMesh(..., 'this_object')` (forks if shared, no prompt) |
+| Open Paint / Edit UV layout from Texture inspector | Retains the chosen library image after workspace entry |
 | 3D pixel-paint a mesh | **Yes** (the image you hit) |
 | Drop an image on a mesh in the viewport | Creates, then `applyTextureToMesh(..., 'this_object')` (forks if shared, no prompt) |
 
@@ -74,10 +76,10 @@ Related:
 
 | UI | New | Dropdown / click | Apply |
 | :--- | :--- | :--- | :--- |
-| Texture panel | `createTexture` | `selectTexture` (library list) | **Use** on object → share prompt. Layers sit under Image (paint uses this instead of a floating canvas panel). Library + Atlas are open; size / filter / pixels stay collapsed. |
+| Texture panel | `createTexture`, then bind active object (`this_object`) | `selectTexture` (library list). **Replace** overwrites the current image’s pixels. **Delete** is `deleteTexture`. | **Use** on object → share prompt. Layers sit under Image (paint uses this instead of a floating canvas panel). |
 | Material inspector | `createTexture` then `applyTextureToMaterial` | `applyTextureToMaterial` | n/a (already material-scoped) |
 | Object inspector (Transform) | — | — | Shading links jump to Material / Texture tabs (no texture dropdown) |
-| UV / Pixel **TEX** | `createTexture` then bind active object | `applyTextureToMesh(..., 'this_object')` | **Apply** still there if bind was skipped |
+| UV / Pixel **TEX** | `createTexture` then bind active object | `selectTexture` only (does not bind) | **Apply** binds the chosen image to the object |
 | UV / Pixel **Import** | `createTexture` via modal, then bind active object | — | `this_object` (fork if shared) |
 | Texture library click | — | UV/Paint: bind active object; Model: `selectTexture` | **Use on** + prompt |
 | Import modal | `createTexture` only | — | caller may apply afterward |
@@ -85,13 +87,15 @@ Related:
 
 ## Atlas workflow
 
-A texture may carry `atlas: { cols, rows }` (row 0 = top of the image). That is metadata, not a fourth bind verb.
+A texture may carry `atlas: { cols, rows, spacing?, margin? }` (row 0 = top of the image). Spacing is the gutter between tiles; margin is the outer inset. That is metadata, not a fourth bind verb.
 
 | Step | Where | Store / core |
 | :--- | :--- | :--- |
 | Mark a grid | Texture → Atlas (2×2, 4×4, custom) | `setTextureAtlasGrid` / `clearTextureAtlasGrid` |
 | See cells | UV editor overlay (amber) | `TextureMap.atlas` |
 | Put islands in a cell | UV Align & Snap, UV inspector Atlas, or Texture cell pad | `performMapUVsToAtlasCell` → `mapFacesToAtlasCell` |
+| Pick a tile and stamp 3D faces | Floating tileset / tilemap panel (Stamp) | `stampFacesToRegion` (`TilesetStamp.ts`) via viewport click or selected faces |
+| Paint inside one tile | Tileset panel Paint + Clip | `tilesetPaintClip` + `paintWithinSelection` (2D and 3D) |
 | Extract tiles | Texture → Slice to library; Import modal “Atlas / Sprite Sheet” | `sliceTextureIntoTiles` / `createTexture` per tile |
 | Merge maps | Texture → Bake scene atlas | `bakeSceneAtlas` (`AtlasBaker`) |
 
@@ -101,6 +105,7 @@ Math: `src/core/uv/AtlasCells.ts`. Do not remap UVs in Vue.
 
 ## Viewport / undo
 
+- **Starter texture:** File → Properties → 3D Viewport chooses the image new projects and **Restore starter texture** use (`tex_default`): retro atlas, white, black, grey, checker, or a custom color. Stored in `localStorage` (`polyecho_default_texture`).
 - During a paint stroke: `markTexturePreview()` (bumps `textureRevision` so Three.js `CanvasTexture.needsUpdate` — no `toDataURL` / autosave).
 - On pointer up (and one-shot edits): `markTextureUpdated(id)` (refreshes `dataUrl`, bumps `textureRevision`, autosave).
 - After a bind: also `markGeometryUpdated()` so materials rebuild.
@@ -112,13 +117,13 @@ Math: `src/core/uv/AtlasCells.ts`. Do not remap UVs in Vue.
 ## Do not
 
 - Set `activeTextureId` to “apply” a texture to an object.
-- Call `assignTextureToActiveMesh` from New / Import / Duplicate unless the control is explicitly “put this on the object.”
+- Call `assignTextureToActiveMesh` from Duplicate or library browse. New / Import bind with `this_object` (same as viewport drop).
 - Add another create/select helper in a Vue file. Extend the store verbs.
 - Auto-sync paint target from mesh selection in Model mode.
 
 ## Adding a new texture UI
 
-1. New image → `createTexture`.
+1. New image → `createTexture`, then `applyTextureToMesh(..., 'this_object')` if an object is selected.
 2. Browse / paint → `selectTexture`.
-3. Show on a mesh → `useTextureApply().applyToActiveMesh` or `applyTextureToMaterial`.
+3. Show an existing library image on a mesh → `useTextureApply().applyToActiveMesh` or `applyTextureToMaterial`.
 4. Update this table.
