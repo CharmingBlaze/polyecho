@@ -177,7 +177,7 @@ app.whenReady().then(async () => {
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
       const headers = { ...details.responseHeaders }
       headers['Content-Security-Policy'] = [
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:"
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' data:; worker-src 'self' blob:"
       ]
       callback({ responseHeaders: headers })
     })
