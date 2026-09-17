@@ -165,7 +165,7 @@ function handleAddBone() {
   } else {
     animationStore.addRootBone(`Bone_Root_${animationStore.armature.bones.length + 1}`)
   }
-  toolStore.appMode = 'animate'
+  toolStore.setAppMode('animate')
 }
 </script>
 
@@ -322,7 +322,7 @@ function handleAddBone() {
         <div 
           v-for="bone in filteredBones" 
           :key="bone.id"
-          @click="animationStore.selectBone(bone.id); toolStore.appMode = 'animate'"
+          @click="animationStore.selectBone(bone.id); toolStore.setAppMode('animate')"
           class="flex items-center justify-between px-2.5 py-2 rounded-xs cursor-pointer transition border"
           :style="{ paddingLeft: bone.parentId ? '1.5rem' : '0.625rem' }"
           :class="bone.id === animationStore.selectedBoneId ? 'bg-ui-active border-ui-accent/50 text-ui-textAccent shadow-xs' : 'bg-ui-surface/60 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover hover:text-ui-textAccent'"
@@ -353,7 +353,7 @@ function handleAddBone() {
 
           <div class="flex items-center space-x-1 shrink-0">
             <button 
-              @click.stop="animationStore.addChildBone(bone.id, `${bone.name}_Child`); toolStore.appMode = 'animate'" 
+              @click.stop="animationStore.addChildBone(bone.id, `${bone.name}_Child`); toolStore.setAppMode('animate')" 
               class="p-1 hover:bg-ui-hover rounded-xs text-ui-textMuted hover:text-ui-textAccent transition" 
               title="Add Child Bone"
             >

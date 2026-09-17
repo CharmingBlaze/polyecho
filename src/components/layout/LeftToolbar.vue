@@ -33,7 +33,7 @@ function modalClass(name: string, idle = 'text-ui-textSecondary hover:text-ui-te
 }
 
 function setSelectMode(mode: 'object' | 'vertex' | 'edge' | 'face') {
-  toolStore.selectMode = mode
+  toolStore.enterSelectMode(mode)
 }
 
 function handleSetTool(tool: 'select' | 'move' | 'rotate' | 'scale') {
