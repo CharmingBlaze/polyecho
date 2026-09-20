@@ -174,19 +174,19 @@ function handleAddBone() {
     <div class="h-7 px-1.5 bg-ui-header border-b border-ui-borderSubtle flex items-center justify-between gap-1">
       <div class="flex items-center">
         <button 
-          @click="activeTab = 'meshes'"
           class="flex items-center gap-1 px-1.5 h-5 rounded-xs font-semibold text-[10px] transition"
           :class="activeTab === 'meshes' ? 'bg-ui-panel text-ui-textPrimary' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Scene objects"
+          @click="activeTab = 'meshes'"
         >
           <BlenderIcon name="mesh-cube" :size="11" />
           <span>Obj {{ projectStore.meshes.length }}</span>
         </button>
         <button 
-          @click="activeTab = 'armature'"
           class="flex items-center gap-1 px-1.5 h-5 rounded-xs font-semibold text-[10px] transition"
           :class="activeTab === 'armature' ? 'bg-ui-panel text-ui-textPrimary' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Armature bones"
+          @click="activeTab = 'armature'"
         >
           <BlenderIcon name="bone" :size="11" />
           <span>Bone {{ animationStore.armature.bones.length }}</span>
@@ -197,9 +197,9 @@ function handleAddBone() {
       <div class="flex items-center gap-1">
         <button 
           v-if="activeTab === 'meshes'"
-          @click="handleAddMeshClick($event)" 
-          class="flex items-center gap-1 px-2.5 h-6 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white text-[11px] font-bold shadow-xs transition cursor-pointer"
+          class="flex items-center gap-1 px-2.5 h-6 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white text-[11px] font-bold shadow-xs transition cursor-pointer" 
           title="Add 3D Primitive (Opens Primitives Panel / Shift+A)"
+          @click="handleAddMeshClick($event)"
         >
           <BlenderIcon name="plus" :size="14" />
           <span>Add</span>
@@ -207,9 +207,9 @@ function handleAddBone() {
 
         <button 
           v-else
-          @click="handleAddBone" 
-          class="flex items-center gap-1 px-2.5 h-6 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white text-[11px] font-bold shadow-xs transition cursor-pointer"
+          class="flex items-center gap-1 px-2.5 h-6 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white text-[11px] font-bold shadow-xs transition cursor-pointer" 
           title="Add Bone"
+          @click="handleAddBone"
         >
           <BlenderIcon name="plus" :size="14" />
           <span>{{ animationStore.selectedBoneId ? 'Child' : 'Root' }}</span>
@@ -224,7 +224,7 @@ function handleAddBone() {
         type="text" 
         :placeholder="activeTab === 'meshes' ? 'Filter…' : 'Filter bones…'"
         class="bg-transparent text-ui-textPrimary placeholder-ui-textMuted text-[10px] w-full focus:outline-none"
-      />
+      >
     </div>
 
     <!-- FULL HEIGHT SCROLLABLE TREE LIST -->
@@ -239,17 +239,17 @@ function handleAddBone() {
           v-for="mesh in filteredMeshes" 
           :key="mesh.id"
           draggable="true"
-          @dragstart="onDragStartMesh($event, mesh.id)"
-          @dragover="onDragOverMesh($event, mesh.id)"
-          @dragleave="onDragLeaveMesh"
-          @drop="onDropOnMesh($event, mesh.id)"
-          @click="selectMesh(mesh.id, $event)"
           class="flex items-center justify-between px-2.5 py-1.5 rounded-xs cursor-pointer transition border text-xs"
           :class="[
             projectStore.selectedMeshIds.includes(mesh.id) ? 'bg-ui-active border-ui-accent/40 text-ui-textAccent' : 'bg-ui-surface/60 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover hover:text-ui-textAccent',
             dragOverTargetId === mesh.id ? 'ring-2 ring-ui-accent bg-ui-accent/20' : '',
             mesh.parentId ? 'ml-3' : ''
           ]"
+          @dragstart="onDragStartMesh($event, mesh.id)"
+          @dragover="onDragOverMesh($event, mesh.id)"
+          @dragleave="onDragLeaveMesh"
+          @drop="onDropOnMesh($event, mesh.id)"
+          @click="selectMesh(mesh.id, $event)"
         >
           <div class="flex items-center space-x-2 flex-1 min-w-0 mr-1.5">
             <BlenderIcon name="mesh-cube" :size="14" :color="projectStore.selectedMeshIds.includes(mesh.id) ? 'currentColor' : '#8d939d'" />
@@ -257,11 +257,11 @@ function handleAddBone() {
             <input 
               v-if="editingItemId === mesh.id"
               v-model="editingName"
-              @blur="commitRenameMesh(mesh.id)"
-              @keydown.enter="commitRenameMesh(mesh.id)"
               class="bg-ui-input text-ui-textPrimary px-1.5 py-0.5 rounded-xs font-mono text-xs w-full focus:outline-none border border-ui-accent"
               autoFocus
-            />
+              @blur="commitRenameMesh(mesh.id)"
+              @keydown.enter="commitRenameMesh(mesh.id)"
+            >
             <div v-else class="flex flex-col min-w-0" @dblclick="startRename(mesh.id, mesh.name)">
               <div class="flex items-center gap-1.5 truncate">
                 <span class="font-mono font-bold text-[11px] truncate select-none">
@@ -272,9 +272,9 @@ function handleAddBone() {
                   <span class="truncate">{{ meshParentLabel(mesh) }}</span>
                   <button
                     v-if="mesh.parentId && !resolveMeshBoneParentId(mesh, animationStore.armature.bones)"
-                    @click.stop="unparentMesh(mesh.id)"
                     class="hover:text-rose-400 ml-0.5 font-bold"
                     title="Unparent Object"
+                    @click.stop="unparentMesh(mesh.id)"
                   >×</button>
                 </span>
               </div>
@@ -288,21 +288,21 @@ function handleAddBone() {
           </div>
 
           <div class="flex items-center space-x-1 shrink-0">
-            <button @click.stop="duplicateMesh(mesh.id)" class="p-1 hover:bg-ui-hover rounded-xs text-ui-textMuted hover:text-ui-textAccent transition" title="Duplicate Object">
+            <button class="p-1 hover:bg-ui-hover rounded-xs text-ui-textMuted hover:text-ui-textAccent transition" title="Duplicate Object" @click.stop="duplicateMesh(mesh.id)">
               <BlenderIcon name="duplicate" :size="13" />
             </button>
-            <button @click.stop="toggleLock(mesh.id)" class="p-1 hover:bg-ui-hover rounded-xs transition" :class="mesh.locked ? 'text-amber-400' : 'text-ui-textMuted hover:text-ui-textPrimary'" title="Lock Object">
+            <button class="p-1 hover:bg-ui-hover rounded-xs transition" :class="mesh.locked ? 'text-amber-400' : 'text-ui-textMuted hover:text-ui-textPrimary'" title="Lock Object" @click.stop="toggleLock(mesh.id)">
               <BlenderIcon v-if="mesh.locked" name="lock" :size="13" color="#f59e0b" />
               <BlenderIcon v-else name="unlock" :size="13" />
             </button>
-            <button @click.stop="toggleVisibility(mesh.id)" class="p-1 hover:bg-ui-hover rounded-xs transition" :class="mesh.visible ? 'text-ui-textSecondary' : 'text-ui-textMuted opacity-50'" title="Toggle Visibility">
+            <button class="p-1 hover:bg-ui-hover rounded-xs transition" :class="mesh.visible ? 'text-ui-textSecondary' : 'text-ui-textMuted opacity-50'" title="Toggle Visibility" @click.stop="toggleVisibility(mesh.id)">
               <BlenderIcon v-if="mesh.visible" name="eye-open" :size="13" />
               <BlenderIcon v-else name="eye-closed" :size="13" />
             </button>
             <button 
-              @click.stop="deleteMesh(mesh.id)" 
               class="p-1 hover:bg-rose-500/20 rounded-xs text-ui-textMuted hover:text-rose-400 transition" 
-              title="Delete Object"
+              title="Delete Object" 
+              @click.stop="deleteMesh(mesh.id)"
             >
               <BlenderIcon name="trash" :size="13" />
             </button>
@@ -314,7 +314,7 @@ function handleAddBone() {
       <template v-else>
         <div v-if="filteredBones.length === 0" class="py-12 text-center text-ui-textMuted font-mono text-[11px] flex flex-col items-center gap-2">
           <span>No bones in armature</span>
-          <button @click="handleAddBone" class="px-3 py-1 rounded-xs bg-ui-accent text-white hover:bg-ui-accentHover font-bold shadow transition">
+          <button class="px-3 py-1 rounded-xs bg-ui-accent text-white hover:bg-ui-accentHover font-bold shadow transition" @click="handleAddBone">
             + Add First Root Bone
           </button>
         </div>
@@ -322,10 +322,10 @@ function handleAddBone() {
         <div 
           v-for="bone in filteredBones" 
           :key="bone.id"
-          @click="animationStore.selectBone(bone.id); toolStore.setAppMode('animate')"
           class="flex items-center justify-between px-2.5 py-2 rounded-xs cursor-pointer transition border"
           :style="{ paddingLeft: bone.parentId ? '1.5rem' : '0.625rem' }"
           :class="bone.id === animationStore.selectedBoneId ? 'bg-ui-active border-ui-accent/50 text-ui-textAccent shadow-xs' : 'bg-ui-surface/60 border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover hover:text-ui-textAccent'"
+          @click="animationStore.selectBone(bone.id); toolStore.setAppMode('animate')"
         >
           <div class="flex items-center space-x-2 flex-1 min-w-0 mr-1.5">
             <BlenderIcon name="bone" :size="15" :color="bone.id === animationStore.selectedBoneId ? 'currentColor' : '#06b6d4'" />
@@ -333,11 +333,11 @@ function handleAddBone() {
             <input 
               v-if="editingItemId === bone.id"
               v-model="editingName"
-              @blur="commitRenameBone(bone.id)"
-              @keydown.enter="commitRenameBone(bone.id)"
               class="bg-ui-input text-ui-textPrimary px-1.5 py-0.5 rounded-xs font-mono text-xs w-full focus:outline-none border border-ui-accent"
               autoFocus
-            />
+              @blur="commitRenameBone(bone.id)"
+              @keydown.enter="commitRenameBone(bone.id)"
+            >
             <div v-else class="flex flex-col min-w-0" @dblclick="startRename(bone.id, bone.name)">
               <span class="font-mono font-bold text-[11px] truncate select-none">
                 {{ bone.name }}
@@ -353,16 +353,16 @@ function handleAddBone() {
 
           <div class="flex items-center space-x-1 shrink-0">
             <button 
-              @click.stop="animationStore.addChildBone(bone.id, `${bone.name}_Child`); toolStore.setAppMode('animate')" 
               class="p-1 hover:bg-ui-hover rounded-xs text-ui-textMuted hover:text-ui-textAccent transition" 
-              title="Add Child Bone"
+              title="Add Child Bone" 
+              @click.stop="animationStore.addChildBone(bone.id, `${bone.name}_Child`); toolStore.setAppMode('animate')"
             >
               <BlenderIcon name="link" :size="14" />
             </button>
             <button 
-              @click.stop="animationStore.deleteBone(bone.id)" 
               class="p-1 hover:bg-rose-500/20 rounded-xs text-ui-textMuted hover:text-rose-400 transition" 
-              title="Delete Bone"
+              title="Delete Bone" 
+              @click.stop="animationStore.deleteBone(bone.id)"
             >
               <BlenderIcon name="trash" :size="13" />
             </button>

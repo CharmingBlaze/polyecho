@@ -51,7 +51,7 @@ export class MoveOperator extends ModalOperator {
     const basis = PivotManager.getBasis(this.orientation, this.ctx.camera, undefined, this.ctx.objectEuler)
     const numVal = this.numericInput.getValue()
 
-    let delta = TransformSolver.solveMoveDelta(
+    const delta = TransformSolver.solveMoveDelta(
       this.startHit,
       this.currentHit,
       this.startRay,

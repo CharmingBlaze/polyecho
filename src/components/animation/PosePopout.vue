@@ -149,10 +149,12 @@ function keyAndAdvance() {
 </script>
 
 <template>
-  <section v-if="visible" role="dialog" aria-label="Quick pose & animate" :aria-modal="false" data-floating-panel
+  <section
+    v-if="visible" role="dialog" aria-label="Quick pose & animate" :aria-modal="false" data-floating-panel
     class="pose-popout fixed z-[65] flex flex-col rounded-lg border border-ui-borderDefault bg-ui-panel text-ui-textPrimary shadow-2xl select-none"
     :style="{ left: `${pos.x}px`, top: `${pos.y}px`, width: `${size.width}px`, height: minimized ? '38px' : `${size.height}px` }"
-    @keydown.stop="panelKey" @keyup.stop @pointerdown.stop>
+    @keydown.stop="panelKey" @keyup.stop @pointerdown.stop
+  >
     <header class="pose-header flex items-center gap-1 bg-ui-header border-b border-ui-borderSubtle rounded-t-lg shrink-0">
       <button type="button" aria-label="Move pose panel" title="Drag to move · arrow keys to reposition" class="flex-1 text-left cursor-grab active:cursor-grabbing touch-none px-3 h-full text-xs font-semibold" @pointerdown="startPanelGesture($event)" @keydown="movePanelByKey">⠿ Pose & animate <span class="text-ui-textMuted font-normal text-[10px] ml-1">drag to move</span></button>
       <button class="header-action" aria-label="Position pose panel" :aria-expanded="placementOpen" title="Panel position" @click="placementOpen = !placementOpen">↔</button>
@@ -168,7 +170,7 @@ function keyAndAdvance() {
           <span class="section-label">1 · {{ targetType === 'bone' ? 'Bone' : 'Target' }}</span>
           <button class="text-ui-textAccent" :aria-expanded="showSearch" @click="showSearch = !showSearch">{{ showSearch ? 'Hide search' : 'Find target' }}</button>
         </div>
-        <input v-if="showSearch" v-model="search" aria-label="Find pose target" placeholder="Find a bone or object…" class="pose-input" />
+        <input v-if="showSearch" v-model="search" aria-label="Find pose target" placeholder="Find a bone or object…" class="pose-input">
         <select :value="targetKey" aria-label="Pose target" class="pose-input font-semibold" @change="chooseTarget">
           <option v-if="!target" value="" disabled>Select a bone or object</option>
           <option v-if="target && ![...bones, ...meshes].some(item => item.id === target!.id)" :value="targetKey">{{ target.name }} (selected)</option>
@@ -196,32 +198,32 @@ function keyAndAdvance() {
             <div v-for="axis in axes" :key="axis" class="axis-row flex items-center gap-2">
               <label :for="`quick-pose-${axis}`" class="w-4 font-bold" :class="axis === 'x' ? 'text-rose-400' : axis === 'y' ? 'text-emerald-400' : 'text-sky-400'">{{ axis.toUpperCase() }}</label>
               <button type="button" class="pose-nudge" :aria-label="`Decrease ${axis.toUpperCase()}`" title="Shift-click for a fine adjustment" @click="nudge(axis, -1, $event)">−</button>
-              <input :id="`quick-pose-${axis}`" type="number" :step="steps[channel]" :aria-label="`Pose ${channel} ${axis.toUpperCase()}`" :value="target[channel][axis]" class="pose-input text-right font-mono min-w-0" @change="setValue(axis, $event)" />
+              <input :id="`quick-pose-${axis}`" type="number" :step="steps[channel]" :aria-label="`Pose ${channel} ${axis.toUpperCase()}`" :value="target[channel][axis]" class="pose-input text-right font-mono min-w-0" @change="setValue(axis, $event)">
               <button type="button" class="pose-nudge" :aria-label="`Increase ${axis.toUpperCase()}`" title="Shift-click for a fine adjustment" @click="nudge(axis, 1, $event)">+</button>
             </div>
           </div>
           <div class="flex items-center justify-between gap-2">
-            <label class="flex items-center gap-1 text-ui-textMuted">Step<input v-model.number="steps[channel]" aria-label="Pose adjustment step" type="number" min="0.000001" step="any" class="pose-input !w-16" /></label>
+            <label class="flex items-center gap-1 text-ui-textMuted">Step<input v-model.number="steps[channel]" aria-label="Pose adjustment step" type="number" min="0.000001" step="any" class="pose-input !w-16"></label>
             <UiButton size="xs" @click="resetChannel">Reset {{ channel === 'position' ? 'move' : channel === 'rotation' ? 'rotation' : 'scale' }}</UiButton>
           </div>
           <div class="flex items-center gap-1">
             <UiButton size="xs" :disabled="!history.undoStack.length" title="Undo the latest project edit" @click="undoPose()">Undo</UiButton>
             <UiButton size="xs" :disabled="!history.redoStack.length" title="Redo the latest undone project edit" @click="undoPose(true)">Redo</UiButton>
-            <label v-if="animation.selectedBone" class="flex items-center gap-1 ml-auto"><input type="checkbox" v-model="animation.xrayBones" /> X-ray bones</label>
+            <label v-if="animation.selectedBone" class="flex items-center gap-1 ml-auto"><input v-model="animation.xrayBones" type="checkbox"> X-ray bones</label>
           </div>
         </template>
       </div>
       <footer class="pose-transport shrink-0 border-t border-ui-borderDefault p-3 space-y-2 text-[11px] rounded-b-lg bg-ui-surface">
-        <div class="flex items-center justify-between"><span class="section-label">3 · Animate</span><label class="flex items-center gap-1.5"><input type="checkbox" v-model="animation.autoKey" /> Auto-key</label></div>
+        <div class="flex items-center justify-between"><span class="section-label">3 · Animate</span><label class="flex items-center gap-1.5"><input v-model="animation.autoKey" type="checkbox"> Auto-key</label></div>
         <select :value="animation.activeClip?.id" aria-label="Pose animation clip" class="pose-input" @change="animation.selectClip(($event.target as HTMLSelectElement).value)">
           <option v-for="clip in animation.armature.clips" :key="clip.id" :value="clip.id">{{ clip.name }} · {{ clip.durationFrames }}f / {{ clip.fps }} fps</option>
         </select>
-        <input aria-label="Scrub animation frame" type="range" min="0" :max="animation.activeClip?.durationFrames || 1" step="1" :value="animation.currentFrame" :disabled="!animation.activeClip" class="w-full accent-ui-accent block" @input="setFrame" />
+        <input aria-label="Scrub animation frame" type="range" min="0" :max="animation.activeClip?.durationFrames || 1" step="1" :value="animation.currentFrame" :disabled="!animation.activeClip" class="w-full accent-ui-accent block" @input="setFrame">
         <div class="flex items-center gap-1.5">
           <UiButton size="xs" :disabled="animation.currentFrame <= 0" @click="moveFrame(-1)">← Back</UiButton>
-          <input type="number" min="0" :max="animation.activeClip?.durationFrames" :value="animation.currentFrame" aria-label="Pose frame" class="pose-input !w-14 text-center" @change="setFrame" />
+          <input type="number" min="0" :max="animation.activeClip?.durationFrames" :value="animation.currentFrame" aria-label="Pose frame" class="pose-input !w-14 text-center" @change="setFrame">
           <UiButton size="xs" :disabled="animation.currentFrame >= (animation.activeClip?.durationFrames || 0)" @click="moveFrame(1)">Next →</UiButton>
-          <label class="flex items-center gap-1 ml-auto text-ui-textMuted" title="Frames to advance">By<input v-model.number="frameStep" aria-label="Pose frame step" type="number" min="1" step="1" class="pose-input !w-12" /></label>
+          <label class="flex items-center gap-1 ml-auto text-ui-textMuted" title="Frames to advance">By<input v-model.number="frameStep" aria-label="Pose frame step" type="number" min="1" step="1" class="pose-input !w-12"></label>
         </div>
         <div class="grid grid-cols-2 gap-2">
           <UiButton size="md" :disabled="!target || !animation.activeClip" @click="animation.recordCurrentKeyframe()">Insert key</UiButton>

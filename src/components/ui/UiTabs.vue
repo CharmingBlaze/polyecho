@@ -15,13 +15,13 @@ const emit = defineEmits<{
       v-for="tab in tabs" 
       :key="tab.id"
       type="button"
-      @click="emit('update:modelValue', tab.id)"
       class="h-6 px-2.5 flex items-center gap-1.5 rounded-xs transition text-[11px] font-medium"
       :class="modelValue === tab.id 
         ? 'bg-ui-panel text-ui-textPrimary font-bold border-b border-ui-accent shadow-xs' 
         : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+      @click="emit('update:modelValue', tab.id)"
     >
-      <component v-if="tab.icon" :is="tab.icon" class="w-3 h-3" />
+      <component :is="tab.icon" v-if="tab.icon" class="w-3 h-3" />
       <span>{{ tab.label }}</span>
     </button>
   </div>

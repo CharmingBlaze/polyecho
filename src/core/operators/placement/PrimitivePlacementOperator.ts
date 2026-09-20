@@ -342,7 +342,7 @@ export class PrimitivePlacementOperator extends ModalOperator {
     const kind = def?.creationKind || 'RECTANGULAR'
 
     // Compute surface basis rotation quaternion (X -> axisU, Y -> axisW normal, Z -> axisV)
-    let Z = this.frame.axisV.clone().normalize()
+    const Z = this.frame.axisV.clone().normalize()
     if (new THREE.Matrix4().makeBasis(this.frame.axisU, this.frame.axisW, Z).determinant() < 0) {
       Z.negate()
     }

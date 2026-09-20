@@ -52,7 +52,7 @@ export class ScreenGeometry {
     if (s >= 0.995) return { front: 0, side: total, persp: 0, xSide: 0, xPersp: total }
     if (p >= 0.995) return { front: 0, side: 0, persp: total, xSide: 0, xPersp: 0 }
 
-    let front = Math.max(0, Math.round(total * f))
+    const front = Math.max(0, Math.round(total * f))
     let side = Math.max(0, Math.round(total * s))
     let persp = total - front - side
     if (persp < 0) {

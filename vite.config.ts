@@ -1,11 +1,20 @@
 import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
+import { visualizer } from 'rollup-plugin-visualizer'
 import path from 'path'
 
 // https://vite.dev/config/
 export default defineConfig({
   base: './',
-  plugins: [vue()],
+  plugins: [
+    vue(),
+    visualizer({
+      filename: 'dist/stats.html',
+      gzipSize: true,
+      brotliSize: true,
+      open: false,
+    }),
+  ],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -39,12 +48,15 @@ export default defineConfig({
   },
   test: {
     environment: 'happy-dom',
+    pool: 'vmThreads',
     include: ['src/**/*.test.ts'],
     setupFiles: ['src/test/setup.ts'],
     // Each file builds its own happy-dom environment, so under parallel worker
     // contention a cold file's transform cost can land on its last test. The
     // tests themselves are fast; 5s was measuring the harness, not the code.
-    testTimeout: 20000,
-    hookTimeout: 20000,
+    // vmThreads pool reuses a worker per thread so the environment cost is
+    // paid once per thread instead of once per file.
+    testTimeout: 10000,
+    hookTimeout: 10000,
   },
 })

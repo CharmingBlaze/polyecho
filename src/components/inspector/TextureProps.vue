@@ -154,7 +154,7 @@ function bakeAtlas() {
 
 <template>
   <div class="texture-inspector flex flex-col select-none text-xs font-sans" @dragover.prevent="dragging = true" @dragleave.prevent="dragging = false" @drop.prevent="dropFile">
-    <input ref="fileInput" type="file" accept="image/*" class="hidden" @change="importFile" />
+    <input ref="fileInput" type="file" accept="image/*" class="hidden" @change="importFile">
     <div v-if="dragging" class="texture-drop">Drop to import · Shift-drop replaces this image</div>
     <header class="inspector-head">
       <div class="inspector-head-kicker">
@@ -181,7 +181,7 @@ function bakeAtlas() {
 
     <template v-if="tab === 'image' && activeTexture">
       <section class="texture-card">
-        <button class="texture-preview checker" @click="openEditor('paint')" title="Open image in Paint"><img :src="preview" alt="Active texture preview" /></button>
+        <button class="texture-preview checker" title="Open image in Paint" @click="openEditor('paint')"><img :src="preview" alt="Active texture preview"></button>
         <div class="texture-summary">
           <strong :title="activeTexture.name">{{ activeTexture.name }}</strong>
           <span>{{ activeTexture.width }} × {{ activeTexture.height }} px</span>
@@ -200,7 +200,7 @@ function bakeAtlas() {
         <UiButton size="xs" @click="exportPng">Export PNG</UiButton>
       </div>
       <div class="texture-actions">
-        <UiButton size="xs" @click="openTileset(projectStore.activeTextureId)" title="Browse and edit tiles on this atlas">Tileset</UiButton>
+        <UiButton size="xs" title="Browse and edit tiles on this atlas" @click="openTileset(projectStore.activeTextureId)">Tileset</UiButton>
         <UiButton size="xs" @click="projectStore.duplicateTexture(activeTexture.id)">Duplicate</UiButton>
       </div>
       <UiSection title="Use on object" blender-icon="mesh-cube" :default-open="true">
@@ -221,12 +221,12 @@ function bakeAtlas() {
         <p v-if="usedBy.length > 1">Painting updates all {{ usedBy.length }} objects. Duplicate to paint a separate copy.</p>
       </UiSection>
       <UiSection title="Image settings" blender-icon="texture" :default-open="true">
-        <label>Name<input v-model="imageName" aria-label="Texture image name" @change="rename" @keydown.enter="($event.target as HTMLInputElement).blur()" /></label>
+        <label>Name<input v-model="imageName" aria-label="Texture image name" @change="rename" @keydown.enter="($event.target as HTMLInputElement).blur()"></label>
         <details class="texture-details">
           <summary>Resize image or canvas <span>{{ activeTexture.width }} × {{ activeTexture.height }}</span></summary>
           <div class="texture-details-body">
-            <label>Width<input type="number" min="8" max="4096" v-model.number="width" aria-label="Texture width" /></label>
-            <label>Height<input type="number" min="8" max="4096" v-model.number="height" aria-label="Texture height" /></label>
+            <label>Width<input v-model.number="width" type="number" min="8" max="4096" aria-label="Texture width"></label>
+            <label>Height<input v-model.number="height" type="number" min="8" max="4096" aria-label="Texture height"></label>
             <select v-model="resizeMode" class="inspector-select w-full" aria-label="Texture resize method">
               <option value="resample">Scale pixels (nearest neighbor)</option>
               <option value="crop">Change canvas (keep pixel size)</option>
@@ -256,10 +256,10 @@ function bakeAtlas() {
         <UiButton size="xs" variant="accent" @click="showNew = true">+ New image</UiButton>
         <UiButton size="xs" @click="fileInput?.click()">Import image</UiButton>
       </div>
-      <input class="texture-search inspector-select w-full" v-model="query" type="search" aria-label="Search texture images" placeholder="Search images…" />
+      <input v-model="query" class="texture-search inspector-select w-full" type="search" aria-label="Search texture images" placeholder="Search images…">
       <div class="texture-library" aria-label="Project images">
         <button v-for="texture in library" :key="texture.id" class="texture-library-row" :class="{ active: texture.id === activeTexture?.id }" :aria-pressed="texture.id === activeTexture?.id" @click="selectImage(texture.id)">
-          <img class="checker" :src="texture.dataUrl || texture.pixelBuffer?.toDataURL()" alt="" /><span><strong>{{ texture.name }}</strong><small>{{ texture.width }} × {{ texture.height }} px</small></span><span v-if="texture.id === activeTexture?.id" class="texture-selected">Editing</span>
+          <img class="checker" :src="texture.dataUrl || texture.pixelBuffer?.toDataURL()" alt=""><span><strong>{{ texture.name }}</strong><small>{{ texture.width }} × {{ texture.height }} px</small></span><span v-if="texture.id === activeTexture?.id" class="texture-selected">Editing</span>
         </button>
         <p v-if="!library.length">No images match “{{ query }}”.</p>
       </div>
@@ -270,8 +270,8 @@ function bakeAtlas() {
       <details class="texture-details">
         <summary>Tile grid <span>{{ activeTexture.atlas ? `${activeTexture.atlas.cols} × ${activeTexture.atlas.rows}` : 'Off' }}</span></summary>
         <div class="texture-details-body">
-          <label>Columns<input type="number" min="1" max="16" v-model.number="cols" /></label>
-          <label>Rows<input type="number" min="1" max="16" v-model.number="rows" /></label>
+          <label>Columns<input v-model.number="cols" type="number" min="1" max="16"></label>
+          <label>Rows<input v-model.number="rows" type="number" min="1" max="16"></label>
           <div class="texture-actions">
             <UiButton size="xs" @click="setGrid">Apply grid</UiButton>
             <UiButton size="xs" :disabled="!activeTexture.atlas" @click="projectStore.clearTextureAtlasGrid(activeTexture.id)">Remove grid</UiButton>

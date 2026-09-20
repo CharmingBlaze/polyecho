@@ -42,6 +42,7 @@ const boneLength = computed({
 function setBoneLength(bone: { head: { x: number; y: number; z: number }; tail: { x: number; y: number; z: number } }, newLen: number) {
   if (!Number.isFinite(newLen)) return
   if (newLen <= 0.05) newLen = 0.05
+  projectStore.recordState('Change Bone Length')
   const dx = bone.tail.x - bone.head.x
   const dy = bone.tail.y - bone.head.y
   const dz = bone.tail.z - bone.head.z
@@ -58,7 +59,6 @@ function setBoneLength(bone: { head: { x: number; y: number; z: number }; tail: 
 
 function adjustBoneLength(delta: number) {
   if (!selectedBone.value) return
-  projectStore.recordState('Change Bone Length')
   boneLength.value = Math.max(0.1, Number((boneLength.value + delta).toFixed(2)))
 }
 
@@ -81,6 +81,8 @@ function onRotationInput(axis: 'x' | 'y' | 'z', event: Event) {
   if (!selectedBone.value) return
   const value = Number((event.target as HTMLInputElement).value)
   if (!Number.isFinite(value)) return
+  if (selectedBone.value.rotation[axis] === value) return
+  projectStore.recordState('Edit Bone Rotation')
   selectedBone.value.rotation[axis] = value
 }
 
@@ -158,9 +160,9 @@ function toggleSpring(on: boolean) {
         <input
           :value="selectedBone.name"
           aria-label="Bone name"
-          @change="animationStore.renameBone(selectedBone.id, ($event.target as HTMLInputElement).value)"
           class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2 py-1 text-xs"
-        />
+          @change="animationStore.renameBone(selectedBone.id, ($event.target as HTMLInputElement).value)"
+        >
         <select
           :value="selectedBone.parentId || 'root'"
           class="inspector-select w-full"
@@ -172,7 +174,9 @@ function toggleSpring(on: boolean) {
             :key="b.id"
             :value="b.id"
             class="bg-ui-panel"
-          >{{ b.name }}</option>
+          >
+            {{ b.name }}
+          </option>
         </select>
         <UiButton size="xs" variant="danger" class="w-full" @click="animationStore.deleteBone(selectedBone.id)">
           <Trash2 class="w-3 h-3" /> Delete
@@ -184,37 +188,37 @@ function toggleSpring(on: boolean) {
         <div class="grid grid-cols-3 gap-1">
           <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
             <span class="text-[9px] text-rose-400 cursor-ew-resize" @mousedown="startScrubVector($event, selectedBone.head, 'x')">X</span>
-            <input type="number" step="0.1" @focus="projectStore.recordState('Edit Joint Position')" v-model.number="selectedBone.head.x" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
+            <input v-model.number="selectedBone.head.x" type="number" step="0.1" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" @focus="projectStore.recordState('Edit Joint Position')">
           </div>
           <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
             <span class="text-[9px] text-emerald-400 cursor-ew-resize" @mousedown="startScrubVector($event, selectedBone.head, 'y')">Y</span>
-            <input type="number" step="0.1" @focus="projectStore.recordState('Edit Joint Position')" v-model.number="selectedBone.head.y" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
+            <input v-model.number="selectedBone.head.y" type="number" step="0.1" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" @focus="projectStore.recordState('Edit Joint Position')">
           </div>
           <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
             <span class="text-[9px] text-sky-400 cursor-ew-resize" @mousedown="startScrubVector($event, selectedBone.head, 'z')">Z</span>
-            <input type="number" step="0.1" @focus="projectStore.recordState('Edit Joint Position')" v-model.number="selectedBone.head.z" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
+            <input v-model.number="selectedBone.head.z" type="number" step="0.1" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" @focus="projectStore.recordState('Edit Joint Position')">
           </div>
         </div>
         <div class="text-[9px] text-ui-textMuted">Tail</div>
         <div class="grid grid-cols-3 gap-1">
           <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
             <span class="text-[9px] text-rose-400 cursor-ew-resize" @mousedown="startScrubVector($event, selectedBone.tail, 'x')">X</span>
-            <input type="number" step="0.1" @focus="projectStore.recordState('Edit Joint Position')" v-model.number="selectedBone.tail.x" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
+            <input v-model.number="selectedBone.tail.x" type="number" step="0.1" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" @focus="projectStore.recordState('Edit Joint Position')">
           </div>
           <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
             <span class="text-[9px] text-emerald-400 cursor-ew-resize" @mousedown="startScrubVector($event, selectedBone.tail, 'y')">Y</span>
-            <input type="number" step="0.1" @focus="projectStore.recordState('Edit Joint Position')" v-model.number="selectedBone.tail.y" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
+            <input v-model.number="selectedBone.tail.y" type="number" step="0.1" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" @focus="projectStore.recordState('Edit Joint Position')">
           </div>
           <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
             <span class="text-[9px] text-sky-400 cursor-ew-resize" @mousedown="startScrubVector($event, selectedBone.tail, 'z')">Z</span>
-            <input type="number" step="0.1" @focus="projectStore.recordState('Edit Joint Position')" v-model.number="selectedBone.tail.z" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
+            <input v-model.number="selectedBone.tail.z" type="number" step="0.1" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" @focus="projectStore.recordState('Edit Joint Position')">
           </div>
         </div>
         <div class="flex items-center justify-between text-[10px] text-ui-textMuted">
           <span>Length</span>
           <span class="font-mono text-ui-textPrimary">{{ boneLength }}</span>
         </div>
-        <input type="range" aria-label="Bone length" min="0.1" max="5" step="0.05" @pointerdown="projectStore.recordState('Change Bone Length')" @keydown="projectStore.recordState('Change Bone Length')" v-model.number="boneLength" class="inspector-range" />
+        <input v-model.number="boneLength" type="range" aria-label="Bone length" min="0.1" max="5" step="0.05" class="inspector-range" @pointerdown="projectStore.recordState('Change Bone Length')" @keydown="projectStore.recordState('Change Bone Length')">
         <div class="grid grid-cols-4 gap-1">
           <UiButton size="xs" @click="adjustBoneLength(-0.1)">−</UiButton>
           <UiButton size="xs" @click="adjustBoneLength(0.1)">+</UiButton>
@@ -231,7 +235,7 @@ function toggleSpring(on: boolean) {
             :checked="selectedBone.ikConstraint?.enabled || false"
             class="accent-ui-accent"
             @change="toggleIk(($event.target as HTMLInputElement).checked)"
-          />
+          >
         </label>
         <p class="text-[9px] text-ui-textMuted leading-snug">Solved after keys. Drag in Pose to set the target.</p>
         <template v-if="selectedBone.ikConstraint?.enabled">
@@ -239,7 +243,7 @@ function toggleSpring(on: boolean) {
             <span>Chain</span>
             <span class="font-mono text-ui-textPrimary">{{ selectedBone.ikConstraint.chainLength }}</span>
           </div>
-          <input type="range" min="2" max="6" step="1" v-model.number="selectedBone.ikConstraint.chainLength" class="inspector-range" />
+          <input v-model.number="selectedBone.ikConstraint.chainLength" type="range" min="2" max="6" step="1" class="inspector-range">
           <label class="text-[9px] text-ui-textMuted">Target</label>
           <select
             :value="selectedBone.ikConstraint.targetBoneId || ''"
@@ -261,11 +265,11 @@ function toggleSpring(on: boolean) {
           <div class="grid grid-cols-2 gap-2">
             <div>
               <div class="flex justify-between text-[9px] text-ui-textMuted"><span>Iterations</span><span>{{ selectedBone.ikConstraint.iterations || 10 }}</span></div>
-              <input v-model.number="selectedBone.ikConstraint.iterations" type="range" min="1" max="32" step="1" class="inspector-range" title="Higher values improve longer-chain IK convergence" />
+              <input v-model.number="selectedBone.ikConstraint.iterations" type="range" min="1" max="32" step="1" class="inspector-range" title="Higher values improve longer-chain IK convergence">
             </div>
             <div>
               <div class="flex justify-between text-[9px] text-ui-textMuted"><span>Influence</span><span>{{ Math.round((selectedBone.ikConstraint.weight ?? 1) * 100) }}%</span></div>
-              <input v-model.number="selectedBone.ikConstraint.weight" type="range" min="0" max="1" step="0.05" class="inspector-range" title="Blend between the keyed pose and the IK solve" />
+              <input v-model.number="selectedBone.ikConstraint.weight" type="range" min="0" max="1" step="0.05" class="inspector-range" title="Blend between the keyed pose and the IK solve">
             </div>
           </div>
         </template>
@@ -274,7 +278,7 @@ function toggleSpring(on: boolean) {
       <UiSection title="Sockets" :icon="Wrench" :badge="selectedBone.sockets?.length || 0" :default-open="false">
         <UiButton size="xs" class="w-full" @click="handleAddSocket"><Plus class="w-3 h-3" /> Add</UiButton>
         <div v-for="s in selectedBone.sockets || []" :key="s.id" class="flex items-center gap-1">
-          <input v-model="s.name" class="flex-1 bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-[10px] text-ui-textPrimary" />
+          <input v-model="s.name" class="flex-1 bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-[10px] text-ui-textPrimary">
           <button type="button" class="text-ui-textMuted hover:text-rose-400" @click="handleRemoveSocket(s.id)"><Trash2 class="w-3 h-3" /></button>
         </div>
       </UiSection>
@@ -287,15 +291,15 @@ function toggleSpring(on: boolean) {
             :checked="selectedBone.springConstraint?.enabled || false"
             class="accent-ui-accent"
             @change="toggleSpring(($event.target as HTMLInputElement).checked)"
-          />
+          >
         </label>
         <template v-if="selectedBone.springConstraint?.enabled">
           <div class="flex justify-between text-[10px] text-ui-textMuted"><span>Stiff</span><span class="font-mono">{{ selectedBone.springConstraint.stiffness }}</span></div>
-          <input type="range" min="0.05" max="1" step="0.05" v-model.number="selectedBone.springConstraint.stiffness" class="inspector-range" />
+          <input v-model.number="selectedBone.springConstraint.stiffness" type="range" min="0.05" max="1" step="0.05" class="inspector-range">
           <div class="flex justify-between text-[10px] text-ui-textMuted"><span>Damp</span><span class="font-mono">{{ selectedBone.springConstraint.damping }}</span></div>
-          <input type="range" min="0.05" max="1" step="0.05" v-model.number="selectedBone.springConstraint.damping" class="inspector-range" />
+          <input v-model.number="selectedBone.springConstraint.damping" type="range" min="0.05" max="1" step="0.05" class="inspector-range">
           <div class="flex justify-between text-[10px] text-ui-textMuted"><span>Gravity</span><span class="font-mono">{{ selectedBone.springConstraint.gravity }}</span></div>
-          <input type="range" min="0" max="1" step="0.05" v-model.number="selectedBone.springConstraint.gravity" class="inspector-range" />
+          <input v-model.number="selectedBone.springConstraint.gravity" type="range" min="0" max="1" step="0.05" class="inspector-range">
         </template>
       </UiSection>
     </template>
@@ -310,11 +314,11 @@ function toggleSpring(on: boolean) {
       <template v-if="selectedBone && animationStore.isTestPoseActive">
         <p class="text-[10px] text-ui-textMuted truncate">{{ selectedBone.name }}</p>
         <div class="flex justify-between text-[10px] text-ui-textMuted"><span>X</span><span class="font-mono inspector-value">{{ Math.round(selectedBone.rotation.x) }}°</span></div>
-        <input type="range" min="-90" max="90" step="1" :value="selectedBone.rotation.x" aria-label="Test rotation X" class="inspector-range" @input="onRotationInput('x', $event)" />
+        <input type="range" min="-90" max="90" step="1" :value="selectedBone.rotation.x" aria-label="Test rotation X" class="inspector-range" @input="onRotationInput('x', $event)">
         <div class="flex justify-between text-[10px] text-ui-textMuted"><span>Y</span><span class="font-mono inspector-value">{{ Math.round(selectedBone.rotation.y) }}°</span></div>
-        <input type="range" min="-90" max="90" step="1" :value="selectedBone.rotation.y" aria-label="Test rotation Y" class="inspector-range" @input="onRotationInput('y', $event)" />
+        <input type="range" min="-90" max="90" step="1" :value="selectedBone.rotation.y" aria-label="Test rotation Y" class="inspector-range" @input="onRotationInput('y', $event)">
         <div class="flex justify-between text-[10px] text-ui-textMuted"><span>Z</span><span class="font-mono inspector-value">{{ Math.round(selectedBone.rotation.z) }}°</span></div>
-        <input type="range" min="-90" max="90" step="1" :value="selectedBone.rotation.z" aria-label="Test rotation Z" class="inspector-range" @input="onRotationInput('z', $event)" />
+        <input type="range" min="-90" max="90" step="1" :value="selectedBone.rotation.z" aria-label="Test rotation Z" class="inspector-range" @input="onRotationInput('z', $event)">
       </template>
       <div class="grid grid-cols-2 gap-1">
         <UiButton size="xs" :disabled="!animationStore.armature.bones.length" @click="animationStore.resetAllBonesToRest()">Reset pose</UiButton>

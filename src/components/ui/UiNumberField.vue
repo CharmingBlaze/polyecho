@@ -114,7 +114,7 @@ function handleInput(event: Event) {
       class="w-full bg-transparent text-right text-ui-textPrimary font-mono tabular-nums text-xs focus:outline-none cursor-text selection:bg-ui-accent/40"
       @focus="emittedBeforeChange = false"
       @change="handleInput"
-    />
+    >
 
     <span v-if="unit" class="text-[10px] text-ui-textMuted ml-0.5 shrink-0 select-none">
       {{ unit }}

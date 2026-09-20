@@ -195,8 +195,8 @@ onUnmounted(() => {
     >
       <!-- Titlebar / Header -->
       <div 
-        @pointerdown="startDrag"
         class="h-9 bg-ui-header border-b border-ui-borderSubtle px-3 flex items-center justify-between cursor-move select-none shrink-0 touch-none"
+        @pointerdown="startDrag"
       >
         <div class="flex items-center gap-2 text-xs font-mono font-bold text-ui-textPrimary">
           <GripHorizontal class="w-4 h-4 text-ui-textMuted" />
@@ -205,9 +205,9 @@ onUnmounted(() => {
         </div>
 
         <button 
-          @click="emit('close')"
           class="p-1 rounded-xs hover:bg-rose-900/60 text-ui-textMuted hover:text-rose-200 transition"
           title="Close Properties (Esc)"
+          @click="emit('close')"
         >
           <X class="w-4 h-4" />
         </button>
@@ -219,54 +219,54 @@ onUnmounted(() => {
         <div class="w-44 bg-ui-input/40 border-r border-ui-borderSubtle p-1.5 space-y-1 font-mono text-xs shrink-0 flex flex-col justify-between">
           <div class="space-y-0.5">
             <button 
-              @click="activeTab = 'themes'"
               class="w-full text-left px-2.5 py-1.5 rounded-xs flex items-center gap-2 transition"
               :class="activeTab === 'themes' ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/50 shadow-xs' : 'text-ui-textSecondary hover:bg-ui-hover'"
+              @click="activeTab = 'themes'"
             >
               <Palette class="w-3.5 h-3.5" />
               <span>Themes ({{ themeStore.presets.length }})</span>
             </button>
 
             <button 
-              @click="activeTab = 'keymap'"
               class="w-full text-left px-2.5 py-1.5 rounded-xs flex items-center gap-2 transition"
               :class="activeTab === 'keymap' ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/50 shadow-xs' : 'text-ui-textSecondary hover:bg-ui-hover'"
+              @click="activeTab = 'keymap'"
             >
               <Keyboard class="w-3.5 h-3.5" />
               <span>Keymap & Keys</span>
             </button>
 
             <button 
-              @click="activeTab = 'viewport'"
               class="w-full text-left px-2.5 py-1.5 rounded-xs flex items-center gap-2 transition"
               :class="activeTab === 'viewport' ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/50 shadow-xs' : 'text-ui-textSecondary hover:bg-ui-hover'"
+              @click="activeTab = 'viewport'"
             >
               <Monitor class="w-3.5 h-3.5" />
               <span>3D Viewport</span>
             </button>
 
             <button 
-              @click="activeTab = 'input'"
               class="w-full text-left px-2.5 py-1.5 rounded-xs flex items-center gap-2 transition"
               :class="activeTab === 'input' ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/50 shadow-xs' : 'text-ui-textSecondary hover:bg-ui-hover'"
+              @click="activeTab = 'input'"
             >
               <PenTool class="w-3.5 h-3.5" />
               <span>Input & Stylus</span>
             </button>
 
             <button 
-              @click="activeTab = 'interface'"
               class="w-full text-left px-2.5 py-1.5 rounded-xs flex items-center gap-2 transition"
               :class="activeTab === 'interface' ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/50 shadow-xs' : 'text-ui-textSecondary hover:bg-ui-hover'"
+              @click="activeTab = 'interface'"
             >
               <Sliders class="w-3.5 h-3.5" />
               <span>Interface UI</span>
             </button>
 
             <button 
-              @click="activeTab = 'system'"
               class="w-full text-left px-2.5 py-1.5 rounded-xs flex items-center gap-2 transition"
               :class="activeTab === 'system' ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/50 shadow-xs' : 'text-ui-textSecondary hover:bg-ui-hover'"
+              @click="activeTab = 'system'"
             >
               <HardDrive class="w-3.5 h-3.5" />
               <span>System & Memory</span>
@@ -311,11 +311,11 @@ onUnmounted(() => {
                 </select>
                 <div class="relative">
                   <input
-                    type="text"
                     v-model="themeSearchQuery"
+                    type="text"
                     placeholder="Search theme..."
                     class="bg-ui-input border border-ui-borderDefault rounded-xs pl-6 pr-2 py-1 text-xs text-ui-textPrimary focus:outline-none w-36"
-                  />
+                  >
                   <Search class="w-3 h-3 text-ui-textMuted absolute left-2 top-2" />
                 </div>
               </div>
@@ -329,11 +329,11 @@ onUnmounted(() => {
                     :key="theme.id"
                     role="button"
                     tabindex="0"
+                    class="p-2 rounded-xs border transition cursor-pointer flex flex-col justify-between select-none group"
+                    :class="themeStore.currentThemeId === theme.id ? 'border-amber-500 bg-amber-500/15 shadow-md ring-1 ring-amber-400/50' : 'border-ui-borderDefault bg-ui-input/30 hover:border-ui-borderStrong hover:bg-ui-hover'"
                     @click="themeStore.setTheme(theme.id)"
                     @keydown.enter="themeStore.setTheme(theme.id)"
                     @keydown.space.prevent="themeStore.setTheme(theme.id)"
-                    class="p-2 rounded-xs border transition cursor-pointer flex flex-col justify-between select-none group"
-                    :class="themeStore.currentThemeId === theme.id ? 'border-amber-500 bg-amber-500/15 shadow-md ring-1 ring-amber-400/50' : 'border-ui-borderDefault bg-ui-input/30 hover:border-ui-borderStrong hover:bg-ui-hover'"
                   >
                     <div>
                       <div class="flex items-center justify-between gap-1">
@@ -393,7 +393,7 @@ onUnmounted(() => {
                     </button>
                     <label class="px-1.5 py-0.5 rounded-xs border border-ui-borderSubtle hover:bg-ui-hover text-[10px] flex items-center gap-1 cursor-pointer">
                       <Upload class="w-3 h-3" /> Import
-                      <input type="file" accept="application/json,.json" class="hidden" @change="importThemeFile" />
+                      <input type="file" accept="application/json,.json" class="hidden" @change="importThemeFile">
                     </label>
                   </div>
                 </div>
@@ -433,7 +433,7 @@ onUnmounted(() => {
                       :value="tokenValue(key)"
                       :title="TOKEN_META[key].hint"
                       @input="onTokenInput(key, $event)"
-                    />
+                    >
                     <div class="min-w-0 flex-1">
                       <div class="flex items-center justify-between gap-1">
                         <span class="text-[11px] text-ui-textPrimary truncate">{{ TOKEN_META[key].label }}</span>
@@ -451,7 +451,7 @@ onUnmounted(() => {
                         class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1 py-0.5 text-[10px] font-mono text-ui-textSecondary"
                         :value="tokenValue(key)"
                         @change="onTokenInput(key, $event)"
-                      />
+                      >
                     </div>
                   </div>
                 </div>
@@ -474,9 +474,9 @@ onUnmounted(() => {
 
               <div class="flex items-center gap-2">
                 <button 
-                  @click="keymapStore.resetAllDefaults()"
                   class="px-2 py-1 bg-ui-input hover:bg-ui-hover border border-ui-borderDefault rounded-xs text-[10px] text-ui-textMuted hover:text-white flex items-center gap-1 transition"
                   title="Reset all keybindings to Blender defaults"
+                  @click="keymapStore.resetAllDefaults()"
                 >
                   <RotateCcw class="w-3 h-3" />
                   <span>Reset All</span>
@@ -496,11 +496,11 @@ onUnmounted(() => {
 
                 <div class="relative">
                   <input 
-                    type="text" 
-                    v-model="keymapSearchQuery"
+                    v-model="keymapSearchQuery" 
+                    type="text"
                     placeholder="Search action or key..."
                     class="bg-ui-input border border-ui-borderDefault rounded-xs pl-6 pr-2 py-1 text-xs text-ui-textPrimary focus:outline-none w-36"
-                  />
+                  >
                   <Search class="w-3 h-3 text-ui-textMuted absolute left-2 top-2" />
                 </div>
               </div>
@@ -521,18 +521,18 @@ onUnmounted(() => {
 
                 <div class="flex items-center gap-2">
                   <button 
-                    @click="startKeyRecording(item.id)"
                     class="px-2 py-1 rounded-xs border text-xs font-bold transition min-w-[70px] text-center"
                     :class="activeRecordingId === item.id ? 'bg-amber-500 text-black border-amber-400 animate-pulse' : 'bg-ui-input border-ui-borderStrong text-amber-400 hover:border-amber-400 hover:text-white'"
+                    @click="startKeyRecording(item.id)"
                   >
                     {{ activeRecordingId === item.id ? 'Press Key...' : item.currentKey }}
                   </button>
 
                   <button 
                     v-if="item.currentKey !== item.defaultKey"
-                    @click="keymapStore.resetToDefault(item.id)"
                     class="p-1 text-ui-textMuted hover:text-rose-300"
                     title="Reset to default key"
+                    @click="keymapStore.resetToDefault(item.id)"
                   >
                     <RotateCcw class="w-3 h-3" />
                   </button>
@@ -556,7 +556,7 @@ onUnmounted(() => {
                   <span class="text-ui-textPrimary font-medium">Sticky CAD Viewport Controls</span>
                   <p class="text-[10px] text-ui-textMuted">Click Pan, Orbit, or Zoom to lock that view tool until you click it again or press Esc. Off uses click-and-hold.</p>
                 </div>
-                <input type="checkbox" v-model="toolStore.stickyViewportControls" class="rounded-xs text-amber-500" />
+                <input v-model="toolStore.stickyViewportControls" type="checkbox" class="rounded-xs text-amber-500">
               </div>
 
               <div class="flex items-center justify-between py-1 border-b border-ui-borderSubtle/40">
@@ -586,7 +586,7 @@ onUnmounted(() => {
                     alt="Starter texture preview"
                     class="w-16 h-16 rounded-xs border border-ui-borderDefault bg-ui-input object-contain"
                     style="image-rendering: pixelated"
-                  />
+                  >
                   <div class="flex flex-wrap gap-1 justify-end max-w-[18rem]">
                     <button
                       v-for="preset in DEFAULT_TEXTURE_PRESETS"
@@ -615,7 +615,7 @@ onUnmounted(() => {
                       class="w-8 h-6 rounded-xs border border-ui-borderDefault bg-transparent cursor-pointer"
                       :value="projectStore.defaultTexturePref.color"
                       @change="chooseStarterColor"
-                    />
+                    >
                   </label>
                 </div>
               </div>
@@ -626,7 +626,7 @@ onUnmounted(() => {
                   <p class="text-[10px] text-ui-textMuted">Dark mesh-edge overlay (creases). Higher = more Blockbench-like.</p>
                 </div>
                 <div class="flex items-center gap-2">
-                  <input type="range" min="0.1" max="1.0" step="0.05" v-model.number="toolStore.viewport.wireframeOpacity" class="w-32 accent-amber-500" />
+                  <input v-model.number="toolStore.viewport.wireframeOpacity" type="range" min="0.1" max="1.0" step="0.05" class="w-32 accent-amber-500">
                   <span class="w-10 text-right">{{ Math.round((toolStore.viewport.wireframeOpacity || 0.6) * 100) }}%</span>
                 </div>
               </div>
@@ -636,7 +636,7 @@ onUnmounted(() => {
                   <span class="text-ui-textPrimary font-medium">Invert Zoom Direction</span>
                   <p class="text-[10px] text-ui-textMuted">Reverse mouse wheel and trackpad zoom direction.</p>
                 </div>
-                <input type="checkbox" v-model="toolStore.viewport.invertZoom" class="rounded-xs text-amber-500" />
+                <input v-model="toolStore.viewport.invertZoom" type="checkbox" class="rounded-xs text-amber-500">
               </div>
 
               <div class="flex items-center justify-between py-1 border-b border-ui-borderSubtle/40">
@@ -644,7 +644,7 @@ onUnmounted(() => {
                   <span class="text-ui-textPrimary font-medium">Diagnostic Face Orientation</span>
                   <p class="text-[10px] text-ui-textMuted">Display Cobalt Blue for outside normals and Crimson Red for flipped backfaces.</p>
                 </div>
-                <input type="checkbox" v-model="toolStore.viewport.faceOrientation" class="rounded-xs text-amber-500" />
+                <input v-model="toolStore.viewport.faceOrientation" type="checkbox" class="rounded-xs text-amber-500">
               </div>
             </div>
           </div>
@@ -664,7 +664,7 @@ onUnmounted(() => {
                   <span class="text-ui-textPrimary font-medium">Enable Stylus Pressure Sensitivity</span>
                   <p class="text-[10px] text-ui-textMuted">Modulate brush size and vertex falloff dynamically based on pen pressure.</p>
                 </div>
-                <input type="checkbox" v-model="toolStore.stylusPressureEnabled" class="rounded-xs text-amber-500" />
+                <input v-model="toolStore.stylusPressureEnabled" type="checkbox" class="rounded-xs text-amber-500">
               </div>
 
               <div class="flex items-center justify-between py-1 border-b border-ui-borderSubtle/40">
@@ -672,7 +672,7 @@ onUnmounted(() => {
                   <span class="text-ui-textPrimary font-medium">Stylus mode notifications</span>
                   <p class="text-[10px] text-ui-textMuted">Show the floating Move / Rotate / Scale panel. Off by default. Tool status stays in the status bar.</p>
                 </div>
-                <input type="checkbox" v-model="toolStore.stylusModeNotifications" class="rounded-xs text-amber-500" />
+                <input v-model="toolStore.stylusModeNotifications" type="checkbox" class="rounded-xs text-amber-500">
               </div>
 
               <div class="flex items-center justify-between py-1 border-b border-ui-borderSubtle/40">
@@ -680,7 +680,7 @@ onUnmounted(() => {
                   <span class="text-ui-textPrimary font-medium">Sticky CAD Viewport Controls</span>
                   <p class="text-[10px] text-ui-textMuted">Same as File → Properties → Viewport. Click Pan, Orbit, or Zoom to lock that view tool until you click it again or press Esc.</p>
                 </div>
-                <input type="checkbox" v-model="toolStore.stickyViewportControls" class="rounded-xs text-amber-500" />
+                <input v-model="toolStore.stickyViewportControls" type="checkbox" class="rounded-xs text-amber-500">
               </div>
 
               <div class="flex items-center justify-between py-1 border-b border-ui-borderSubtle/40">
@@ -721,7 +721,7 @@ onUnmounted(() => {
                   <p class="text-[10px] text-ui-textMuted">Adjust overall size of buttons, toolbars, and panels.</p>
                 </div>
                 <div class="flex items-center gap-2">
-                  <input type="range" min="80" max="140" step="5" :value="themeStore.uiScale" @input="themeStore.setScale(Number(($event.target as HTMLInputElement).value))" class="w-32 accent-amber-500" />
+                  <input type="range" min="80" max="140" step="5" :value="themeStore.uiScale" class="w-32 accent-amber-500" @input="themeStore.setScale(Number(($event.target as HTMLInputElement).value))">
                   <span class="w-12 text-right">{{ themeStore.uiScale }}%</span>
                 </div>
               </div>
@@ -756,7 +756,7 @@ onUnmounted(() => {
                   :checked="projectStore.documentRecoveryEnabled"
                   class="accent-amber-500"
                   @change="projectStore.setDocumentRecoveryEnabled(($event.target as HTMLInputElement).checked)"
-                />
+                >
               </div>
 
               <div class="flex items-center justify-between py-1 border-b border-ui-borderSubtle/40">
@@ -765,7 +765,7 @@ onUnmounted(() => {
                   <p class="text-[10px] text-ui-textMuted">Depth of the geometry and canvas undo/redo history stack.</p>
                 </div>
                 <div class="flex items-center gap-2">
-                  <input type="range" min="10" max="100" step="5" v-model.number="maxUndoSteps" class="w-32 accent-amber-500" />
+                  <input v-model.number="maxUndoSteps" type="range" min="10" max="100" step="5" class="w-32 accent-amber-500">
                   <span class="w-12 text-right">{{ maxUndoSteps }} steps</span>
                 </div>
               </div>
@@ -795,8 +795,8 @@ onUnmounted(() => {
 
         <div class="flex items-center gap-2">
           <button 
-            @click="emit('close')"
             class="px-4 py-1 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded-xs shadow-xs transition"
+            @click="emit('close')"
           >
             Done
           </button>

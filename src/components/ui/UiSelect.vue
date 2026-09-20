@@ -24,8 +24,8 @@ function handleChange(event: Event) {
     <select 
       :value="modelValue"
       :disabled="disabled"
-      @change="handleChange"
       class="h-6 w-full bg-ui-input border border-ui-borderDefault hover:border-ui-borderStrong focus:border-ui-accent rounded-xs px-2 text-xs font-mono text-ui-textPrimary focus:outline-none transition disabled:opacity-40 select-none cursor-pointer"
+      @change="handleChange"
     >
       <option 
         v-for="opt in options" 

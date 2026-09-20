@@ -332,8 +332,8 @@ function closePopout() {
 
 <template>
   <div 
-    data-floating-panel
     v-if="animationStore.showBoneHierarchyPopout"
+    data-floating-panel
     class="fixed z-50 bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl flex flex-col font-sans text-xs select-none backdrop-blur-xs overflow-hidden"
     :style="{
       left: pos.x + 'px',
@@ -344,8 +344,8 @@ function closePopout() {
   >
     <!-- 1. Header Bar (Draggable) -->
     <div 
-      @pointerdown="startDrag"
       class="h-8 bg-ui-header px-2.5 flex items-center justify-between border-b border-ui-borderSubtle cursor-move shrink-0"
+      @pointerdown="startDrag"
     >
       <div class="flex items-center gap-1.5 font-semibold text-ui-textPrimary">
         <GripHorizontal class="w-3.5 h-3.5 text-ui-textMuted opacity-60" />
@@ -359,32 +359,32 @@ function closePopout() {
       <!-- Controls (Expand/Collapse All / Minimize / Close) -->
       <div class="flex items-center gap-1">
         <button 
-          @click="handleExpandAll" 
-          class="p-1 text-ui-textMuted hover:text-ui-textPrimary rounded-xs hover:bg-ui-hover transition cursor-pointer"
+          class="p-1 text-ui-textMuted hover:text-ui-textPrimary rounded-xs hover:bg-ui-hover transition cursor-pointer" 
           title="Expand All Bone Branches"
+          @click="handleExpandAll"
         >
           <ChevronsDown class="w-3 h-3" />
         </button>
         <button 
-          @click="handleCollapseAll" 
-          class="p-1 text-ui-textMuted hover:text-ui-textPrimary rounded-xs hover:bg-ui-hover transition cursor-pointer"
+          class="p-1 text-ui-textMuted hover:text-ui-textPrimary rounded-xs hover:bg-ui-hover transition cursor-pointer" 
           title="Collapse All Bone Branches"
+          @click="handleCollapseAll"
         >
           <ChevronsUp class="w-3 h-3" />
         </button>
-        <div class="w-px h-3.5 bg-ui-borderSubtle mx-0.5"></div>
+        <div class="w-px h-3.5 bg-ui-borderSubtle mx-0.5" />
         <button 
-          @click="isMinimized = !isMinimized"
           class="p-1 text-ui-textMuted hover:text-ui-textPrimary rounded-xs hover:bg-ui-hover transition cursor-pointer"
           :title="isMinimized ? 'Expand' : 'Minimize'"
+          @click="isMinimized = !isMinimized"
         >
           <Plus v-if="isMinimized" class="w-3 h-3" />
           <Minus v-else class="w-3 h-3" />
         </button>
         <button 
-          @click="closePopout"
           class="p-1 text-ui-textMuted hover:text-rose-400 rounded-xs hover:bg-ui-hover transition cursor-pointer"
           title="Close Hierarchy Popout (H)"
+          @click="closePopout"
         >
           <X class="w-3 h-3" />
         </button>
@@ -402,11 +402,11 @@ function closePopout() {
             v-model="searchQuery"
             placeholder="Search skeleton bones..."
             class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs pl-7 pr-7 py-1 text-[11px] text-ui-textPrimary focus:outline-none focus:border-ui-accent placeholder:text-ui-textMuted/60"
-          />
+          >
           <button 
             v-if="searchQuery" 
-            @click="searchQuery = ''"
             class="absolute right-2 text-ui-textMuted hover:text-ui-textPrimary text-[10px] cursor-pointer"
+            @click="searchQuery = ''"
           >
             ×
           </button>
@@ -417,32 +417,32 @@ function closePopout() {
           <!-- Parent / Child Traversal Island -->
           <div class="flex items-center gap-0.5 bg-ui-input/70 p-0.5 rounded-xs border border-ui-borderSubtle">
             <button 
-              @click="animationStore.selectParentBone()" 
-              :disabled="!selectedBone || !selectedBone.parentId"
+              :disabled="!selectedBone || !selectedBone.parentId" 
               class="p-1 text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover rounded-xs transition cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
               title="Select Parent Bone (Up)"
+              @click="animationStore.selectParentBone()"
             >
               <ArrowUp class="w-3 h-3" />
             </button>
             <button 
-              @click="animationStore.selectFirstChildBone()" 
-              :disabled="!selectedBone || selectedBone.childrenIds.length === 0"
+              :disabled="!selectedBone || selectedBone.childrenIds.length === 0" 
               class="p-1 text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover rounded-xs transition cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
               title="Select First Child Bone (Down)"
+              @click="animationStore.selectFirstChildBone()"
             >
               <ArrowDown class="w-3 h-3" />
             </button>
             <button 
-              @click="animationStore.selectPreviousBone()" 
-              class="p-1 text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover rounded-xs transition cursor-pointer"
+              class="p-1 text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover rounded-xs transition cursor-pointer" 
               title="Select Previous Bone in Skeleton"
+              @click="animationStore.selectPreviousBone()"
             >
               <ArrowLeft class="w-3 h-3" />
             </button>
             <button 
-              @click="animationStore.selectNextBone()" 
-              class="p-1 text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover rounded-xs transition cursor-pointer"
+              class="p-1 text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover rounded-xs transition cursor-pointer" 
               title="Select Next Bone in Skeleton"
+              @click="animationStore.selectNextBone()"
             >
               <ArrowRight class="w-3 h-3" />
             </button>
@@ -451,39 +451,39 @@ function closePopout() {
           <!-- Animation Workspace Tools -->
           <template v-if="toolStore.appMode === 'animate' || animationStore.isTestPoseActive">
             <button 
-              @click="handleKeySelected"
               :disabled="!selectedBone"
               class="flex-1 py-1 px-1.5 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold flex items-center justify-center gap-1 shadow-xs transition cursor-pointer disabled:opacity-40"
               title="Key Selected Bone (K)"
+              @click="handleKeySelected"
             >
               <Key class="w-2.5 h-2.5" />
               <span>Key (K)</span>
             </button>
             <button 
-              @click="handleKeyAll"
               class="py-1 px-1.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textPrimary rounded-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer"
               title="Key Entire Skeleton"
+              @click="handleKeyAll"
             >
               <span>All</span>
             </button>
             <button 
-              @click="handleResetPose"
               class="py-1 px-1.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary rounded-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer"
               title="Reset Rest Pose (Alt+R)"
+              @click="handleResetPose"
             >
               <RotateCcw class="w-2.5 h-2.5" />
             </button>
             <button 
-              @click="handleCopyPose"
               class="p-1 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary rounded-xs transition cursor-pointer"
               title="Copy Pose"
+              @click="handleCopyPose"
             >
               <Copy class="w-2.5 h-2.5" />
             </button>
             <button 
-              @click="handlePastePose"
               class="p-1 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary rounded-xs transition cursor-pointer"
               title="Paste Pose"
+              @click="handlePastePose"
             >
               <Clipboard class="w-2.5 h-2.5" />
             </button>
@@ -492,33 +492,33 @@ function closePopout() {
           <!-- Rigging Workspace Setup Tools -->
           <template v-else>
             <button 
-              @click="handleAddRoot"
               class="flex-1 py-1 px-1.5 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold flex items-center justify-center gap-1 shadow-xs transition cursor-pointer"
               title="Add Center Bone"
+              @click="handleAddRoot"
             >
               <Plus class="w-2.5 h-2.5" />
               <span>+ Root</span>
             </button>
             <button 
-              @click="handleExtrude"
               class="flex-1 py-1 px-1.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary hover:text-ui-textPrimary rounded-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer"
               title="Extrude Child Bone (E)"
+              @click="handleExtrude"
             >
               <GitBranch class="w-2.5 h-2.5" />
               <span>Extrude</span>
             </button>
             <button 
-              @click="handleToggleDrawBone"
               class="py-1 px-1.5 rounded-xs font-semibold flex items-center justify-center gap-1 transition border cursor-pointer"
               :class="animationStore.clickToPlaceMode ? 'bg-ui-active text-ui-textPrimary border-ui-borderStrong' : 'bg-ui-input border-ui-borderSubtle text-ui-textSecondary hover:bg-ui-hover'"
               title="Draw Bone in 3D (B)"
+              @click="handleToggleDrawBone"
             >
               <Crosshair class="w-2.5 h-2.5" />
             </button>
             <button 
-              @click="handleSymmetrize"
               class="py-1 px-1.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textSecondary hover:text-ui-textPrimary rounded-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer"
               title="Mirror Skeleton X"
+              @click="handleSymmetrize"
             >
               <FlipHorizontal class="w-2.5 h-2.5" />
             </button>
@@ -531,8 +531,8 @@ function closePopout() {
         <div v-if="animationStore.armature.bones.length === 0" class="py-10 text-center text-ui-textMuted space-y-2">
           <p class="text-[11px]">No bones in skeleton yet.</p>
           <button 
-            @click="handleAddRoot"
             class="py-1 px-2.5 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold text-[11px] inline-flex items-center gap-1 transition cursor-pointer shadow-xs"
+            @click="handleAddRoot"
           >
             <Plus class="w-3 h-3" />
             <span>Create First Bone</span>
@@ -544,17 +544,17 @@ function closePopout() {
           <div v-show="node.isVisible">
             <!-- Bone Row -->
             <div 
-              @click="selectBone(node.bone.id)"
               class="flex items-center justify-between pr-2 py-1 rounded-xs cursor-pointer text-[11px] transition group"
               :style="{ paddingLeft: `${8 + node.depth * 14}px` }"
               :class="animationStore.selectedBoneId === node.bone.id && !animationStore.selectedSocketId ? 'bg-ui-active text-ui-textPrimary font-semibold border border-ui-borderStrong' : 'hover:bg-ui-hover text-ui-textSecondary'"
+              @click="selectBone(node.bone.id)"
             >
               <div class="flex items-center gap-1.5 truncate flex-1 min-w-0">
                 <!-- Branch Expand / Collapse Toggle -->
                 <button 
                   v-if="node.hasChildren"
-                  @click.stop="toggleBranch(node.bone.id)"
                   class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary cursor-pointer"
+                  @click.stop="toggleBranch(node.bone.id)"
                 >
                   <ChevronRight v-if="node.isCollapsed" class="w-3 h-3" />
                   <ChevronDown v-else class="w-3 h-3" />
@@ -571,17 +571,17 @@ function closePopout() {
                 <input 
                   v-if="editingBoneId === node.bone.id"
                   v-model="editingName"
-                  @blur="commitRename(node.bone.id)"
-                  @keydown.enter="commitRename(node.bone.id)"
                   class="bg-ui-input text-ui-textPrimary px-1 py-0.5 rounded-xs text-[11px] w-full border border-ui-accent focus:outline-none"
                   autoFocus
-                />
+                  @blur="commitRename(node.bone.id)"
+                  @keydown.enter="commitRename(node.bone.id)"
+                >
                 <span 
                   v-else 
                   class="truncate select-none font-mono" 
                   :class="node.isMatching && searchQuery ? 'text-ui-textPrimary font-bold' : ''"
-                  @dblclick="startRename(node.bone.id, node.bone.name)"
                   :title="node.bone.name + ' (Double-click to rename)'"
+                  @dblclick="startRename(node.bone.id, node.bone.name)"
                 >
                   {{ node.bone.name }}
                 </span>
@@ -597,17 +597,17 @@ function closePopout() {
 
               <!-- Row Tools -->
               <div class="flex items-center gap-1 opacity-60 group-hover:opacity-100">
-                <button @click.stop="toggleBoneVisibility(node.bone.id)" class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary cursor-pointer" title="Toggle Visibility">
+                <button class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary cursor-pointer" title="Toggle Visibility" @click.stop="toggleBoneVisibility(node.bone.id)">
                   <EyeOff v-if="hiddenBoneIds.has(node.bone.id)" class="w-3 h-3 text-rose-400" />
                   <Eye v-else class="w-3 h-3" />
                 </button>
-                <button @click.stop="handleAddSocket(node.bone.id)" class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary cursor-pointer" title="Add Socket (+S)">
+                <button class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary cursor-pointer" title="Add Socket (+S)" @click.stop="handleAddSocket(node.bone.id)">
                   <Wrench class="w-3 h-3" />
                 </button>
-                <button @click.stop="handleAddChild(node.bone.id)" class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary cursor-pointer" title="Add Child Bone">
+                <button class="p-0.5 text-ui-textMuted hover:text-ui-textPrimary cursor-pointer" title="Add Child Bone" @click.stop="handleAddChild(node.bone.id)">
                   <Plus class="w-3 h-3" />
                 </button>
-                <button @click.stop="handleDeleteBone(node.bone.id)" class="p-0.5 text-ui-textMuted hover:text-rose-400 cursor-pointer" title="Delete Bone">
+                <button class="p-0.5 text-ui-textMuted hover:text-rose-400 cursor-pointer" title="Delete Bone" @click.stop="handleDeleteBone(node.bone.id)">
                   <Trash2 class="w-3 h-3" />
                 </button>
               </div>
@@ -618,27 +618,27 @@ function closePopout() {
               <div 
                 v-for="s in node.sockets" 
                 :key="s.id" 
-                @click.stop="selectSocket(s.id)"
                 class="flex items-center justify-between pr-2 py-0.5 rounded-xs cursor-pointer text-[10px] transition group"
                 :style="{ paddingLeft: `${22 + node.depth * 14}px` }"
                 :class="animationStore.selectedSocketId === s.id ? 'bg-ui-active text-ui-textPrimary font-semibold border border-ui-borderStrong' : 'text-ui-textSecondary hover:bg-ui-hover'"
+                @click.stop="selectSocket(s.id)"
               >
                 <div class="flex items-center gap-1.5 truncate flex-1 min-w-0">
                   <Wrench class="w-2.5 h-2.5 shrink-0" />
                   <input 
                     v-if="editingSocketId === s.id"
                     v-model="editingSocketName"
-                    @blur="commitSocketRename(node.bone.id, s.id)"
-                    @keydown.enter="commitSocketRename(node.bone.id, s.id)"
                     class="bg-ui-input text-ui-textPrimary px-1 py-0.5 rounded-xs text-[10px] w-full border border-ui-accent focus:outline-none"
                     autoFocus
-                  />
+                    @blur="commitSocketRename(node.bone.id, s.id)"
+                    @keydown.enter="commitSocketRename(node.bone.id, s.id)"
+                  >
                   <span v-else class="truncate select-none font-mono" @dblclick="startSocketRename(s.id, s.name)">
                     [S] {{ s.name }}
                   </span>
                 </div>
                 <div class="flex items-center gap-1 opacity-60 group-hover:opacity-100">
-                  <button @click.stop="handleRemoveSocket(node.bone.id, s.id)" class="p-0.5 text-ui-textMuted hover:text-rose-400 cursor-pointer" title="Delete Socket">
+                  <button class="p-0.5 text-ui-textMuted hover:text-rose-400 cursor-pointer" title="Delete Socket" @click.stop="handleRemoveSocket(node.bone.id, s.id)">
                     <Trash2 class="w-2.5 h-2.5" />
                   </button>
                 </div>
@@ -658,9 +658,9 @@ function closePopout() {
             <span class="text-ui-textMuted font-normal">({{ selectedSocket.bone.name }})</span>
           </div>
           <button 
-            @click="handleRemoveSocket(selectedSocket.bone.id, selectedSocket.socket.id)"
             class="text-ui-textMuted hover:text-rose-400 p-0.5 transition cursor-pointer"
             title="Delete Socket"
+            @click="handleRemoveSocket(selectedSocket.bone.id, selectedSocket.socket.id)"
           >
             <Trash2 class="w-3 h-3" />
           </button>
@@ -669,15 +669,15 @@ function closePopout() {
         <div class="flex items-center gap-2">
           <div class="flex items-center gap-1 flex-1">
             <span class="text-ui-textMuted">Offset:</span>
-            <input type="number" step="0.1" v-model.number="selectedSocket.socket.position.x" class="w-10 bg-ui-input px-1 py-0.5 text-right rounded-xs border border-ui-borderSubtle font-mono text-ui-textPrimary" title="Offset X" />
-            <input type="number" step="0.1" v-model.number="selectedSocket.socket.position.y" class="w-10 bg-ui-input px-1 py-0.5 text-right rounded-xs border border-ui-borderSubtle font-mono text-ui-textPrimary" title="Offset Y" />
-            <input type="number" step="0.1" v-model.number="selectedSocket.socket.position.z" class="w-10 bg-ui-input px-1 py-0.5 text-right rounded-xs border border-ui-borderSubtle font-mono text-ui-textPrimary" title="Offset Z" />
+            <input v-model.number="selectedSocket.socket.position.x" type="number" step="0.1" class="w-10 bg-ui-input px-1 py-0.5 text-right rounded-xs border border-ui-borderSubtle font-mono text-ui-textPrimary" title="Offset X">
+            <input v-model.number="selectedSocket.socket.position.y" type="number" step="0.1" class="w-10 bg-ui-input px-1 py-0.5 text-right rounded-xs border border-ui-borderSubtle font-mono text-ui-textPrimary" title="Offset Y">
+            <input v-model.number="selectedSocket.socket.position.z" type="number" step="0.1" class="w-10 bg-ui-input px-1 py-0.5 text-right rounded-xs border border-ui-borderSubtle font-mono text-ui-textPrimary" title="Offset Z">
           </div>
           <button 
             v-if="projectStore.activeMesh"
-            @click="handleAttachActiveMeshToSocket(selectedSocket.socket.id)"
             class="px-2 py-0.5 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold flex items-center gap-1 transition cursor-pointer shadow-xs"
             :title="'Attach ' + projectStore.activeMesh.name + ' to this socket'"
+            @click="handleAttachActiveMeshToSocket(selectedSocket.socket.id)"
           >
             <Link class="w-2.5 h-2.5" />
             <span>Attach Mesh</span>
@@ -695,8 +695,8 @@ function closePopout() {
           <span v-else class="text-ui-textMuted font-semibold">(Root)</span>
         </div>
         <button 
-          @click="handleAddSocket(selectedBone.id)"
           class="px-1.5 py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[10px] text-ui-textSecondary font-semibold transition cursor-pointer"
+          @click="handleAddSocket(selectedBone.id)"
         >
           + Socket
         </button>
@@ -705,10 +705,10 @@ function closePopout() {
 
     <!-- Window Resize Handle (Bottom-Right Corner) -->
     <div 
-      @mousedown="startResize"
       class="absolute bottom-0 right-0 w-3.5 h-3.5 cursor-nwse-resize z-50 flex items-end justify-end p-0.5 text-ui-textMuted hover:text-ui-textPrimary"
+      @mousedown="startResize"
     >
-      <div class="w-1.5 h-1.5 border-r-2 border-b-2 border-ui-borderStrong"></div>
+      <div class="w-1.5 h-1.5 border-r-2 border-b-2 border-ui-borderStrong" />
     </div>
   </div>
 </template>

@@ -596,47 +596,47 @@ function handleGraphSvgClick(e: MouseEvent) {
   >
     <!-- Top Draggable Resizer Bar (Drag Up/Down to Resize, Double-click to Toggle) -->
     <div 
-      @mousedown="startResize"
-      @dblclick="toggleExpandPreset"
       class="h-2 w-full bg-ui-header hover:bg-ui-hover border-t border-ui-borderSubtle cursor-ns-resize flex items-center justify-center transition group shrink-0 relative select-none"
       title="Drag up/down to resize timeline height. Double-click to toggle height."
+      @mousedown="startResize"
+      @dblclick="toggleExpandPreset"
     >
-      <div class="w-14 h-1 rounded-full bg-ui-borderDefault group-hover:bg-ui-accent transition"></div>
+      <div class="w-14 h-1 rounded-full bg-ui-borderDefault group-hover:bg-ui-accent transition" />
     </div>
 
     <!-- Top Tab Header & Action Switcher -->
     <div class="h-8 bg-ui-header border-b border-ui-borderSubtle flex items-center justify-between px-3 text-xs shrink-0">
       <div class="flex items-center space-x-1">
         <button 
-          @click="activeTab = 'keyframe'"
           class="px-3 py-1 rounded-xs transition text-[11px]"
           :class="activeTab === 'keyframe' ? 'bg-ui-active text-ui-textAccent font-bold border border-ui-accent/40 shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          @click="activeTab = 'keyframe'"
         >
           Keyframe Editor
         </button>
 
         <button 
-          @click="activeTab = 'graph'"
           class="px-3 py-1 rounded-xs transition text-[11px] flex items-center gap-1.5"
           :class="activeTab === 'graph' ? 'bg-ui-active text-ui-textAccent font-bold border border-ui-accent/40 shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          @click="activeTab = 'graph'"
         >
           <BlenderIcon name="keyframe-map" :size="12" color="#10b981" />
           <span>Graph Curves</span>
         </button>
 
         <button 
-          @click="activeTab = 'clip'"
           class="px-3 py-1 rounded-xs transition text-[11px]"
           :class="activeTab === 'clip' ? 'bg-ui-active text-ui-textAccent font-bold border border-ui-accent/40 shadow-xs' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+          @click="activeTab = 'clip'"
         >
           Clip Timeline
         </button>
 
         <!-- Quick Height Preset Switcher -->
         <button 
-          @click="toggleExpandPreset"
           class="p-1 rounded-xs bg-ui-input hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary border border-ui-borderSubtle transition ml-1"
           :title="timelineHeight > 300 ? 'Collapse Timeline Height' : 'Expand Timeline Height'"
+          @click="toggleExpandPreset"
         >
           <Minimize2 v-if="timelineHeight > 300" class="w-3 h-3" />
           <Maximize2 v-else class="w-3 h-3" />
@@ -646,45 +646,45 @@ function handleGraphSvgClick(e: MouseEvent) {
       <!-- Blockbench Pose Quick Tools (Copy, Paste, Flip, Reset) -->
       <div class="flex items-center space-x-1 bg-ui-input px-1.5 py-0.5 rounded-xs border border-ui-borderSubtle text-[10px]">
         <button 
-          @click="animationStore.copyPose" 
-          class="px-2 py-0.5 rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition flex items-center gap-1"
+          class="px-2 py-0.5 rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition flex items-center gap-1" 
           title="Copy Pose (Ctrl+C in Animate)"
+          @click="animationStore.copyPose"
         >
           <BlenderIcon name="duplicate" :size="11" />
           <span>Copy</span>
         </button>
 
         <button 
-          @click="animationStore.pastePose" 
-          class="px-2 py-0.5 rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition flex items-center gap-1"
+          class="px-2 py-0.5 rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition flex items-center gap-1" 
           title="Paste Pose (Ctrl+V · Ctrl+Shift+V flipped)"
+          @click="animationStore.pastePose"
         >
           <span>Paste</span>
         </button>
 
         <button 
-          @click="animationStore.pasteFlippedPose" 
-          class="px-2 py-0.5 rounded-xs hover:bg-ui-hover text-ui-textAccent hover:opacity-80 transition flex items-center gap-1"
+          class="px-2 py-0.5 rounded-xs hover:bg-ui-hover text-ui-textAccent hover:opacity-80 transition flex items-center gap-1" 
           title="Paste Flipped (Mirror Left/Right for Walk Cycles)"
+          @click="animationStore.pasteFlippedPose"
         >
           <BlenderIcon name="flip-horizontal" :size="11" />
           <span>Flip (Walk Mirror)</span>
         </button>
 
         <button 
-          @click="animationStore.resetPose" 
-          class="px-2 py-0.5 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary transition flex items-center gap-1"
+          class="px-2 py-0.5 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary transition flex items-center gap-1" 
           title="Reset Pose (Alt+R)"
+          @click="animationStore.resetPose"
         >
           <BlenderIcon name="rotate-ccw" :size="11" />
           <span>Reset</span>
         </button>
 
         <button 
-          @click="animationStore.toggleBoneHierarchyPopout()" 
-          class="px-2 py-0.5 rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-accent transition flex items-center gap-1 cursor-pointer"
+          class="px-2 py-0.5 rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-accent transition flex items-center gap-1 cursor-pointer" 
           :class="animationStore.showBoneHierarchyPopout ? 'bg-ui-active text-ui-textAccent font-bold' : ''"
           title="Toggle Floating Bone Hierarchy (H)"
+          @click="animationStore.toggleBoneHierarchyPopout()"
         >
           <BlenderIcon name="bone" :size="11" />
           <span>Hierarchy (H)</span>
@@ -696,8 +696,8 @@ function handleGraphSvgClick(e: MouseEvent) {
         <span class="text-ui-textMuted">Action:</span>
         <select 
           :value="animationStore.activeClip?.id"
-          @change="animationStore.selectClip(($event.target as HTMLSelectElement).value)"
           class="bg-ui-input text-ui-textAccent px-2 py-0.5 rounded-xs border border-ui-borderSubtle font-bold focus:outline-none cursor-pointer"
+          @change="animationStore.selectClip(($event.target as HTMLSelectElement).value)"
         >
           <option v-for="c in animationStore.armature.clips" :key="c.id" :value="c.id" class="bg-ui-panel text-ui-textPrimary">
             {{ c.name }} ({{ c.durationFrames }}f)
@@ -705,26 +705,26 @@ function handleGraphSvgClick(e: MouseEvent) {
         </select>
 
         <button 
-          @click="showNewClipModal = true" 
           class="p-1 rounded-xs bg-ui-input hover:bg-ui-accent hover:text-white text-ui-textAccent border border-ui-borderSubtle transition" 
-          title="Add New Animation"
+          title="Add New Animation" 
+          @click="showNewClipModal = true"
         >
           <BlenderIcon name="plus" :size="12" />
         </button>
 
         <button 
-          @click="handleDuplicateActiveClip" 
           class="p-1 rounded-xs bg-ui-input hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary border border-ui-borderSubtle transition" 
-          title="Duplicate Current Animation"
+          title="Duplicate Current Animation" 
+          @click="handleDuplicateActiveClip"
         >
           <BlenderIcon name="duplicate" :size="12" />
         </button>
 
         <button 
           v-if="animationStore.armature.clips.length > 1"
-          @click="handleDeleteActiveClip" 
           class="p-1 rounded-xs bg-ui-input hover:bg-rose-500/20 text-ui-textMuted hover:text-rose-400 border border-ui-borderSubtle transition" 
-          title="Delete Current Animation"
+          title="Delete Current Animation" 
+          @click="handleDeleteActiveClip"
         >
           <BlenderIcon name="trash" :size="12" />
         </button>
@@ -737,24 +737,24 @@ function handleGraphSvgClick(e: MouseEvent) {
       <div class="flex items-center space-x-2 shrink-0">
         <!-- Frame Navigation Steppers -->
         <div class="flex items-center space-x-0.5 bg-ui-input border border-ui-borderSubtle rounded-xs p-0.5 shadow-xs">
-          <button @click="animationStore.setFrame(0)" class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary transition" title="First Frame (Home)">
+          <button class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary transition" title="First Frame (Home)" @click="animationStore.setFrame(0)">
             <BlenderIcon name="skip-start" :size="12" />
           </button>
-          <button @click="stepFrame(-1)" class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary transition" title="Prev Frame (Left Arrow)">
+          <button class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary transition" title="Prev Frame (Left Arrow)" @click="stepFrame(-1)">
             <BlenderIcon name="chevron-left" :size="12" />
           </button>
           <button 
-            @click="animationStore.togglePlay"
             class="px-2.5 py-0.5 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white flex items-center justify-center shadow-xs transition active:scale-95"
             title="Play / Pause (Space)"
+            @click="animationStore.togglePlay"
           >
             <BlenderIcon v-if="animationStore.isPlaying" name="pause" :size="12" />
             <BlenderIcon v-else name="play" :size="12" />
           </button>
-          <button @click="stepFrame(1)" class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary transition" title="Next Frame (Right Arrow)">
+          <button class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary transition" title="Next Frame (Right Arrow)" @click="stepFrame(1)">
             <BlenderIcon name="chevron-right" :size="12" />
           </button>
-          <button @click="animationStore.setFrame(maxFrames)" class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary transition" title="Last Frame (End)">
+          <button class="p-1 rounded-xs hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary transition" title="Last Frame (End)" @click="animationStore.setFrame(maxFrames)">
             <BlenderIcon name="skip-end" :size="12" />
           </button>
         </div>
@@ -765,9 +765,9 @@ function handleGraphSvgClick(e: MouseEvent) {
           <input 
             type="text" 
             :value="timeSecondsFormatted"
-            @change="timeSecondsFormatted = ($event.target as HTMLInputElement).value"
             class="w-12 bg-transparent font-bold text-center focus:outline-none text-ui-textAccent font-mono text-xs"
-          />
+            @change="timeSecondsFormatted = ($event.target as HTMLInputElement).value"
+          >
           <span class="text-ui-textMuted text-[10px] pr-1">s</span>
           <span class="text-ui-borderDefault px-1">|</span>
           <span class="text-ui-textMuted text-[10px] mr-1">f:</span>
@@ -776,8 +776,8 @@ function handleGraphSvgClick(e: MouseEvent) {
             :style="{ width: `${framePadWidth}ch` }"
           >{{ paddedFrame }}</span>
           <div class="flex flex-col ml-1.5 border-l border-ui-borderSubtle pl-1 space-y-0.5">
-            <button @click="stepTime(1)" class="text-[8px] text-ui-textMuted hover:text-ui-textPrimary leading-none">▲</button>
-            <button @click="stepTime(-1)" class="text-[8px] text-ui-textMuted hover:text-ui-textPrimary leading-none">▼</button>
+            <button class="text-[8px] text-ui-textMuted hover:text-ui-textPrimary leading-none" @click="stepTime(1)">▲</button>
+            <button class="text-[8px] text-ui-textMuted hover:text-ui-textPrimary leading-none" @click="stepTime(-1)">▼</button>
           </div>
         </div>
       </div>
@@ -787,16 +787,16 @@ function handleGraphSvgClick(e: MouseEvent) {
         <span class="text-ui-textMuted font-semibold text-[10px]">Len:</span>
         <div class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-ui-textPrimary shadow-xs">
           <input 
-            type="number" 
+            v-model.number="clipDurationSeconds" 
+            type="number"
             step="0.5"
             min="0.5"
-            v-model.number="clipDurationSeconds"
             class="w-9 bg-transparent font-bold text-center focus:outline-none text-ui-textAccent text-xs font-mono"
-          />
+          >
           <span class="text-ui-textMuted text-[10px] pr-1">s</span>
           <div class="flex flex-col border-l border-ui-borderSubtle pl-1 space-y-0.5">
-            <button @click="stepClipDuration(0.5)" class="text-[8px] text-ui-textMuted hover:text-ui-textPrimary leading-none">▲</button>
-            <button @click="stepClipDuration(-0.5)" class="text-[8px] text-ui-textMuted hover:text-ui-textPrimary leading-none">▼</button>
+            <button class="text-[8px] text-ui-textMuted hover:text-ui-textPrimary leading-none" @click="stepClipDuration(0.5)">▲</button>
+            <button class="text-[8px] text-ui-textMuted hover:text-ui-textPrimary leading-none" @click="stepClipDuration(-0.5)">▼</button>
           </div>
         </div>
 
@@ -804,9 +804,9 @@ function handleGraphSvgClick(e: MouseEvent) {
           <button 
             v-for="sec in [1.0, 2.0, 3.0, 5.0]" 
             :key="sec"
-            @click="setPresetClipDuration(sec)"
             class="px-1.5 py-0.5 rounded-xs text-[9px] border transition cursor-pointer"
             :class="Math.abs(clipDurationSeconds - sec) < 0.1 ? 'bg-ui-active border-ui-accent/50 text-ui-textAccent font-bold shadow-xs' : 'bg-ui-input border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+            @click="setPresetClipDuration(sec)"
           >
             {{ sec }}s
           </button>
@@ -816,27 +816,27 @@ function handleGraphSvgClick(e: MouseEvent) {
       <!-- Interpolation Mode Selectors (Smooth, Linear, Step) -->
       <div class="flex items-center space-x-1 shrink-0 border-l border-ui-borderSubtle pl-3">
         <button 
-          @click="animationStore.interpolationMode = 'cubic'"
           class="flex items-center space-x-1 px-2 py-0.5 rounded-xs transition border text-[10px] cursor-pointer"
           :class="animationStore.interpolationMode === 'cubic' ? 'bg-ui-active text-ui-textAccent font-bold border-ui-accent/50 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
+          @click="animationStore.interpolationMode = 'cubic'"
         >
           <BlenderIcon name="circle" :size="10" color="#38bdf8" />
           <span>Smooth</span>
         </button>
 
         <button 
-          @click="animationStore.interpolationMode = 'linear'"
           class="flex items-center space-x-1 px-2 py-0.5 rounded-xs transition border text-[10px] cursor-pointer"
           :class="animationStore.interpolationMode === 'linear' ? 'bg-ui-active text-ui-textAccent font-bold border-ui-accent/50 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
+          @click="animationStore.interpolationMode = 'linear'"
         >
           <BlenderIcon name="keyframe" :size="10" />
           <span>Linear</span>
         </button>
 
         <button 
-          @click="animationStore.interpolationMode = 'step'"
           class="flex items-center space-x-1 px-2 py-0.5 rounded-xs transition border text-[10px] cursor-pointer"
           :class="animationStore.interpolationMode === 'step' ? 'bg-ui-active text-ui-textAccent font-bold border-ui-accent/50 shadow-xs' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
+          @click="animationStore.interpolationMode = 'step'"
         >
           <BlenderIcon name="rect" :size="10" color="#c084fc" />
           <span>Step</span>
@@ -846,10 +846,10 @@ function handleGraphSvgClick(e: MouseEvent) {
       <!-- Right: Auto Key & Recording -->
       <div class="flex items-center space-x-1.5 shrink-0 border-l border-ui-borderSubtle pl-3">
         <button 
-          @click="animationStore.autoKey = !animationStore.autoKey" 
-          class="flex items-center space-x-1.5 px-2 py-0.5 rounded-xs transition text-[10px] border cursor-pointer"
+          class="flex items-center space-x-1.5 px-2 py-0.5 rounded-xs transition text-[10px] border cursor-pointer" 
           :class="animationStore.autoKey ? 'bg-rose-500/20 text-rose-400 border-rose-500/50 shadow-xs font-bold' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary hover:bg-ui-hover'"
           title="Auto Keyframing (Automatically records keyframes upon transform)"
+          @click="animationStore.autoKey = !animationStore.autoKey"
         >
           <BlenderIcon name="record" :size="10" :color="animationStore.autoKey ? '#f43f5e' : 'currentColor'" />
           <span>Auto Key</span>
@@ -858,9 +858,9 @@ function handleGraphSvgClick(e: MouseEvent) {
         <!-- Add Event Marker Button -->
         <div class="relative">
           <button 
-            @click="showMarkerInput = !showMarkerInput"
             class="flex items-center space-x-1 px-2 py-0.5 rounded-xs bg-ui-input hover:bg-ui-hover text-ui-textAccent border border-ui-borderSubtle transition text-[10px] cursor-pointer"
             title="Add Game Event Marker at Active Frame"
+            @click="showMarkerInput = !showMarkerInput"
           >
             <BlenderIcon name="marker" :size="11" />
             <span>+ Event</span>
@@ -873,8 +873,8 @@ function handleGraphSvgClick(e: MouseEvent) {
               placeholder="Event Name (e.g. Footstep)"
               class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-xs text-ui-textPrimary focus:outline-none focus:border-ui-accent"
               @keydown.enter="handleAddMarker"
-            />
-            <button @click="handleAddMarker" class="px-2 py-0.5 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white font-bold text-[10px]">
+            >
+            <button class="px-2 py-0.5 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white font-bold text-[10px]" @click="handleAddMarker">
               Add
             </button>
           </div>
@@ -882,18 +882,18 @@ function handleGraphSvgClick(e: MouseEvent) {
 
         <!-- Keyframe REC & Clear Buttons -->
         <button 
-          @click="animationStore.recordAllBonesKeyframe()"
           class="flex items-center space-x-1.5 px-2.5 py-0.5 rounded-xs bg-rose-600 hover:bg-rose-500 text-white font-bold shadow-xs transition border border-rose-400/40 active:scale-95 text-[10px] cursor-pointer"
           title="Record Keyframe for All Bones at Active Time"
+          @click="animationStore.recordAllBonesKeyframe()"
         >
-          <span class="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
+          <span class="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
           <span>REC</span>
         </button>
 
         <button 
-          @click="animationStore.clearKeyframeAtCurrentTime()"
           class="px-2 py-0.5 rounded-xs bg-ui-input hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary border border-ui-borderSubtle transition text-[10px] cursor-pointer"
           title="Clear Keyframes at Active Time"
+          @click="animationStore.clearKeyframeAtCurrentTime()"
         >
           Clear
         </button>
@@ -907,7 +907,7 @@ function handleGraphSvgClick(e: MouseEvent) {
 
     <div v-if="activeTab === 'keyframe'" class="flex items-center gap-2 px-2 py-1 border-b border-ui-borderSubtle bg-ui-panel shrink-0 text-[10px] flex-wrap">
       <button type="button" class="inspector-chip" @click="animationStore.showPosePopup = true">Quick Pose</button>
-      <input v-model="trackSearch" aria-label="Search animation tracks" placeholder="Find bone or object…" class="w-44 min-w-0 bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-1" />
+      <input v-model="trackSearch" aria-label="Search animation tracks" placeholder="Find bone or object…" class="w-44 min-w-0 bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-1">
       <select v-model="trackFilter" aria-label="Filter animation tracks" class="inspector-select">
         <option value="all">All tracks</option><option value="selected">Selected only</option><option value="animated">Animated only</option>
       </select>
@@ -930,8 +930,8 @@ function handleGraphSvgClick(e: MouseEvent) {
       <!-- Time Ruler Row with Interactive Scrubbing -->
       <div 
         ref="rulerContainerRef"
-        @mousedown="startRulerScrub"
         class="h-7 bg-ui-surface/95 backdrop-blur-xs border-b border-ui-borderDefault flex items-center pl-44 sticky top-0 z-20 shrink-0 select-none cursor-ew-resize overflow-visible group/ruler"
+        @mousedown="startRulerScrub"
       >
         <!-- Sticky left corner header -->
         <div class="w-44 px-2 h-full bg-ui-panel border-r border-ui-borderDefault absolute left-0 top-0 flex items-center justify-between z-30 font-semibold text-[10px] text-ui-textMuted uppercase tracking-wider">
@@ -959,16 +959,16 @@ function handleGraphSvgClick(e: MouseEvent) {
           <div 
             class="w-[1px] bg-ui-borderDefault mb-0 pointer-events-none"
             :class="marker.isMajor ? 'h-2.5 bg-ui-textMuted/70' : 'h-1.5 bg-ui-borderSubtle'"
-          ></div>
+          />
 
           <!-- Event Marker Tag indicator -->
           <div 
             v-for="ev in getMarkersAtFrame(marker.frame)" 
             :key="ev.id"
-            @click.stop="animationStore.deleteMarker(ev.id)"
             class="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-cyan-400 cursor-pointer shadow-[0_0_5px_rgba(6,182,212,0.8)]"
             :title="`Event: ${ev.name} (Click to remove)`"
-          ></div>
+            @click.stop="animationStore.deleteMarker(ev.id)"
+          />
         </div>
       </div>
 
@@ -980,16 +980,16 @@ function handleGraphSvgClick(e: MouseEvent) {
         <!-- Top Scrubber Badge / Needle Head -->
         <div 
           class="relative -left-2 top-0 w-4 h-7 flex flex-col items-center pointer-events-auto cursor-ew-resize group select-none" 
-          @mousedown="startRulerScrub"
           :title="`Frame ${animationStore.currentFrame} (${timeSecondsFormatted}s)`"
+          @mousedown="startRulerScrub"
         >
           <div class="w-3.5 h-3.5 bg-rose-500 rounded-xs shadow-[0_0_8px_rgba(244,63,94,0.9)] flex items-center justify-center border border-rose-300 group-hover:scale-110 transition-transform">
             <span class="text-[7px] font-bold text-white font-mono leading-none tabular-nums">{{ paddedFrame }}</span>
           </div>
-          <div class="w-0 h-0 border-l-[3px] border-l-transparent border-r-[3px] border-r-transparent border-t-[4px] border-t-rose-500"></div>
+          <div class="w-0 h-0 border-l-[3px] border-l-transparent border-r-[3px] border-r-transparent border-t-[4px] border-t-rose-500" />
         </div>
         <!-- Laser-sharp Vertical Playhead Line -->
-        <div class="w-[1.5px] -ml-[0.75px] h-full bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.8)]"></div>
+        <div class="w-[1.5px] -ml-[0.75px] h-full bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.8)]" />
       </div>
 
       <div v-if="!allRigBones.length && !visibleMeshes.length" class="p-5 text-[11px] text-ui-textMuted">
@@ -1002,14 +1002,14 @@ function handleGraphSvgClick(e: MouseEvent) {
         <template v-for="bone in allRigBones" :key="bone.id">
           <!-- Main Bone Row -->
           <div 
-            @click="selectTrackItem('bone', bone.id)"
             class="h-6 flex items-center hover:bg-ui-hover/60 cursor-pointer shrink-0 transition"
             :class="{ 'bg-ui-active': animationStore.selectedBoneId === bone.id }"
+            @click="selectTrackItem('bone', bone.id)"
           >
             <!-- Expand Chevron + Name -->
             <div class="w-44 px-2 truncate text-ui-textPrimary font-mono text-[10px] font-medium flex items-center justify-between gap-1.5 shrink-0 bg-ui-panel border-r border-ui-borderSubtle h-full sticky left-0 z-10">
               <div class="flex items-center space-x-1 truncate">
-                <button @click.stop="toggleTrackExpand(bone.id)" class="text-ui-textMuted hover:text-ui-textPrimary p-0.5">
+                <button class="text-ui-textMuted hover:text-ui-textPrimary p-0.5" @click.stop="toggleTrackExpand(bone.id)">
                   <BlenderIcon v-if="expandedTracks[bone.id]" name="chevron-down" :size="12" />
                   <BlenderIcon v-else name="chevron-right" :size="12" />
                 </button>
@@ -1019,9 +1019,9 @@ function handleGraphSvgClick(e: MouseEvent) {
 
               <!-- Quick 1-Click Keyframe All Channels Button -->
               <button 
-                @click.stop="animationStore.recordCurrentKeyframe()" 
-                class="text-[9px] text-ui-textMuted hover:text-ui-textAccent font-bold px-1 rounded-xs hover:bg-ui-hover"
+                class="text-[9px] text-ui-textMuted hover:text-ui-textAccent font-bold px-1 rounded-xs hover:bg-ui-hover" 
                 title="Keyframe All Channels"
+                @click.stop="animationStore.recordCurrentKeyframe()"
               >
                 +Key
               </button>
@@ -1032,15 +1032,15 @@ function handleGraphSvgClick(e: MouseEvent) {
               <div 
                 v-for="m in timeMarkers" 
                 :key="m.frame"
+                class="w-7 h-6 flex items-center justify-center border-r border-ui-borderSubtle hover:bg-ui-hover/40 shrink-0 relative"
                 @click.stop="handleCellClick(bone.id, 'bone', m.frame)"
                 @dblclick.stop="toggleCellKeyframe(bone.id, 'bone', m.frame)"
-                class="w-7 h-6 flex items-center justify-center border-r border-ui-borderSubtle hover:bg-ui-hover/40 shrink-0 relative"
               >
                 <div 
                   v-if="hasAnyKeyframe(bone.id, m.frame)"
                   class="w-2.5 h-2.5 rotate-45 bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.9)] border border-amber-200 rounded-xs"
                   title="Keyframe"
-                ></div>
+                />
               </div>
             </div>
           </div>
@@ -1051,13 +1051,13 @@ function handleGraphSvgClick(e: MouseEvent) {
             <div class="h-5 flex items-center bg-ui-surface/90 hover:bg-ui-hover/40 text-[9px] shrink-0 border-b border-ui-borderSubtle">
               <div class="w-44 pl-6 pr-2 truncate text-purple-400 flex items-center justify-between shrink-0 bg-ui-panel/80 border-r border-ui-borderSubtle h-full sticky left-0 z-10">
                 <span class="flex items-center gap-1">
-                  <span class="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-purple-400" />
                   <span>Rotation (Deg)</span>
                 </span>
                 <button 
-                  @click.stop="animationStore.addChannelKeyframe(bone.id, 'bone', 'rotation')" 
-                  class="text-[8px] text-purple-400 hover:text-ui-textPrimary px-1 rounded-xs hover:bg-purple-900/40"
+                  class="text-[8px] text-purple-400 hover:text-ui-textPrimary px-1 rounded-xs hover:bg-purple-900/40" 
                   title="Keyframe Rotation Only"
+                  @click.stop="animationStore.addChannelKeyframe(bone.id, 'bone', 'rotation')"
                 >
                   +Rot
                 </button>
@@ -1067,14 +1067,14 @@ function handleGraphSvgClick(e: MouseEvent) {
                 <div 
                   v-for="m in timeMarkers" 
                   :key="m.frame"
+                  class="w-7 h-5 flex items-center justify-center border-r border-ui-borderSubtle hover:bg-purple-900/20 shrink-0 relative"
                   @click.stop="handleCellClick(bone.id, 'bone', m.frame)"
                   @dblclick.stop="toggleChannelCellKeyframe(bone.id, 'bone', 'rotation', m.frame)"
-                  class="w-7 h-5 flex items-center justify-center border-r border-ui-borderSubtle hover:bg-purple-900/20 shrink-0 relative"
                 >
                   <div 
                     v-if="hasChannelKeyframe(bone.id, 'rotation', m.frame)"
                     class="w-2 h-2 rotate-45 bg-purple-400 border border-purple-200 rounded-xs shadow-xs"
-                  ></div>
+                  />
                 </div>
               </div>
             </div>
@@ -1083,13 +1083,13 @@ function handleGraphSvgClick(e: MouseEvent) {
             <div class="h-5 flex items-center bg-ui-surface/90 hover:bg-ui-hover/40 text-[9px] shrink-0 border-b border-ui-borderSubtle">
               <div class="w-44 pl-6 pr-2 truncate text-sky-400 flex items-center justify-between shrink-0 bg-ui-panel/80 border-r border-ui-borderSubtle h-full sticky left-0 z-10">
                 <span class="flex items-center gap-1">
-                  <span class="w-1.5 h-1.5 rounded-full bg-sky-400"></span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-sky-400" />
                   <span>Position</span>
                 </span>
                 <button 
-                  @click.stop="animationStore.addChannelKeyframe(bone.id, 'bone', 'position')" 
-                  class="text-[8px] text-sky-400 hover:text-ui-textPrimary px-1 rounded-xs hover:bg-sky-900/40"
+                  class="text-[8px] text-sky-400 hover:text-ui-textPrimary px-1 rounded-xs hover:bg-sky-900/40" 
                   title="Keyframe Position Only"
+                  @click.stop="animationStore.addChannelKeyframe(bone.id, 'bone', 'position')"
                 >
                   +Pos
                 </button>
@@ -1099,14 +1099,14 @@ function handleGraphSvgClick(e: MouseEvent) {
                 <div 
                   v-for="m in timeMarkers" 
                   :key="m.frame"
+                  class="w-7 h-5 flex items-center justify-center border-r border-ui-borderSubtle hover:bg-sky-900/20 shrink-0 relative"
                   @click.stop="handleCellClick(bone.id, 'bone', m.frame)"
                   @dblclick.stop="toggleChannelCellKeyframe(bone.id, 'bone', 'position', m.frame)"
-                  class="w-7 h-5 flex items-center justify-center border-r border-ui-borderSubtle hover:bg-sky-900/20 shrink-0 relative"
                 >
                   <div 
                     v-if="hasChannelKeyframe(bone.id, 'position', m.frame)"
                     class="w-2 h-2 rotate-45 bg-sky-400 border border-sky-200 rounded-xs shadow-xs"
-                  ></div>
+                  />
                 </div>
               </div>
             </div>
@@ -1115,13 +1115,13 @@ function handleGraphSvgClick(e: MouseEvent) {
             <div class="h-5 flex items-center bg-ui-surface/90 hover:bg-ui-hover/40 text-[9px] shrink-0 border-b border-ui-borderSubtle">
               <div class="w-44 pl-6 pr-2 truncate text-emerald-400 flex items-center justify-between shrink-0 bg-ui-panel/80 border-r border-ui-borderSubtle h-full sticky left-0 z-10">
                 <span class="flex items-center gap-1">
-                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                   <span>Scale</span>
                 </span>
                 <button 
-                  @click.stop="animationStore.addChannelKeyframe(bone.id, 'bone', 'scale')" 
-                  class="text-[8px] text-emerald-400 hover:text-ui-textPrimary px-1 rounded-xs hover:bg-emerald-900/40"
+                  class="text-[8px] text-emerald-400 hover:text-ui-textPrimary px-1 rounded-xs hover:bg-emerald-900/40" 
                   title="Keyframe Scale Only"
+                  @click.stop="animationStore.addChannelKeyframe(bone.id, 'bone', 'scale')"
                 >
                   +Scl
                 </button>
@@ -1131,14 +1131,14 @@ function handleGraphSvgClick(e: MouseEvent) {
                 <div 
                   v-for="m in timeMarkers" 
                   :key="m.frame"
+                  class="w-7 h-5 flex items-center justify-center border-r border-ui-borderSubtle hover:bg-emerald-900/20 shrink-0 relative"
                   @click.stop="handleCellClick(bone.id, 'bone', m.frame)"
                   @dblclick.stop="toggleChannelCellKeyframe(bone.id, 'bone', 'scale', m.frame)"
-                  class="w-7 h-5 flex items-center justify-center border-r border-ui-borderSubtle hover:bg-emerald-900/20 shrink-0 relative"
                 >
                   <div 
                     v-if="hasChannelKeyframe(bone.id, 'scale', m.frame)"
                     class="w-2 h-2 rotate-45 bg-emerald-400 border border-emerald-200 rounded-xs shadow-xs"
-                  ></div>
+                  />
                 </div>
               </div>
             </div>
@@ -1148,13 +1148,13 @@ function handleGraphSvgClick(e: MouseEvent) {
         <!-- 2. Scene Meshes Tracks -->
         <template v-for="mesh in visibleMeshes" :key="mesh.id">
           <div 
-            @click="selectTrackItem('mesh', mesh.id)"
             class="h-6 flex items-center hover:bg-ui-hover/60 cursor-pointer shrink-0 transition"
             :class="{ 'bg-ui-active': projectStore.activeMeshId === mesh.id && !animationStore.selectedBoneId }"
+            @click="selectTrackItem('mesh', mesh.id)"
           >
             <div class="w-44 px-2 truncate text-ui-textPrimary font-mono text-[10px] font-medium flex items-center justify-between gap-1.5 shrink-0 bg-ui-panel border-r border-ui-borderSubtle h-full sticky left-0 z-10">
               <div class="flex items-center space-x-1 truncate">
-                <button @click.stop="toggleTrackExpand(mesh.id)" class="text-ui-textMuted hover:text-ui-textPrimary p-0.5">
+                <button class="text-ui-textMuted hover:text-ui-textPrimary p-0.5" @click.stop="toggleTrackExpand(mesh.id)">
                   <BlenderIcon v-if="expandedTracks[mesh.id]" name="chevron-down" :size="12" />
                   <BlenderIcon v-else name="chevron-right" :size="12" />
                 </button>
@@ -1163,9 +1163,9 @@ function handleGraphSvgClick(e: MouseEvent) {
               </div>
 
               <button 
-                @click.stop="animationStore.recordCurrentKeyframe()" 
-                class="text-[9px] text-ui-textMuted hover:text-ui-textAccent font-bold px-1 rounded-xs hover:bg-ui-hover"
+                class="text-[9px] text-ui-textMuted hover:text-ui-textAccent font-bold px-1 rounded-xs hover:bg-ui-hover" 
                 title="Keyframe All Channels"
+                @click.stop="animationStore.recordCurrentKeyframe()"
               >
                 +Key
               </button>
@@ -1175,15 +1175,15 @@ function handleGraphSvgClick(e: MouseEvent) {
               <div 
                 v-for="m in timeMarkers" 
                 :key="m.frame"
+                class="w-7 h-6 flex items-center justify-center border-r border-ui-borderSubtle hover:bg-ui-hover/40 shrink-0 relative"
                 @click.stop="handleCellClick(mesh.id, 'mesh', m.frame)"
                 @dblclick.stop="toggleCellKeyframe(mesh.id, 'mesh', m.frame)"
-                class="w-7 h-6 flex items-center justify-center border-r border-ui-borderSubtle hover:bg-ui-hover/40 shrink-0 relative"
               >
                 <div 
                   v-if="hasAnyKeyframe(mesh.id, m.frame)"
                   class="w-2.5 h-2.5 rotate-45 bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.9)] border border-amber-200 rounded-xs"
                   title="Keyframe"
-                ></div>
+                />
               </div>
             </div>
           </div>
@@ -1193,12 +1193,12 @@ function handleGraphSvgClick(e: MouseEvent) {
             <div class="h-5 flex items-center bg-ui-surface/90 hover:bg-ui-hover/40 text-[9px] shrink-0 border-b border-ui-borderSubtle">
               <div class="w-44 pl-6 pr-2 truncate text-purple-400 flex items-center justify-between shrink-0 bg-ui-panel/80 border-r border-ui-borderSubtle h-full sticky left-0 z-10">
                 <span class="flex items-center gap-1">
-                  <span class="w-1.5 h-1.5 rounded-full bg-purple-400"></span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-purple-400" />
                   <span>Rotation</span>
                 </span>
                 <button 
-                  @click.stop="animationStore.addChannelKeyframe(mesh.id, 'mesh', 'rotation')" 
-                  class="text-[8px] text-purple-400 hover:text-ui-textPrimary px-1 rounded-xs hover:bg-purple-900/40"
+                  class="text-[8px] text-purple-400 hover:text-ui-textPrimary px-1 rounded-xs hover:bg-purple-900/40" 
+                  @click.stop="animationStore.addChannelKeyframe(mesh.id, 'mesh', 'rotation')"
                 >
                   +Rot
                 </button>
@@ -1208,14 +1208,14 @@ function handleGraphSvgClick(e: MouseEvent) {
                 <div 
                   v-for="m in timeMarkers" 
                   :key="m.frame"
+                  class="w-7 h-5 flex items-center justify-center border-r border-ui-borderSubtle hover:bg-purple-900/20 shrink-0 relative"
                   @click.stop="handleCellClick(mesh.id, 'mesh', m.frame)"
                   @dblclick.stop="toggleChannelCellKeyframe(mesh.id, 'mesh', 'rotation', m.frame)"
-                  class="w-7 h-5 flex items-center justify-center border-r border-ui-borderSubtle hover:bg-purple-900/20 shrink-0 relative"
                 >
                   <div 
                     v-if="hasChannelKeyframe(mesh.id, 'rotation', m.frame)"
                     class="w-2 h-2 rotate-45 bg-purple-400 border border-purple-200 rounded-xs shadow-xs"
-                  ></div>
+                  />
                 </div>
               </div>
             </div>
@@ -1223,12 +1223,12 @@ function handleGraphSvgClick(e: MouseEvent) {
             <div class="h-5 flex items-center bg-ui-surface/90 hover:bg-ui-hover/40 text-[9px] shrink-0 border-b border-ui-borderSubtle">
               <div class="w-44 pl-6 pr-2 truncate text-sky-400 flex items-center justify-between shrink-0 bg-ui-panel/80 border-r border-ui-borderSubtle h-full sticky left-0 z-10">
                 <span class="flex items-center gap-1">
-                  <span class="w-1.5 h-1.5 rounded-full bg-sky-400"></span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-sky-400" />
                   <span>Position</span>
                 </span>
                 <button 
-                  @click.stop="animationStore.addChannelKeyframe(mesh.id, 'mesh', 'position')" 
-                  class="text-[8px] text-sky-400 hover:text-ui-textPrimary px-1 rounded-xs hover:bg-sky-900/40"
+                  class="text-[8px] text-sky-400 hover:text-ui-textPrimary px-1 rounded-xs hover:bg-sky-900/40" 
+                  @click.stop="animationStore.addChannelKeyframe(mesh.id, 'mesh', 'position')"
                 >
                   +Pos
                 </button>
@@ -1238,14 +1238,14 @@ function handleGraphSvgClick(e: MouseEvent) {
                 <div 
                   v-for="m in timeMarkers" 
                   :key="m.frame"
+                  class="w-7 h-5 flex items-center justify-center border-r border-ui-borderSubtle hover:bg-sky-900/20 shrink-0 relative"
                   @click.stop="handleCellClick(mesh.id, 'mesh', m.frame)"
                   @dblclick.stop="toggleChannelCellKeyframe(mesh.id, 'mesh', 'position', m.frame)"
-                  class="w-7 h-5 flex items-center justify-center border-r border-ui-borderSubtle hover:bg-sky-900/20 shrink-0 relative"
                 >
                   <div 
                     v-if="hasChannelKeyframe(mesh.id, 'position', m.frame)"
                     class="w-2 h-2 rotate-45 bg-sky-400 border border-sky-200 rounded-xs shadow-xs"
-                  ></div>
+                  />
                 </div>
               </div>
             </div>
@@ -1263,28 +1263,28 @@ function handleGraphSvgClick(e: MouseEvent) {
           <span class="text-ui-textMuted font-bold text-[10px] uppercase">Target:</span>
           <span class="text-ui-textAccent font-bold text-[11px]">{{ activeGraphTarget?.name || 'No Target Selected' }}</span>
 
-          <div class="h-4 w-px bg-ui-borderSubtle mx-1"></div>
+          <div class="h-4 w-px bg-ui-borderSubtle mx-1" />
 
           <!-- Channel buttons: Rot / Pos / Scale -->
           <div class="flex items-center space-x-0.5 bg-ui-input border border-ui-borderSubtle rounded-xs p-0.5 text-[10px]">
             <button 
-              @click="graphChannel = 'rotation'" 
-              class="px-2 py-0.5 rounded-xs transition"
+              class="px-2 py-0.5 rounded-xs transition" 
               :class="graphChannel === 'rotation' ? 'bg-purple-600 text-white font-bold' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+              @click="graphChannel = 'rotation'"
             >
               Rotation (°)
             </button>
             <button 
-              @click="graphChannel = 'position'" 
-              class="px-2 py-0.5 rounded-xs transition"
+              class="px-2 py-0.5 rounded-xs transition" 
               :class="graphChannel === 'position' ? 'bg-sky-600 text-white font-bold' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+              @click="graphChannel = 'position'"
             >
               Position
             </button>
             <button 
-              @click="graphChannel = 'scale'" 
-              class="px-2 py-0.5 rounded-xs transition"
+              class="px-2 py-0.5 rounded-xs transition" 
               :class="graphChannel === 'scale' ? 'bg-emerald-600 text-white font-bold' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+              @click="graphChannel = 'scale'"
             >
               Scale
             </button>
@@ -1293,27 +1293,27 @@ function handleGraphSvgClick(e: MouseEvent) {
           <!-- Axis Visibility Toggles -->
           <div class="flex items-center space-x-1 ml-2 text-[10px]">
             <button 
-              @click="graphShowX = !graphShowX" 
-              class="px-1.5 py-0.5 rounded-xs flex items-center gap-1 border transition"
+              class="px-1.5 py-0.5 rounded-xs flex items-center gap-1 border transition" 
               :class="graphShowX ? 'bg-rose-500/20 text-rose-500 border-rose-500/50' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:bg-ui-hover'"
+              @click="graphShowX = !graphShowX"
             >
-              <span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+              <span class="w-1.5 h-1.5 rounded-full bg-rose-500" />
               <span>X</span>
             </button>
             <button 
-              @click="graphShowY = !graphShowY" 
-              class="px-1.5 py-0.5 rounded-xs flex items-center gap-1 border transition"
+              class="px-1.5 py-0.5 rounded-xs flex items-center gap-1 border transition" 
               :class="graphShowY ? 'bg-emerald-500/20 text-emerald-500 border-emerald-500/50' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:bg-ui-hover'"
+              @click="graphShowY = !graphShowY"
             >
-              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500" />
               <span>Y</span>
             </button>
             <button 
-              @click="graphShowZ = !graphShowZ" 
-              class="px-1.5 py-0.5 rounded-xs flex items-center gap-1 border transition"
+              class="px-1.5 py-0.5 rounded-xs flex items-center gap-1 border transition" 
               :class="graphShowZ ? 'bg-sky-500/20 text-sky-500 border-sky-500/50' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:bg-ui-hover'"
+              @click="graphShowZ = !graphShowZ"
             >
-              <span class="w-1.5 h-1.5 rounded-full bg-sky-500"></span>
+              <span class="w-1.5 h-1.5 rounded-full bg-sky-500" />
               <span>Z</span>
             </button>
           </div>
@@ -1328,46 +1328,46 @@ function handleGraphSvgClick(e: MouseEvent) {
               type="number" 
               step="0.1"
               :value="selectedGraphKey.value"
-              @input="updateGraphKeyVal(parseFloat(($event.target as HTMLInputElement).value) || 0)"
               class="w-14 bg-ui-panel border border-ui-borderDefault px-1 py-0.5 rounded-xs text-ui-textPrimary text-[10px] font-mono"
-            />
+              @input="updateGraphKeyVal(parseFloat(($event.target as HTMLInputElement).value) || 0)"
+            >
           </div>
 
           <div class="flex items-center space-x-0.5 border border-ui-borderDefault rounded-xs p-0.5">
             <button 
-              @click="updateGraphKeyInterp('step')"
               class="px-1.5 py-0.5 rounded-xs text-[9px]"
               :class="selectedGraphKey.interpolation === 'step' ? 'bg-amber-600 text-white font-bold' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+              @click="updateGraphKeyInterp('step')"
             >
               Step
             </button>
             <button 
-              @click="updateGraphKeyInterp('linear')"
               class="px-1.5 py-0.5 rounded-xs text-[9px]"
               :class="selectedGraphKey.interpolation === 'linear' ? 'bg-amber-600 text-white font-bold' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+              @click="updateGraphKeyInterp('linear')"
             >
               Linear
             </button>
             <button 
-              @click="updateGraphKeyInterp('cubic')"
               class="px-1.5 py-0.5 rounded-xs text-[9px]"
               :class="selectedGraphKey.interpolation === 'cubic' ? 'bg-amber-600 text-white font-bold' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+              @click="updateGraphKeyInterp('cubic')"
             >
               Cubic
             </button>
             <button 
-              @click="updateGraphKeyInterp('bezier')"
               class="px-1.5 py-0.5 rounded-xs text-[9px]"
               :class="selectedGraphKey.interpolation === 'bezier' ? 'bg-purple-600 text-white font-bold' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+              @click="updateGraphKeyInterp('bezier')"
             >
               Bézier
             </button>
           </div>
 
           <button 
-            @click="deleteSelectedGraphNode" 
-            class="text-rose-500 hover:text-white p-1 hover:bg-rose-900/40 rounded-xs"
+            class="text-rose-500 hover:text-white p-1 hover:bg-rose-900/40 rounded-xs" 
             title="Delete Selected Key"
+            @click="deleteSelectedGraphNode"
           >
             <BlenderIcon name="trash" :size="12" />
           </button>
@@ -1491,8 +1491,8 @@ function handleGraphSvgClick(e: MouseEvent) {
       <div class="flex items-center justify-between pb-1 border-b border-ui-borderSubtle">
         <span class="text-[11px] font-bold text-ui-textPrimary uppercase tracking-wider">Animation Clips Strip</span>
         <button 
-          @click="showNewClipModal = true"
           class="px-2.5 py-1 rounded-xs bg-ui-accent hover:bg-ui-accentHover text-white font-bold text-[10px] flex items-center space-x-1 transition"
+          @click="showNewClipModal = true"
         >
           <BlenderIcon name="plus" :size="12" />
           <span>+ Add Animation</span>
@@ -1503,9 +1503,9 @@ function handleGraphSvgClick(e: MouseEvent) {
         <div 
           v-for="clip in animationStore.armature.clips" 
           :key="clip.id"
-          @click="animationStore.selectClip(clip.id)"
           class="p-2.5 rounded-xs bg-ui-surface border transition cursor-pointer flex flex-col space-y-2"
           :class="animationStore.activeClip?.id === clip.id ? 'border-ui-accent shadow-md ring-1 ring-ui-accent bg-ui-active' : 'border-ui-borderSubtle hover:border-ui-borderDefault'"
+          @click="animationStore.selectClip(clip.id)"
         >
           <div class="flex items-center justify-between">
             <div class="flex items-center space-x-1.5 truncate">
@@ -1514,14 +1514,14 @@ function handleGraphSvgClick(e: MouseEvent) {
             </div>
 
             <div class="flex items-center space-x-1" @click.stop>
-              <button @click="animationStore.duplicateClip(clip.id)" class="text-ui-textMuted hover:text-ui-textPrimary p-1" title="Duplicate">
+              <button class="text-ui-textMuted hover:text-ui-textPrimary p-1" title="Duplicate" @click="animationStore.duplicateClip(clip.id)">
                 <BlenderIcon name="duplicate" :size="12" />
               </button>
               <button 
                 v-if="animationStore.armature.clips.length > 1" 
-                @click="animationStore.deleteClip(clip.id)" 
                 class="text-ui-textMuted hover:text-rose-400 p-1" 
-                title="Delete"
+                title="Delete" 
+                @click="animationStore.deleteClip(clip.id)"
               >
                 <BlenderIcon name="trash" :size="12" />
               </button>
@@ -1550,17 +1550,17 @@ function handleGraphSvgClick(e: MouseEvent) {
           class="w-full bg-ui-input border border-ui-borderDefault text-ui-textPrimary px-2.5 py-1 rounded-xs text-xs focus:outline-none focus:border-ui-accent"
           autoFocus
           @keydown.enter="handleAddClip"
-        />
+        >
         <div class="flex items-center justify-end space-x-2 pt-1">
           <button 
-            @click="showNewClipModal = false"
             class="px-2.5 py-1 rounded-xs bg-ui-input text-ui-textMuted text-xs hover:text-ui-textPrimary hover:bg-ui-hover border border-ui-borderSubtle"
+            @click="showNewClipModal = false"
           >
             Cancel
           </button>
           <button 
-            @click="handleAddClip"
             class="px-3 py-1 rounded-xs bg-ui-accent text-white text-xs font-bold hover:bg-ui-accentHover shadow transition"
+            @click="handleAddClip"
           >
             Create Clip
           </button>

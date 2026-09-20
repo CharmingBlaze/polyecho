@@ -105,7 +105,7 @@ export class ExtrudeKernel {
       const vBNew = oldToNewVertMap.get(vBOld)
       if (vANew === undefined || vBNew === undefined) continue
 
-      let selFaceId = edge.faceIds.find((fid) => selFaceSet.has(fid))
+      const selFaceId = edge.faceIds.find((fid) => selFaceSet.has(fid))
       const selFace = selFaceId !== undefined ? mesh.faces.get(selFaceId) : null
       let forward = true
       if (selFace) {

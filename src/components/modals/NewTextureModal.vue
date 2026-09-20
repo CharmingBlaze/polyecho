@@ -164,7 +164,7 @@ watch(squareLock, (locked) => {
             v-model="textureName"
             :placeholder="placeholderName"
             class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-1.5 text-ui-textPrimary text-xs focus:outline-none focus:border-amber-400"
-          />
+          >
         </div>
 
         <div class="flex gap-3">
@@ -188,7 +188,7 @@ watch(squareLock, (locked) => {
                 aria-label="Width in pixels"
                 @input="onWidthInput(($event.target as HTMLInputElement).value)"
                 @blur="commitWidth"
-              />
+              >
               <span class="text-ui-textMuted">×</span>
               <input
                 :value="height"
@@ -199,7 +199,7 @@ watch(squareLock, (locked) => {
                 aria-label="Height in pixels"
                 @input="onHeightInput(($event.target as HTMLInputElement).value)"
                 @blur="commitHeight"
-              />
+              >
               <button
                 type="button"
                 class="shrink-0 px-1.5 py-1 rounded-xs border text-[9px] font-bold uppercase"

@@ -159,7 +159,7 @@ export class InsetKernel {
       const vB_new = oldToNew.get(vB_old) ?? vB_old
       if (vA_new === vA_old && vB_new === vB_old) continue
 
-      let selFaceId = edge.faceIds.find(fid => sel.has(fid))
+      const selFaceId = edge.faceIds.find(fid => sel.has(fid))
       const selFace = selFaceId != null ? mesh.faces.get(selFaceId) : null
       let forward = true
       let uvA = new THREE.Vector2(0, 0)

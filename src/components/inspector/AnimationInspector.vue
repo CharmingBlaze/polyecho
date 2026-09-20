@@ -179,7 +179,7 @@ const generators: { label: string; run: () => void }[] = [
           :disabled="!animationStore.activeClip"
           class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-1 text-[10px] text-ui-textPrimary disabled:opacity-50"
           @change="animationStore.activeClip && animationStore.renameClip(animationStore.activeClip.id, ($event.target as HTMLInputElement).value)"
-        />
+        >
       </label>
       <div class="grid grid-cols-2 gap-1">
         <label class="flex flex-col gap-0.5 text-[9px] text-ui-textMuted">
@@ -216,16 +216,16 @@ const generators: { label: string; run: () => void }[] = [
           placeholder="New action…"
           class="flex-1 bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-1 text-[10px]"
           @keydown.enter="handleCreateClip"
-        />
+        >
         <UiButton size="xs" @click="handleCreateClip">New</UiButton>
       </div>
       <div class="grid grid-cols-2 gap-1">
-        <label class="text-[10px] text-ui-textMuted">Seconds<input v-model.number="newClipSeconds" aria-label="New clip duration" type="number" min="0.1" max="120" step="0.1" class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1 py-0.5 font-mono text-[10px]" /></label>
+        <label class="text-[10px] text-ui-textMuted">Seconds<input v-model.number="newClipSeconds" aria-label="New clip duration" type="number" min="0.1" max="120" step="0.1" class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1 py-0.5 font-mono text-[10px]"></label>
         <label class="text-[10px] text-ui-textMuted">Frame rate<select v-model.number="newClipFps" aria-label="New clip frame rate" class="inspector-select w-full"><option v-for="rate in [12, 15, 24, 30, 60]" :key="rate" :value="rate">{{ rate }} fps</option></select></label>
       </div>
       <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
         <span>Loop</span>
-        <input type="checkbox" v-model="newClipLoop" class="accent-ui-accent" />
+        <input v-model="newClipLoop" type="checkbox" class="accent-ui-accent">
       </label>
     </UiSection>
 
@@ -256,28 +256,28 @@ const generators: { label: string; run: () => void }[] = [
       <div class="grid grid-cols-3 gap-1">
         <div v-for="ax in (['x', 'y', 'z'] as const)" :key="'r'+ax" class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
           <span class="text-[9px] font-bold cursor-ew-resize" :class="ax === 'x' ? 'text-rose-400' : ax === 'y' ? 'text-emerald-400' : 'text-sky-400'" @mousedown="startScrubVector($event, selectedBone.rotation, ax, 1, 1)">{{ ax.toUpperCase() }}</span>
-          <input type="number" step="1" :aria-label="`Rotation ${ax.toUpperCase()}`" :value="selectedBone.rotation[ax]" @change="commitPose('rotation', ax, $event)" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
+          <input type="number" step="1" :aria-label="`Rotation ${ax.toUpperCase()}`" :value="selectedBone.rotation[ax]" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" @change="commitPose('rotation', ax, $event)">
         </div>
       </div>
       <div class="text-[9px] text-ui-textMuted">Location</div>
       <div class="grid grid-cols-3 gap-1">
         <div v-for="ax in (['x', 'y', 'z'] as const)" :key="'p'+ax" class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
           <span class="text-[9px] font-bold cursor-ew-resize" :class="ax === 'x' ? 'text-rose-400' : ax === 'y' ? 'text-emerald-400' : 'text-sky-400'" @mousedown="startScrubVector($event, selectedBone.position, ax)">{{ ax.toUpperCase() }}</span>
-          <input type="number" step="0.1" :aria-label="`Location ${ax.toUpperCase()}`" :value="selectedBone.position[ax]" @change="commitPose('position', ax, $event)" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
+          <input type="number" step="0.1" :aria-label="`Location ${ax.toUpperCase()}`" :value="selectedBone.position[ax]" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" @change="commitPose('position', ax, $event)">
         </div>
       </div>
       <div class="text-[9px] text-ui-textMuted">Scale</div>
       <div class="grid grid-cols-3 gap-1">
         <div v-for="ax in (['x', 'y', 'z'] as const)" :key="'s'+ax" class="flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-1">
           <span class="text-[9px] font-bold cursor-ew-resize" :class="ax === 'x' ? 'text-rose-400' : ax === 'y' ? 'text-emerald-400' : 'text-sky-400'" @mousedown="startScrubVector($event, selectedBone.scale, ax, 0.05, 2)">{{ ax.toUpperCase() }}</span>
-          <input type="number" step="0.05" :aria-label="`Scale ${ax.toUpperCase()}`" :value="selectedBone.scale[ax]" @change="commitPose('scale', ax, $event)" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" />
+          <input type="number" step="0.05" :aria-label="`Scale ${ax.toUpperCase()}`" :value="selectedBone.scale[ax]" class="w-full bg-transparent text-right font-mono text-[10px] py-0.5" @change="commitPose('scale', ax, $event)">
         </div>
       </div>
       <p class="text-[10px] text-ui-textMuted">{{ selectedBone.ikConstraint?.enabled ? 'IK enabled · solver controls this chain.' : 'Direct bone posing (FK)' }}{{ selectedBone.springConstraint?.enabled ? ' · Spring enabled' : '' }}</p>
     </UiSection>
 
     <UiSection v-if="hasBones" title="Bones" blender-icon="bone" :badge="filteredBones.length" :default-open="true">
-      <input v-model="boneSearchQuery" placeholder="Find bone…" class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-1 text-[10px]" />
+      <input v-model="boneSearchQuery" placeholder="Find bone…" class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-1 text-[10px]">
       <div class="max-h-36 overflow-y-auto space-y-0.5">
         <button
           v-for="b in filteredBones"
@@ -285,11 +285,13 @@ const generators: { label: string; run: () => void }[] = [
           type="button"
           class="w-full text-left px-2 py-1 rounded-xs text-[10px] truncate"
           :class="animationStore.selectedBoneId === b.id ? 'bg-ui-active text-ui-textPrimary' : 'text-ui-textSecondary hover:bg-ui-hover'"
-          @click="animationStore.selectBone(b.id)"
           :style="{ paddingLeft: `${8 + boneDepth(b.id) * 10}px` }"
           :aria-pressed="animationStore.selectedBoneId === b.id"
           :title="b.name"
-        >{{ b.parentId ? '↳ ' : '◈ ' }}{{ b.name }}<span v-if="b.ikConstraint?.enabled" class="text-ui-textMuted ml-1">IK</span></button>
+          @click="animationStore.selectBone(b.id)"
+        >
+          {{ b.parentId ? '↳ ' : '◈ ' }}{{ b.name }}<span v-if="b.ikConstraint?.enabled" class="text-ui-textMuted ml-1">IK</span>
+        </button>
         <p v-if="!filteredBones.length" class="text-[10px] text-ui-textMuted p-2">No bones match your search.</p>
       </div>
       <UiButton size="xs" class="w-full" @click="animationStore.toggleBoneHierarchyPopout(true)">Open bone hierarchy</UiButton>
@@ -302,33 +304,33 @@ const generators: { label: string; run: () => void }[] = [
     <UiSection title="Playback" blender-icon="display" :default-open="true">
       <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
         <span>Auto-key on release</span>
-        <input type="checkbox" v-model="animationStore.autoKey" class="accent-ui-accent" />
+        <input v-model="animationStore.autoKey" type="checkbox" class="accent-ui-accent">
       </label>
       <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
         <span class="flex items-center gap-1"><BlenderIcon name="onion-skin" :size="12" /> Onion skin</span>
-        <input type="checkbox" v-model="animationStore.onionSkin" class="accent-ui-accent" />
+        <input v-model="animationStore.onionSkin" type="checkbox" class="accent-ui-accent">
       </label>
       <div v-if="animationStore.onionSkin" class="grid grid-cols-2 gap-1">
         <label class="flex flex-col gap-0.5 text-[9px] text-ui-textMuted">
           Frames
           <input
+            v-model.number="animationStore.onionFramesCount"
             type="number"
             min="1"
             max="4"
-            v-model.number="animationStore.onionFramesCount"
             class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1 py-0.5 text-[10px] text-ui-textPrimary font-mono"
-          />
+          >
         </label>
         <label class="flex flex-col gap-0.5 text-[9px] text-ui-textMuted">
           Opacity
           <input
+            v-model.number="animationStore.onionOpacity"
             type="number"
             min="0.1"
             max="0.8"
             step="0.05"
-            v-model.number="animationStore.onionOpacity"
             class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1 py-0.5 text-[10px] text-ui-textPrimary font-mono"
-          />
+          >
         </label>
       </div>
       <div class="inspector-seg is-stretch">
@@ -344,7 +346,7 @@ const generators: { label: string; run: () => void }[] = [
       </div>
       <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
         <span>X-Ray mesh (Alt+Z)</span>
-        <input type="checkbox" v-model="toolStore.viewport.xray" class="accent-ui-accent" />
+        <input v-model="toolStore.viewport.xray" type="checkbox" class="accent-ui-accent">
       </label>
       <template v-if="hasBones">
         <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
@@ -354,11 +356,11 @@ const generators: { label: string; run: () => void }[] = [
             :checked="animationStore.showBones"
             class="accent-ui-accent"
             @change="animationStore.setShowBones(!animationStore.showBones)"
-          />
+          >
         </label>
         <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
           <span>X-ray bones</span>
-          <input type="checkbox" v-model="animationStore.xrayBones" class="accent-ui-accent" />
+          <input v-model="animationStore.xrayBones" type="checkbox" class="accent-ui-accent">
         </label>
       </template>
     </UiSection>
@@ -377,7 +379,7 @@ const generators: { label: string; run: () => void }[] = [
         <option value="" class="bg-ui-panel">Clip B</option>
         <option v-for="c in animationStore.armature.clips" :key="c.id" :value="c.id" class="bg-ui-panel">{{ c.name }}</option>
       </select>
-      <input type="range" min="0" max="1" step="0.05" v-model.number="blendFactor" class="inspector-range" />
+      <input v-model.number="blendFactor" type="range" min="0" max="1" step="0.05" class="inspector-range">
       <div class="grid grid-cols-2 gap-1">
         <UiButton size="xs" :disabled="!hasBones || !blendClipAId || !blendClipBId" @click="applyBlendPreview">Preview</UiButton>
         <UiButton size="xs" :disabled="!hasBones || !blendClipAId || !blendClipBId" @click="keyBlend">Key blend</UiButton>

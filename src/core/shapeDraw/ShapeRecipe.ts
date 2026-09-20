@@ -98,7 +98,7 @@ export function generateShape(recipe: ShapeRecipe): EditableMesh {
   if (recipe.topology === 'quad-grid') throw new Error('This silhouette needs separate patches. Use Auto, or split it into paths and sections for cleaner quad flow.')
   const loops = [outline, ...holes]
   const points = loops.flat().map(p => p.clone())
-  let tris = triangulateBoundary(outline, holes)
+  const tris = triangulateBoundary(outline, holes)
   if (!tris.length) throw new Error('This outline cannot be filled. Check its corners.')
   const boundary = new Set(points.map((_, i) => i))
   let offset = 0

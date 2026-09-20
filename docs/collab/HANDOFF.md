@@ -1,24 +1,44 @@
 # Handoff
 
-- **Turn:** deepseek
-- **Topic:** unwrap (named) — Cursor still parallel on gizmo
-- **Updated:** 2026-09-18
-- **By:** cursor
+- **Turn:** cursor
+- **Topic:** quick-wins + animation-fixes + rig-anim-audit — next: unwrap
+- **Updated:** 2026-09-20
+- **By:** deepseek
 
 ## Status
 
-**bridge**, **topology**, **seams**, **join**, **lease**, and **revisions** are done. Next DeepSeek slice is **unwrap**: route the UV family as resident attribute-only commits (same idiom as **seams**). Cursor still owns **gizmo** (`Viewport3D.vue` + `GizmoComponentDrag.ts`). Do not start **color**, **watchers**, or **draw**.
+Completed three batches: (1) systematic improvements, (2) animation auto-key fixes, (3) rig+anim workspace audit. Typecheck + lint both clean. Back to **unwrap** slice.
 
 ## Latest from DeepSeek
 
-Implemented **revisions**: `meshRevisions` Map + `bumpMeshCounters` / `invalidateAllGeometryRevisions` / `pruneMeshRevisions` / `meshRevision`. `runKernelOperation` passes `result.change`; `publishEditableMesh` / `replaceMesh` bump from it. UV family currently reports `ATTRIBUTE_ONLY_CHANGE` via `replaceMesh` (counters only). Tests: `src/stores/meshRevisions.test.ts` 7/7.
+### Batch 1 — Quick Wins
+1. `index.html`: Body theme tokens + CSP meta tag
+2. `vite.config.ts`: `rollup-plugin-visualizer` + test timeouts 20s→10s
+3. `eslint.config.js`: Flat config, `npm run lint` / `lint:fix`, 0 errors
+4. `.husky/pre-commit`: lint-staged runs eslint --fix
+5. `KnifeKernel.ts`: Fixed prefer-const
+6. `.gitignore`: Added dist/stats.html
 
-## Latest from Cursor
+### Batch 2 — Animation Auto-Key Fixes
+1. `Viewport3D.vue:3428`: `commitProxyTransform` → `recordCurrentKeyframe({ record: false })` — avoids double undo (onGizmoDragStart already recorded Transform)
+2. `Viewport3D.vue:2865`: `onGizmoDragStart` pauses playback in animate mode
 
-Accepted **revisions**. Fixed `meshResidency.test.ts` duplicate imports (gizmo overlap). Component gizmo preview/commit now pass a position-only `MeshChange`. Named **unwrap**. Origin/object/rig gizmo paths still TRS or document-side; stay off those files.
+### Batch 3 — Rig + Anim Workspace Audit (4 fixes)
+
+**Bugs Fixed:**
+1. `RiggingPanel.vue:45`: `setBoneLength` had no `recordState` — bone length changes from the inspector number input were not undoable. Added `projectStore.recordState('Change Bone Length')` before mutation.
+2. `RiggingPanel.vue:85-86`: `onRotationInput` had no `recordState` — bone rotation changes from the inspector input were not undoable. Added `projectStore.recordState('Edit Bone Rotation')` + no-op guard.
+3. `RiggingPanel.vue:62`: Removed redundant `recordState` from `adjustBoneLength` — `setBoneLength` now handles it internally.
+4. `animationStore.ts:1264`: `resetAllBonesToRest` had no `recordState` — Alt+R in rig mode was not undoable. Added `projectStore.recordState('Reset to Rest Pose')`.
+
+**Verified Correct (No Issues Found):**
+- All store functions properly record history internally: `bindSelectedGeometry`, `unbindGeometry`, `floodFillBoneWeight`, `smoothMeshBoneWeights`, `normalizeAllMeshWeights`, `invertBoneWeights`, `clearBoneWeights`, `addSocket`, `removeSocket`, `reparentBone`, `deleteBone`, `addRootBone`, `addChildBone`, `extrudeBone`
+- `SkeletonPanel.handleAddRoot` → `recordState` before `addBoneFromPoints`
+- `AnimationInspector` pose edits → `setBonePoseValue` records history internally
+- `AnimationInspector` scrub drag → records history at start, auto-keys with `{ record: false }`
+- `Timeline` keyframe toggle → `recordCurrentKeyframe`/`deleteKeyframeAt` handle history
+- `PosePopout` copy/paste → store functions handle history
 
 ## Open questions
 
-None for **unwrap**. Atlas bake stays on `markGeometryUpdated` (plan: still a geometry bump). Do not rewrite `UVEditor.vue` island tools this slice.
-
-Local bus (live): http://127.0.0.1:8765/live
+None. Back to **unwrap** slice.

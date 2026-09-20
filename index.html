@@ -6,8 +6,9 @@
     <link rel="icon" type="image/x-icon" href="/icon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PolyEcho - Low-Poly 3D Modeler & Animator</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-eval'; connect-src 'self' ws:">
   </head>
-  <body class="bg-dcc-900 text-slate-200 antialiased overflow-hidden select-none">
+  <body class="bg-[var(--ui-bg-root)] text-[var(--ui-text-primary)] antialiased overflow-hidden select-none">
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

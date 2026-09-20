@@ -121,7 +121,9 @@ function addPreset() {
           :title="item.description"
           :aria-pressed="preset === item.id"
           @click="preset = item.id"
-        >{{ item.name }}</button>
+        >
+          {{ item.name }}
+        </button>
       </div>
       <UiButton size="xs" class="w-full" variant="accent" :disabled="!activeMesh?.vertices.length" @click="addPreset">Add fitted skeleton</UiButton>
     </UiSection>
@@ -145,19 +147,19 @@ function addPreset() {
     </UiSection>
 
     <UiSection title="Display" :icon="Eye" :default-open="false">
-      <label class="block text-[11px] text-ui-textMuted">Bone size <input v-model.number="animationStore.boneDisplaySize" aria-label="Bone display size" type="range" min="0.5" max="2" step="0.1" class="inspector-range" /></label>
+      <label class="block text-[11px] text-ui-textMuted">Bone size <input v-model.number="animationStore.boneDisplaySize" aria-label="Bone display size" type="range" min="0.5" max="2" step="0.1" class="inspector-range"></label>
       <p class="text-[10px] text-ui-textMuted">Blue: left · rose: right · amber: selected</p>
       <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
         <span>Show bones</span>
-        <input type="checkbox" :checked="animationStore.showBones" class="accent-ui-accent" @change="animationStore.setShowBones(($event.target as HTMLInputElement).checked)" />
+        <input type="checkbox" :checked="animationStore.showBones" class="accent-ui-accent" @change="animationStore.setShowBones(($event.target as HTMLInputElement).checked)">
       </label>
       <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
         <span>X-Ray mesh (Alt+Z)</span>
-        <input type="checkbox" v-model="toolStore.viewport.xray" class="accent-ui-accent" />
+        <input v-model="toolStore.viewport.xray" type="checkbox" class="accent-ui-accent">
       </label>
       <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
         <span>X-ray bones</span>
-        <input type="checkbox" v-model="animationStore.xrayBones" class="accent-ui-accent" />
+        <input v-model="animationStore.xrayBones" type="checkbox" class="accent-ui-accent">
       </label>
     </UiSection>
 
@@ -189,9 +191,7 @@ function addPreset() {
       </template>
       <div class="bg-ui-input/50 rounded-xs border border-ui-borderSubtle p-1 space-y-0.5 overflow-y-auto max-h-[280px]">
         <BoneTreeNode v-for="root in rootBones" :key="root.id" :bone-id="root.id" />
-
       </div>
-
     </UiSection>
 
     <UiSection v-if="selectedSocket" title="Socket" :icon="Wrench" :default-open="true">
@@ -202,9 +202,9 @@ function addPreset() {
         </button>
       </div>
       <div class="grid grid-cols-3 gap-1">
-        <input type="number" step="0.1" v-model.number="selectedSocket.socket.position.x" class="w-full bg-ui-input px-1 py-0.5 text-right rounded-xs border border-ui-borderSubtle font-mono text-[10px]" title="X" />
-        <input type="number" step="0.1" v-model.number="selectedSocket.socket.position.y" class="w-full bg-ui-input px-1 py-0.5 text-right rounded-xs border border-ui-borderSubtle font-mono text-[10px]" title="Y" />
-        <input type="number" step="0.1" v-model.number="selectedSocket.socket.position.z" class="w-full bg-ui-input px-1 py-0.5 text-right rounded-xs border border-ui-borderSubtle font-mono text-[10px]" title="Z" />
+        <input v-model.number="selectedSocket.socket.position.x" type="number" step="0.1" class="w-full bg-ui-input px-1 py-0.5 text-right rounded-xs border border-ui-borderSubtle font-mono text-[10px]" title="X">
+        <input v-model.number="selectedSocket.socket.position.y" type="number" step="0.1" class="w-full bg-ui-input px-1 py-0.5 text-right rounded-xs border border-ui-borderSubtle font-mono text-[10px]" title="Y">
+        <input v-model.number="selectedSocket.socket.position.z" type="number" step="0.1" class="w-full bg-ui-input px-1 py-0.5 text-right rounded-xs border border-ui-borderSubtle font-mono text-[10px]" title="Z">
       </div>
       <UiButton v-if="projectStore.activeMesh" size="xs" class="w-full" @click="handleAttachActiveMeshToSocket(selectedSocket.socket.id)">
         <Link class="w-3 h-3" /> Attach mesh
@@ -223,7 +223,9 @@ function addPreset() {
           :key="b.id"
           :value="b.id"
           class="bg-ui-panel"
-        >{{ b.name }}</option>
+        >
+          {{ b.name }}
+        </option>
       </select>
       <p class="text-[9px] text-ui-textMuted">Rest pose, IK, and spring are in joint settings below.</p>
     </UiSection>

@@ -13,6 +13,7 @@ dist-ssr
 release
 *.local
 samples/*.glb
+dist/stats.html
 
 # TypeScript incremental build info
 *.tsbuildinfo

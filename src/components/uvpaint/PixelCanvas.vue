@@ -68,14 +68,14 @@ const activeTab = computed({
         >
           <span class="uv-paint-color-label text-[9px] text-ui-textMuted font-bold uppercase">Color:</span>
           <label class="w-5 h-5 rounded-xs border border-ui-borderStrong cursor-pointer shadow-xs relative overflow-hidden block" :style="{ backgroundColor: toolStore.primaryColor }">
-            <input type="color" v-model="toolStore.primaryColor" class="opacity-0 absolute inset-0 w-full h-full cursor-pointer" />
+            <input v-model="toolStore.primaryColor" type="color" class="opacity-0 absolute inset-0 w-full h-full cursor-pointer">
           </label>
           <input
-            type="text"
             v-model="toolStore.primaryColor"
+            type="text"
             class="uv-paint-color-hex w-16 px-1.5 py-0.5 bg-ui-panel text-ui-textPrimary font-mono text-[10px] font-bold border border-ui-borderSubtle rounded-xs focus:outline-none focus:border-ui-accent uppercase text-center"
             aria-label="Color hex"
-          />
+          >
           <label class="flex items-center gap-1 text-[9px] text-ui-textMuted font-bold uppercase" title="Brush size ([ / ])">
             Size
             <input
@@ -86,13 +86,13 @@ const activeTab = computed({
               class="w-10 px-1 py-0.5 bg-ui-panel text-ui-textPrimary font-mono text-[10px] font-bold border border-ui-borderSubtle rounded-xs focus:outline-none focus:border-ui-accent text-center"
               aria-label="Brush size in pixels"
               @change="toolStore.brushSize = Math.max(1, Math.min(128, Math.round(Number(($event.target as HTMLInputElement).value) || 1)))"
-            />
+            >
           </label>
         </div>
       </div>
-      <button class="workspace-help-button" :aria-expanded="showHelp" @click="showHelp = !showHelp" title="Workspace shortcuts">?</button>
+      <button class="workspace-help-button" :aria-expanded="showHelp" title="Workspace shortcuts" @click="showHelp = !showHelp">?</button>
       <div v-if="showHelp" class="workspace-help" @keydown.esc="showHelp = false">
-        <div class="flex items-center justify-between mb-2"><strong>{{ activeTab === 'uv' ? 'UV Editor' : 'Pixel Paint' }} shortcuts</strong><button @click="showHelp = false" aria-label="Close shortcuts">×</button></div>
+        <div class="flex items-center justify-between mb-2"><strong>{{ activeTab === 'uv' ? 'UV Editor' : 'Pixel Paint' }} shortcuts</strong><button aria-label="Close shortcuts" @click="showHelp = false">×</button></div>
         <template v-if="activeTab === 'uv'">
           <p><kbd>1–4</kbd> Vertex / edge / face / island</p>
           <p><kbd>A</kbd> Select all <kbd>Alt+A</kbd> Deselect</p>
@@ -121,7 +121,9 @@ const activeTab = computed({
         type="button"
         class="shrink-0 px-2 py-0.5 rounded-xs bg-ui-active border border-ui-borderSubtle text-ui-textAccent hover:bg-ui-hover"
         @click="toolStore.setAppMode('model')"
-      >Go to Modeling</button>
+      >
+        Go to Modeling
+      </button>
     </div>
 
     <div class="flex-1 min-h-0 min-w-0 flex">

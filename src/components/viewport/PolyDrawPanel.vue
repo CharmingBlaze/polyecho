@@ -25,11 +25,13 @@ function update(key: keyof PolyDrawOperator['options'], event: Event) {
 </script>
 
 <template>
-  <section v-if="op" data-floating-panel class="poly-draw-panel fixed z-50 hud-panel"
+  <section
+    v-if="op" data-floating-panel class="poly-draw-panel fixed z-50 hud-panel"
     :data-revision="operatorManager.state.value.previewTick"
     :style="{ left: `${position.x}px`, top: `${position.y}px` }" aria-label="Poly Draw options"
     @pointerdown.stop @pointermove.stop @mousedown.stop @click.stop @dblclick.stop @wheel.stop
-    @keydown.stop @keydown.esc.prevent="operatorManager.cancel()" @keyup.stop @contextmenu.prevent>
+    @keydown.stop @keydown.esc.prevent="operatorManager.cancel()" @keyup.stop @contextmenu.prevent
+  >
     <header @pointerdown="startDrag">
       <strong>Poly Draw</strong><span>LIVE</span>
       <button :aria-label="minimized ? 'Expand options' : 'Minimize options'" @pointerdown.stop @click="minimized = !minimized">{{ minimized ? '+' : '−' }}</button>
@@ -42,14 +44,14 @@ function update(key: keyof PolyDrawOperator['options'], event: Event) {
       </template>
       <template v-else>
         <p>Changes preview instantly. Editing an option holds the thickness steady.</p>
-        <label>Thickness<input aria-label="Poly Draw thickness" type="number" min="-1000" max="1000" step="0.01" :value="Number(op.options.depth.toFixed(3))" @input="update('depth', $event)" /></label>
-        <label>Centered extrusion<input type="checkbox" :checked="op.options.centered" @change="update('centered', $event)" /></label>
+        <label>Thickness<input aria-label="Poly Draw thickness" type="number" min="-1000" max="1000" step="0.01" :value="Number(op.options.depth.toFixed(3))" @input="update('depth', $event)"></label>
+        <label>Centered extrusion<input type="checkbox" :checked="op.options.centered" @change="update('centered', $event)"></label>
         <label>End size <output>{{ Math.round(op.options.taper * 100) }}%</output></label>
-        <input aria-label="Poly Draw end size" type="range" min="0.05" max="3" step="0.05" :value="op.options.taper" @input="update('taper', $event)" />
+        <input aria-label="Poly Draw end size" type="range" min="0.05" max="3" step="0.05" :value="op.options.taper" @input="update('taper', $event)">
         <h4>Bevel</h4>
-        <label>Width<input aria-label="Poly Draw bevel width" type="number" min="0" max="100" step="0.01" :value="op.options.bevel" @input="update('bevel', $event)" /></label>
-        <input aria-label="Poly Draw bevel slider" type="range" min="0" max="1" step="0.01" :value="op.options.bevel" @input="update('bevel', $event)" />
-        <label>Segments<input aria-label="Poly Draw bevel segments" type="number" min="1" max="8" step="1" :value="op.options.segments" @input="update('segments', $event)" /></label>
+        <label>Width<input aria-label="Poly Draw bevel width" type="number" min="0" max="100" step="0.01" :value="op.options.bevel" @input="update('bevel', $event)"></label>
+        <input aria-label="Poly Draw bevel slider" type="range" min="0" max="1" step="0.01" :value="op.options.bevel" @input="update('bevel', $event)">
+        <label>Segments<input aria-label="Poly Draw bevel segments" type="number" min="1" max="8" step="1" :value="op.options.segments" @input="update('segments', $event)"></label>
         <label>Profile<select :value="op.options.profile" @change="update('profile', $event)"><option :value="0">Chamfer</option><option :value="0.5">Rounded</option><option :value="1">Concave</option></select></label>
         <p>Width is limited to fit the edges. Use 3 or more segments for curved profiles.</p>
         <p v-if="op.optionsError" role="status" class="error">{{ op.optionsError }}</p>

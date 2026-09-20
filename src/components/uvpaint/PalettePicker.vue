@@ -88,22 +88,22 @@ function quantizeActiveTexture(mode: 'nearest' | 'floyd-steinberg' | 'atkinson' 
               class="absolute top-0 left-0 w-4 h-4 rounded-xs border border-ui-borderStrong shadow-sm z-10"
               :style="{ backgroundColor: toolStore.primaryColor }"
               title="Primary Color"
-            ></div>
+            />
             <!-- Secondary Color Box -->
             <div 
               class="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-xs border border-ui-borderStrong shadow-sm"
               :style="{ backgroundColor: toolStore.secondaryColor }"
               title="Secondary Color"
-            ></div>
+            />
           </div>
 
           <!-- Native Color Picker Trigger -->
           <label class="cursor-pointer relative flex items-center justify-center w-5 h-5 rounded-xs border border-ui-borderDefault bg-[#14161a] hover:border-ui-borderStrong transition text-ui-textMuted hover:text-ui-textPrimary" title="Pick Custom Color">
             <input 
-              type="color" 
               v-model="toolStore.primaryColor" 
+              type="color" 
               class="opacity-0 absolute inset-0 w-full h-full cursor-pointer" 
-            />
+            >
             <Pipette class="w-3 h-3 pointer-events-none" />
           </label>
         </div>
@@ -115,15 +115,15 @@ function quantizeActiveTexture(mode: 'nearest' | 'floyd-steinberg' | 'atkinson' 
           <div class="relative flex-1 flex items-center">
             <select 
               :value="projectStore.activePalette.id" 
+              style="background-color: #14161a !important; color: #d8dbe0 !important;"
+              class="w-full appearance-none border border-ui-borderDefault hover:border-ui-borderStrong focus:border-ui-accent rounded-xs pl-2.5 pr-7 h-7 text-xs font-sans focus:outline-none cursor-pointer transition shadow-inner"
               @change="(e) => {
                 const target = e.target as HTMLSelectElement
                 const found = allPalettes.find(p => p.id === target.value)
                 if (found) selectPalette(found)
               }"
-              style="background-color: #14161a !important; color: #d8dbe0 !important;"
-              class="w-full appearance-none border border-ui-borderDefault hover:border-ui-borderStrong focus:border-ui-accent rounded-xs pl-2.5 pr-7 h-7 text-xs font-sans focus:outline-none cursor-pointer transition shadow-inner"
             >
-              <optgroup label="Custom Color Sets" v-if="allPalettes.some(p => p.isCustom)">
+              <optgroup v-if="allPalettes.some(p => p.isCustom)" label="Custom Color Sets">
                 <option 
                   v-for="pal in allPalettes.filter(p => p.isCustom)" 
                   :key="pal.id" 
@@ -148,9 +148,9 @@ function quantizeActiveTexture(mode: 'nearest' | 'floyd-steinberg' | 'atkinson' 
           </div>
 
           <button 
-            @click="showNewPaletteDialog = !showNewPaletteDialog"
             class="h-7 px-1.5 rounded-xs bg-ui-surface hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary border border-ui-borderSubtle transition flex items-center gap-0.5 text-[10px]"
             title="Create New Custom Color Set"
+            @click="showNewPaletteDialog = !showNewPaletteDialog"
           >
             <Plus class="w-3 h-3 text-emerald-400" />
             <span>New</span>
@@ -158,9 +158,9 @@ function quantizeActiveTexture(mode: 'nearest' | 'floyd-steinberg' | 'atkinson' 
 
           <button 
             v-if="projectStore.activePalette.isCustom"
-            @click="deleteCurrentCustomPalette"
             class="h-7 px-1.5 rounded-xs bg-ui-surface hover:bg-rose-950/40 text-ui-textMuted hover:text-rose-400 border border-ui-borderSubtle transition"
             title="Delete Custom Color Set"
+            @click="deleteCurrentCustomPalette"
           >
             <Trash2 class="w-3 h-3" />
           </button>
@@ -173,17 +173,17 @@ function quantizeActiveTexture(mode: 'nearest' | 'floyd-steinberg' | 'atkinson' 
             placeholder="Color Set Name" 
             class="w-full bg-ui-surface border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-xs text-ui-textPrimary focus:outline-none"
             @keydown.enter="createNewCustomPalette"
-          />
+          >
           <div class="flex gap-1">
             <button 
-              @click="createNewCustomPalette" 
-              class="flex-1 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xs text-[10px] font-bold transition"
+              class="flex-1 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xs text-[10px] font-bold transition" 
+              @click="createNewCustomPalette"
             >
               Create
             </button>
             <button 
-              @click="showNewPaletteDialog = false" 
-              class="px-2 py-0.5 bg-ui-surface text-ui-textSecondary rounded-xs text-[10px] transition"
+              class="px-2 py-0.5 bg-ui-surface text-ui-textSecondary rounded-xs text-[10px] transition" 
+              @click="showNewPaletteDialog = false"
             >
               Cancel
             </button>
@@ -202,47 +202,47 @@ function quantizeActiveTexture(mode: 'nearest' | 'floyd-steinberg' | 'atkinson' 
 
           <div class="grid grid-cols-5 gap-1">
             <button 
-              @click="setColor(activeShadingRamp.highlight)"
-              @contextmenu="setSecondaryColor($event, activeShadingRamp.highlight)"
               class="flex flex-col items-center gap-0.5 p-1 rounded-xs border border-black/40 hover:scale-105 transition shadow-2xs cursor-pointer"
               :style="{ backgroundColor: activeShadingRamp.highlight }"
               :title="'Highlight (+45%): ' + activeShadingRamp.highlight + ' · Right-Click for Secondary'"
+              @click="setColor(activeShadingRamp.highlight)"
+              @contextmenu="setSecondaryColor($event, activeShadingRamp.highlight)"
             >
               <span class="text-[7px] font-mono text-black font-bold uppercase bg-white/80 px-0.5 rounded-xs">High</span>
             </button>
             <button 
-              @click="setColor(activeShadingRamp.light)"
-              @contextmenu="setSecondaryColor($event, activeShadingRamp.light)"
               class="flex flex-col items-center gap-0.5 p-1 rounded-xs border border-black/40 hover:scale-105 transition shadow-2xs cursor-pointer"
               :style="{ backgroundColor: activeShadingRamp.light }"
               :title="'Light (+22%): ' + activeShadingRamp.light + ' · Right-Click for Secondary'"
+              @click="setColor(activeShadingRamp.light)"
+              @contextmenu="setSecondaryColor($event, activeShadingRamp.light)"
             >
               <span class="text-[7px] font-mono text-black font-bold uppercase bg-white/80 px-0.5 rounded-xs">Light</span>
             </button>
             <button 
-              @click="setColor(activeShadingRamp.base)"
-              @contextmenu="setSecondaryColor($event, activeShadingRamp.base)"
               class="flex flex-col items-center gap-0.5 p-1 rounded-xs border-2 border-amber-400 hover:scale-105 transition shadow-2xs cursor-pointer"
               :style="{ backgroundColor: activeShadingRamp.base }"
               :title="'Base Midtone: ' + activeShadingRamp.base + ' · Right-Click for Secondary'"
+              @click="setColor(activeShadingRamp.base)"
+              @contextmenu="setSecondaryColor($event, activeShadingRamp.base)"
             >
               <span class="text-[7px] font-mono text-black font-bold uppercase bg-white/80 px-0.5 rounded-xs">Base</span>
             </button>
             <button 
-              @click="setColor(activeShadingRamp.shadow)"
-              @contextmenu="setSecondaryColor($event, activeShadingRamp.shadow)"
               class="flex flex-col items-center gap-0.5 p-1 rounded-xs border border-black/40 hover:scale-105 transition shadow-2xs cursor-pointer"
               :style="{ backgroundColor: activeShadingRamp.shadow }"
               :title="'Shadow (-35%): ' + activeShadingRamp.shadow + ' · Right-Click for Secondary'"
+              @click="setColor(activeShadingRamp.shadow)"
+              @contextmenu="setSecondaryColor($event, activeShadingRamp.shadow)"
             >
               <span class="text-[7px] font-mono text-white font-bold uppercase bg-black/80 px-0.5 rounded-xs">Shad</span>
             </button>
             <button 
-              @click="setColor(activeShadingRamp.deepShadow)"
-              @contextmenu="setSecondaryColor($event, activeShadingRamp.deepShadow)"
               class="flex flex-col items-center gap-0.5 p-1 rounded-xs border border-black/40 hover:scale-105 transition shadow-2xs cursor-pointer"
               :style="{ backgroundColor: activeShadingRamp.deepShadow }"
               :title="'Deep Shadow (-65%): ' + activeShadingRamp.deepShadow + ' · Right-Click for Secondary'"
+              @click="setColor(activeShadingRamp.deepShadow)"
+              @contextmenu="setSecondaryColor($event, activeShadingRamp.deepShadow)"
             >
               <span class="text-[7px] font-mono text-white font-bold uppercase bg-black/80 px-0.5 rounded-xs">Deep</span>
             </button>
@@ -263,14 +263,14 @@ function quantizeActiveTexture(mode: 'nearest' | 'floyd-steinberg' | 'atkinson' 
               :title="`Left-Click: Primary, Right-Click: Secondary (${color})`"
               @click="setColor(color)"
               @contextmenu="setSecondaryColor($event, color)"
-            ></button>
+            />
 
             <!-- Delete Swatch Button on Custom Palettes -->
             <button 
               v-if="projectStore.activePalette.isCustom"
-              @click.stop="removeColorFromPalette(idx)"
               class="absolute -top-1 -right-1 hidden group-hover:flex w-3 h-3 bg-rose-600 text-white rounded-full items-center justify-center z-20 shadow-xs hover:bg-rose-500"
               title="Remove Color"
+              @click.stop="removeColorFromPalette(idx)"
             >
               <X class="w-2 h-2 stroke-[3]" />
             </button>
@@ -278,9 +278,9 @@ function quantizeActiveTexture(mode: 'nearest' | 'floyd-steinberg' | 'atkinson' 
 
           <!-- Add Current Color Button -->
           <button 
-            @click="addCurrentColorToPalette"
             class="w-full h-5 rounded-xs border border-dashed border-ui-borderDefault hover:border-amber-400 bg-ui-surface hover:bg-ui-hover flex items-center justify-center text-ui-textMuted hover:text-amber-400 transition cursor-pointer"
             title="Add active color to palette"
+            @click="addCurrentColorToPalette"
           >
             <Plus class="w-3 h-3" />
           </button>
@@ -290,24 +290,24 @@ function quantizeActiveTexture(mode: 'nearest' | 'floyd-steinberg' | 'atkinson' 
         <div class="flex items-center justify-between pt-1 border-t border-ui-borderSubtle/60 text-[10px] text-ui-textSecondary font-mono">
           <label class="flex items-center gap-1.5 cursor-pointer select-none">
             <input 
-              type="checkbox" 
               v-model="toolStore.paletteSnapEnabled" 
+              type="checkbox" 
               class="rounded-xs text-amber-500 focus:ring-0 focus:ring-offset-0 bg-[#14161a] border-ui-borderStrong w-3 h-3 cursor-pointer" 
-            />
+            >
             <span>Lock to Palette</span>
           </label>
           <div class="flex items-center gap-1">
             <button 
-              @click="showPaletteLibrary = true"
               class="px-1.5 py-0.5 rounded-xs bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 text-[9.5px] font-bold transition cursor-pointer"
               title="Open full palette library (50+ presets, Lospec Import/Export)"
+              @click="showPaletteLibrary = true"
             >
               Browse Library...
             </button>
             <button 
-              @click="() => quantizeActiveTexture('nearest')" 
-              class="px-1.5 py-0.5 rounded-xs bg-ui-panel hover:bg-ui-hover border border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary transition cursor-pointer"
+              class="px-1.5 py-0.5 rounded-xs bg-ui-panel hover:bg-ui-hover border border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary transition cursor-pointer" 
               title="Quantize all pixels in the active texture to this palette"
+              @click="() => quantizeActiveTexture('nearest')"
             >
               Quantize
             </button>

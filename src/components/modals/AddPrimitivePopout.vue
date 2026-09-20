@@ -203,8 +203,8 @@ defineExpose({
 
 <template>
   <div
-    data-floating-panel
     v-if="visible"
+    data-floating-panel
     class="fixed z-50 flex flex-col bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl font-sans select-none pointer-events-auto w-52 text-xs"
     :style="{ left: `${position.x}px`, top: `${position.y}px` }"
   >
@@ -247,14 +247,18 @@ defineExpose({
           :class="{ 'is-active': placementMode === PrimitivePlacementMode.CAD_DRAW }"
           title="Draw footprint, then height"
           @click="setPlacementMode(PrimitivePlacementMode.CAD_DRAW)"
-        >Draw</button>
+        >
+          Draw
+        </button>
         <button
           type="button"
           class="inspector-seg-btn"
           :class="{ 'is-active': placementMode === PrimitivePlacementMode.PLACE }"
           title="Click to drop at exact size"
           @click="setPlacementMode(PrimitivePlacementMode.PLACE)"
-        >Place</button>
+        >
+          Place
+        </button>
       </div>
       <div class="inspector-seg is-stretch" aria-label="Align">
         <button
@@ -263,14 +267,18 @@ defineExpose({
           :class="{ 'is-active': liveOrientation === 'SURFACE' }"
           title="Follow the clicked surface"
           @click="setOrientation('SURFACE')"
-        >Surface</button>
+        >
+          Surface
+        </button>
         <button
           type="button"
           class="inspector-seg-btn"
           :class="{ 'is-active': liveOrientation === 'WORLD' }"
           title="Stay upright on world axes"
           @click="setOrientation('WORLD')"
-        >World</button>
+        >
+          World
+        </button>
       </div>
 
       <div class="inspector-seg is-stretch" aria-label="Category">
@@ -307,7 +315,7 @@ defineExpose({
             :checked="settings[key]"
             class="accent-ui-accent"
             @change="updateSetting(key, $event)"
-          />
+          >
           <input
             v-else
             type="number"
@@ -316,7 +324,7 @@ defineExpose({
             min="0"
             class="w-14 shrink-0 bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 font-mono text-[10px] text-ui-textPrimary text-right"
             @change="updateSetting(key, $event)"
-          />
+          >
         </label>
         <p class="text-[10px] text-ui-textMuted leading-snug">{{ sessionHint }}</p>
         <p v-if="placing?.dimensionText" class="font-mono text-[10px] inspector-value">{{ placing.dimensionText }}</p>

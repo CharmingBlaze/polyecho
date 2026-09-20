@@ -505,8 +505,8 @@ let isWeightPainting = false
 
 // Transform helper proxy object & initial drag transforms
 const transformProxy = new THREE.Object3D()
-let dragStartProxyMatrix = new THREE.Matrix4()
-let dragStartProxyMatrixInverse = new THREE.Matrix4()
+const dragStartProxyMatrix = new THREE.Matrix4()
+const dragStartProxyMatrixInverse = new THREE.Matrix4()
 const dragStartVertexMap = new Map<string, THREE.Vector3>()
 const dragStartMultiMeshMap = new Map<string, { position: THREE.Vector3; rotation: THREE.Euler; scale: THREE.Vector3 }>()
 
@@ -2862,6 +2862,7 @@ function syncStoreObjectSceneTRS() {
 
 function onGizmoDragStart() {
   projectStore.recordState(toolStore.selectMode === 'origin' ? 'Move Origin' : 'Transform')
+  if (toolStore.appMode === 'animate') animationStore.isPlaying = false
   transformProxy.updateMatrixWorld()
   dragStartProxyMatrix.copy(transformProxy.matrixWorld)
   dragStartProxyMatrixInverse.copy(dragStartProxyMatrix).invert()
@@ -3425,7 +3426,7 @@ function commitProxyTransform() {
   }
 
   if (toolStore.appMode === 'animate' && animationStore.autoKey) {
-    animationStore.recordCurrentKeyframe()
+    animationStore.recordCurrentKeyframe({ record: false })
   }
 
   isGizmoDragging = false
@@ -4754,7 +4755,7 @@ function startModalOperator(tool: string, options?: any) {
     .map(id => bridgeData.strToNumFaceId.get(id)!)
     .filter(id => id !== undefined)
 
-  let selEdgeIds: number[] = []
+  const selEdgeIds: number[] = []
 
   if (toolStore.selectMode === 'object') {
     selVertIds = Array.from(editableMesh.vertices.keys())
@@ -5146,7 +5147,7 @@ function updateActiveMeshVisualsFast() {
 }
 
 function setHoverPositions(geom: THREE.BufferGeometry, values: number[]) {
-  let attr = geom.getAttribute('position') as THREE.BufferAttribute | undefined
+  const attr = geom.getAttribute('position') as THREE.BufferAttribute | undefined
   if (!attr || attr.array.length !== values.length) {
     geom.setAttribute('position', new THREE.Float32BufferAttribute(values, 3))
     return
@@ -6543,7 +6544,7 @@ onUnmounted(() => {
       @drop.prevent="onViewportDrop"
     >
       <!-- Dedicated 3D Canvas Mount (Preserves Vue UI overlay and LightWave controls) -->
-      <div ref="canvasMountRef" class="absolute inset-0 w-full h-full z-0 pointer-events-auto"></div>
+      <div ref="canvasMountRef" class="absolute inset-0 w-full h-full z-0 pointer-events-auto" />
 
       <!-- Drop Image Overlay -->
       <div
@@ -6595,10 +6596,12 @@ onUnmounted(() => {
             <template v-else>The browser released the graphics context.</template>
           </span>
           <button
-            @click="rendererInitError ? startViewportRenderer() : recoverViewportRenderer()"
             :disabled="isRendererStarting"
             class="mt-1 rounded-xs border border-ui-accent/50 bg-ui-active px-3 py-1 text-[9px] font-bold text-ui-textAccent hover:bg-ui-hover"
-          >{{ isRendererStarting ? 'Starting…' : 'Retry renderer' }}</button>
+            @click="rendererInitError ? startViewportRenderer() : recoverViewportRenderer()"
+          >
+            {{ isRendererStarting ? 'Starting…' : 'Retry renderer' }}
+          </button>
         </div>
       </div>
 
@@ -6608,61 +6611,61 @@ onUnmounted(() => {
         <div class="absolute top-2.5 right-2.5 z-20 flex items-center bg-ui-panel/95 backdrop-blur-xs text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-lg divide-x divide-ui-borderSubtle select-none">
           <button 
             type="button"
-            @pointerdown="onLightWaveNavButton('pan', 'persp', $event)" 
-            class="p-1.5 hover:bg-ui-hover cursor-move transition"
+            class="p-1.5 hover:bg-ui-hover cursor-move transition" 
             :class="isStickyNav('pan') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'"
             :title="lightWaveNavTitle('pan', 'Pan View (Drag to pan)')"
+            @pointerdown="onLightWaveNavButton('pan', 'persp', $event)"
           >
             <BlenderIcon name="tool-move" :size="14" />
           </button>
           <button 
             type="button"
-            @pointerdown="onLightWaveNavButton('orbit', 'persp', $event)" 
-            class="p-1.5 hover:bg-ui-hover cursor-grab transition"
+            class="p-1.5 hover:bg-ui-hover cursor-grab transition" 
             :class="isStickyNav('orbit') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'"
             :title="lightWaveNavTitle('orbit', 'Orbit View (Drag to rotate)')"
+            @pointerdown="onLightWaveNavButton('orbit', 'persp', $event)"
           >
             <BlenderIcon name="tool-rotate" :size="14" />
           </button>
           <button 
             type="button"
-            @pointerdown="onLightWaveNavButton('zoom', 'persp', $event)" 
-            class="p-1.5 hover:bg-ui-hover cursor-ns-resize transition"
+            class="p-1.5 hover:bg-ui-hover cursor-ns-resize transition" 
             :class="isStickyNav('zoom') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'"
             :title="lightWaveNavTitle('zoom', 'Zoom View (Drag up/down to zoom)')"
+            @pointerdown="onLightWaveNavButton('zoom', 'persp', $event)"
           >
             <BlenderIcon name="zoom-in" :size="14" />
           </button>
           <button
             type="button"
-            @click.stop="toolStore.stickyViewportControls = !toolStore.stickyViewportControls"
             class="p-1.5 hover:bg-ui-hover transition cursor-pointer"
             :class="toolStore.stickyViewportControls ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'"
             :title="stickyCadLockTitle()"
+            @click.stop="toolStore.stickyViewportControls = !toolStore.stickyViewportControls"
           >
             <BlenderIcon :name="toolStore.stickyViewportControls ? 'lock' : 'unlock'" :size="14" />
           </button>
           <button 
-            @click="centerViewOnContents('persp')" 
-            class="p-1.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition cursor-pointer"
+            class="p-1.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition cursor-pointer" 
             title="Center View on Model (Frame Contents)"
+            @click="centerViewOnContents('persp')"
           >
             <BlenderIcon name="view-fit" :size="14" />
           </button>
           <button
             type="button"
-            @click="toolStore.viewport.xray = !toolStore.viewport.xray"
             class="p-1.5 hover:bg-ui-hover transition cursor-pointer"
             :class="toolStore.viewport.xray ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'"
             title="X-Ray Transparent (Alt+Z)"
+            @click="toolStore.viewport.xray = !toolStore.viewport.xray"
           >
             <BlenderIcon name="xray" :size="14" />
           </button>
           <button
             type="button"
-            @click="enterQuadView"
             class="p-1.5 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition cursor-pointer"
             title="Quad View (Ctrl+Alt+Q)"
+            @click="enterQuadView"
           >
             <BlenderIcon name="quad-view" :size="14" />
           </button>
@@ -6673,13 +6676,13 @@ onUnmounted(() => {
           v-if="toolStore.appMode === 'model' && toolStore.selectMode === 'origin'"
           class="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1 bg-amber-950/90 backdrop-blur-xs border border-amber-500/50 rounded-full shadow-lg font-sans text-[11px] text-amber-300 select-none"
         >
-          <div class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></div>
+          <div class="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
           <span class="font-semibold">
             Origin Edit Mode: Drag Gizmo or Use Presets to Move Pivot
           </span>
           <button 
-            @click="toolStore.selectMode = 'object'" 
-            class="ml-1 px-2 py-0.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xs text-[10px] transition cursor-pointer"
+            class="ml-1 px-2 py-0.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xs text-[10px] transition cursor-pointer" 
+            @click="toolStore.selectMode = 'object'"
           >
             Done
           </button>
@@ -6690,7 +6693,7 @@ onUnmounted(() => {
           v-if="toolStore.appMode === 'rig'"
           class="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1 bg-ui-panel/90 backdrop-blur-xs border border-ui-borderStrong rounded-full shadow-lg font-sans text-[11px]"
         >
-          <div class="w-2 h-2 rounded-full" :class="animationStore.clickToPlaceMode || animationStore.jointPlacementActive || animationStore.isWeightPaintActive ? 'bg-ui-accent' : 'bg-ui-textMuted'"></div>
+          <div class="w-2 h-2 rounded-full" :class="animationStore.clickToPlaceMode || animationStore.jointPlacementActive || animationStore.isWeightPaintActive ? 'bg-ui-accent' : 'bg-ui-textMuted'" />
           <span v-if="animationStore.jointPlacementActive" class="text-ui-textPrimary font-semibold">Fit {{ animationStore.selectedBone?.name }} · click to place pivot</span>
           <span v-else-if="animationStore.clickToPlaceMode" class="text-ui-textPrimary font-semibold">
             Draw Bone Active: Click Head, then Click Tail in 3D (Press B or Esc to exit)
@@ -6710,9 +6713,9 @@ onUnmounted(() => {
             Rig Mode: <strong class="text-ui-textPrimary">{{ animationStore.selectedBone ? animationStore.selectedBone.name : 'Select joint' }}</strong> · <span class="text-ui-textMuted">Extrude: E · Bind: Ctrl+B</span>
           </span>
           <button 
-            @click="animationStore.toggleBoneHierarchyPopout()" 
-            class="ml-1 px-1.5 py-0.2 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[10px] text-ui-textSecondary font-semibold transition cursor-pointer"
+            class="ml-1 px-1.5 py-0.2 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[10px] text-ui-textSecondary font-semibold transition cursor-pointer" 
             title="Toggle Floating Bone Hierarchy (H)"
+            @click="animationStore.toggleBoneHierarchyPopout()"
           >
             Tree (H)
           </button>
@@ -6727,7 +6730,7 @@ onUnmounted(() => {
             <span>Heatmap Influence</span>
             <span class="text-amber-400 font-mono">{{ animationStore.selectedBone ? animationStore.selectedBone.name : 'No Bone' }}</span>
           </div>
-          <div class="h-2.5 w-full rounded-xs shadow-inner" style="background: linear-gradient(to right, #0a188f 0%, #00e5ff 25%, #00e676 50%, #ffd600 75%, #ff1744 100%);"></div>
+          <div class="h-2.5 w-full rounded-xs shadow-inner" style="background: linear-gradient(to right, #0a188f 0%, #00e5ff 25%, #00e676 50%, #ffd600 75%, #ff1744 100%);" />
           <div class="flex justify-between text-[9px] font-mono text-ui-textSecondary">
             <span>0% Blue</span>
             <span>25%</span>
@@ -6762,7 +6765,7 @@ onUnmounted(() => {
             </div>
             <div v-else class="absolute top-1.5 left-1.5 right-1.5 flex items-center justify-between gap-1 min-w-0">
               <div class="shrink-0 px-1.5 py-0.5 rounded-xs bg-ui-panel/95 border border-ui-borderStrong text-[10px] font-mono text-ui-textPrimary flex items-center gap-1 shadow-xs">
-                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                 <span class="font-bold">Front</span>
                 <span class="text-ui-textMuted">Z</span>
               </div>
@@ -6770,29 +6773,29 @@ onUnmounted(() => {
                 class="pointer-events-auto relative z-40 flex items-center bg-ui-panel/95 border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle shrink-0"
                 @pointerdown.stop
               >
-                <button type="button" @pointerdown="onLightWaveNavButton('pan', 'front', $event)" class="p-1 hover:bg-ui-hover cursor-move" :class="isStickyNav('pan') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'" :title="lightWaveNavTitle('pan', 'Pan Front')">
+                <button type="button" class="p-1 hover:bg-ui-hover cursor-move" :class="isStickyNav('pan') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'" :title="lightWaveNavTitle('pan', 'Pan Front')" @pointerdown="onLightWaveNavButton('pan', 'front', $event)">
                   <BlenderIcon name="tool-move" :size="12" />
                 </button>
-                <button type="button" @pointerdown="onLightWaveNavButton('zoom', 'front', $event)" class="p-1 hover:bg-ui-hover cursor-ns-resize" :class="isStickyNav('zoom') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'" :title="lightWaveNavTitle('zoom', 'Zoom Front')">
+                <button type="button" class="p-1 hover:bg-ui-hover cursor-ns-resize" :class="isStickyNav('zoom') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'" :title="lightWaveNavTitle('zoom', 'Zoom Front')" @pointerdown="onLightWaveNavButton('zoom', 'front', $event)">
                   <BlenderIcon name="zoom-in" :size="12" />
                 </button>
-                <button type="button" @click="centerViewOnContents('front')" class="p-1 hover:bg-ui-hover text-ui-textSecondary" title="Frame Front">
+                <button type="button" class="p-1 hover:bg-ui-hover text-ui-textSecondary" title="Frame Front" @click="centerViewOnContents('front')">
                   <BlenderIcon name="view-fit" :size="12" />
                 </button>
                 <button
                   type="button"
-                @click.stop="maximizeBlockoutPane('front')"
                   class="p-1 hover:bg-ui-hover cursor-pointer"
                   :class="layoutStore.blockoutMaximized === 'front' ? 'text-emerald-300 bg-ui-active' : 'text-ui-textSecondary'"
                   :title="layoutStore.blockoutMaximized === 'front' ? 'Exit fullscreen Front — show all three panes' : 'Maximize Front to the whole view'"
+                  @click.stop="maximizeBlockoutPane('front')"
                 >
                   <BlenderIcon name="maximize" :size="12" />
                 </button>
                 <button
                   type="button"
-                  @click="minimizeBlockoutPane('front')"
                   class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-pointer"
                   title="Minimize Front"
+                  @click="minimizeBlockoutPane('front')"
                 >
                   <BlenderIcon name="minimize" :size="12" />
                 </button>
@@ -6820,7 +6823,7 @@ onUnmounted(() => {
             </div>
             <div v-else class="absolute top-1.5 left-1.5 right-1.5 flex items-center justify-between gap-1 min-w-0">
               <div class="shrink-0 px-1.5 py-0.5 rounded-xs bg-ui-panel/95 border border-ui-borderStrong text-[10px] font-mono text-ui-textPrimary flex items-center gap-1 shadow-xs">
-                <span class="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
+                <span class="w-1.5 h-1.5 rounded-full bg-indigo-400" />
                 <span class="font-bold">Side</span>
                 <span class="text-ui-textMuted">X</span>
               </div>
@@ -6828,29 +6831,29 @@ onUnmounted(() => {
                 class="pointer-events-auto relative z-40 flex items-center bg-ui-panel/95 border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle shrink-0"
                 @pointerdown.stop
               >
-                <button type="button" @pointerdown="onLightWaveNavButton('pan', 'right', $event)" class="p-1 hover:bg-ui-hover cursor-move" :class="isStickyNav('pan') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'" :title="lightWaveNavTitle('pan', 'Pan Side')">
+                <button type="button" class="p-1 hover:bg-ui-hover cursor-move" :class="isStickyNav('pan') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'" :title="lightWaveNavTitle('pan', 'Pan Side')" @pointerdown="onLightWaveNavButton('pan', 'right', $event)">
                   <BlenderIcon name="tool-move" :size="12" />
                 </button>
-                <button type="button" @pointerdown="onLightWaveNavButton('zoom', 'right', $event)" class="p-1 hover:bg-ui-hover cursor-ns-resize" :class="isStickyNav('zoom') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'" :title="lightWaveNavTitle('zoom', 'Zoom Side')">
+                <button type="button" class="p-1 hover:bg-ui-hover cursor-ns-resize" :class="isStickyNav('zoom') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'" :title="lightWaveNavTitle('zoom', 'Zoom Side')" @pointerdown="onLightWaveNavButton('zoom', 'right', $event)">
                   <BlenderIcon name="zoom-in" :size="12" />
                 </button>
-                <button type="button" @click="centerViewOnContents('right')" class="p-1 hover:bg-ui-hover text-ui-textSecondary" title="Frame Side">
+                <button type="button" class="p-1 hover:bg-ui-hover text-ui-textSecondary" title="Frame Side" @click="centerViewOnContents('right')">
                   <BlenderIcon name="view-fit" :size="12" />
                 </button>
                 <button
                   type="button"
-                @click.stop="maximizeBlockoutPane('side')"
                   class="p-1 hover:bg-ui-hover cursor-pointer"
                   :class="layoutStore.blockoutMaximized === 'side' ? 'text-indigo-300 bg-ui-active' : 'text-ui-textSecondary'"
                   :title="layoutStore.blockoutMaximized === 'side' ? 'Exit fullscreen Side — show all three panes' : 'Maximize Side to the whole view'"
+                  @click.stop="maximizeBlockoutPane('side')"
                 >
                   <BlenderIcon name="maximize" :size="12" />
                 </button>
                 <button
                   type="button"
-                  @click="minimizeBlockoutPane('side')"
                   class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-pointer"
                   title="Minimize Side"
+                  @click="minimizeBlockoutPane('side')"
                 >
                   <BlenderIcon name="minimize" :size="12" />
                 </button>
@@ -6878,57 +6881,57 @@ onUnmounted(() => {
             </div>
             <div v-else class="absolute top-1.5 left-1.5 right-1.5 flex items-center justify-between gap-1 min-w-0">
               <div class="shrink-0 px-1.5 py-0.5 rounded-xs bg-ui-panel/95 border border-ui-borderStrong text-[10px] font-mono text-ui-textPrimary flex items-center gap-1 shadow-xs">
-                <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                <span class="w-1.5 h-1.5 rounded-full bg-amber-400" />
                 <span class="font-bold">Persp</span>
               </div>
               <div
                 class="pointer-events-auto relative z-40 flex items-center bg-ui-panel/95 border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle shrink-0"
                 @pointerdown.stop
               >
-                <button type="button" @pointerdown="onLightWaveNavButton('pan', 'persp', $event)" class="p-1 hover:bg-ui-hover cursor-move" :class="isStickyNav('pan') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'" :title="lightWaveNavTitle('pan', 'Pan')">
+                <button type="button" class="p-1 hover:bg-ui-hover cursor-move" :class="isStickyNav('pan') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'" :title="lightWaveNavTitle('pan', 'Pan')" @pointerdown="onLightWaveNavButton('pan', 'persp', $event)">
                   <BlenderIcon name="tool-move" :size="12" />
                 </button>
-                <button type="button" @pointerdown="onLightWaveNavButton('orbit', 'persp', $event)" class="p-1 hover:bg-ui-hover cursor-grab" :class="isStickyNav('orbit') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'" :title="lightWaveNavTitle('orbit', 'Orbit')">
+                <button type="button" class="p-1 hover:bg-ui-hover cursor-grab" :class="isStickyNav('orbit') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'" :title="lightWaveNavTitle('orbit', 'Orbit')" @pointerdown="onLightWaveNavButton('orbit', 'persp', $event)">
                   <BlenderIcon name="tool-rotate" :size="12" />
                 </button>
-                <button type="button" @pointerdown="onLightWaveNavButton('zoom', 'persp', $event)" class="p-1 hover:bg-ui-hover cursor-ns-resize" :class="isStickyNav('zoom') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'" :title="lightWaveNavTitle('zoom', 'Zoom')">
+                <button type="button" class="p-1 hover:bg-ui-hover cursor-ns-resize" :class="isStickyNav('zoom') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'" :title="lightWaveNavTitle('zoom', 'Zoom')" @pointerdown="onLightWaveNavButton('zoom', 'persp', $event)">
                   <BlenderIcon name="zoom-in" :size="12" />
                 </button>
                 <button
                   type="button"
-                  @click.stop="toolStore.stickyViewportControls = !toolStore.stickyViewportControls"
                   class="p-1 hover:bg-ui-hover cursor-pointer"
                   :class="toolStore.stickyViewportControls ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'"
                   :title="stickyCadLockTitle()"
+                  @click.stop="toolStore.stickyViewportControls = !toolStore.stickyViewportControls"
                 >
                   <BlenderIcon :name="toolStore.stickyViewportControls ? 'lock' : 'unlock'" :size="12" />
                 </button>
-                <button type="button" @click="centerViewOnContents('persp')" class="p-1 hover:bg-ui-hover text-ui-textSecondary" title="Frame">
+                <button type="button" class="p-1 hover:bg-ui-hover text-ui-textSecondary" title="Frame" @click="centerViewOnContents('persp')">
                   <BlenderIcon name="view-fit" :size="12" />
                 </button>
                 <button
                   type="button"
-                  @click="toolStore.viewport.xray = !toolStore.viewport.xray"
                   class="p-1 hover:bg-ui-hover cursor-pointer"
                   :class="toolStore.viewport.xray ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary'"
                   title="X-Ray Transparent (Alt+Z)"
+                  @click="toolStore.viewport.xray = !toolStore.viewport.xray"
                 >
                   <BlenderIcon name="xray" :size="12" />
                 </button>
                 <button
                   type="button"
-                @click.stop="maximizeBlockoutPane('persp')"
                   class="p-1 hover:bg-ui-hover cursor-pointer"
                   :class="layoutStore.blockoutMaximized === 'persp' ? 'text-amber-300 bg-ui-active' : 'text-ui-textSecondary'"
                   :title="layoutStore.blockoutMaximized === 'persp' ? 'Exit fullscreen Persp — show all three panes' : 'Maximize Persp to the whole view'"
+                  @click.stop="maximizeBlockoutPane('persp')"
                 >
                   <BlenderIcon name="maximize" :size="12" />
                 </button>
                 <button
                   type="button"
-                  @click.stop="minimizeBlockoutPane('persp')"
                   class="p-1 hover:bg-ui-hover text-ui-textSecondary cursor-pointer"
                   title="Minimize Persp"
+                  @click.stop="minimizeBlockoutPane('persp')"
                 >
                   <BlenderIcon name="minimize" :size="12" />
                 </button>
@@ -6974,34 +6977,34 @@ onUnmounted(() => {
       <!-- 3. QUAD VIEWPORT LIGHTWAVE CONTROLS -->
       <template v-else>
         <!-- Center Divider Lines -->
-        <div class="absolute inset-x-0 top-1/2 h-px bg-ui-borderStrong/60 pointer-events-none z-10"></div>
-        <div class="absolute inset-y-0 left-1/2 w-px bg-ui-borderStrong/60 pointer-events-none z-10"></div>
+        <div class="absolute inset-x-0 top-1/2 h-px bg-ui-borderStrong/60 pointer-events-none z-10" />
+        <div class="absolute inset-y-0 left-1/2 w-px bg-ui-borderStrong/60 pointer-events-none z-10" />
 
         <!-- QUADRANT 1: TOP-LEFT (Top Ortho) -->
         <div class="absolute top-2 left-2 z-20 flex items-center justify-between w-[calc(50%-16px)]">
           <!-- View Label -->
           <div class="px-2 py-0.5 rounded-xs bg-ui-panel/95 border border-ui-borderStrong text-[10px] font-mono text-ui-textPrimary flex items-center gap-1.5 shadow-xs">
-            <span class="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+            <span class="w-1.5 h-1.5 rounded-full bg-cyan-400" />
             <span class="font-bold">Top Ortho</span>
             <span class="text-ui-textMuted">[Y+]</span>
           </div>
 
           <!-- LightWave Nav Buttons (Pan, Zoom, Center, Maximize for 2D Ortho) -->
           <div class="flex items-center bg-ui-panel/95 text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle">
-            <button type="button" @pointerdown="onLightWaveNavButton('pan', 'top', $event)" class="p-1 hover:bg-ui-hover cursor-move transition" :class="isStickyNav('pan') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('pan', 'Pan Top View (Drag to pan)')">
+            <button type="button" class="p-1 hover:bg-ui-hover cursor-move transition" :class="isStickyNav('pan') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('pan', 'Pan Top View (Drag to pan)')" @pointerdown="onLightWaveNavButton('pan', 'top', $event)">
               <BlenderIcon name="tool-move" :size="12" />
             </button>
-            <button type="button" @pointerdown="onLightWaveNavButton('zoom', 'top', $event)" class="p-1 hover:bg-ui-hover cursor-ns-resize transition" :class="isStickyNav('zoom') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('zoom', 'Zoom Top View (Drag up/down to zoom)')">
+            <button type="button" class="p-1 hover:bg-ui-hover cursor-ns-resize transition" :class="isStickyNav('zoom') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('zoom', 'Zoom Top View (Drag up/down to zoom)')" @pointerdown="onLightWaveNavButton('zoom', 'top', $event)">
               <BlenderIcon name="zoom-in" :size="12" />
             </button>
-            <button @click="centerViewOnContents('top')" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Center Top View on Model">
+            <button class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Center Top View on Model" @click="centerViewOnContents('top')">
               <BlenderIcon name="view-fit" :size="12" />
             </button>
             <button
               type="button"
-              @click="leaveQuadTo('top')"
               class="p-1 hover:bg-ui-hover text-ui-textAccent bg-ui-active transition cursor-pointer"
               title="Leave Quad View — maximize Top (Ctrl+Alt+Q)"
+              @click="leaveQuadTo('top')"
             >
               <BlenderIcon name="quad-view" :size="12" />
             </button>
@@ -7011,48 +7014,48 @@ onUnmounted(() => {
         <!-- QUADRANT 2: TOP-RIGHT (Perspective) -->
         <div class="absolute top-2 right-2 z-20 flex items-center justify-between w-[calc(50%-16px)]">
           <div class="px-2 py-0.5 rounded-xs bg-ui-panel/95 border border-ui-borderStrong text-[10px] font-mono text-ui-textPrimary flex items-center gap-1.5 shadow-xs">
-            <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+            <span class="w-1.5 h-1.5 rounded-full bg-amber-400" />
             <span class="font-bold">Perspective 3D</span>
             <span class="text-ui-textMuted">[User]</span>
           </div>
 
           <!-- Full 3D Nav Buttons (Pan, Rotate, Zoom, Center, X-Ray, Maximize) -->
           <div class="flex items-center bg-ui-panel/95 text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle">
-            <button type="button" @pointerdown="onLightWaveNavButton('pan', 'persp', $event)" class="p-1 hover:bg-ui-hover cursor-move transition" :class="isStickyNav('pan') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('pan', 'Pan View')">
+            <button type="button" class="p-1 hover:bg-ui-hover cursor-move transition" :class="isStickyNav('pan') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('pan', 'Pan View')" @pointerdown="onLightWaveNavButton('pan', 'persp', $event)">
               <BlenderIcon name="tool-move" :size="12" />
             </button>
-            <button type="button" @pointerdown="onLightWaveNavButton('orbit', 'persp', $event)" class="p-1 hover:bg-ui-hover cursor-grab transition" :class="isStickyNav('orbit') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('orbit', 'Orbit 3D View')">
+            <button type="button" class="p-1 hover:bg-ui-hover cursor-grab transition" :class="isStickyNav('orbit') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('orbit', 'Orbit 3D View')" @pointerdown="onLightWaveNavButton('orbit', 'persp', $event)">
               <BlenderIcon name="tool-rotate" :size="12" />
             </button>
-            <button type="button" @pointerdown="onLightWaveNavButton('zoom', 'persp', $event)" class="p-1 hover:bg-ui-hover cursor-ns-resize transition" :class="isStickyNav('zoom') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('zoom', 'Zoom View')">
+            <button type="button" class="p-1 hover:bg-ui-hover cursor-ns-resize transition" :class="isStickyNav('zoom') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('zoom', 'Zoom View')" @pointerdown="onLightWaveNavButton('zoom', 'persp', $event)">
               <BlenderIcon name="zoom-in" :size="12" />
             </button>
             <button
               type="button"
-              @click.stop="toolStore.stickyViewportControls = !toolStore.stickyViewportControls"
               class="p-1 hover:bg-ui-hover cursor-pointer transition"
               :class="toolStore.stickyViewportControls ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'"
               :title="stickyCadLockTitle()"
+              @click.stop="toolStore.stickyViewportControls = !toolStore.stickyViewportControls"
             >
               <BlenderIcon :name="toolStore.stickyViewportControls ? 'lock' : 'unlock'" :size="12" />
             </button>
-            <button @click="centerViewOnContents('persp')" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Center View on Model">
+            <button class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Center View on Model" @click="centerViewOnContents('persp')">
               <BlenderIcon name="view-fit" :size="12" />
             </button>
             <button
               type="button"
-              @click="toolStore.viewport.xray = !toolStore.viewport.xray"
               class="p-1 hover:bg-ui-hover cursor-pointer transition"
               :class="toolStore.viewport.xray ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'"
               title="X-Ray Transparent (Alt+Z)"
+              @click="toolStore.viewport.xray = !toolStore.viewport.xray"
             >
               <BlenderIcon name="xray" :size="12" />
             </button>
             <button
               type="button"
-              @click="leaveQuadTo('persp')"
               class="p-1 hover:bg-ui-hover text-ui-textAccent bg-ui-active transition cursor-pointer"
               title="Leave Quad View — maximize Perspective (Ctrl+Alt+Q)"
+              @click="leaveQuadTo('persp')"
             >
               <BlenderIcon name="quad-view" :size="12" />
             </button>
@@ -7062,27 +7065,27 @@ onUnmounted(() => {
         <!-- QUADRANT 3: BOTTOM-LEFT (Front Ortho) -->
         <div class="absolute top-[calc(50%+8px)] left-2 z-20 flex items-center justify-between w-[calc(50%-16px)]">
           <div class="px-2 py-0.5 rounded-xs bg-ui-panel/95 border border-ui-borderStrong text-[10px] font-mono text-ui-textPrimary flex items-center gap-1.5 shadow-xs">
-            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400" />
             <span class="font-bold">Front Ortho</span>
             <span class="text-ui-textMuted">[Z-]</span>
           </div>
 
           <!-- LightWave Nav Buttons (Pan, Zoom, Center, Maximize for 2D Ortho) -->
           <div class="flex items-center bg-ui-panel/95 text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle">
-            <button type="button" @pointerdown="onLightWaveNavButton('pan', 'front', $event)" class="p-1 hover:bg-ui-hover cursor-move transition" :class="isStickyNav('pan') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('pan', 'Pan Front View (Drag to pan)')">
+            <button type="button" class="p-1 hover:bg-ui-hover cursor-move transition" :class="isStickyNav('pan') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('pan', 'Pan Front View (Drag to pan)')" @pointerdown="onLightWaveNavButton('pan', 'front', $event)">
               <BlenderIcon name="tool-move" :size="12" />
             </button>
-            <button type="button" @pointerdown="onLightWaveNavButton('zoom', 'front', $event)" class="p-1 hover:bg-ui-hover cursor-ns-resize transition" :class="isStickyNav('zoom') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('zoom', 'Zoom Front View (Drag up/down to zoom)')">
+            <button type="button" class="p-1 hover:bg-ui-hover cursor-ns-resize transition" :class="isStickyNav('zoom') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('zoom', 'Zoom Front View (Drag up/down to zoom)')" @pointerdown="onLightWaveNavButton('zoom', 'front', $event)">
               <BlenderIcon name="zoom-in" :size="12" />
             </button>
-            <button @click="centerViewOnContents('front')" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Center Front View on Model">
+            <button class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Center Front View on Model" @click="centerViewOnContents('front')">
               <BlenderIcon name="view-fit" :size="12" />
             </button>
             <button
               type="button"
-              @click="leaveQuadTo('front')"
               class="p-1 hover:bg-ui-hover text-ui-textAccent bg-ui-active transition cursor-pointer"
               title="Leave Quad View — maximize Front (Ctrl+Alt+Q)"
+              @click="leaveQuadTo('front')"
             >
               <BlenderIcon name="quad-view" :size="12" />
             </button>
@@ -7092,27 +7095,27 @@ onUnmounted(() => {
         <!-- QUADRANT 4: BOTTOM-RIGHT (Right Ortho) -->
         <div class="absolute top-[calc(50%+8px)] right-2 z-20 flex items-center justify-between w-[calc(50%-16px)]">
           <div class="px-2 py-0.5 rounded-xs bg-ui-panel/95 border border-ui-borderStrong text-[10px] font-mono text-ui-textPrimary flex items-center gap-1.5 shadow-xs">
-            <span class="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
+            <span class="w-1.5 h-1.5 rounded-full bg-indigo-400" />
             <span class="font-bold">Right Ortho</span>
             <span class="text-ui-textMuted">[X-]</span>
           </div>
 
           <!-- LightWave Nav Buttons (Pan, Zoom, Center, Maximize for 2D Ortho) -->
           <div class="flex items-center bg-ui-panel/95 text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-xs divide-x divide-ui-borderSubtle">
-            <button type="button" @pointerdown="onLightWaveNavButton('pan', 'right', $event)" class="p-1 hover:bg-ui-hover cursor-move transition" :class="isStickyNav('pan') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('pan', 'Pan Right View (Drag to pan)')">
+            <button type="button" class="p-1 hover:bg-ui-hover cursor-move transition" :class="isStickyNav('pan') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('pan', 'Pan Right View (Drag to pan)')" @pointerdown="onLightWaveNavButton('pan', 'right', $event)">
               <BlenderIcon name="tool-move" :size="12" />
             </button>
-            <button type="button" @pointerdown="onLightWaveNavButton('zoom', 'right', $event)" class="p-1 hover:bg-ui-hover cursor-ns-resize transition" :class="isStickyNav('zoom') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('zoom', 'Zoom Right View (Drag up/down to zoom)')">
+            <button type="button" class="p-1 hover:bg-ui-hover cursor-ns-resize transition" :class="isStickyNav('zoom') ? 'text-ui-textAccent bg-ui-active' : 'text-ui-textSecondary hover:text-ui-textAccent'" :title="lightWaveNavTitle('zoom', 'Zoom Right View (Drag up/down to zoom)')" @pointerdown="onLightWaveNavButton('zoom', 'right', $event)">
               <BlenderIcon name="zoom-in" :size="12" />
             </button>
-            <button @click="centerViewOnContents('right')" class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Center Right View on Model">
+            <button class="p-1 hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textAccent transition" title="Center Right View on Model" @click="centerViewOnContents('right')">
               <BlenderIcon name="view-fit" :size="12" />
             </button>
             <button
               type="button"
-              @click="leaveQuadTo('right')"
               class="p-1 hover:bg-ui-hover text-ui-textAccent bg-ui-active transition cursor-pointer"
               title="Leave Quad View — maximize Right (Ctrl+Alt+Q)"
+              @click="leaveQuadTo('right')"
             >
               <BlenderIcon name="quad-view" :size="12" />
             </button>
@@ -7126,7 +7129,7 @@ onUnmounted(() => {
       v-if="toolStore.viewport.crtFilter" 
       class="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_center,_rgba(0,0,0,0)_0%,_rgba(0,0,0,0.4)_100%)] opacity-80"
     >
-      <div class="w-full h-full bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%)] bg-[length:100%_4px]"></div>
+      <div class="w-full h-full bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%)] bg-[length:100%_4px]" />
     </div>
 
     <!-- Knife & Loop Cut Interactive Screen Overlay Layer -->
@@ -7137,17 +7140,17 @@ onUnmounted(() => {
       <!-- Loop Cut Preview Lines -->
       <template v-if="operatorManager.activeOperator instanceof LoopCutOperator">
         <g :key="'lc_' + operatorManager.state.value.previewTick">
-        <line
-          v-for="(seg, idx) in (operatorManager.activeOperator as LoopCutOperator).previewSegments"
-          :key="'lcseg_' + idx"
-          :x1="projectWorldToScreen(seg.p1).x"
-          :y1="projectWorldToScreen(seg.p1).y"
-          :x2="projectWorldToScreen(seg.p2).x"
-          :y2="projectWorldToScreen(seg.p2).y"
-          stroke="#f59e0b"
-          stroke-width="2.5"
-          stroke-linecap="round"
-        />
+          <line
+            v-for="(seg, idx) in (operatorManager.activeOperator as LoopCutOperator).previewSegments"
+            :key="'lcseg_' + idx"
+            :x1="projectWorldToScreen(seg.p1).x"
+            :y1="projectWorldToScreen(seg.p1).y"
+            :x2="projectWorldToScreen(seg.p2).x"
+            :y2="projectWorldToScreen(seg.p2).y"
+            stroke="#f59e0b"
+            stroke-width="2.5"
+            stroke-linecap="round"
+          />
         </g>
       </template>
 
@@ -7380,21 +7383,23 @@ onUnmounted(() => {
       <BlenderIcon name="marquee" :size="13" color="#f59e0b" />
       <span>Box Select: Drag to select</span>
       <span class="text-[10px] text-ui-textMuted">(Esc / Click &times; to cancel)</span>
-      <button @click="toolStore.isBoxSelectActive = false" class="ml-1 text-slate-400 hover:text-white">&times;</button>
+      <button class="ml-1 text-slate-400 hover:text-white" @click="toolStore.isBoxSelectActive = false">&times;</button>
     </div>
 
     <PolyDrawPanel />
     <ShapeDrawPanel v-if="toolStore.appMode === 'blockout'" @start="fresh => startModalOperator('shapedraw', { fresh })" />
 
-    <div v-if="toolStore.stylusModeNotifications && operatorManager.activeOperator instanceof LoopCutOperator" data-floating-panel
-      class="absolute top-3 left-1/2 -translate-x-1/2 z-50 w-[440px] max-w-[95%] bg-ui-panel border border-ui-borderStrong rounded shadow-xl p-3 text-xs pointer-events-auto">
-      <div class="flex justify-between items-center mb-2"><strong>Loop Cut</strong><button @click="operatorManager.cancel()" title="Cancel (Esc)">×</button></div>
+    <div
+      v-if="toolStore.stylusModeNotifications && operatorManager.activeOperator instanceof LoopCutOperator" data-floating-panel
+      class="absolute top-3 left-1/2 -translate-x-1/2 z-50 w-[440px] max-w-[95%] bg-ui-panel border border-ui-borderStrong rounded shadow-xl p-3 text-xs pointer-events-auto"
+    >
+      <div class="flex justify-between items-center mb-2"><strong>Loop Cut</strong><button title="Cancel (Esc)" @click="operatorManager.cancel()">×</button></div>
       <p class="text-ui-textSecondary leading-relaxed mb-2">{{ operatorManager.state.value.statusText }}</p>
       <div class="flex flex-wrap items-center gap-2">
         <template v-if="(operatorManager.activeOperator as LoopCutOperator).loopState === 'FINDING_RING'">
-          <button class="px-2 py-1 bg-ui-input rounded" @click="loopCutAction('less')" title="Fewer cuts">−</button>
+          <button class="px-2 py-1 bg-ui-input rounded" title="Fewer cuts" @click="loopCutAction('less')">−</button>
           <span>{{ (operatorManager.activeOperator as LoopCutOperator).cutCount }} cuts</span>
-          <button class="px-2 py-1 bg-ui-input rounded" @click="loopCutAction('more')" title="More cuts">+</button>
+          <button class="px-2 py-1 bg-ui-input rounded" title="More cuts" @click="loopCutAction('more')">+</button>
         </template>
         <button class="px-2 py-1 bg-ui-input rounded disabled:opacity-40" :disabled="!(operatorManager.activeOperator as LoopCutOperator).ringEdgeIds.length" @click="loopCutAction('center')">Apply centered</button>
         <button class="px-2 py-1 bg-emerald-700 rounded text-white disabled:opacity-40" :disabled="!(operatorManager.activeOperator as LoopCutOperator).ringEdgeIds.length" @click="loopCutAction('advance')">{{ (operatorManager.activeOperator as LoopCutOperator).loopState === 'SLIDING' ? 'Apply' : 'Slide' }}</button>
@@ -7412,17 +7417,17 @@ onUnmounted(() => {
       <!-- Panel Header Bar (Draggable) -->
       <div 
         class="flex items-center justify-between px-2.5 py-1 bg-ui-header border-b border-ui-borderSubtle cursor-move rounded-t-xs text-xs text-ui-textMuted group"
-        @pointerdown="startHudDrag"
         title="Drag to reposition HUD"
+        @pointerdown="startHudDrag"
       >
         <div class="flex items-center gap-1.5">
           <GripHorizontal class="w-3.5 h-3.5 text-ui-textMuted group-hover:text-ui-textSecondary transition" />
           <span class="font-semibold text-ui-textPrimary text-[11px]">{{ operatorManager.state.value.operatorName }}</span>
         </div>
         <button 
-          @click="operatorManager.cancel()"
           class="p-0.5 text-ui-textMuted hover:text-rose-400 hover:bg-rose-950/40 rounded-xs transition"
           title="Cancel Operation (Esc)"
+          @click="operatorManager.cancel()"
         >
           <BlenderIcon name="close" :size="14" />
         </button>
@@ -7457,12 +7462,12 @@ onUnmounted(() => {
               <!-- Cut-Through Toggle -->
               <button
                 type="button"
-                @click="knifeAction('toggleCutThrough')"
                 class="px-2 py-0.5 rounded-xs text-[10px] font-semibold border transition active:scale-95 cursor-pointer"
                 :class="(operatorManager.activeOperator as KnifeOperator).cutThrough
                   ? 'bg-amber-500/25 text-amber-300 border-amber-400/50 hover:bg-amber-500/35'
                   : 'bg-ui-surface text-ui-textMuted border-ui-borderSubtle hover:text-ui-textSecondary'"
                 title="Cut through backfacing geometry (C)"
+                @click="knifeAction('toggleCutThrough')"
               >
                 Cut-Through (C): {{ (operatorManager.activeOperator as KnifeOperator).cutThrough ? 'ON' : 'OFF' }}
               </button>
@@ -7470,12 +7475,12 @@ onUnmounted(() => {
               <!-- Angle Snapping Toggle -->
               <button
                 type="button"
-                @click="knifeAction('toggleAngleSnap')"
                 class="px-2 py-0.5 rounded-xs text-[10px] font-semibold border transition active:scale-95 cursor-pointer"
                 :class="(operatorManager.activeOperator as KnifeOperator).angleSnapping
                   ? 'bg-sky-500/25 text-sky-300 border-sky-400/50 hover:bg-sky-500/35'
                   : 'bg-ui-surface text-ui-textMuted border-ui-borderSubtle hover:text-ui-textSecondary'"
                 title="Constrain angle increments (A)"
+                @click="knifeAction('toggleAngleSnap')"
               >
                 Angle-Snap (A): {{ (operatorManager.activeOperator as KnifeOperator).angleSnapping ? (operatorManager.activeOperator as KnifeOperator).snapAngleDegrees + '°' : 'OFF' }}
               </button>
@@ -7484,9 +7489,9 @@ onUnmounted(() => {
               <button
                 v-if="(operatorManager.activeOperator as KnifeOperator).angleSnapping"
                 type="button"
-                @click="knifeAction('cycleAngle')"
                 class="px-1.5 py-0.5 rounded-xs text-[10px] font-mono text-sky-300 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-400/30 transition active:scale-95 cursor-pointer"
                 title="Cycle snap angle: 30° / 45° / 90°"
+                @click="knifeAction('cycleAngle')"
               >
                 {{ (operatorManager.activeOperator as KnifeOperator).snapAngleDegrees }}° ⟳
               </button>
@@ -7494,13 +7499,13 @@ onUnmounted(() => {
               <!-- New Cut Button -->
               <button
                 type="button"
-                @click="knifeAction('newCut')"
                 :disabled="(operatorManager.activeOperator as KnifeOperator).currentChain.length < 2"
                 class="px-2 py-0.5 rounded-xs text-[10px] font-semibold border transition active:scale-95 cursor-pointer"
                 :class="(operatorManager.activeOperator as KnifeOperator).currentChain.length >= 2
                   ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40 hover:bg-emerald-500/30'
                   : 'bg-ui-surface text-ui-textMuted border-ui-borderSubtle opacity-40'"
                 title="Finish current cut stroke and start a new cut (E)"
+                @click="knifeAction('newCut')"
               >
                 New Cut (E)
               </button>
@@ -7508,14 +7513,14 @@ onUnmounted(() => {
               <!-- Undo Point Button -->
               <button
                 type="button"
-                @click="knifeAction('undoPoint')"
                 :disabled="(operatorManager.activeOperator as KnifeOperator).currentChain.length === 0 && (operatorManager.activeOperator as KnifeOperator).completedChains.length === 0"
                 class="px-2 py-0.5 rounded-xs text-[10px] text-ui-textSecondary hover:text-ui-text bg-ui-surface border border-ui-borderSubtle transition active:scale-95 cursor-pointer disabled:opacity-40"
                 title="Undo last point (Ctrl+Z / Backspace)"
+                @click="knifeAction('undoPoint')"
               >
                 Undo
               </button>
-              <button type="button" @click="knifeAction('redoPoint')" class="px-2 py-0.5 rounded-xs text-[10px] bg-ui-surface border border-ui-borderSubtle" title="Redo cut point (Ctrl+Shift+Z)">Redo</button>
+              <button type="button" class="px-2 py-0.5 rounded-xs text-[10px] bg-ui-surface border border-ui-borderSubtle" title="Redo cut point (Ctrl+Shift+Z)" @click="knifeAction('redoPoint')">Redo</button>
             </div>
           </template>
           <div
@@ -7523,23 +7528,23 @@ onUnmounted(() => {
             class="flex items-center bg-ui-input rounded-xs p-0.5 border border-ui-borderSubtle"
           >
             <button
-              @click="triggerAxisConstraint('x')"
               class="px-1.5 py-0.5 rounded-xs text-[10px] font-bold text-rose-400 hover:bg-rose-500/20 active:scale-95 transition"
               title="Lock to X Axis (X)"
+              @click="triggerAxisConstraint('x')"
             >
               X
             </button>
             <button
-              @click="triggerAxisConstraint('y')"
               class="px-1.5 py-0.5 rounded-xs text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/20 active:scale-95 transition"
               title="Lock to Y Axis (Y)"
+              @click="triggerAxisConstraint('y')"
             >
               Y
             </button>
             <button
-              @click="triggerAxisConstraint('z')"
               class="px-1.5 py-0.5 rounded-xs text-[10px] font-bold text-sky-400 hover:bg-sky-500/20 active:scale-95 transition"
               title="Lock to Z Axis (Z)"
+              @click="triggerAxisConstraint('z')"
             >
               Z
             </button>
@@ -7568,7 +7573,7 @@ onUnmounted(() => {
               Fill face
             </button>
             <label v-if="operatorManager.activeOperator instanceof PolyBuildOperator" class="flex items-center gap-1 px-2 text-[11px] text-ui-textSecondary" title="Keep the last edge after filling to build a connected strip of faces">
-              <input type="checkbox" v-model="(operatorManager.activeOperator as PolyBuildOperator).continueStrip" />
+              <input v-model="(operatorManager.activeOperator as PolyBuildOperator).continueStrip" type="checkbox">
               Continue strip
             </label>
             <button
@@ -7608,59 +7613,59 @@ onUnmounted(() => {
             </button>
             <button 
               v-if="!(operatorManager.activeOperator instanceof PolyBuildOperator) && !(operatorManager.activeOperator instanceof PolyDrawOperator) && !(operatorManager.activeOperator instanceof KnifeOperator)"
-              @click="triggerToggleSnap"
               class="px-2 py-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[11px] text-ui-textSecondary font-medium active:scale-95 transition"
               title="Toggle Grid / Angle Snapping (Ctrl)"
+              @click="triggerToggleSnap"
             >
               Snap
             </button>
 
             <button 
               v-if="!(operatorManager.activeOperator instanceof PolyBuildOperator) && !(operatorManager.activeOperator instanceof PolyDrawOperator) && !(operatorManager.activeOperator instanceof KnifeOperator)"
-              @click="triggerTogglePrecision"
               class="px-2 py-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[11px] text-ui-textSecondary font-medium active:scale-95 transition"
               title="Precision Mode (Shift)"
+              @click="triggerTogglePrecision"
             >
               Slow
             </button>
 
             <button 
               v-if="operatorManager.state.value.operatorName === 'Inset'"
-              @click="triggerInsetIndividual"
               class="px-2 py-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[11px] text-ui-textSecondary font-medium active:scale-95 transition"
               title="Individual faces (I)"
+              @click="triggerInsetIndividual"
             >
               Individual
             </button>
             <button 
               v-if="operatorManager.state.value.operatorName === 'Inset'"
-              @click="triggerInsetBoundary"
               class="px-2 py-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[11px] text-ui-textSecondary font-medium active:scale-95 transition"
               title="Inset mesh boundary edges (B)"
+              @click="triggerInsetBoundary"
             >
               Boundary
             </button>
             <button 
               v-if="operatorManager.state.value.operatorName === 'Inset'"
-              @click="triggerInsetOutset"
               class="px-2 py-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[11px] text-ui-textSecondary font-medium active:scale-95 transition"
               title="Outset (O)"
+              @click="triggerInsetOutset"
             >
               Outset
             </button>
             <button 
               v-if="operatorManager.state.value.operatorName.includes('Primitive')"
-              @click="triggerToggleOrientation"
               class="px-2 py-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[11px] text-amber-400 font-medium active:scale-95 transition"
               title="Toggle Align to World vs Surface (O)"
+              @click="triggerToggleOrientation"
             >
               Align
             </button>
 
             <button 
-              @click="triggerStepBack"
               class="px-2 py-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[11px] text-ui-textMuted hover:text-ui-textPrimary active:scale-95 transition"
               title="Step Back / Cancel Stage (RMB)"
+              @click="triggerStepBack"
             >
               Back
             </button>
@@ -7669,18 +7674,18 @@ onUnmounted(() => {
           <!-- Action Buttons -->
           <div class="flex items-center gap-1.5 pl-1.5 border-l border-ui-borderSubtle">
             <button 
-              @click="hudConfirm()" 
-              class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs rounded-xs shadow-xs flex items-center gap-1 active:scale-95 transition border border-emerald-500/80"
+              class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs rounded-xs shadow-xs flex items-center gap-1 active:scale-95 transition border border-emerald-500/80" 
               :title="hudConfirmTitle"
+              @click="hudConfirm()"
             >
               <BlenderIcon name="check" :size="14" />
               <span>{{ hudConfirmLabel }}</span>
             </button>
 
             <button 
-              @click="operatorManager.cancel()" 
-              class="px-2 py-1 bg-ui-surface hover:bg-rose-950/60 hover:text-rose-300 text-ui-textMuted border border-ui-borderSubtle text-xs rounded-xs active:scale-95 transition"
+              class="px-2 py-1 bg-ui-surface hover:bg-rose-950/60 hover:text-rose-300 text-ui-textMuted border border-ui-borderSubtle text-xs rounded-xs active:scale-95 transition" 
               title="Cancel Operation (Esc)"
+              @click="operatorManager.cancel()"
             >
               <BlenderIcon name="close" :size="14" />
             </button>
@@ -7698,32 +7703,32 @@ onUnmounted(() => {
     >
       <div class="px-2 py-1 bg-ui-header border-b border-ui-borderSubtle text-[10px] text-amber-400 font-bold uppercase tracking-wider flex items-center justify-between">
         <span>{{ toolStore.selectMode.toUpperCase() }} SPECIALS</span>
-        <button @click="showSpecialsMenu = false" class="text-ui-textMuted hover:text-white">&times;</button>
+        <button class="text-ui-textMuted hover:text-white" @click="showSpecialsMenu = false">&times;</button>
       </div>
 
       <div class="py-1 divide-y divide-ui-borderSubtle/40">
         <!-- VERTEX SPECIALS -->
         <template v-if="toolStore.selectMode === 'vertex'">
           <div class="py-0.5">
-            <button @click="execSpecial('connect-path')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('connect-path')">
               <span>Connect Path</span>
               <span class="text-[10px] text-amber-400 font-bold">J</span>
             </button>
-            <button @click="execSpecial('merge-center')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('merge-center')">
               <span>Merge Vertices</span>
               <span class="text-[10px] text-amber-400 font-bold">M</span>
             </button>
-            <button @click="execSpecial('bevel')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('bevel')">
               <span>Bevel Connecting Edges</span>
               <span class="text-[10px] text-ui-textMuted font-mono">Shift+Ctrl+B</span>
             </button>
-            <button @click="execSpecial('fill-face')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('fill-face')">
               <span>New Face from Verts</span>
               <span class="text-[10px] text-amber-400 font-bold">F</span>
             </button>
           </div>
           <div class="pt-1">
-            <button @click="execSpecial('delete')" class="w-full text-left px-2 py-1 hover:bg-rose-950/40 text-rose-400 rounded-xs flex items-center justify-between">
+            <button class="w-full text-left px-2 py-1 hover:bg-rose-950/40 text-rose-400 rounded-xs flex items-center justify-between" @click="execSpecial('delete')">
               <span>Delete Vertices</span>
               <span class="text-[10px] font-bold">X</span>
             </button>
@@ -7733,25 +7738,25 @@ onUnmounted(() => {
         <!-- EDGE SPECIALS -->
         <template v-else-if="toolStore.selectMode === 'edge'">
           <div class="py-0.5">
-            <button @click="execSpecial('subdivide')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('subdivide')">
               <span>Subdivide</span>
               <span class="text-[10px] text-amber-400 font-bold">W</span>
             </button>
-            <button @click="execSpecial('loopcut')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('loopcut')">
               <span>Loop Cut and Slide</span>
               <span class="text-[10px] text-amber-400 font-bold">Ctrl+R</span>
             </button>
-            <button @click="execSpecial('bevel')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('bevel')">
               <span>Bevel Edges</span>
               <span class="text-[10px] text-amber-400 font-bold">Ctrl+B</span>
             </button>
-            <button @click="execSpecial('fill-face')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('fill-face')">
               <span>Bridge / Fill Face</span>
               <span class="text-[10px] text-amber-400 font-bold">F</span>
             </button>
           </div>
           <div class="pt-1">
-            <button @click="execSpecial('delete')" class="w-full text-left px-2 py-1 hover:bg-rose-950/40 text-rose-400 rounded-xs flex items-center justify-between">
+            <button class="w-full text-left px-2 py-1 hover:bg-rose-950/40 text-rose-400 rounded-xs flex items-center justify-between" @click="execSpecial('delete')">
               <span>Delete Edges</span>
               <span class="text-[10px] font-bold">X</span>
             </button>
@@ -7761,37 +7766,37 @@ onUnmounted(() => {
         <!-- FACE SPECIALS -->
         <template v-else-if="toolStore.selectMode === 'face'">
           <div class="py-0.5">
-            <button @click="execSpecial('extrude')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('extrude')">
               <span>Extrude Faces</span>
               <span class="text-[10px] text-amber-400 font-bold">E</span>
             </button>
-            <button @click="execSpecial('subdivide')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('subdivide')">
               <span>Subdivide</span>
               <span class="text-[10px] text-amber-400 font-bold">W</span>
             </button>
-            <button @click="execSpecial('extrude-individual')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('extrude-individual')">
               <span>Extrude Individual</span>
               <span class="text-[10px] text-amber-400 font-bold">Alt+E</span>
             </button>
-            <button @click="execSpecial('inset')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('inset')">
               <span>Inset Faces</span>
               <span class="text-[10px] text-amber-400 font-bold">I</span>
             </button>
-            <button @click="execSpecial('poke')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('poke')">
               <span>Poke Face (Centroid)</span>
               <span class="text-[10px] text-ui-textMuted font-mono">Alt+P</span>
             </button>
-            <button @click="execSpecial('triangulate')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('triangulate')">
               <span>Triangulate Faces</span>
               <span class="text-[10px] text-ui-textMuted font-mono">Ctrl+T</span>
             </button>
-            <button @click="execSpecial('flip-normals')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('flip-normals')">
               <span>Flip Normals</span>
               <span class="text-[10px] text-ui-textMuted font-mono">Shift+N</span>
             </button>
           </div>
           <div class="pt-1">
-            <button @click="execSpecial('delete')" class="w-full text-left px-2 py-1 hover:bg-rose-950/40 text-rose-400 rounded-xs flex items-center justify-between">
+            <button class="w-full text-left px-2 py-1 hover:bg-rose-950/40 text-rose-400 rounded-xs flex items-center justify-between" @click="execSpecial('delete')">
               <span>Delete Faces</span>
               <span class="text-[10px] font-bold">X</span>
             </button>
@@ -7801,31 +7806,31 @@ onUnmounted(() => {
         <!-- OBJECT SPECIALS -->
         <template v-else-if="toolStore.selectMode === 'object'">
           <div class="py-0.5">
-            <button @click="execSpecial('origin-geometry')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('origin-geometry')">
               <span>Set Origin to Geometry</span>
             </button>
-            <button @click="execSpecial('origin-cursor')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('origin-cursor')">
               <span>Set Origin to 3D Cursor</span>
             </button>
-            <button @click="execSpecial('subdivide')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('subdivide')">
               <span>Subdivide</span>
               <span class="text-[10px] text-amber-400 font-bold">W</span>
             </button>
-            <button @click="execSpecial('duplicate')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('duplicate')">
               <span>Duplicate Objects</span>
               <span class="text-[10px] text-amber-400 font-bold">Shift+D</span>
             </button>
-            <button @click="execSpecial('join')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('join')">
               <span>Join Meshes</span>
               <span class="text-[10px] text-amber-400 font-bold">Ctrl+J</span>
             </button>
-            <button @click="execSpecial('separate')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('separate')">
               <span>Separate Selection</span>
               <span class="text-[10px] text-amber-400 font-bold">P</span>
             </button>
           </div>
           <div class="pt-1">
-            <button @click="execSpecial('delete')" class="w-full text-left px-2 py-1 hover:bg-rose-950/40 text-rose-400 rounded-xs flex items-center justify-between">
+            <button class="w-full text-left px-2 py-1 hover:bg-rose-950/40 text-rose-400 rounded-xs flex items-center justify-between" @click="execSpecial('delete')">
               <span>Delete Object</span>
               <span class="text-[10px] font-bold">X / Del</span>
             </button>
@@ -7835,19 +7840,19 @@ onUnmounted(() => {
         <!-- BONE SPECIALS -->
         <template v-else-if="toolStore.selectMode === 'bone'">
           <div class="py-0.5">
-            <button @click="execSpecial('extrude-bone')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('extrude-bone')">
               <span>Extrude Bone</span>
               <span class="text-[10px] text-amber-400 font-bold">E</span>
             </button>
-            <button @click="execSpecial('subdivide-bone')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('subdivide-bone')">
               <span>Subdivide Bone</span>
             </button>
-            <button @click="execSpecial('symmetrize-bone')" class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary">
+            <button class="w-full text-left px-2 py-1 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary" @click="execSpecial('symmetrize-bone')">
               <span>Symmetrize Armature</span>
             </button>
           </div>
           <div class="pt-1">
-            <button @click="execSpecial('delete-bone')" class="w-full text-left px-2 py-1 hover:bg-rose-950/40 text-rose-400 rounded-xs flex items-center justify-between">
+            <button class="w-full text-left px-2 py-1 hover:bg-rose-950/40 text-rose-400 rounded-xs flex items-center justify-between" @click="execSpecial('delete-bone')">
               <span>Delete Bone</span>
               <span class="text-[10px] font-bold">X</span>
             </button>

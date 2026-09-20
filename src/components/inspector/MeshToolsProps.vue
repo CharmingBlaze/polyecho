@@ -112,7 +112,7 @@ function deleteSel() {
             :checked="(activeMesh.shadeMode || 'flat') !== 'flat'"
             :title="(activeMesh.shadeMode || 'flat') !== 'flat' ? 'Smooth shading on — click to shade flat' : 'Smooth shading off — click to shade smooth'"
             @change="projectStore.setShadeMode(($event.target as HTMLInputElement).checked ? 'smooth' : 'flat')"
-          />
+          >
         </label>
         <label
           v-if="(activeMesh.shadeMode || 'flat') !== 'flat'"
@@ -125,7 +125,7 @@ function deleteSel() {
             :checked="activeMesh.shadeMode === 'auto'"
             title="Shade Smooth by Angle"
             @change="projectStore.setShadeMode(($event.target as HTMLInputElement).checked ? 'auto' : 'smooth')"
-          />
+          >
         </label>
         <UiNumberField
           v-if="activeMesh.shadeMode === 'auto'"
@@ -151,7 +151,7 @@ function deleteSel() {
         </p>
       </div>
 
-      <UiSection title="Subdivide" blender-icon="tool-subdivide" hint="W" v-model:is-open="sections.subdivide">
+      <UiSection v-model:is-open="sections.subdivide" title="Subdivide" blender-icon="tool-subdivide" hint="W">
         <div class="grid grid-cols-2 gap-1">
           <UiNumberField
             v-model="toolStore.subdivideCuts"
@@ -184,10 +184,10 @@ function deleteSel() {
       </UiSection>
 
       <UiSection
+        v-model:is-open="sections.face"
         title="Faces"
         blender-icon="face-select"
         :badge="faceCount || undefined"
-        v-model:is-open="sections.face"
       >
         <div class="grid grid-cols-2 gap-1">
           <UiButton size="xs" :disabled="!isEdit" :title="toolStore.appMode === 'blockout' ? 'Fill a boundary (Mesh menu). F in Blockout is Poly Draw.' : 'Fill (F)'" @click="requestFillFace()">
@@ -230,10 +230,10 @@ function deleteSel() {
       </UiSection>
 
       <UiSection
+        v-model:is-open="sections.edge"
         title="Edges"
         blender-icon="edge-select"
         :badge="edgeCount || undefined"
-        v-model:is-open="sections.edge"
       >
         <div class="grid grid-cols-2 gap-1">
           <UiButton size="xs" :disabled="!hasEdges" title="Bridge Edge Loops" @click="projectStore.performBridgeEdges(toolStore.bridgeSegments, toolStore.bridgeTwist)">
@@ -284,10 +284,10 @@ function deleteSel() {
       </UiSection>
 
       <UiSection
+        v-model:is-open="sections.vert"
         title="Vertices"
         blender-icon="vertex-select"
         :badge="vertCount || undefined"
-        v-model:is-open="sections.vert"
       >
         <div class="text-[9px] font-semibold text-ui-textMuted uppercase tracking-wide">Merge</div>
         <div class="grid grid-cols-4 gap-1">
@@ -320,7 +320,7 @@ function deleteSel() {
         </div>
       </UiSection>
 
-      <UiSection title="Mesh" blender-icon="mesh-cube" v-model:is-open="sections.mesh">
+      <UiSection v-model:is-open="sections.mesh" title="Mesh" blender-icon="mesh-cube">
         <div class="grid grid-cols-2 gap-1">
           <UiButton size="xs" title="Duplicate (Shift+D)" @click="projectStore.duplicateSelection(toolStore.selectMode)">
             <BlenderIcon name="duplicate" :size="12" />
@@ -348,8 +348,8 @@ function deleteSel() {
             <span>Ltd Dissolve</span>
           </UiButton>
           <UiNumberField
-            class="col-span-1"
             v-model="toolStore.limitedDissolveAngle"
+            class="col-span-1"
             label="Angle °"
             :min="0"
             :max="90"

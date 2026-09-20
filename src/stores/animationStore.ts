@@ -1261,6 +1261,7 @@ export const useAnimationStore = defineStore('animation', () => {
   }
 
   function resetAllBonesToRest() {
+    projectStore.recordState('Reset to Rest Pose')
     for (const b of armature.value.bones) {
       b.position = { x: 0, y: 0, z: 0 }
       b.rotation = { x: 0, y: 0, z: 0 }

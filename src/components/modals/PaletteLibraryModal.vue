@@ -238,7 +238,6 @@ function handleQuantizeTexture(p: Palette, e: MouseEvent) {
 <template>
   <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4 font-sans text-xs select-none">
     <div class="bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-100">
-      
       <!-- Top Header -->
       <div class="h-11 px-4 border-b border-ui-borderSubtle flex items-center justify-between bg-ui-header shrink-0">
         <div class="flex items-center gap-2">
@@ -251,24 +250,24 @@ function handleQuantizeTexture(p: Palette, e: MouseEvent) {
 
         <div class="flex items-center gap-2">
           <button 
-            @click="showCreateDialog = true"
             class="flex items-center gap-1 px-2.5 py-1 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold shadow-xs transition"
+            @click="showCreateDialog = true"
           >
             <Plus class="w-3.5 h-3.5" />
             <span>New Custom</span>
           </button>
 
           <button 
-            @click="showImportDialog = true"
             class="flex items-center gap-1 px-2.5 py-1 bg-ui-surface hover:bg-ui-hover text-ui-textPrimary border border-ui-borderSubtle rounded-xs font-medium transition"
+            @click="showImportDialog = true"
           >
             <Upload class="w-3.5 h-3.5 text-amber-400" />
             <span>Import Palette...</span>
           </button>
 
           <button 
-            @click="$emit('close')"
             class="p-1 text-ui-textMuted hover:text-ui-textPrimary rounded-xs hover:bg-ui-hover transition ml-2"
+            @click="$emit('close')"
           >
             <X class="w-4 h-4" />
           </button>
@@ -281,11 +280,11 @@ function handleQuantizeTexture(p: Palette, e: MouseEvent) {
         <div class="relative w-72">
           <Search class="w-3.5 h-3.5 text-ui-textMuted absolute left-2.5 top-1/2 -translate-y-1/2" />
           <input 
-            type="text"
             v-model="searchQuery"
+            type="text"
             placeholder="Search palettes by name, type, or color count..."
             class="w-full bg-ui-input border border-ui-borderDefault rounded-xs pl-8 pr-3 py-1 text-xs text-ui-textPrimary placeholder:text-ui-textMuted focus:outline-none focus:border-ui-accent"
-          />
+          >
         </div>
 
         <!-- Category Filter Tabs -->
@@ -293,9 +292,9 @@ function handleQuantizeTexture(p: Palette, e: MouseEvent) {
           <button 
             v-for="cat in categories"
             :key="cat"
-            @click="selectedCategory = cat"
             class="px-2.5 py-1 rounded-xs text-[11px] font-medium transition whitespace-nowrap"
             :class="selectedCategory === cat ? 'bg-ui-active text-ui-textAccent shadow-xs font-semibold' : 'text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover'"
+            @click="selectedCategory = cat"
           >
             {{ cat }}
           </button>
@@ -307,11 +306,11 @@ function handleQuantizeTexture(p: Palette, e: MouseEvent) {
         <div 
           v-for="pal in filteredPalettes"
           :key="pal.id"
-          @click="selectPalette(pal)"
           class="bg-ui-panel border rounded-xs p-3 transition flex flex-col justify-between group cursor-pointer hover:shadow-lg"
           :class="projectStore.activePalette.id === pal.id 
             ? 'border-ui-accent bg-ui-accentSubtle/20 shadow-md ring-1 ring-ui-accent/40' 
             : 'border-ui-borderSubtle hover:border-ui-borderStrong hover:bg-ui-hover/40'"
+          @click="selectPalette(pal)"
         >
           <!-- Card Header -->
           <div>
@@ -343,7 +342,7 @@ function handleQuantizeTexture(p: Palette, e: MouseEvent) {
                 class="w-4 h-4 rounded-xs border border-black/20 shrink-0"
                 :style="{ backgroundColor: hex }"
                 :title="`${hex} (#${idx + 1})`"
-              ></div>
+              />
             </div>
           </div>
 
@@ -352,17 +351,17 @@ function handleQuantizeTexture(p: Palette, e: MouseEvent) {
             <div class="flex items-center gap-1.5">
               <!-- Activate -->
               <button 
-                @click.stop="selectPalette(pal)"
                 class="px-2 py-0.5 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold transition cursor-pointer"
+                @click.stop="selectPalette(pal)"
               >
                 Use Palette
               </button>
 
               <!-- Quantize Texture -->
               <button 
-                @click.stop="handleQuantizeTexture(pal, $event)"
                 class="px-2 py-0.5 bg-ui-surface hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary rounded-xs border border-ui-borderSubtle transition cursor-pointer"
                 title="Remap and snap active texture pixels to this palette"
+                @click.stop="handleQuantizeTexture(pal, $event)"
               >
                 Quantize
               </button>
@@ -372,36 +371,36 @@ function handleQuantizeTexture(p: Palette, e: MouseEvent) {
             <div class="flex items-center gap-1">
               <!-- Sort -->
               <button 
-                @click.stop="handleSortPalette(pal, 'hue', $event)" 
                 class="p-1 text-ui-textMuted hover:text-ui-textPrimary rounded-xs hover:bg-ui-hover transition" 
-                title="Sort by Hue"
+                title="Sort by Hue" 
+                @click.stop="handleSortPalette(pal, 'hue', $event)"
               >
                 <ArrowDownUp class="w-3.5 h-3.5" />
               </button>
 
               <!-- Export .hex -->
               <button 
-                @click.stop="handleExportHex(pal, $event)" 
                 class="p-1 text-ui-textMuted hover:text-amber-400 rounded-xs hover:bg-ui-hover transition" 
-                title="Download .hex (Lospec)"
+                title="Download .hex (Lospec)" 
+                @click.stop="handleExportHex(pal, $event)"
               >
                 <FileCode class="w-3.5 h-3.5" />
               </button>
 
               <!-- Export .gpl -->
               <button 
-                @click.stop="handleExportGpl(pal, $event)" 
                 class="p-1 text-ui-textMuted hover:text-sky-400 rounded-xs hover:bg-ui-hover transition" 
-                title="Download .gpl (Aseprite)"
+                title="Download .gpl (Aseprite)" 
+                @click.stop="handleExportGpl(pal, $event)"
               >
                 <Download class="w-3.5 h-3.5" />
               </button>
 
               <!-- Export .png -->
               <button 
-                @click.stop="handleExportPng(pal, $event)" 
                 class="p-1 text-ui-textMuted hover:text-emerald-400 rounded-xs hover:bg-ui-hover transition" 
-                title="Download PNG Swatch Strip"
+                title="Download PNG Swatch Strip" 
+                @click.stop="handleExportPng(pal, $event)"
               >
                 <ImageIcon class="w-3.5 h-3.5" />
               </button>
@@ -409,9 +408,9 @@ function handleQuantizeTexture(p: Palette, e: MouseEvent) {
               <!-- Delete (Custom only) -->
               <button 
                 v-if="pal.isCustom"
-                @click.stop="handleDeleteCustomPalette(pal, $event)"
                 class="p-1 text-ui-textMuted hover:text-rose-400 rounded-xs hover:bg-rose-950/30 transition"
                 title="Delete Custom Palette"
+                @click.stop="handleDeleteCustomPalette(pal, $event)"
               >
                 <Trash2 class="w-3.5 h-3.5" />
               </button>
@@ -433,7 +432,7 @@ function handleQuantizeTexture(p: Palette, e: MouseEvent) {
             <h3 class="font-bold text-xs text-ui-textPrimary flex items-center gap-1.5">
               <Upload class="w-4 h-4 text-amber-400" /> Import Palette (.hex, .gpl, .pal, PNG)
             </h3>
-            <button @click="showImportDialog = false" class="text-ui-textMuted hover:text-white">
+            <button class="text-ui-textMuted hover:text-white" @click="showImportDialog = false">
               <X class="w-4 h-4" />
             </button>
           </div>
@@ -444,7 +443,7 @@ function handleQuantizeTexture(p: Palette, e: MouseEvent) {
               v-model="importName"
               placeholder="e.g. My Cool Game Palette"
               class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2.5 py-1 text-xs text-ui-textPrimary"
-            />
+            >
           </div>
 
           <!-- File Upload Option -->
@@ -455,10 +454,10 @@ function handleQuantizeTexture(p: Palette, e: MouseEvent) {
               accept=".hex,.gpl,.pal,.txt,image/*" 
               class="hidden" 
               @change="handleFileUpload" 
-            />
+            >
             <button 
-              @click="fileInputRef?.click()"
               class="px-3 py-1.5 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold shadow-xs transition"
+              @click="fileInputRef?.click()"
             >
               Choose Palette File (.hex, .gpl, .pal, PNG)
             </button>
@@ -473,17 +472,17 @@ function handleQuantizeTexture(p: Palette, e: MouseEvent) {
               rows="4"
               placeholder="Paste hex codes separated by newlines or commas (e.g. #000000, #ffffff, #ff0044, #00e436)..."
               class="w-full bg-ui-input border border-ui-borderDefault rounded-xs p-2 text-xs font-mono text-ui-textPrimary resize-none"
-            ></textarea>
+            />
           </div>
 
           <div class="flex items-center justify-end gap-2 pt-2 border-t border-ui-borderSubtle">
-            <button @click="showImportDialog = false" class="px-3 py-1 bg-ui-surface hover:bg-ui-hover text-ui-textSecondary rounded-xs">
+            <button class="px-3 py-1 bg-ui-surface hover:bg-ui-hover text-ui-textSecondary rounded-xs" @click="showImportDialog = false">
               Cancel
             </button>
             <button 
-              @click="handlePasteImport" 
-              :disabled="!importRawText.trim()"
+              :disabled="!importRawText.trim()" 
               class="px-3 py-1 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold disabled:opacity-40"
+              @click="handlePasteImport"
             >
               Import Pasted Colors
             </button>
@@ -498,7 +497,7 @@ function handleQuantizeTexture(p: Palette, e: MouseEvent) {
             <h3 class="font-bold text-xs text-ui-textPrimary flex items-center gap-1.5">
               <Plus class="w-4 h-4 text-ui-accent" /> Create New Custom Palette
             </h3>
-            <button @click="showCreateDialog = false" class="text-ui-textMuted hover:text-white">
+            <button class="text-ui-textMuted hover:text-white" @click="showCreateDialog = false">
               <X class="w-4 h-4" />
             </button>
           </div>
@@ -510,23 +509,22 @@ function handleQuantizeTexture(p: Palette, e: MouseEvent) {
               placeholder="e.g. Hero Sprite Colors"
               class="w-full bg-ui-input border border-ui-borderDefault rounded-xs px-2.5 py-1 text-xs text-ui-textPrimary focus:outline-none focus:border-ui-accent"
               @keyup.enter="handleAddCustomPalette"
-            />
+            >
           </div>
 
           <div class="flex items-center justify-end gap-2 pt-2 border-t border-ui-borderSubtle">
-            <button @click="showCreateDialog = false" class="px-3 py-1 bg-ui-surface hover:bg-ui-hover text-ui-textSecondary rounded-xs">
+            <button class="px-3 py-1 bg-ui-surface hover:bg-ui-hover text-ui-textSecondary rounded-xs" @click="showCreateDialog = false">
               Cancel
             </button>
             <button 
-              @click="handleAddCustomPalette"
               class="px-3 py-1 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold shadow-xs"
+              @click="handleAddCustomPalette"
             >
               Create Palette
             </button>
           </div>
         </div>
       </div>
-
     </div>
   </div>
 </template>

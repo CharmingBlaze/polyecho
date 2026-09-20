@@ -619,7 +619,7 @@ onUnmounted(() => {
               <select :value="textureId" aria-label="Tileset image" @change="switchImage(($event.target as HTMLSelectElement).value)">
                 <option v-for="item in project.textures" :key="item.id" :value="item.id">{{ item.name }} · {{ item.width }}×{{ item.height }}</option>
               </select>
-              <input ref="replaceInput" type="file" accept="image/*" hidden @change="replaceAtlas" />
+              <input ref="replaceInput" type="file" accept="image/*" hidden @change="replaceAtlas">
               <button type="button" @click="replaceInput?.click()">Replace</button>
               <button type="button" :disabled="!project.activeMesh || project.activeMesh.locked || bound" @click="applyToActiveMesh(textureId)">{{ bound ? 'On object' : 'Use on object' }}</button>
             </div>
@@ -631,12 +631,12 @@ onUnmounted(() => {
               <span class="unit">px</span>
               <button type="button" class="icon-btn" aria-label="Smaller tiles" @click="nudgeTile(-1)">−</button>
               <button type="button" class="icon-btn" aria-label="Larger tiles" @click="nudgeTile(1)">+</button>
-              <label class="dim">W<input :value="tileWidth" type="number" min="1" aria-label="Tile width in pixels" @change="onTileDim('w', $event)" /></label>
-              <label class="dim">H<input :value="tileHeight" type="number" min="1" aria-label="Tile height in pixels" :disabled="squareTiles" @change="onTileDim('h', $event)" /></label>
-              <label class="dim">Gap<input :value="spacing" type="number" min="0" aria-label="Tile spacing in pixels" @change="spacing = Math.max(0, Math.round(Number(($event.target as HTMLInputElement).value) || 0)); applyLayout()" /></label>
-              <label class="dim">Margin<input :value="margin" type="number" min="0" aria-label="Atlas margin in pixels" @change="margin = Math.max(0, Math.round(Number(($event.target as HTMLInputElement).value) || 0)); applyLayout()" /></label>
+              <label class="dim">W<input :value="tileWidth" type="number" min="1" aria-label="Tile width in pixels" @change="onTileDim('w', $event)"></label>
+              <label class="dim">H<input :value="tileHeight" type="number" min="1" aria-label="Tile height in pixels" :disabled="squareTiles" @change="onTileDim('h', $event)"></label>
+              <label class="dim">Gap<input :value="spacing" type="number" min="0" aria-label="Tile spacing in pixels" @change="spacing = Math.max(0, Math.round(Number(($event.target as HTMLInputElement).value) || 0)); applyLayout()"></label>
+              <label class="dim">Margin<input :value="margin" type="number" min="0" aria-label="Atlas margin in pixels" @change="margin = Math.max(0, Math.round(Number(($event.target as HTMLInputElement).value) || 0)); applyLayout()"></label>
               <button type="button" @click="detectSpacing">Detect gap</button>
-              <label class="lock"><input v-model="squareTiles" type="checkbox" /> Square</label>
+              <label class="lock"><input v-model="squareTiles" type="checkbox"> Square</label>
               <span class="grid-badge">{{ grid.cols }}×{{ grid.rows }}</span>
               <button type="button" :aria-pressed="panMode" :class="{ selected: panMode }" @click="panMode = !panMode">Pan</button>
               <button type="button" @click="fitPicker">Fit</button>
@@ -661,9 +661,9 @@ onUnmounted(() => {
               <p class="picker-meta">{{ tileWidth }}×{{ tileHeight }} px · {{ grid.cols }}×{{ grid.rows }} tiles{{ pickerRemainder }} · cell {{ selectedCell }}</p>
               <div class="stamp-row">
                 <label>Rotate<select v-model.number="rotation" aria-label="Stamp rotation"><option :value="0">0°</option><option :value="1">90°</option><option :value="2">180°</option><option :value="3">270°</option></select></label>
-                <label><input v-model="flip" type="checkbox" /> Flip</label>
-                <label>Inset<input v-model.number="inset" type="number" min="0" max="16" step="0.5" aria-label="Stamp inset" /></label>
-                <label><input v-model="tilesetClipPaint" type="checkbox" /> Clip paint</label>
+                <label><input v-model="flip" type="checkbox"> Flip</label>
+                <label>Inset<input v-model.number="inset" type="number" min="0" max="16" step="0.5" aria-label="Stamp inset"></label>
+                <label><input v-model="tilesetClipPaint" type="checkbox"> Clip paint</label>
               </div>
             </div>
             <div class="sr-tiles">
@@ -674,13 +674,13 @@ onUnmounted(() => {
             <div class="tile-title"><h3>{{ region ? 'Edit region' : `Edit tile ${selected + 1}` }}</h3><span>{{ b.width }} × {{ b.height }} px · {{ layer?.name }}{{ dirty ? ' · Unsaved' : '' }}</span></div>
             <div class="tile-editor-bar">
               <button v-for="item in (['pencil', 'eraser', 'fill', 'picker'] as const)" :key="item" :aria-pressed="tool === item" :class="{ selected: tool === item }" @click="tool = item">{{ item }}</button>
-              <input v-model="color" type="color" aria-label="Tile paint color" />
-              <label>Size<input v-model.number="brush" type="number" min="1" max="32" aria-label="Tile brush size" /></label>
+              <input v-model="color" type="color" aria-label="Tile paint color">
+              <label>Size<input v-model.number="brush" type="number" min="1" max="32" aria-label="Tile brush size"></label>
             </div>
-            <div class="tile-stage"><canvas ref="canvas" aria-label="Tile pixel canvas" :style="{ aspectRatio: `${b.width} / ${b.height}` }" @pointerdown.prevent="start" @pointermove="stroke" @pointerup="stop" @pointercancel="stop" @lostpointercapture="stop" /><div v-if="showGrid && Math.max(b.width, b.height) <= 64" class="pixel-grid" :style="{ aspectRatio: `${b.width} / ${b.height}`, backgroundSize: `${100 / b.width}% ${100 / b.height}%` }"></div></div>
-            <div class="row"><button :disabled="!undo.length" @click="history(true)">Undo</button><button :disabled="!redo.length" @click="history(false)">Redo</button><label><input v-model="showGrid" type="checkbox" /> Pixel grid</label><label><input v-model="repeat" type="checkbox" /> Repeat preview</label></div>
-            <label><input v-model="liveSave" type="checkbox" /> Save each brush stroke to atlas</label>
-            <div v-if="repeat" class="repeat-preview" :style="{ backgroundImage: `url(${draftUrl})`, backgroundSize: '33.333% 33.333%' }" aria-label="Tile repeated three by three"></div>
+            <div class="tile-stage"><canvas ref="canvas" aria-label="Tile pixel canvas" :style="{ aspectRatio: `${b.width} / ${b.height}` }" @pointerdown.prevent="start" @pointermove="stroke" @pointerup="stop" @pointercancel="stop" @lostpointercapture="stop" /><div v-if="showGrid && Math.max(b.width, b.height) <= 64" class="pixel-grid" :style="{ aspectRatio: `${b.width} / ${b.height}`, backgroundSize: `${100 / b.width}% ${100 / b.height}%` }" /></div>
+            <div class="row"><button :disabled="!undo.length" @click="history(true)">Undo</button><button :disabled="!redo.length" @click="history(false)">Redo</button><label><input v-model="showGrid" type="checkbox"> Pixel grid</label><label><input v-model="repeat" type="checkbox"> Repeat preview</label></div>
+            <label><input v-model="liveSave" type="checkbox"> Save each brush stroke to atlas</label>
+            <div v-if="repeat" class="repeat-preview" :style="{ backgroundImage: `url(${draftUrl})`, backgroundSize: '33.333% 33.333%' }" aria-label="Tile repeated three by three" />
             <div class="edit-actions">
               <button class="primary" :disabled="!dirty || !layer?.visible" @click="save">Save tile to atlas</button>
               <button :disabled="!dirty" @click="load(); status = 'Draft discarded.'">Discard edits</button>
@@ -703,33 +703,35 @@ onUnmounted(() => {
                 </div>
                 <div ref="viewport" class="atlas-viewport" @dragover.prevent @drop.prevent="dropAtlas" @wheel.prevent.stop="zoomAt($event.deltaY < 0 ? 1.15 : 1 / 1.15, $event)" @pointerdown.prevent="startSelection" @pointermove="moveSelection" @pointerup="endSelection" @pointercancel="endSelection">
                   <div ref="atlas" tabindex="0" role="group" class="atlas-overview" aria-label="Full atlas selection surface" :style="{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }">
-                    <img :src="atlasUrl" alt="Whole texture atlas" draggable="false" />
-                    <div class="atlas-region" :style="selectionStyle"></div>
+                    <img :src="atlasUrl" alt="Whole texture atlas" draggable="false">
+                    <div class="atlas-region" :style="selectionStyle" />
                   </div>
                 </div>
                 <p>Drag to select · Arrow keys move · Shift = 8 px · {{ b.x }}, {{ b.y }} · {{ b.width }} × {{ b.height }} px</p>
-                <label><input v-model="liveMap" type="checkbox" /> Apply region on selection</label>
+                <label><input v-model="liveMap" type="checkbox"> Apply region on selection</label>
                 <div class="settings-grid">
                   <div class="row"><span class="settings-label">Grid</span><button v-for="n in [2,4,8]" :key="n" :class="{ selected: grid.cols === n && grid.rows === n }" @click="cols = n; rows = n; configure()">{{ n }} × {{ n }}</button></div>
                   <div class="row settings-fields">
-                    <label>Cols<input v-model.number="cols" type="number" min="1" :max="MAX_ATLAS_CELLS" /></label>
-                    <label>Rows<input v-model.number="rows" type="number" min="1" :max="MAX_ATLAS_CELLS" /></label>
+                    <label>Cols<input v-model.number="cols" type="number" min="1" :max="MAX_ATLAS_CELLS"></label>
+                    <label>Rows<input v-model.number="rows" type="number" min="1" :max="MAX_ATLAS_CELLS"></label>
                     <button type="button" @click="configure">Save grid</button>
                   </div>
-                  <label><input v-model="individual" type="checkbox" /> Fill each face</label>
+                  <label><input v-model="individual" type="checkbox"> Fill each face</label>
                 </div>
               </div>
             </section>
-            <details><summary>Transform & copy</summary><div class="options">
-              <div class="row"><button @click="edit('horizontal')">Flip H</button><button @click="edit('vertical')">Flip V</button></div><button :disabled="b.width !== b.height" @click="edit('rotate')">Rotate 90° (square tiles)</button>
-              <button @click="clipboard = ctx.getImageData(0, 0, draft.width, draft.height); status = 'Tile copied. Save or discard before choosing a destination.'">Copy tile</button><button :disabled="!clipboard" @click="paste">Paste tile</button>
-              <button @click="edit('fill')">Fill tile with color</button><button @click="edit('clear')">Clear tile pixels</button>
-            </div></details>
-            <details><summary>Import, export & slice</summary><div class="options"><input ref="importInput" type="file" accept="image/*" hidden @change="importTile" /><button @click="importInput?.click()">Import image into tile…</button><button @click="exportTile">Export edited layer tile PNG</button><button :disabled="dirty || tiles.length < 2" @click="project.sliceTextureIntoTiles(textureId, grid.cols, grid.rows); status = 'All tiles added to the image library.'">Create images from all tiles</button><p>Slice uses the saved, merged atlas. The original stays intact.</p></div></details>
+            <details>
+              <summary>Transform & copy</summary><div class="options">
+                <div class="row"><button @click="edit('horizontal')">Flip H</button><button @click="edit('vertical')">Flip V</button></div><button :disabled="b.width !== b.height" @click="edit('rotate')">Rotate 90° (square tiles)</button>
+                <button @click="clipboard = ctx.getImageData(0, 0, draft.width, draft.height); status = 'Tile copied. Save or discard before choosing a destination.'">Copy tile</button><button :disabled="!clipboard" @click="paste">Paste tile</button>
+                <button @click="edit('fill')">Fill tile with color</button><button @click="edit('clear')">Clear tile pixels</button>
+              </div>
+            </details>
+            <details><summary>Import, export & slice</summary><div class="options"><input ref="importInput" type="file" accept="image/*" hidden @change="importTile"><button @click="importInput?.click()">Import image into tile…</button><button @click="exportTile">Export edited layer tile PNG</button><button :disabled="dirty || tiles.length < 2" @click="project.sliceTextureIntoTiles(textureId, grid.cols, grid.rows); status = 'All tiles added to the image library.'">Create images from all tiles</button><p>Slice uses the saved, merged atlas. The original stays intact.</p></div></details>
           </aside>
         </div>
         <footer v-show="!minimized || closing"><span role="status">{{ status || (tilesetUseMode === 'stamp' ? 'Click a tile, then a face in the 3D view.' : 'Click a tile, then paint the 3D object.') }}</span><template v-if="closing"><button @click="emit('close')">Discard & close</button><button @click="closing = false">Keep editing</button></template></footer>
-        <button v-show="!minimized" type="button" class="resize-handle" aria-label="Resize tileset panel" @pointerdown="startResize"></button>
+        <button v-show="!minimized" type="button" class="resize-handle" aria-label="Resize tileset panel" @pointerdown="startResize" />
       </section>
       <TextureSharePrompt v-if="isOpen" style="pointer-events: auto" :object-count="sharedCount" @confirm="confirmApply" @cancel="cancel" />
     </div>

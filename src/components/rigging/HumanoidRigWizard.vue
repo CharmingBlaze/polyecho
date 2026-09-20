@@ -117,7 +117,7 @@ onMounted(() => { loadModel(); panel.value?.focus() })
               <div class="space-y-1"><button v-for="item in landmarkGroups" :key="item.id" type="button" class="flex w-full items-center gap-3 rounded border px-3 py-1.5 text-left" :class="group === item.id ? 'border-ui-borderStrong bg-ui-active' : 'border-transparent hover:bg-ui-hover'" @click="group = item.id"><span class="h-4 w-4 rounded-full border-[3px]" :style="{ borderColor: item.color }" /><span class="flex-1">{{ item.label }}</span><Check v-if="confirmed.includes(item.id)" class="h-3.5 w-3.5 text-ui-textPrimary" /></button></div>
 
 
-              <label class="flex items-center justify-between"><span>Use symmetry</span><input v-model="symmetry" type="checkbox" class="accent-ui-accent" /></label>
+              <label class="flex items-center justify-between"><span>Use symmetry</span><input v-model="symmetry" type="checkbox" class="accent-ui-accent"></label>
               <p class="text-[11px] text-ui-textMuted">Turn symmetry off for asymmetric characters. Marker positions are editable independently.</p>
               <label class="block space-y-2"><span>Skeleton detail</span><select v-model="detail" aria-label="Skeleton detail" class="inspector-select w-full"><option value="standard">Standard · 19 bones</option><option value="simple">Simple · 15 bones</option></select></label>
               <p class="text-[11px] text-ui-textMuted">Includes hands and feet. Individual fingers are not generated.</p>
@@ -127,7 +127,7 @@ onMounted(() => { loadModel(); panel.value?.focus() })
               <div><h3 class="text-sm font-semibold">Check the deformation</h3><p class="mt-2 leading-relaxed text-ui-textMuted">Try a bend. Go back if a joint is misplaced; weights can also be painted after applying.</p></div>
               <p class="rounded border border-ui-borderSubtle bg-ui-surface p-3 text-ui-textSecondary">{{ previewBones.length }} bones · {{ status.ready ? 'Binding checks passed' : 'Check binding before applying' }}</p>
               <label class="block space-y-2"><span>Test joint</span><select v-model="testBone" aria-label="Preview test joint" class="inspector-select w-full" @change="applyBend"><option v-for="bone in previewBones" :key="bone.id" :value="bone.name">{{ bone.name }}</option></select></label>
-              <label class="block space-y-2"><span>Bend · <span class="inspector-value">{{ bend }}°</span></span><input v-model.number="bend" aria-label="Preview bend" type="range" min="-75" max="75" step="1" class="inspector-range" @input="applyBend" /></label>
+              <label class="block space-y-2"><span>Bend · <span class="inspector-value">{{ bend }}°</span></span><input v-model.number="bend" aria-label="Preview bend" type="range" min="-75" max="75" step="1" class="inspector-range" @input="applyBend"></label>
               <UiButton class="w-full" @click="bend = 0; applyBend()">Reset preview pose</UiButton>
               <p class="leading-relaxed text-ui-textMuted">Apply adds this skeleton and replaces weights on {{ draft?.name }}. Existing bones and clips are kept. One Undo restores the previous state.</p>
             </template>

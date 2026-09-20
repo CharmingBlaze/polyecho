@@ -54,7 +54,7 @@ function removeSocket(socketId: string) {
       <div class="flex items-center gap-1 min-w-0 flex-1">
         <span v-if="(depth || 0) > 0" class="text-ui-borderSubtle">└</span>
         <GitCommitVertical class="w-3 h-3 shrink-0" />
-        <input v-if="editing" v-model="nameDraft" class="min-w-0 w-full bg-ui-input text-ui-textPrimary px-1 py-0.5 rounded-xs border border-ui-accent focus:outline-none" autofocus @click.stop @blur="commitRename" @keydown.enter="commitRename" />
+        <input v-if="editing" v-model="nameDraft" class="min-w-0 w-full bg-ui-input text-ui-textPrimary px-1 py-0.5 rounded-xs border border-ui-accent focus:outline-none" autofocus @click.stop @blur="commitRename" @keydown.enter="commitRename">
         <span v-else class="truncate" @dblclick.stop="startRename">{{ bone.name }}</span>
       </div>
       <div class="flex items-center gap-0.5 opacity-50 group-hover:opacity-100">

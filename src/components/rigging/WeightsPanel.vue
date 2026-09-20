@@ -199,18 +199,18 @@ function handleRemoveWeight(boneId: string) {
         <span class="text-ui-textMuted cursor-ew-resize" @mousedown="startScrubNumeric($event, () => animationStore.weightBrushWeight, val => animationStore.weightBrushWeight = val, 0, 1, 0.02, 2)">Weight</span>
         <span class="font-mono inspector-value">{{ Math.round(animationStore.weightBrushWeight * 100) }}%</span>
       </div>
-      <input type="range" min="0" max="1" step="0.01" v-model.number="animationStore.weightBrushWeight" class="inspector-range" />
+      <input v-model.number="animationStore.weightBrushWeight" type="range" min="0" max="1" step="0.01" class="inspector-range">
       <div class="inspector-seg is-stretch">
         <button v-for="pw in weightPresets" :key="pw" type="button" class="inspector-seg-btn" :class="{ 'is-active': Math.abs(animationStore.weightBrushWeight - pw) < 0.01 }" @click="animationStore.weightBrushWeight = pw">{{ pw }}</button>
       </div>
       <div class="grid grid-cols-2 gap-2">
         <div>
           <div class="flex justify-between text-[10px] text-ui-textMuted"><span>Radius</span><span class="font-mono inspector-value">{{ animationStore.weightBrushRadius }}</span></div>
-          <input type="range" min="0.05" max="3" step="0.05" v-model.number="animationStore.weightBrushRadius" class="inspector-range" />
+          <input v-model.number="animationStore.weightBrushRadius" type="range" min="0.05" max="3" step="0.05" class="inspector-range">
         </div>
         <div>
           <div class="flex justify-between text-[10px] text-ui-textMuted"><span>Strength</span><span class="font-mono inspector-value">{{ Math.round(animationStore.weightBrushStrength * 100) }}%</span></div>
-          <input type="range" min="0.05" max="1" step="0.05" v-model.number="animationStore.weightBrushStrength" class="inspector-range" />
+          <input v-model.number="animationStore.weightBrushStrength" type="range" min="0.05" max="1" step="0.05" class="inspector-range">
         </div>
       </div>
     </UiSection>
@@ -237,15 +237,15 @@ function handleRemoveWeight(boneId: string) {
       </div>
       <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
         <span>Normalize</span>
-        <input type="checkbox" v-model="animationStore.weightAutoNormalize" class="accent-ui-accent" />
+        <input v-model="animationStore.weightAutoNormalize" type="checkbox" class="accent-ui-accent">
       </label>
       <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
         <span>X mirror</span>
-        <input type="checkbox" v-model="animationStore.weightXMirror" class="accent-ui-accent" />
+        <input v-model="animationStore.weightXMirror" type="checkbox" class="accent-ui-accent">
       </label>
       <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
         <span>Heatmap key</span>
-        <input type="checkbox" v-model="animationStore.showHeatmapLegend" class="accent-ui-accent" />
+        <input v-model="animationStore.showHeatmapLegend" type="checkbox" class="accent-ui-accent">
       </label>
     </UiSection>
 

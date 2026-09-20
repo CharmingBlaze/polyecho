@@ -772,21 +772,21 @@ onUnmounted(() => {
       </div>
       <div class="flex items-center gap-2 shrink-0 ml-4">
         <button 
-          @click="handleRestoreAutosave" 
-          class="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded-xs transition text-[11px] cursor-pointer shadow-xs flex items-center gap-1"
+          class="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded-xs transition text-[11px] cursor-pointer shadow-xs flex items-center gap-1" 
+          @click="handleRestoreAutosave"
         >
           <BlenderIcon name="undo" :size="12" /> Recover Session
         </button>
         <button 
-          @click="projectStore.dismissRecoverySession()" 
-          class="px-2.5 py-1 bg-ui-surface hover:bg-ui-hover text-ui-textSecondary hover:text-white border border-ui-borderSubtle rounded-xs transition text-[11px] cursor-pointer"
+          class="px-2.5 py-1 bg-ui-surface hover:bg-ui-hover text-ui-textSecondary hover:text-white border border-ui-borderSubtle rounded-xs transition text-[11px] cursor-pointer" 
+          @click="projectStore.dismissRecoverySession()"
         >
           Dismiss
         </button>
         <button 
-          @click="projectStore.discardRecoverySession()" 
           class="px-2 py-1 text-rose-400 hover:text-rose-300 hover:underline transition text-[10.5px] cursor-pointer" 
-          title="Delete autosave data and keep current clean file"
+          title="Delete autosave data and keep current clean file" 
+          @click="projectStore.discardRecoverySession()"
         >
           Discard
         </button>
@@ -810,12 +810,12 @@ onUnmounted(() => {
 
             <div 
               v-if="toolStore.appMode === 'uvpaint'"
-              @mousedown="startUvSplit"
-              @dblclick="toggleUvSplitPreset"
               class="w-1.5 h-full bg-ui-header hover:bg-ui-hover border-x border-ui-borderSubtle cursor-col-resize flex items-center justify-center transition group shrink-0 relative select-none z-10"
               title="Drag left/right to resize 3D vs UV Canvas. Double-click to toggle layout."
+              @mousedown="startUvSplit"
+              @dblclick="toggleUvSplitPreset"
             >
-              <div class="h-12 w-0.5 rounded-full bg-ui-borderDefault group-hover:bg-ui-accent transition"></div>
+              <div class="h-12 w-0.5 rounded-full bg-ui-borderDefault group-hover:bg-ui-accent transition" />
             </div>
 
             <div 
@@ -843,21 +843,21 @@ onUnmounted(() => {
         class="w-7 bg-ui-panel border-l border-ui-borderSubtle flex flex-col items-center py-2 gap-1 select-none z-30 shrink-0 font-sans shadow-sm"
       >
         <button 
-          @click="layoutStore.showRightSidebar = true"
           class="w-6 h-6 flex items-center justify-center rounded-xs text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer mb-1"
           title="Expand Properties & Outliner (Hotkey: N)"
+          @click="layoutStore.showRightSidebar = true"
         >
           <BlenderIcon name="sidebar" :size="14" color="#f59e0b" />
         </button>
 
-        <div class="w-4 h-px bg-ui-borderSubtle my-0.5"></div>
+        <div class="w-4 h-px bg-ui-borderSubtle my-0.5" />
 
         <button
           v-for="tab in collapsedPropTabs"
           :key="tab.id"
-          @click="layoutStore.showRightSidebar = true; layoutStore.setInspectorTab(tab.id, toolStore.appMode)"
           class="w-6 h-6 flex items-center justify-center rounded-xs text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer"
           :title="tab.title"
+          @click="layoutStore.showRightSidebar = true; layoutStore.setInspectorTab(tab.id, toolStore.appMode)"
         >
           <BlenderIcon :name="tab.blender" :size="13" />
         </button>
@@ -887,6 +887,8 @@ onUnmounted(() => {
         top: fastTip.y + 'px',
         transform: fastTip.side === 'right' ? 'translateY(-50%)' : 'translateX(-50%)'
       }"
-    >{{ fastTip.text }}</div>
+    >
+      {{ fastTip.text }}
+    </div>
   </div>
 </template>

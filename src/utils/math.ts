@@ -62,7 +62,7 @@ export function computeCentroid(points: Vector3D[]): Vector3D {
 export function computeFaceNormal(points: Vector3D[]): Vector3D {
   if (points.length < 3) return { x: 0, y: 1, z: 0 }
   // Newell's method for arbitrary polygon normal
-  let normal = { x: 0, y: 0, z: 0 }
+  const normal = { x: 0, y: 0, z: 0 }
   for (let i = 0; i < points.length; i++) {
     const current = points[i]
     const next = points[(i + 1) % points.length]

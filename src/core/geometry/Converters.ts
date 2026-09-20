@@ -385,7 +385,7 @@ export function meshToThreeGeometry(
   selectedVertexIds: string[] = []
 ): GeometryBundle {
   ensureMeshUVs(mesh)
-  let { vertices: evalVertices, faces: evalFaces } = evaluateModifiers(mesh)
+  const { vertices: evalVertices, faces: evalFaces } = evaluateModifiers(mesh)
 
   const posedPos = new Map<string, { x: number; y: number; z: number }>()
   if (skeletalDeformContext && skeletalDeformContext.isPoseMode && skeletalDeformContext.bones.length > 0) {

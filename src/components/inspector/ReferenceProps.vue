@@ -51,7 +51,7 @@ function edit(id: string, data: Record<string, unknown>, label = 'Edit Reference
       </div>
       <span class="inspector-head-name">{{ projectStore.referenceImages.length ? `${projectStore.referenceImages.length}` : 'None' }}</span>
     </div>
-    <input ref="fileInput" type="file" accept="image/*" class="hidden" @change="onFile" />
+    <input ref="fileInput" type="file" accept="image/*" class="hidden" @change="onFile">
 
     <UiSection title="Import" blender-icon="image" hint="lightbox" :default-open="true">
       <p class="text-[10px] text-ui-textMuted mb-2 leading-relaxed">
@@ -130,19 +130,19 @@ function edit(id: string, data: Record<string, unknown>, label = 'Edit Reference
         </label>
         <label class="block text-[10px] text-ui-textMuted mb-1">
           Opacity {{ Math.round(img.opacity * 100) }}%
-          <input type="range" min="0.1" max="1" step="0.05" class="w-full" :value="img.opacity" @click.stop @pointerdown="beginAdjustment" @input="patch(img.id, { opacity: Number(($event.target as HTMLInputElement).value) })" />
+          <input type="range" min="0.1" max="1" step="0.05" class="w-full" :value="img.opacity" @click.stop @pointerdown="beginAdjustment" @input="patch(img.id, { opacity: Number(($event.target as HTMLInputElement).value) })">
         </label>
         <label class="block text-[10px] text-ui-textMuted mb-1">
           Scale {{ img.scale.toFixed(1) }}
-          <input type="range" min="0.5" max="16" step="0.25" class="w-full" :value="img.scale" @click.stop @pointerdown="beginAdjustment" @input="patch(img.id, { scale: Number(($event.target as HTMLInputElement).value) })" />
+          <input type="range" min="0.5" max="16" step="0.25" class="w-full" :value="img.scale" @click.stop @pointerdown="beginAdjustment" @input="patch(img.id, { scale: Number(($event.target as HTMLInputElement).value) })">
         </label>
         <label class="block text-[10px] text-ui-textMuted mb-1">
           Move X {{ img.offsetX.toFixed(2) }}
-          <input type="range" min="-12" max="12" step="0.05" class="w-full" :value="img.offsetX" @click.stop @pointerdown="beginAdjustment" @input="patch(img.id, { offsetX: Number(($event.target as HTMLInputElement).value) })" />
+          <input type="range" min="-12" max="12" step="0.05" class="w-full" :value="img.offsetX" @click.stop @pointerdown="beginAdjustment" @input="patch(img.id, { offsetX: Number(($event.target as HTMLInputElement).value) })">
         </label>
         <label class="block text-[10px] text-ui-textMuted">
           Move Y {{ img.offsetY.toFixed(2) }}
-          <input type="range" min="-12" max="12" step="0.05" class="w-full" :value="img.offsetY" @click.stop @pointerdown="beginAdjustment" @input="patch(img.id, { offsetY: Number(($event.target as HTMLInputElement).value) })" />
+          <input type="range" min="-12" max="12" step="0.05" class="w-full" :value="img.offsetY" @click.stop @pointerdown="beginAdjustment" @input="patch(img.id, { offsetY: Number(($event.target as HTMLInputElement).value) })">
         </label>
         <UiButton size="xs" class="w-full mt-1" @click.stop="projectStore.resetReferenceImageTransform(img.id)">
           Reset alignment

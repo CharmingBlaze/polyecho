@@ -65,22 +65,30 @@ const atlasCells = computed(() => {
     <UiSection v-if="toolStore.uvWorkspaceTab === 'uv'" title="Unwrap" blender-icon="uv-smart" :default-open="true">
       <p class="text-[10px] text-ui-textMuted">Uses selected faces, or the whole mesh when nothing is selected.</p>
       <label class="flex items-center justify-between gap-2">Cut angle
-        <input type="number" min="1" max="180" :value="toolStore.smartUvAngle"
-          @change="toolStore.smartUvAngle = Math.max(1, Math.min(180, Number(($event.target as HTMLInputElement).value) || 66))"
-          class="w-16 bg-ui-input rounded-xs px-2 py-1" aria-label="Smart UV cut angle" />
+        <input
+          type="number" min="1" max="180" :value="toolStore.smartUvAngle"
+          class="w-16 bg-ui-input rounded-xs px-2 py-1"
+          aria-label="Smart UV cut angle" @change="toolStore.smartUvAngle = Math.max(1, Math.min(180, Number(($event.target as HTMLInputElement).value) || 66))"
+        >
       </label>
       <label class="flex items-center justify-between gap-2">Margin (px)
-        <input type="number" min="0" max="64" :value="toolStore.smartUvMargin"
-          @change="toolStore.smartUvMargin = Math.max(0, Math.min(64, Number(($event.target as HTMLInputElement).value) || 0))"
-          class="w-16 bg-ui-input rounded-xs px-2 py-1" aria-label="UV island margin in pixels" />
+        <input
+          type="number" min="0" max="64" :value="toolStore.smartUvMargin"
+          class="w-16 bg-ui-input rounded-xs px-2 py-1"
+          aria-label="UV island margin in pixels" @change="toolStore.smartUvMargin = Math.max(0, Math.min(64, Number(($event.target as HTMLInputElement).value) || 0))"
+        >
       </label>
       <div class="grid grid-cols-2 gap-1">
-        <UiButton size="xs" class="col-span-2" :disabled="!projectStore.activeMesh" @click="projectStore.performSmartUvProject({
-          angleLimitDegrees: toolStore.smartUvAngle,
-          marginPixels: toolStore.smartUvMargin
-        })">Smart UV Project</UiButton>
-        <UiButton size="xs" :disabled="!projectStore.activeMesh" @click="projectStore.markSelectedEdgesAsSeam()" title="Selected edges, or the border of selected faces / islands">Mark seam</UiButton>
-        <UiButton size="xs" :disabled="!projectStore.activeMesh" @click="projectStore.clearSelectedEdgesSeam()" title="Selected edges, or the border of selected faces / islands">Clear seam</UiButton>
+        <UiButton
+          size="xs" class="col-span-2" :disabled="!projectStore.activeMesh" @click="projectStore.performSmartUvProject({
+            angleLimitDegrees: toolStore.smartUvAngle,
+            marginPixels: toolStore.smartUvMargin
+          })"
+        >
+          Smart UV Project
+        </UiButton>
+        <UiButton size="xs" :disabled="!projectStore.activeMesh" title="Selected edges, or the border of selected faces / islands" @click="projectStore.markSelectedEdgesAsSeam()">Mark seam</UiButton>
+        <UiButton size="xs" :disabled="!projectStore.activeMesh" title="Selected edges, or the border of selected faces / islands" @click="projectStore.clearSelectedEdgesSeam()">Clear seam</UiButton>
         <UiButton size="xs" :disabled="!projectStore.activeMesh" @click="projectStore.performSeamUnwrap()">Seam unwrap</UiButton>
         <UiButton size="xs" :disabled="!projectStore.activeMesh" @click="projectStore.performBoxUnwrap()">Box project</UiButton>
         <UiButton size="xs" class="col-span-2" :disabled="!projectStore.activeMesh" @click="projectStore.performPackUVIslands(toolStore.smartUvMargin)">Pack islands</UiButton>
@@ -112,23 +120,25 @@ const atlasCells = computed(() => {
         <span class="text-ui-textMuted">[ / ] resize</span>
       </div>
       <label class="flex items-center justify-between gap-2">Size (px)
-        <input type="number" min="1" max="128" :value="toolStore.brushSize"
-          @change="toolStore.brushSize = Math.max(1, Math.min(128, Math.round(Number(($event.target as HTMLInputElement).value) || 1)))"
-          class="w-16 bg-ui-input rounded-xs px-2 py-1" aria-label="Brush size in pixels" />
+        <input
+          type="number" min="1" max="128" :value="toolStore.brushSize"
+          class="w-16 bg-ui-input rounded-xs px-2 py-1"
+          aria-label="Brush size in pixels" @change="toolStore.brushSize = Math.max(1, Math.min(128, Math.round(Number(($event.target as HTMLInputElement).value) || 1)))"
+        >
       </label>
       <label class="flex items-center justify-between gap-2">Opacity
         <span>{{ Math.round(toolStore.brushOpacity * 100) }}%</span>
       </label>
-      <input type="range" min="0" max="1" step="0.01" v-model.number="toolStore.brushOpacity" class="inspector-range" aria-label="Brush opacity" />
+      <input v-model.number="toolStore.brushOpacity" type="range" min="0" max="1" step="0.01" class="inspector-range" aria-label="Brush opacity">
       <div class="inspector-seg is-stretch">
         <button type="button" class="inspector-seg-btn" :class="{ 'is-active': toolStore.brushShape === 'square' }" @click="toolStore.brushShape = 'square'">Square</button>
         <button type="button" class="inspector-seg-btn" :class="{ 'is-active': toolStore.brushShape === 'circle' }" @click="toolStore.brushShape = 'circle'">Round</button>
       </div>
       <label class="flex items-center justify-between">Foreground
-        <input type="color" v-model="toolStore.primaryColor" class="w-10 h-6 bg-transparent cursor-pointer" aria-label="Foreground paint color" />
+        <input v-model="toolStore.primaryColor" type="color" class="w-10 h-6 bg-transparent cursor-pointer" aria-label="Foreground paint color">
       </label>
       <label class="flex items-center justify-between">Pen pressure
-        <input type="checkbox" v-model="toolStore.stylusPressureEnabled" />
+        <input v-model="toolStore.stylusPressureEnabled" type="checkbox">
       </label>
       <p class="text-[10px] text-ui-textMuted leading-relaxed">Ctrl-click paints the secondary color. Space-drag pans. Use the wheel to zoom.</p>
     </UiSection>
@@ -136,11 +146,11 @@ const atlasCells = computed(() => {
     <UiSection title="Viewport" blender-icon="eye-open" :default-open="true">
       <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
         <span>X-Ray</span>
-        <input type="checkbox" v-model="toolStore.viewport.xray" class="accent-ui-accent" />
+        <input v-model="toolStore.viewport.xray" type="checkbox" class="accent-ui-accent">
       </label>
       <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
         <span>Palette snap</span>
-        <input type="checkbox" v-model="toolStore.paletteSnapEnabled" class="accent-ui-accent" />
+        <input v-model="toolStore.paletteSnapEnabled" type="checkbox" class="accent-ui-accent">
       </label>
     </UiSection>
 

@@ -125,7 +125,7 @@ export class KnifeKernel {
     const tri = new THREE.Triangle()
     const closest = new THREE.Vector3()
     let bestFaceId = -1
-    let bestPoint = new THREE.Vector3()
+    const bestPoint = new THREE.Vector3()
     let bestDist = Infinity
 
     const consider = (faceId: number) => {
@@ -213,7 +213,8 @@ export class KnifeKernel {
     } else {
       // Preserve regions outside the containing triangle on concave polygons.
       for (const indices of triangles) {
-        let [a, b, c] = indices
+        const [a] = indices
+        let [, b, c] = indices
         if (positions[b].clone().sub(positions[a]).cross(positions[c].clone().sub(positions[a])).dot(normal) < 0) [b, c] = [c, b]
         triangle.set(positions[a], positions[b], positions[c])
         if (triangle.containsPoint(position)) {

@@ -222,7 +222,7 @@ function handleRigidAttach() {
       </div>
       <label class="flex items-center justify-between text-[10px] cursor-pointer bg-ui-surface px-2 py-1 rounded-xs border border-ui-borderSubtle">
         <span class="flex items-center gap-1"><Scissors class="w-3 h-3" /> Split hinge</span>
-        <input type="checkbox" v-model="splitBoundary" class="accent-ui-accent" />
+        <input v-model="splitBoundary" type="checkbox" class="accent-ui-accent">
       </label>
     </UiSection>
 

@@ -114,13 +114,13 @@ onUnmounted(() => {
         <Search class="w-4 h-4 text-amber-400 shrink-0" />
         <input 
           ref="inputRef"
-          type="text"
           v-model="searchQuery"
+          type="text"
           placeholder="Search operator, modifier, tool, primitive (e.g. Extrude, Mirror, X-Ray)..."
           class="flex-1 bg-transparent text-ui-textPrimary placeholder:text-ui-textMuted text-xs font-mono focus:outline-none"
-        />
+        >
         <span class="text-[10px] text-ui-textMuted font-mono">ESC to cancel</span>
-        <button @click="closePalette" class="text-ui-textMuted hover:text-white">&times;</button>
+        <button class="text-ui-textMuted hover:text-white" @click="closePalette">&times;</button>
       </div>
 
       <!-- Command Results List -->
@@ -129,10 +129,10 @@ onUnmounted(() => {
           <button 
             v-for="(cmd, idx) in filteredCommands"
             :key="cmd.id"
-            @click="selectedIndex = idx; executeSelected()"
-            @mouseenter="selectedIndex = idx"
             class="w-full text-left px-3 py-1.5 rounded-xs flex items-center justify-between transition text-xs font-mono"
             :class="selectedIndex === idx ? 'bg-amber-500/20 text-amber-300 border border-amber-500/50 shadow-xs' : 'text-ui-textSecondary hover:bg-ui-hover'"
+            @click="selectedIndex = idx; executeSelected()"
+            @mouseenter="selectedIndex = idx"
           >
             <div class="flex items-center gap-2.5">
               <BlenderIcon v-if="cmd.icon" :name="cmd.icon" :size="14" :color="selectedIndex === idx ? '#f59e0b' : 'currentColor'" />

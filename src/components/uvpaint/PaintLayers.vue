@@ -20,32 +20,31 @@ const activeIndex = computed(() => { props.revision; return props.buffer.layers.
   <aside class="paint-layers-panel" aria-label="Paint layers" @pointerdown.stop @pointermove.stop @pointerup.stop @wheel.stop>
     <header class="inspector-head">
       <div class="inspector-head-kicker">Layers <span class="inspector-value">{{ layers.length }}</span></div>
-      <button @click="emit('close')" title="Hide layers" aria-label="Hide paint layers">×</button>
+      <button title="Hide layers" aria-label="Hide paint layers" @click="emit('close')">×</button>
     </header>
     <div class="layer-toolbar">
-      <button @click="emit('add')" title="New transparent layer">+ New</button>
-      <button :disabled="!active" @click="active && emit('duplicate', active.id)" title="Duplicate active layer">Duplicate</button>
-      <button :disabled="layers.length < 2" @click="active && emit('remove', active.id)" title="Delete active layer (undoable)">Delete</button>
+      <button title="New transparent layer" @click="emit('add')">+ New</button>
+      <button :disabled="!active" title="Duplicate active layer" @click="active && emit('duplicate', active.id)">Duplicate</button>
+      <button :disabled="layers.length < 2" title="Delete active layer (undoable)" @click="active && emit('remove', active.id)">Delete</button>
     </div>
     <div class="layer-list" role="listbox" aria-label="Texture layers">
       <div v-for="layer in layers" :key="layer.id" class="layer-row" :class="{ active: active?.id === layer.id, 'is-hidden': !layer.visible }">
-        <button class="layer-eye" @click="emit('visibility', layer.id)" :aria-label="`${layer.visible ? 'Hide' : 'Show'} ${layer.name}`" :aria-pressed="layer.visible">{{ layer.visible ? '◉' : '○' }}</button>
+        <button class="layer-eye" :aria-label="`${layer.visible ? 'Hide' : 'Show'} ${layer.name}`" :aria-pressed="layer.visible" @click="emit('visibility', layer.id)">{{ layer.visible ? '◉' : '○' }}</button>
         <button class="layer-select" role="option" :aria-selected="active?.id === layer.id" @click="emit('select', layer.id)">
-          <img :src="layer.thumbnail" alt="" width="36" height="36" />
+          <img :src="layer.thumbnail" alt="" width="36" height="36">
           <span><strong>{{ layer.name }}</strong><small>{{ layer.blendMode }} · {{ Math.round(layer.opacity * 100) }}%</small></span>
         </button>
       </div>
     </div>
     <div v-if="active" class="layer-properties">
-      <label>Layer name<input :value="active.name" aria-label="Active paint layer name" @change="emit('rename', ($event.target as HTMLInputElement).value)" /></label>
+      <label>Layer name<input :value="active.name" aria-label="Active paint layer name" @change="emit('rename', ($event.target as HTMLInputElement).value)"></label>
       <label>Blend<select class="inspector-select" :value="active.blendMode" aria-label="Layer blend mode" @change="emit('blend', ($event.target as HTMLSelectElement).value)">
         <option value="normal">Normal</option><option value="multiply">Multiply</option><option value="screen">Screen</option><option value="overlay">Overlay</option><option value="additive">Additive</option>
       </select></label>
       <label>Opacity <span class="inspector-value">{{ Math.round(active.opacity * 100) }}%</span></label>
-      <input type="range" min="0" max="100" :value="Math.round(active.opacity * 100)" class="inspector-range" aria-label="Layer opacity" @change="emit('opacity', Number(($event.target as HTMLInputElement).value))" />
+      <input type="range" min="0" max="100" :value="Math.round(active.opacity * 100)" class="inspector-range" aria-label="Layer opacity" @change="emit('opacity', Number(($event.target as HTMLInputElement).value))">
       <div class="layer-toolbar"><button :disabled="activeIndex >= layers.length - 1" @click="emit('reorder', active.id, 1)">↑ Move up</button><button :disabled="activeIndex <= 0" @click="emit('reorder', active.id, -1)">↓ Move down</button></div>
       <p v-if="!active.visible">This layer is hidden. Show it before painting.</p>
-
     </div>
   </aside>
 </template>

@@ -162,39 +162,39 @@ watch(panelViewMode, (mode) => {
   >
     <!-- Left Resize Handle -->
     <div 
-      @mousedown="startResizeLeft"
       class="absolute left-0 top-0 w-1.5 h-full cursor-ew-resize hover:bg-ui-accent/40 transition z-50 group"
       title="Drag to resize sidebar width"
-    ></div>
+      @mousedown="startResizeLeft"
+    />
 
     <div class="h-7 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between select-none shrink-0">
       <div class="inspector-seg">
         <button
           type="button"
-          @click="panelViewMode = 'split'"
           class="inspector-seg-btn"
           :class="{ 'is-active': panelViewMode === 'split' }"
           title="Split view: scene and inspector"
+          @click="panelViewMode = 'split'"
         >
           <BlenderIcon name="layers" :size="12" />
           <span>Split</span>
         </button>
         <button
           type="button"
-          @click="panelViewMode = 'outliner'"
           class="inspector-seg-btn"
           :class="{ 'is-active': panelViewMode === 'outliner' }"
           title="Scene objects and bones"
+          @click="panelViewMode = 'outliner'"
         >
           <BlenderIcon name="mesh-cube" :size="12" />
           <span>Scene</span>
         </button>
         <button
           type="button"
-          @click="panelViewMode = 'props'"
           class="inspector-seg-btn"
           :class="{ 'is-active': panelViewMode === 'props' }"
           title="Focused inspector"
+          @click="panelViewMode = 'props'"
         >
           <BlenderIcon name="settings" :size="12" />
           <span>Inspect</span>
@@ -203,9 +203,9 @@ watch(panelViewMode, (mode) => {
 
       <button
         type="button"
-        @click="layoutStore.showRightSidebar = false"
         class="w-7 h-7 flex items-center justify-center rounded-xs text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover cursor-pointer"
         title="Hide panel (N)"
+        @click="layoutStore.showRightSidebar = false"
       >
         <BlenderIcon name="sidebar" :size="14" />
       </button>
@@ -230,11 +230,11 @@ watch(panelViewMode, (mode) => {
             </div>
           </div>
           <div
-            @mousedown="startVerticalSplit"
             class="h-2 w-full bg-ui-header hover:bg-ui-hover border-y border-ui-borderSubtle cursor-row-resize flex items-center justify-center transition group select-none shrink-0 z-20"
             title="Drag to resize Outliner vs Properties"
+            @mousedown="startVerticalSplit"
           >
-            <div class="w-8 h-0.5 rounded-full bg-ui-borderDefault group-hover:bg-ui-accent transition"></div>
+            <div class="w-8 h-0.5 rounded-full bg-ui-borderDefault group-hover:bg-ui-accent transition" />
           </div>
         </template>
 
@@ -244,12 +244,12 @@ watch(panelViewMode, (mode) => {
               v-for="tab in activePropTabs"
               :key="tab.id"
               type="button"
-              @click="activeTab = tab.id"
               :class="railClass(tab.id)"
               :title="tab.title"
+              @click="activeTab = tab.id"
             >
               <BlenderIcon v-if="tab.blenderIcon" :name="tab.blenderIcon" :size="14" />
-              <component v-else-if="tab.icon" :is="tab.icon" class="w-3.5 h-3.5" />
+              <component :is="tab.icon" v-else-if="tab.icon" class="w-3.5 h-3.5" />
             </button>
           </div>
 

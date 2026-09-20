@@ -612,7 +612,7 @@ export function smartUvProject(mesh: MeshObject, options: SmartUvProjectOptions 
 
   for (let islandIndex = 0; islandIndex < islands.length; islandIndex++) {
     const island = islands[islandIndex]
-    let normalSum = { x: 0, y: 0, z: 0 }
+    const normalSum = { x: 0, y: 0, z: 0 }
     const uniquePoints = new Map<string, Vector3D>()
     for (const faceIndex of island) {
       const normal = normals.get(faceIndex) || { x: 0, y: 1, z: 0 }

@@ -500,8 +500,8 @@ export class PixelBuffer {
     size = 1,
     shape: 'square' | 'circle' = 'square'
   ) {
-    let dx = Math.abs(x1 - x0)
-    let dy = Math.abs(y1 - y0)
+    const dx = Math.abs(x1 - x0)
+    const dy = Math.abs(y1 - y0)
     const sx = x0 < x1 ? 1 : -1
     const sy = y0 < y1 ? 1 : -1
     let err = dx - dy
@@ -529,10 +529,10 @@ export class PixelBuffer {
     opacity = 1.0,
     shape: 'square' | 'circle' = 'square'
   ) {
-    let dx = Math.abs(x1 - x0)
-    let dy = Math.abs(y1 - y0)
-    let sx = x0 < x1 ? 1 : -1
-    let sy = y0 < y1 ? 1 : -1
+    const dx = Math.abs(x1 - x0)
+    const dy = Math.abs(y1 - y0)
+    const sx = x0 < x1 ? 1 : -1
+    const sy = y0 < y1 ? 1 : -1
     let err = dx - dy
 
     let curX = Math.floor(x0)
@@ -543,7 +543,7 @@ export class PixelBuffer {
     while (true) {
       this.drawBrush(curX, curY, colorHex, size, opacity, shape, false)
       if (curX === endX && curY === endY) break
-      let e2 = 2 * err
+      const e2 = 2 * err
       if (e2 > -dy) {
         err -= dy
         curX += sx

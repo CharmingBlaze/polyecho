@@ -103,9 +103,9 @@ const activeModifiersCount = computed(() => {
     <div>
       <div class="relative px-2.5 py-1.5 border-b border-ui-borderSubtle">
         <button
-          @click="showAddMenu = !showAddMenu"
           :disabled="!activeMesh"
           class="w-full py-1.5 px-3 bg-ui-input hover:bg-ui-hover text-ui-textPrimary border border-ui-borderDefault rounded-xs flex items-center justify-between font-medium transition shadow-xs disabled:opacity-40 disabled:pointer-events-none"
+          @click="showAddMenu = !showAddMenu"
         >
           <div class="flex items-center gap-2">
             <Wrench class="w-3.5 h-3.5 text-ui-textMuted" />
@@ -122,8 +122,8 @@ const activeModifiersCount = computed(() => {
             <div class="px-2 py-0.5 text-[10px] font-bold text-ui-textMuted uppercase tracking-wider">Generate</div>
 
             <button
-              @click="projectStore.addModifier('mirror'); showAddMenu = false"
               class="w-full text-left px-2.5 py-1.5 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary"
+              @click="projectStore.addModifier('mirror'); showAddMenu = false"
             >
               <div class="flex items-center gap-2">
                 <FlipHorizontal class="w-3.5 h-3.5 text-ui-textMuted" />
@@ -133,8 +133,8 @@ const activeModifiersCount = computed(() => {
             </button>
 
             <button
-              @click="projectStore.addModifier('subdivision'); showAddMenu = false"
               class="w-full text-left px-2.5 py-1.5 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary"
+              @click="projectStore.addModifier('subdivision'); showAddMenu = false"
             >
               <div class="flex items-center gap-2">
                 <Layers class="w-3.5 h-3.5 text-ui-textMuted" />
@@ -144,8 +144,8 @@ const activeModifiersCount = computed(() => {
             </button>
 
             <button
-              @click="projectStore.addModifier('solidify'); showAddMenu = false"
               class="w-full text-left px-2.5 py-1.5 hover:bg-ui-hover rounded-xs flex items-center justify-between text-ui-textPrimary"
+              @click="projectStore.addModifier('solidify'); showAddMenu = false"
             >
               <div class="flex items-center gap-2">
                 <Shield class="w-3.5 h-3.5 text-ui-textMuted" />
@@ -166,7 +166,7 @@ const activeModifiersCount = computed(() => {
           class="bg-ui-panel border border-ui-borderDefault rounded-xs overflow-hidden shadow-xs"
         >
           <div class="h-7 bg-ui-header px-2 flex items-center justify-between border-b border-ui-borderSubtle">
-            <button @click="toggleSection('mirror')" class="flex items-center gap-1.5 font-semibold text-ui-textPrimary text-[11px]">
+            <button class="flex items-center gap-1.5 font-semibold text-ui-textPrimary text-[11px]" @click="toggleSection('mirror')">
               <ChevronDown v-if="openModifiers.mirror" class="w-3 h-3 text-ui-textMuted" />
               <ChevronRight v-else class="w-3 h-3 text-ui-textMuted" />
               <FlipHorizontal class="w-3.5 h-3.5 text-ui-textMuted" />
@@ -180,19 +180,19 @@ const activeModifiersCount = computed(() => {
                   :checked="activeMesh.mirror.enabled"
                   class="accent-ui-accent"
                   @click.prevent="toggleMirrorFlag('enabled')"
-                />
+                >
               </label>
               <button
-                @click="projectStore.applyMeshModifier('mirror')"
                 class="px-2 py-0.5 bg-ui-accent hover:bg-indigo-500 text-white rounded-xs text-[10px] font-medium transition"
                 title="Bake into mesh"
+                @click="projectStore.applyMeshModifier('mirror')"
               >
                 Apply
               </button>
               <button
-                @click="projectStore.removeMeshModifier('mirror')"
                 class="p-1 text-ui-textMuted hover:text-rose-400 rounded-xs hover:bg-ui-hover transition"
                 title="Remove Modifier"
+                @click="projectStore.removeMeshModifier('mirror')"
               >
                 <Trash2 class="w-3 h-3" />
               </button>
@@ -204,23 +204,23 @@ const activeModifiersCount = computed(() => {
               <span class="text-ui-textSecondary font-bold">Axis</span>
               <div class="flex items-center space-x-1">
                 <button
-                  @click="toggleMirrorFlag('axisX')"
                   class="px-2.5 py-0.5 rounded-xs border text-[10px] font-bold transition"
                   :class="activeMesh.mirror.axisX ? 'inspector-chip is-active' : 'inspector-chip'"
+                  @click="toggleMirrorFlag('axisX')"
                 >
                   X
                 </button>
                 <button
-                  @click="toggleMirrorFlag('axisY')"
                   class="px-2.5 py-0.5 rounded-xs border text-[10px] font-bold transition"
                   :class="activeMesh.mirror.axisY ? 'inspector-chip is-active' : 'inspector-chip'"
+                  @click="toggleMirrorFlag('axisY')"
                 >
                   Y
                 </button>
                 <button
-                  @click="toggleMirrorFlag('axisZ')"
                   class="px-2.5 py-0.5 rounded-xs border text-[10px] font-bold transition"
                   :class="activeMesh.mirror.axisZ ? 'inspector-chip is-active' : 'inspector-chip'"
+                  @click="toggleMirrorFlag('axisZ')"
                 >
                   Z
                 </button>
@@ -234,7 +234,7 @@ const activeModifiersCount = computed(() => {
                   :checked="activeMesh.mirror.bisect"
                   class="rounded-xs bg-ui-panel border-ui-borderDefault text-ui-accent"
                   @click.prevent="toggleMirrorFlag('bisect')"
-                />
+                >
                 <span>Bisect</span>
               </label>
               <label class="flex items-center space-x-1.5 cursor-pointer bg-ui-input p-1.5 rounded-xs border border-ui-borderSubtle">
@@ -243,7 +243,7 @@ const activeModifiersCount = computed(() => {
                   :checked="activeMesh.mirror.merge"
                   class="rounded-xs bg-ui-panel border-ui-borderDefault text-ui-accent"
                   @click.prevent="toggleMirrorFlag('merge')"
-                />
+                >
                 <span>Merge</span>
               </label>
               <label class="flex items-center space-x-1.5 cursor-pointer bg-ui-input p-1.5 rounded-xs border border-ui-borderSubtle">
@@ -252,7 +252,7 @@ const activeModifiersCount = computed(() => {
                   :checked="activeMesh.mirror.clipping"
                   class="rounded-xs bg-ui-panel border-ui-borderDefault text-ui-accent"
                   @click.prevent="toggleMirrorFlag('clipping')"
-                />
+                >
                 <span>Clipping</span>
               </label>
               <label class="flex items-center space-x-1.5 cursor-pointer bg-ui-input p-1.5 rounded-xs border border-ui-borderSubtle">
@@ -261,7 +261,7 @@ const activeModifiersCount = computed(() => {
                   :checked="activeMesh.mirror.flipU"
                   class="rounded-xs bg-ui-panel border-ui-borderDefault text-ui-accent"
                   @click.prevent="toggleMirrorFlag('flipU')"
-                />
+                >
                 <span>Flip U</span>
               </label>
             </div>
@@ -285,7 +285,7 @@ const activeModifiersCount = computed(() => {
           class="bg-ui-panel border border-ui-borderDefault rounded-xs overflow-hidden shadow-xs"
         >
           <div class="h-7 bg-ui-header px-2 flex items-center justify-between border-b border-ui-borderSubtle">
-            <button @click="toggleSection('subdivision')" class="flex items-center gap-1.5 font-semibold text-ui-textPrimary text-[11px]">
+            <button class="flex items-center gap-1.5 font-semibold text-ui-textPrimary text-[11px]" @click="toggleSection('subdivision')">
               <ChevronDown v-if="openModifiers.subdivision" class="w-3 h-3 text-ui-textMuted" />
               <ChevronRight v-else class="w-3 h-3 text-ui-textMuted" />
               <Layers class="w-3.5 h-3.5 text-ui-textMuted" />
@@ -299,19 +299,19 @@ const activeModifiersCount = computed(() => {
                   :checked="activeMesh.subdivision.enabled"
                   class="accent-ui-accent"
                   @click.prevent="toggleSubdivEnabled"
-                />
+                >
               </label>
               <button
-                @click="projectStore.applyMeshModifier('subdivision')"
                 class="px-2 py-0.5 bg-ui-accent hover:bg-indigo-500 text-white rounded-xs text-[10px] font-medium transition"
                 title="Bake into mesh"
+                @click="projectStore.applyMeshModifier('subdivision')"
               >
                 Apply
               </button>
               <button
-                @click="projectStore.removeMeshModifier('subdivision')"
                 class="p-1 text-ui-textMuted hover:text-rose-400 rounded-xs hover:bg-ui-hover transition"
                 title="Remove Modifier"
+                @click="projectStore.removeMeshModifier('subdivision')"
               >
                 <Trash2 class="w-3 h-3" />
               </button>
@@ -323,16 +323,16 @@ const activeModifiersCount = computed(() => {
               <span class="text-ui-textSecondary font-bold">Type</span>
               <div class="flex items-center space-x-1">
                 <button
-                  @click="setSubdivType('catmull-clark')"
                   class="px-2 py-0.5 rounded-xs border text-[10px] font-bold"
                   :class="(activeMesh.subdivision.type || 'catmull-clark') === 'catmull-clark' ? 'inspector-chip is-active' : 'inspector-chip'"
+                  @click="setSubdivType('catmull-clark')"
                 >
                   Catmull–Clark
                 </button>
                 <button
-                  @click="setSubdivType('simple')"
                   class="px-2 py-0.5 rounded-xs border text-[10px] font-bold"
                   :class="activeMesh.subdivision.type === 'simple' ? 'inspector-chip is-active' : 'inspector-chip'"
+                  @click="setSubdivType('simple')"
                 >
                   Simple
                 </button>
@@ -344,9 +344,9 @@ const activeModifiersCount = computed(() => {
                 <button
                   v-for="lv in [1, 2, 3]"
                   :key="lv"
-                  @click="setSubdivLevel(lv)"
                   class="px-2.5 py-0.5 rounded-xs border text-[10px] font-bold"
                   :class="activeMesh.subdivision.level === lv ? 'inspector-chip is-active' : 'inspector-chip'"
+                  @click="setSubdivLevel(lv)"
                 >
                   {{ lv }}
                 </button>
@@ -360,7 +360,7 @@ const activeModifiersCount = computed(() => {
           class="bg-ui-panel border border-ui-borderDefault rounded-xs overflow-hidden shadow-xs"
         >
           <div class="h-7 bg-ui-header px-2 flex items-center justify-between border-b border-ui-borderSubtle">
-            <button @click="toggleSection('solidify')" class="flex items-center gap-1.5 font-semibold text-ui-textPrimary text-[11px]">
+            <button class="flex items-center gap-1.5 font-semibold text-ui-textPrimary text-[11px]" @click="toggleSection('solidify')">
               <ChevronDown v-if="openModifiers.solidify" class="w-3 h-3 text-ui-textMuted" />
               <ChevronRight v-else class="w-3 h-3 text-ui-textMuted" />
               <Shield class="w-3.5 h-3.5 text-ui-textMuted" />
@@ -374,19 +374,19 @@ const activeModifiersCount = computed(() => {
                   :checked="activeMesh.solidify.enabled"
                   class="accent-ui-accent"
                   @click.prevent="toggleSolidifyEnabled"
-                />
+                >
               </label>
               <button
-                @click="projectStore.applyMeshModifier('solidify')"
                 class="px-2 py-0.5 bg-ui-accent hover:bg-indigo-500 text-white rounded-xs text-[10px] font-medium transition"
                 title="Bake into mesh"
+                @click="projectStore.applyMeshModifier('solidify')"
               >
                 Apply
               </button>
               <button
-                @click="projectStore.removeMeshModifier('solidify')"
                 class="p-1 text-ui-textMuted hover:text-rose-400 rounded-xs hover:bg-ui-hover transition"
                 title="Remove Modifier"
+                @click="projectStore.removeMeshModifier('solidify')"
               >
                 <Trash2 class="w-3 h-3" />
               </button>
@@ -422,7 +422,7 @@ const activeModifiersCount = computed(() => {
                 :checked="activeMesh.solidify.fillRim !== false"
                 class="rounded-xs bg-ui-panel border-ui-borderDefault text-ui-accent"
                 @click.prevent="setFillRim(activeMesh.solidify.fillRim === false)"
-              />
+              >
               <span>Fill Rim</span>
             </label>
           </div>

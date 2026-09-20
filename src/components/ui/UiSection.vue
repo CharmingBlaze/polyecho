@@ -62,7 +62,7 @@ function toggle() {
           class="text-ui-textMuted shrink-0"
         />
         <BlenderIcon v-if="blenderIcon" :name="blenderIcon as any" :size="12" class="text-ui-textMuted shrink-0" />
-        <component v-else-if="icon" :is="icon" class="w-3 h-3 text-ui-textMuted shrink-0" />
+        <component :is="icon" v-else-if="icon" class="w-3 h-3 text-ui-textMuted shrink-0" />
         <span
           class="font-sans font-semibold text-[11px] truncate"
           :class="localIsOpen ? 'text-ui-textPrimary' : 'text-ui-textSecondary'"

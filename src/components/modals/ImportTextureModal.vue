@@ -401,299 +401,294 @@ async function handleImport() {
 
 <template>
   <Teleport to="body">
-  <div 
-    class="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center z-[20000] select-none p-4 animate-in fade-in duration-150"
-    @click.self="handleClose"
-  >
-    <div class="bg-ui-surface border border-ui-borderDefault rounded-xs w-[680px] shadow-2xl overflow-hidden flex flex-col text-ui-textPrimary font-sans">
-      
-      <!-- Modal Header -->
-      <div class="h-10 bg-ui-panel border-b border-ui-borderSubtle px-3.5 flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <div class="w-5 h-5 rounded-xs bg-ui-accent/15 text-ui-textAccent flex items-center justify-center">
-            <ImageIcon class="w-3.5 h-3.5" />
+    <div 
+      class="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center z-[20000] select-none p-4 animate-in fade-in duration-150"
+      @click.self="handleClose"
+    >
+      <div class="bg-ui-surface border border-ui-borderDefault rounded-xs w-[680px] shadow-2xl overflow-hidden flex flex-col text-ui-textPrimary font-sans">
+        <!-- Modal Header -->
+        <div class="h-10 bg-ui-panel border-b border-ui-borderSubtle px-3.5 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <div class="w-5 h-5 rounded-xs bg-ui-accent/15 text-ui-textAccent flex items-center justify-center">
+              <ImageIcon class="w-3.5 h-3.5" />
+            </div>
+            <span class="font-bold text-xs text-ui-textPrimary tracking-wide">Import Texture or Atlas Map</span>
           </div>
-          <span class="font-bold text-xs text-ui-textPrimary tracking-wide">Import Texture or Atlas Map</span>
-        </div>
-        <button 
-          @click="handleClose" 
-          class="p-1 rounded-xs text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer"
-        >
-          <X class="w-3.5 h-3.5" />
-        </button>
-      </div>
-
-      <!-- Main Split Content -->
-      <div class="grid grid-cols-12 gap-0 border-b border-ui-borderSubtle bg-ui-surface">
-        
-        <!-- Left: Live Preview Canvas -->
-        <div class="col-span-5 p-3.5 bg-ui-panel/60 border-r border-ui-borderSubtle flex flex-col items-center justify-between gap-2.5">
-          <div class="w-full flex items-center justify-between text-[10px] text-ui-textMuted font-mono">
-            <span>PREVIEW</span>
-            <span class="text-ui-textAccent font-bold">{{ targetDimensions.width }} × {{ targetDimensions.height }}</span>
-          </div>
-
-          <!-- Checkerboard Container -->
-          <div class="relative w-full aspect-square bg-[#12141a] rounded-xs border border-ui-borderSubtle overflow-hidden flex items-center justify-center shadow-inner">
-            <canvas 
-              ref="previewCanvasRef" 
-              width="230" 
-              height="230" 
-              class="w-full h-full object-contain [image-rendering:pixelated]"
-            />
-          </div>
-
-          <!-- File Stats Readout -->
-          <div class="w-full bg-ui-input/70 p-2 rounded-xs border border-ui-borderSubtle text-[10px] space-y-1">
-            <div class="flex items-center justify-between text-ui-textMuted">
-              <span>Source:</span>
-              <span class="font-mono text-ui-textPrimary font-semibold truncate max-w-[120px]" :title="file?.name">{{ file?.name }}</span>
-            </div>
-            <div class="flex items-center justify-between text-ui-textMuted">
-              <span>Original:</span>
-              <span class="font-mono text-ui-textPrimary">{{ origWidth }} × {{ origHeight }} px</span>
-            </div>
-            <div class="flex items-center justify-between text-ui-textMuted">
-              <span>Aspect Ratio:</span>
-              <span class="font-mono text-ui-textPrimary">{{ aspectRatioText }}</span>
-            </div>
-            <div v-if="isAtlasMode" class="flex items-center justify-between text-amber-300 font-bold">
-              <span>Slicing:</span>
-              <span class="font-mono">{{ computedTileDimensions.cols }}×{{ computedTileDimensions.rows }} ({{ computedTileDimensions.count }} tiles)</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Right: Configuration Controls -->
-        <div class="col-span-7 p-3.5 space-y-3 flex flex-col justify-between max-h-[460px] overflow-y-auto custom-scrollbar">
-          
-          <!-- 1. Resolution Presets & Custom Scaling -->
-          <div class="space-y-1.5">
-            <div class="flex items-center justify-between text-[10px] font-bold text-ui-textMuted uppercase tracking-wider">
-              <span>Target Resolution</span>
-              <span class="font-mono text-ui-textAccent">{{ targetDimensions.width }}×{{ targetDimensions.height }} px</span>
-            </div>
-
-            <!-- Resolution Grid -->
-            <div class="grid grid-cols-4 gap-1">
-              <button 
-                v-for="res in (['orig', 32, 64, 128, 256, 512] as const)"
-                :key="res"
-                @click="setPreset(res)"
-                class="py-1 px-1.5 rounded-xs text-[10px] font-mono font-medium border transition text-center cursor-pointer"
-                :class="selectedRes === res 
-                  ? 'bg-ui-accent text-white font-bold border-ui-accent shadow-xs' 
-                  : 'bg-ui-input text-ui-textSecondary hover:text-ui-textPrimary border-ui-borderSubtle hover:bg-ui-hover'"
-              >
-                {{ res === 'orig' ? 'Source' : `${res}²` }}
-              </button>
-
-              <button 
-                @click="selectedRes = 'custom'"
-                class="col-span-2 py-1 px-1.5 rounded-xs text-[10px] font-mono font-medium border transition text-center cursor-pointer"
-                :class="selectedRes === 'custom' 
-                  ? 'bg-ui-accent text-white font-bold border-ui-accent shadow-xs' 
-                  : 'bg-ui-input text-ui-textSecondary hover:text-ui-textPrimary border-ui-borderSubtle hover:bg-ui-hover'"
-              >
-                Custom Size
-              </button>
-            </div>
-
-            <!-- Custom Size Inputs -->
-            <div class="flex items-center gap-1.5 pt-1">
-              <div class="flex-1 flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-0.5 text-[11px] font-mono">
-                <span class="text-ui-textMuted text-[9px] mr-1.5 uppercase">W</span>
-                <input 
-                  type="number" 
-                  min="8" 
-                  max="4096" 
-                  step="8" 
-                  :value="customWidth" 
-                  @input="handleCustomWidthChange(Number(($event.target as HTMLInputElement).value))"
-                  class="w-full bg-transparent text-ui-textPrimary focus:outline-none"
-                />
-              </div>
-
-              <button 
-                @click="lockAspectRatio = !lockAspectRatio"
-                :title="lockAspectRatio ? 'Lock Aspect Ratio' : 'Unlock Aspect Ratio'"
-                class="p-1 rounded-xs border transition cursor-pointer"
-                :class="lockAspectRatio ? 'bg-ui-accent/15 text-ui-textAccent border-ui-accent/30' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary'"
-              >
-                <Lock v-if="lockAspectRatio" class="w-3 h-3" />
-                <Unlock v-else class="w-3 h-3" />
-              </button>
-
-              <div class="flex-1 flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-0.5 text-[11px] font-mono">
-                <span class="text-ui-textMuted text-[9px] mr-1.5 uppercase">H</span>
-                <input 
-                  type="number" 
-                  min="8" 
-                  max="4096" 
-                  step="8" 
-                  :value="customHeight" 
-                  @input="handleCustomHeightChange(Number(($event.target as HTMLInputElement).value))"
-                  class="w-full bg-transparent text-ui-textPrimary focus:outline-none"
-                />
-              </div>
-            </div>
-          </div>
-
-          <!-- 2. Atlas / Sprite Sheet Slicing Card -->
-          <div class="bg-amber-950/20 p-2 rounded-xs border border-amber-500/30 space-y-2">
-            <label class="flex items-center justify-between cursor-pointer">
-              <span class="text-[10.5px] font-bold text-amber-300 flex items-center gap-1.5">
-                <Grid class="w-3.5 h-3.5 text-amber-400" />
-                <span>Atlas / Sprite Sheet Slicing</span>
-              </span>
-              <input 
-                type="checkbox" 
-                v-model="isAtlasMode" 
-                class="rounded-xs accent-amber-500 cursor-pointer"
-              />
-            </label>
-
-            <!-- Atlas Options (if enabled) -->
-            <div v-if="isAtlasMode" class="space-y-1.5 pt-1 border-t border-amber-500/20">
-              <div class="grid grid-cols-2 gap-1 text-[9.5px]">
-                <button 
-                  @click="atlasSliceMethod = 'grid'"
-                  class="py-1 rounded-xs border text-center transition cursor-pointer"
-                  :class="atlasSliceMethod === 'grid' ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-bold' : 'bg-ui-input text-ui-textSecondary border-ui-borderSubtle'"
-                >
-                  Grid (Cols × Rows)
-                </button>
-                <button 
-                  @click="atlasSliceMethod = 'tileSize'"
-                  class="py-1 rounded-xs border text-center transition cursor-pointer"
-                  :class="atlasSliceMethod === 'tileSize' ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-bold' : 'bg-ui-input text-ui-textSecondary border-ui-borderSubtle'"
-                >
-                  Tile Size (px)
-                </button>
-              </div>
-
-              <!-- Grid Mode Inputs -->
-              <div v-if="atlasSliceMethod === 'grid'" class="grid grid-cols-2 gap-2 text-[10px]">
-                <div>
-                  <span class="text-ui-textMuted text-[9px] block">Columns:</span>
-                  <input type="number" min="1" max="64" v-model.number="atlasCols" class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-ui-textPrimary font-mono" />
-                </div>
-                <div>
-                  <span class="text-ui-textMuted text-[9px] block">Rows:</span>
-                  <input type="number" min="1" max="64" v-model.number="atlasRows" class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-ui-textPrimary font-mono" />
-                </div>
-              </div>
-
-              <!-- Tile Size Inputs -->
-              <div v-else class="grid grid-cols-2 gap-2 text-[10px]">
-                <div>
-                  <span class="text-ui-textMuted text-[9px] block">Tile Width (px):</span>
-                  <input type="number" min="8" max="512" step="8" v-model.number="atlasTileW" class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-ui-textPrimary font-mono" />
-                </div>
-                <div>
-                  <span class="text-ui-textMuted text-[9px] block">Tile Height (px):</span>
-                  <input type="number" min="8" max="512" step="8" v-model.number="atlasTileH" class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-ui-textPrimary font-mono" />
-                </div>
-              </div>
-
-              <div class="text-[9px] text-amber-200/80 font-mono">
-                Will extract {{ computedTileDimensions.count }} sub-textures ({{ computedTileDimensions.tileW }}×{{ computedTileDimensions.tileH }}px each).
-              </div>
-            </div>
-          </div>
-
-          <!-- 3. Sampling Filter & Placement -->
-          <div class="grid grid-cols-2 gap-2">
-            <div class="space-y-1">
-              <span class="text-[9.5px] font-bold text-ui-textMuted uppercase">Resample Filter</span>
-              <div class="grid grid-cols-2 gap-0.5">
-                <button 
-                  @click="filterMode = 'nearest'"
-                  class="py-1 rounded-xs text-[9.5px] font-medium border transition text-center cursor-pointer"
-                  :class="filterMode === 'nearest' ? 'bg-ui-accent text-white font-bold border-ui-accent' : 'bg-ui-input text-ui-textSecondary border-ui-borderSubtle'"
-                >
-                  Nearest
-                </button>
-                <button 
-                  @click="filterMode = 'bilinear'"
-                  class="py-1 rounded-xs text-[9.5px] font-medium border transition text-center cursor-pointer"
-                  :class="filterMode === 'bilinear' ? 'bg-ui-accent text-white font-bold border-ui-accent' : 'bg-ui-input text-ui-textSecondary border-ui-borderSubtle'"
-                >
-                  Bilinear
-                </button>
-              </div>
-            </div>
-
-            <div class="space-y-1">
-              <span class="text-[9.5px] font-bold text-ui-textMuted uppercase">Fit Mode</span>
-              <div class="grid grid-cols-3 gap-0.5">
-                <button 
-                  v-for="mode in [
-                    { id: 'stretch', label: 'Stretch' },
-                    { id: 'contain', label: 'Fit' },
-                    { id: 'tile', label: 'Tile' }
-                  ]" 
-                  :key="mode.id"
-                  @click="fitMode = mode.id as any"
-                  class="py-1 rounded-xs text-[9px] font-medium border transition text-center cursor-pointer"
-                  :class="fitMode === mode.id ? 'bg-ui-accent text-white font-bold border-ui-accent' : 'bg-ui-input text-ui-textSecondary border-ui-borderSubtle'"
-                >
-                  {{ mode.label }}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- 4. Retro Palette Extraction -->
-          <div class="bg-ui-input/60 p-2 rounded-xs border border-ui-borderSubtle space-y-1.5">
-            <label class="flex items-center justify-between cursor-pointer">
-              <span class="text-[10px] font-semibold text-ui-textPrimary flex items-center gap-1">
-                <Sparkles class="w-3 h-3 text-amber-400" />
-                <span>Extract Retro Palette</span>
-              </span>
-              <input 
-                type="checkbox" 
-                v-model="extractPalette" 
-                class="rounded-xs accent-ui-accent cursor-pointer"
-              />
-            </label>
-
-            <!-- Color Swatches Preview -->
-            <div v-if="extractPalette && extractedColors.length > 0" class="grid grid-cols-8 gap-0.5 pt-0.5">
-              <div 
-                v-for="c in extractedColors" 
-                :key="c"
-                class="h-3.5 rounded-2xs border border-black/30 shadow-2xs"
-                :style="{ backgroundColor: c }"
-                :title="c"
-              />
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-      <!-- Modal Footer -->
-      <div class="h-11 bg-ui-panel px-3.5 flex items-center justify-between">
-        <span class="text-[10px] text-ui-textMuted font-mono">Press Ctrl+Enter to Import</span>
-        <div class="flex items-center gap-2">
           <button 
-            @click="handleClose" 
-            class="px-3.5 py-1 rounded-xs text-[11px] font-medium text-ui-textSecondary hover:text-ui-textPrimary bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle transition cursor-pointer"
+            class="p-1 rounded-xs text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover transition cursor-pointer" 
+            @click="handleClose"
           >
-            Cancel
-          </button>
-
-          <button 
-            @click="handleImport" 
-            class="px-4 py-1 rounded-xs text-[11px] font-bold text-white bg-ui-accent hover:bg-ui-accentHover shadow-xs transition active:scale-95 cursor-pointer"
-          >
-            {{ isAtlasMode ? `Import Atlas (${computedTileDimensions.count} Tiles)` : 'Import Texture' }}
+            <X class="w-3.5 h-3.5" />
           </button>
         </div>
-      </div>
 
+        <!-- Main Split Content -->
+        <div class="grid grid-cols-12 gap-0 border-b border-ui-borderSubtle bg-ui-surface">
+          <!-- Left: Live Preview Canvas -->
+          <div class="col-span-5 p-3.5 bg-ui-panel/60 border-r border-ui-borderSubtle flex flex-col items-center justify-between gap-2.5">
+            <div class="w-full flex items-center justify-between text-[10px] text-ui-textMuted font-mono">
+              <span>PREVIEW</span>
+              <span class="text-ui-textAccent font-bold">{{ targetDimensions.width }} × {{ targetDimensions.height }}</span>
+            </div>
+
+            <!-- Checkerboard Container -->
+            <div class="relative w-full aspect-square bg-[#12141a] rounded-xs border border-ui-borderSubtle overflow-hidden flex items-center justify-center shadow-inner">
+              <canvas 
+                ref="previewCanvasRef" 
+                width="230" 
+                height="230" 
+                class="w-full h-full object-contain [image-rendering:pixelated]"
+              />
+            </div>
+
+            <!-- File Stats Readout -->
+            <div class="w-full bg-ui-input/70 p-2 rounded-xs border border-ui-borderSubtle text-[10px] space-y-1">
+              <div class="flex items-center justify-between text-ui-textMuted">
+                <span>Source:</span>
+                <span class="font-mono text-ui-textPrimary font-semibold truncate max-w-[120px]" :title="file?.name">{{ file?.name }}</span>
+              </div>
+              <div class="flex items-center justify-between text-ui-textMuted">
+                <span>Original:</span>
+                <span class="font-mono text-ui-textPrimary">{{ origWidth }} × {{ origHeight }} px</span>
+              </div>
+              <div class="flex items-center justify-between text-ui-textMuted">
+                <span>Aspect Ratio:</span>
+                <span class="font-mono text-ui-textPrimary">{{ aspectRatioText }}</span>
+              </div>
+              <div v-if="isAtlasMode" class="flex items-center justify-between text-amber-300 font-bold">
+                <span>Slicing:</span>
+                <span class="font-mono">{{ computedTileDimensions.cols }}×{{ computedTileDimensions.rows }} ({{ computedTileDimensions.count }} tiles)</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Configuration Controls -->
+          <div class="col-span-7 p-3.5 space-y-3 flex flex-col justify-between max-h-[460px] overflow-y-auto custom-scrollbar">
+            <!-- 1. Resolution Presets & Custom Scaling -->
+            <div class="space-y-1.5">
+              <div class="flex items-center justify-between text-[10px] font-bold text-ui-textMuted uppercase tracking-wider">
+                <span>Target Resolution</span>
+                <span class="font-mono text-ui-textAccent">{{ targetDimensions.width }}×{{ targetDimensions.height }} px</span>
+              </div>
+
+              <!-- Resolution Grid -->
+              <div class="grid grid-cols-4 gap-1">
+                <button 
+                  v-for="res in (['orig', 32, 64, 128, 256, 512] as const)"
+                  :key="res"
+                  class="py-1 px-1.5 rounded-xs text-[10px] font-mono font-medium border transition text-center cursor-pointer"
+                  :class="selectedRes === res 
+                    ? 'bg-ui-accent text-white font-bold border-ui-accent shadow-xs' 
+                    : 'bg-ui-input text-ui-textSecondary hover:text-ui-textPrimary border-ui-borderSubtle hover:bg-ui-hover'"
+                  @click="setPreset(res)"
+                >
+                  {{ res === 'orig' ? 'Source' : `${res}²` }}
+                </button>
+
+                <button 
+                  class="col-span-2 py-1 px-1.5 rounded-xs text-[10px] font-mono font-medium border transition text-center cursor-pointer"
+                  :class="selectedRes === 'custom' 
+                    ? 'bg-ui-accent text-white font-bold border-ui-accent shadow-xs' 
+                    : 'bg-ui-input text-ui-textSecondary hover:text-ui-textPrimary border-ui-borderSubtle hover:bg-ui-hover'"
+                  @click="selectedRes = 'custom'"
+                >
+                  Custom Size
+                </button>
+              </div>
+
+              <!-- Custom Size Inputs -->
+              <div class="flex items-center gap-1.5 pt-1">
+                <div class="flex-1 flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-0.5 text-[11px] font-mono">
+                  <span class="text-ui-textMuted text-[9px] mr-1.5 uppercase">W</span>
+                  <input 
+                    type="number" 
+                    min="8" 
+                    max="4096" 
+                    step="8" 
+                    :value="customWidth" 
+                    class="w-full bg-transparent text-ui-textPrimary focus:outline-none"
+                    @input="handleCustomWidthChange(Number(($event.target as HTMLInputElement).value))"
+                  >
+                </div>
+
+                <button 
+                  :title="lockAspectRatio ? 'Lock Aspect Ratio' : 'Unlock Aspect Ratio'"
+                  class="p-1 rounded-xs border transition cursor-pointer"
+                  :class="lockAspectRatio ? 'bg-ui-accent/15 text-ui-textAccent border-ui-accent/30' : 'bg-ui-input text-ui-textMuted border-ui-borderSubtle hover:text-ui-textPrimary'"
+                  @click="lockAspectRatio = !lockAspectRatio"
+                >
+                  <Lock v-if="lockAspectRatio" class="w-3 h-3" />
+                  <Unlock v-else class="w-3 h-3" />
+                </button>
+
+                <div class="flex-1 flex items-center bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-0.5 text-[11px] font-mono">
+                  <span class="text-ui-textMuted text-[9px] mr-1.5 uppercase">H</span>
+                  <input 
+                    type="number" 
+                    min="8" 
+                    max="4096" 
+                    step="8" 
+                    :value="customHeight" 
+                    class="w-full bg-transparent text-ui-textPrimary focus:outline-none"
+                    @input="handleCustomHeightChange(Number(($event.target as HTMLInputElement).value))"
+                  >
+                </div>
+              </div>
+            </div>
+
+            <!-- 2. Atlas / Sprite Sheet Slicing Card -->
+            <div class="bg-amber-950/20 p-2 rounded-xs border border-amber-500/30 space-y-2">
+              <label class="flex items-center justify-between cursor-pointer">
+                <span class="text-[10.5px] font-bold text-amber-300 flex items-center gap-1.5">
+                  <Grid class="w-3.5 h-3.5 text-amber-400" />
+                  <span>Atlas / Sprite Sheet Slicing</span>
+                </span>
+                <input 
+                  v-model="isAtlasMode" 
+                  type="checkbox" 
+                  class="rounded-xs accent-amber-500 cursor-pointer"
+                >
+              </label>
+
+              <!-- Atlas Options (if enabled) -->
+              <div v-if="isAtlasMode" class="space-y-1.5 pt-1 border-t border-amber-500/20">
+                <div class="grid grid-cols-2 gap-1 text-[9.5px]">
+                  <button 
+                    class="py-1 rounded-xs border text-center transition cursor-pointer"
+                    :class="atlasSliceMethod === 'grid' ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-bold' : 'bg-ui-input text-ui-textSecondary border-ui-borderSubtle'"
+                    @click="atlasSliceMethod = 'grid'"
+                  >
+                    Grid (Cols × Rows)
+                  </button>
+                  <button 
+                    class="py-1 rounded-xs border text-center transition cursor-pointer"
+                    :class="atlasSliceMethod === 'tileSize' ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-bold' : 'bg-ui-input text-ui-textSecondary border-ui-borderSubtle'"
+                    @click="atlasSliceMethod = 'tileSize'"
+                  >
+                    Tile Size (px)
+                  </button>
+                </div>
+
+                <!-- Grid Mode Inputs -->
+                <div v-if="atlasSliceMethod === 'grid'" class="grid grid-cols-2 gap-2 text-[10px]">
+                  <div>
+                    <span class="text-ui-textMuted text-[9px] block">Columns:</span>
+                    <input v-model.number="atlasCols" type="number" min="1" max="64" class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-ui-textPrimary font-mono">
+                  </div>
+                  <div>
+                    <span class="text-ui-textMuted text-[9px] block">Rows:</span>
+                    <input v-model.number="atlasRows" type="number" min="1" max="64" class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-ui-textPrimary font-mono">
+                  </div>
+                </div>
+
+                <!-- Tile Size Inputs -->
+                <div v-else class="grid grid-cols-2 gap-2 text-[10px]">
+                  <div>
+                    <span class="text-ui-textMuted text-[9px] block">Tile Width (px):</span>
+                    <input v-model.number="atlasTileW" type="number" min="8" max="512" step="8" class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-ui-textPrimary font-mono">
+                  </div>
+                  <div>
+                    <span class="text-ui-textMuted text-[9px] block">Tile Height (px):</span>
+                    <input v-model.number="atlasTileH" type="number" min="8" max="512" step="8" class="w-full bg-ui-input border border-ui-borderSubtle rounded-xs px-1.5 py-0.5 text-ui-textPrimary font-mono">
+                  </div>
+                </div>
+
+                <div class="text-[9px] text-amber-200/80 font-mono">
+                  Will extract {{ computedTileDimensions.count }} sub-textures ({{ computedTileDimensions.tileW }}×{{ computedTileDimensions.tileH }}px each).
+                </div>
+              </div>
+            </div>
+
+            <!-- 3. Sampling Filter & Placement -->
+            <div class="grid grid-cols-2 gap-2">
+              <div class="space-y-1">
+                <span class="text-[9.5px] font-bold text-ui-textMuted uppercase">Resample Filter</span>
+                <div class="grid grid-cols-2 gap-0.5">
+                  <button 
+                    class="py-1 rounded-xs text-[9.5px] font-medium border transition text-center cursor-pointer"
+                    :class="filterMode === 'nearest' ? 'bg-ui-accent text-white font-bold border-ui-accent' : 'bg-ui-input text-ui-textSecondary border-ui-borderSubtle'"
+                    @click="filterMode = 'nearest'"
+                  >
+                    Nearest
+                  </button>
+                  <button 
+                    class="py-1 rounded-xs text-[9.5px] font-medium border transition text-center cursor-pointer"
+                    :class="filterMode === 'bilinear' ? 'bg-ui-accent text-white font-bold border-ui-accent' : 'bg-ui-input text-ui-textSecondary border-ui-borderSubtle'"
+                    @click="filterMode = 'bilinear'"
+                  >
+                    Bilinear
+                  </button>
+                </div>
+              </div>
+
+              <div class="space-y-1">
+                <span class="text-[9.5px] font-bold text-ui-textMuted uppercase">Fit Mode</span>
+                <div class="grid grid-cols-3 gap-0.5">
+                  <button 
+                    v-for="mode in [
+                      { id: 'stretch', label: 'Stretch' },
+                      { id: 'contain', label: 'Fit' },
+                      { id: 'tile', label: 'Tile' }
+                    ]" 
+                    :key="mode.id"
+                    class="py-1 rounded-xs text-[9px] font-medium border transition text-center cursor-pointer"
+                    :class="fitMode === mode.id ? 'bg-ui-accent text-white font-bold border-ui-accent' : 'bg-ui-input text-ui-textSecondary border-ui-borderSubtle'"
+                    @click="fitMode = mode.id as any"
+                  >
+                    {{ mode.label }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 4. Retro Palette Extraction -->
+            <div class="bg-ui-input/60 p-2 rounded-xs border border-ui-borderSubtle space-y-1.5">
+              <label class="flex items-center justify-between cursor-pointer">
+                <span class="text-[10px] font-semibold text-ui-textPrimary flex items-center gap-1">
+                  <Sparkles class="w-3 h-3 text-amber-400" />
+                  <span>Extract Retro Palette</span>
+                </span>
+                <input 
+                  v-model="extractPalette" 
+                  type="checkbox" 
+                  class="rounded-xs accent-ui-accent cursor-pointer"
+                >
+              </label>
+
+              <!-- Color Swatches Preview -->
+              <div v-if="extractPalette && extractedColors.length > 0" class="grid grid-cols-8 gap-0.5 pt-0.5">
+                <div 
+                  v-for="c in extractedColors" 
+                  :key="c"
+                  class="h-3.5 rounded-2xs border border-black/30 shadow-2xs"
+                  :style="{ backgroundColor: c }"
+                  :title="c"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="h-11 bg-ui-panel px-3.5 flex items-center justify-between">
+          <span class="text-[10px] text-ui-textMuted font-mono">Press Ctrl+Enter to Import</span>
+          <div class="flex items-center gap-2">
+            <button 
+              class="px-3.5 py-1 rounded-xs text-[11px] font-medium text-ui-textSecondary hover:text-ui-textPrimary bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle transition cursor-pointer" 
+              @click="handleClose"
+            >
+              Cancel
+            </button>
+
+            <button 
+              class="px-4 py-1 rounded-xs text-[11px] font-bold text-white bg-ui-accent hover:bg-ui-accentHover shadow-xs transition active:scale-95 cursor-pointer" 
+              @click="handleImport"
+            >
+              {{ isAtlasMode ? `Import Atlas (${computedTileDimensions.count} Tiles)` : 'Import Texture' }}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
-  </div>
   </Teleport>
 </template>

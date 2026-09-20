@@ -246,60 +246,60 @@ async function handleExportTurntable() {
 </script>
 
 <template>
-  <div @click.self="$emit('close')" class="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 select-none font-sans">
+  <div class="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 select-none font-sans" @click.self="$emit('close')">
     <div class="bg-ui-panel border border-ui-borderStrong rounded-xs w-[540px] shadow-2xl overflow-hidden flex flex-col">
       <div class="h-9 bg-ui-header border-b border-ui-borderSubtle px-3 flex items-center justify-between">
         <div class="flex items-center gap-2 text-xs font-mono font-bold text-ui-textPrimary">
           <BlenderIcon name="export" :size="14" />
           <span>Export Game Assets</span>
         </div>
-        <button @click="$emit('close')" class="p-1 rounded-xs text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover" title="Close (Esc)">
+        <button class="p-1 rounded-xs text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover" title="Close (Esc)" @click="$emit('close')">
           <BlenderIcon name="close" :size="14" />
         </button>
       </div>
 
       <div class="grid grid-cols-6 bg-ui-input/40 border-b border-ui-borderSubtle text-[10px] font-mono">
         <button 
-          @click="activeTab = 'gltf'" 
-          class="py-2 flex items-center justify-center gap-1 transition"
+          class="py-2 flex items-center justify-center gap-1 transition" 
           :class="activeTab === 'gltf' ? 'bg-ui-panel text-ui-textAccent font-bold border-b-2 border-ui-accent' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          @click="activeTab = 'gltf'"
         >
           <BlenderIcon name="mesh-cube" :size="12" />
           <span>GLB</span>
         </button>
         <button 
-          @click="activeTab = 'obj'" 
-          class="py-2 flex items-center justify-center gap-1 transition"
+          class="py-2 flex items-center justify-center gap-1 transition" 
           :class="activeTab === 'obj' ? 'bg-ui-panel text-ui-textAccent font-bold border-b-2 border-ui-accent' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          @click="activeTab = 'obj'"
         >
           <span>OBJ</span>
         </button>
         <button 
-          @click="activeTab = 'blockbench'" 
-          class="py-2 flex items-center justify-center gap-1 transition"
+          class="py-2 flex items-center justify-center gap-1 transition" 
           :class="activeTab === 'blockbench' ? 'bg-ui-panel text-ui-textAccent font-bold border-b-2 border-ui-accent' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          @click="activeTab = 'blockbench'"
         >
           <span>BB</span>
         </button>
         <button 
-          @click="activeTab = 'spritesheet'" 
-          class="py-2 flex items-center justify-center gap-1 transition"
+          class="py-2 flex items-center justify-center gap-1 transition" 
           :class="activeTab === 'spritesheet' ? 'bg-ui-panel text-ui-textAccent font-bold border-b-2 border-ui-accent' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          @click="activeTab = 'spritesheet'"
         >
           <BlenderIcon name="image" :size="12" />
           <span>Sprites</span>
         </button>
         <button 
-          @click="activeTab = 'texture'" 
-          class="py-2 flex items-center justify-center gap-1 transition"
+          class="py-2 flex items-center justify-center gap-1 transition" 
           :class="activeTab === 'texture' ? 'bg-ui-panel text-ui-textAccent font-bold border-b-2 border-ui-accent' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          @click="activeTab = 'texture'"
         >
           <span>PNG</span>
         </button>
         <button 
-          @click="activeTab = 'turntable'" 
-          class="py-2 flex items-center justify-center gap-1 transition"
+          class="py-2 flex items-center justify-center gap-1 transition" 
           :class="activeTab === 'turntable' ? 'bg-ui-panel text-ui-textAccent font-bold border-b-2 border-ui-accent' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          @click="activeTab = 'turntable'"
         >
           <BlenderIcon name="film" :size="12" />
           <span>Turn</span>
@@ -315,14 +315,14 @@ async function handleExportTurntable() {
           </p>
           <div class="flex gap-2">
             <button 
-              @click="handleExportGLTF(true)"
               class="flex-1 py-2.5 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold shadow transition"
+              @click="handleExportGLTF(true)"
             >
               Export Binary (.GLB)
             </button>
             <button 
-              @click="handleExportGLTF(false)"
               class="flex-1 py-2.5 bg-ui-input hover:bg-ui-hover text-ui-textPrimary rounded-xs font-semibold shadow transition"
+              @click="handleExportGLTF(false)"
             >
               Export JSON (.gltf)
             </button>
@@ -335,8 +335,8 @@ async function handleExportTurntable() {
             Exports Wavefront OBJ geometry, MTL material definition, and embedded PNG pixel texture map. Universally supported by Blender, 3ds Max, and game engines.
           </p>
           <button 
-            @click="handleExportOBJ"
             class="w-full py-2.5 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold shadow transition"
+            @click="handleExportOBJ"
           >
             Export OBJ + MTL + PNG
           </button>
@@ -347,8 +347,8 @@ async function handleExportTurntable() {
             Writes a Blockbench <span class="font-mono">.bbmodel</span> with cube approximations of each object, textures, and clip names. Import the same file from File → Import.
           </p>
           <button 
-            @click="handleExportBlockbench"
             class="w-full py-2.5 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold shadow transition"
+            @click="handleExportBlockbench"
           >
             Export Blockbench (.bbmodel)
           </button>
@@ -403,23 +403,23 @@ async function handleExportTurntable() {
             <span>Camera Pitch Angle:</span>
             <div class="flex items-center gap-2">
               <button 
-                @click="spriteIsoAngle = 30" 
-                class="px-2 py-0.5 rounded text-[10px]"
+                class="px-2 py-0.5 rounded text-[10px]" 
                 :class="spriteIsoAngle === 30 ? 'bg-ui-accent text-white font-bold' : 'bg-ui-input text-ui-textMuted hover:text-ui-textPrimary'"
+                @click="spriteIsoAngle = 30"
               >
                 30° Iso
               </button>
               <button 
-                @click="spriteIsoAngle = 45" 
-                class="px-2 py-0.5 rounded text-[10px]"
+                class="px-2 py-0.5 rounded text-[10px]" 
                 :class="spriteIsoAngle === 45 ? 'bg-ui-accent text-white font-bold' : 'bg-ui-input text-ui-textMuted hover:text-ui-textPrimary'"
+                @click="spriteIsoAngle = 45"
               >
                 45° Dimetric
               </button>
               <button 
-                @click="spriteIsoAngle = 0" 
-                class="px-2 py-0.5 rounded text-[10px]"
+                class="px-2 py-0.5 rounded text-[10px]" 
                 :class="spriteIsoAngle === 0 ? 'bg-ui-accent text-white font-bold' : 'bg-ui-input text-ui-textMuted hover:text-ui-textPrimary'"
+                @click="spriteIsoAngle = 0"
               >
                 0° Side / Billboard
               </button>
@@ -427,8 +427,8 @@ async function handleExportTurntable() {
           </div>
 
           <button 
-            @click="handleExportSpriteSheet"
             class="w-full py-2.5 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold shadow transition"
+            @click="handleExportSpriteSheet"
           >
             Generate & Download Animated Sprite Sheet
           </button>
@@ -440,8 +440,8 @@ async function handleExportTurntable() {
             Downloads the raw pixel art canvas texture as a standalone PNG with nearest-neighbor crisp pixel edges.
           </p>
           <button 
-            @click="handleExportTexture"
             class="w-full py-2.5 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs font-semibold shadow transition"
+            @click="handleExportTexture"
           >
             Download Texture PNG
           </button>
@@ -479,14 +479,14 @@ async function handleExportTurntable() {
               <span>{{ turntableProgress }}%</span>
             </div>
             <div class="w-full bg-ui-input rounded-full h-1.5 overflow-hidden">
-              <div class="bg-ui-accent h-full transition-all duration-100" :style="{ width: `${turntableProgress}%` }"></div>
+              <div class="bg-ui-accent h-full transition-all duration-100" :style="{ width: `${turntableProgress}%` }" />
             </div>
           </div>
 
           <button 
-            @click="handleExportTurntable"
             :disabled="isRecordingTurntable"
             class="w-full py-2.5 bg-ui-accent hover:bg-ui-accentHover disabled:opacity-50 text-white rounded-xs font-semibold shadow transition"
+            @click="handleExportTurntable"
           >
             {{ isRecordingTurntable ? 'Recording Turntable Video...' : 'Record & Download 360 Turntable Video (.webm)' }}
           </button>

@@ -28,7 +28,7 @@ const categories = computed(() => {
           <Keyboard class="w-4 h-4 text-indigo-400" />
           <span class="font-bold text-sm text-slate-200 font-mono">Keyboard Shortcuts</span>
         </div>
-        <button @click="$emit('close')" class="p-1 rounded text-slate-400 hover:text-white hover:bg-dcc-750">
+        <button class="p-1 rounded text-slate-400 hover:text-white hover:bg-dcc-750" @click="$emit('close')">
           <X class="w-4 h-4" />
         </button>
       </div>

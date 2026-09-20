@@ -62,7 +62,7 @@ function loadTemplate(type: 'blank' | 'character' | 'chest' | 'dungeon') {
           <Box class="w-4 h-4 text-indigo-400" />
           <span class="font-bold text-sm text-slate-200 font-mono">Create New Project Template</span>
         </div>
-        <button @click="$emit('close')" class="p-1 rounded text-slate-400 hover:text-white hover:bg-dcc-750">
+        <button class="p-1 rounded text-slate-400 hover:text-white hover:bg-dcc-750" @click="$emit('close')">
           <X class="w-4 h-4" />
         </button>
       </div>
@@ -71,8 +71,8 @@ function loadTemplate(type: 'blank' | 'character' | 'chest' | 'dungeon') {
       <div class="p-5 grid grid-cols-2 gap-3.5">
         <!-- Blank Cube -->
         <button 
-          @click="loadTemplate('blank')"
           class="flex flex-col items-start p-3.5 bg-dcc-900 hover:bg-dcc-750 border border-dcc-750 hover:border-indigo-500 rounded-lg text-left transition group"
+          @click="loadTemplate('blank')"
         >
           <div class="w-8 h-8 rounded bg-indigo-500/20 text-indigo-400 flex items-center justify-center mb-2.5 group-hover:scale-110 transition">
             <Box class="w-4 h-4" />
@@ -83,8 +83,8 @@ function loadTemplate(type: 'blank' | 'character' | 'chest' | 'dungeon') {
 
         <!-- Rigged Character -->
         <button 
-          @click="loadTemplate('character')"
           class="flex flex-col items-start p-3.5 bg-dcc-900 hover:bg-dcc-750 border border-dcc-750 hover:border-indigo-500 rounded-lg text-left transition group"
+          @click="loadTemplate('character')"
         >
           <div class="w-8 h-8 rounded bg-amber-500/20 text-amber-400 flex items-center justify-center mb-2.5 group-hover:scale-110 transition">
             <User class="w-4 h-4" />
@@ -95,8 +95,8 @@ function loadTemplate(type: 'blank' | 'character' | 'chest' | 'dungeon') {
 
         <!-- Treasure Chest -->
         <button 
-          @click="loadTemplate('chest')"
           class="flex flex-col items-start p-3.5 bg-dcc-900 hover:bg-dcc-750 border border-dcc-750 hover:border-indigo-500 rounded-lg text-left transition group"
+          @click="loadTemplate('chest')"
         >
           <div class="w-8 h-8 rounded bg-emerald-500/20 text-emerald-400 flex items-center justify-center mb-2.5 group-hover:scale-110 transition">
             <Shield class="w-4 h-4" />
@@ -107,8 +107,8 @@ function loadTemplate(type: 'blank' | 'character' | 'chest' | 'dungeon') {
 
         <!-- Dungeon Room -->
         <button 
-          @click="loadTemplate('dungeon')"
           class="flex flex-col items-start p-3.5 bg-dcc-900 hover:bg-dcc-750 border border-dcc-750 hover:border-indigo-500 rounded-lg text-left transition group"
+          @click="loadTemplate('dungeon')"
         >
           <div class="w-8 h-8 rounded bg-cyan-500/20 text-cyan-400 flex items-center justify-center mb-2.5 group-hover:scale-110 transition">
             <Castle class="w-4 h-4" />

@@ -88,9 +88,13 @@ const contextualHints = computed(() => {
     <!-- Left: Contextual Shortcut Hints -->
     <div class="flex items-center space-x-2 truncate" :class="operatorState.active || toolStore.isBoxSelectActive || toolStore.stickyViewNav ? 'max-w-[62%]' : 'max-w-[45%]'">
       <span class="font-semibold text-[10px] uppercase text-ui-textSecondary shrink-0">{{ statusModeLabel }}:</span>
-      <button v-if="projectStore.meshEditError" type="button"
+      <button
+        v-if="projectStore.meshEditError" type="button"
         class="text-amber-300 truncate text-[10px]" :title="projectStore.meshEditError.reason + ' (click to dismiss)'"
-        @click="projectStore.meshEditError = null">{{ projectStore.meshEditError.reason }}</button>
+        @click="projectStore.meshEditError = null"
+      >
+        {{ projectStore.meshEditError.reason }}
+      </button>
       <span v-else class="text-ui-textMuted truncate text-[10px] font-mono">{{ contextualHints }}</span>
       <button
         v-if="runtimeStore.lastError"
