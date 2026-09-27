@@ -94,7 +94,7 @@ import BlenderIcon from '../icons/BlenderIcon.vue'
 import ImageDropOptionsModal from '../modals/ImageDropOptionsModal.vue'
 import type { ImageDropChoice } from '../../core/geometry/ImagePlane'
 import { EDITOR_EVENTS, requestCameraView } from '../../core/commands/editorCommands'
-import { marqueeRect, paintWithinSelection } from '../../core/painting/PaintSelection'
+import { marqueeRect as paintMarqueeRect, paintWithinSelection } from '../../core/painting/PaintSelection'
 import { mirrorPixels, mirrorUvs } from '../../core/painting/PaintMirror'
 import { drawPaintShape, type PaintShapeTool } from '../../core/painting/PaintShapes'
 import { uvFaceMask } from '../../core/painting/UvFill'
@@ -4431,7 +4431,7 @@ function onPointerDown(event: PointerEvent) {
         const pb = projectStore.ensureTextureBuffer(targetTex)
         selectDrag = texturePixelFromUv(pb.width, pb.height, paintHit.uv)
         shapeDrag = null
-        toolStore.requestPaintMarquee(marqueeRect(selectDrag, selectDrag))
+        toolStore.requestPaintMarquee(paintMarqueeRect(selectDrag, selectDrag))
         updatePaintBrushCursor(paintHit)
         return
       }
@@ -4918,7 +4918,7 @@ function onPointerMove(event: PointerEvent) {
       if (tex) {
         const pb = projectStore.ensureTextureBuffer(tex)
         const end = texturePixelFromUv(pb.width, pb.height, dragHit.uv)
-        toolStore.requestPaintMarquee(marqueeRect(selectDrag, end))
+        toolStore.requestPaintMarquee(paintMarqueeRect(selectDrag, end))
       }
       updatePaintBrushCursor(dragHit)
       return
