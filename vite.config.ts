@@ -48,15 +48,15 @@ export default defineConfig({
   },
   test: {
     environment: 'happy-dom',
-    pool: 'vmThreads',
+    // forks, not vmThreads: happy-dom's FileReader returns a buffer Three's
+    // GLTFExporter cannot parse as GLB when the pool is vmThreads, so the
+    // export tests hang until timeout.
+    pool: 'forks',
     include: ['src/**/*.test.ts'],
     setupFiles: ['src/test/setup.ts'],
     // Each file builds its own happy-dom environment, so under parallel worker
-    // contention a cold file's transform cost can land on its last test. The
-    // tests themselves are fast; 5s was measuring the harness, not the code.
-    // vmThreads pool reuses a worker per thread so the environment cost is
-    // paid once per thread instead of once per file.
-    testTimeout: 10000,
-    hookTimeout: 10000,
+    // contention a cold file's transform cost can land on its last test.
+    testTimeout: 20000,
+    hookTimeout: 20000,
   },
 })
