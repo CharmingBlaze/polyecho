@@ -111,7 +111,9 @@ export function applyThemeToDocument(themeId: string, colors: ThemeColors, uiSca
   root.style.setProperty('--ui-icon-hover', c.textPrimary)
   root.style.setProperty('--ui-icon-active', resolved.accentLabel)
   root.style.setProperty('--ui-shadow', withAlpha('#000000', luminance(c.bgBase) > 0.5 ? 0.12 : 0.45))
-  root.style.setProperty('--ui-scale-factor', `${uiScale / 100}`)
+  const scale = uiScale / 100
+  root.style.setProperty('--ui-scale-factor', `${scale}`)
+  root.style.fontSize = `${Number((16 * scale).toFixed(2))}px`
 
   root.style.setProperty('--color-ui-base', c.bgBase)
   root.style.setProperty('--color-ui-panel', c.bgPanel)

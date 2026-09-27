@@ -56,6 +56,32 @@ describe('project kernel lifecycle', () => {
     expect(project.activeMesh!.faces.length).toBeGreaterThan(beforeFaces)
   })
 
+  it('flips geometry on the resident kernel with valid winding', () => {
+    const project = useProjectStore()
+    const document = project.activeMesh!
+    const resident = project.acquireEditableMesh(document)
+    const beforeX = document.vertices[0]!.position.x
+    project.performFlipAxis('x')
+    expect(project.acquireEditableMesh(project.activeMesh!).mesh).toBe(resident.mesh)
+    expect(project.activeMesh!.vertices[0]!.position.x).toBeCloseTo(-beforeX)
+    expect(MeshValidator.validate(resident.mesh).valid).toBe(true)
+    expect(MeshValidator.validate(resident.mesh).flippedEdges).toEqual([])
+  })
+
+  it('applies modifiers into the resident kernel', () => {
+    const project = useProjectStore()
+    const document = project.activeMesh!
+    const resident = project.acquireEditableMesh(document)
+    project.addModifier('subdivision')
+    const result = project.applyMeshModifier('subdivision')
+    if (result && !result.success) throw new Error(`${result.reason}: ${JSON.stringify(result.validation)}`)
+    expect(result).toMatchObject({ success: true })
+    expect(project.acquireEditableMesh(project.activeMesh!).mesh).toBe(resident.mesh)
+    expect(project.activeMesh!.subdivision?.enabled).toBe(false)
+    expect(project.activeMesh!.vertices.length).toBeGreaterThan(document.vertices.length)
+    expect(MeshValidator.validate(resident.mesh).valid).toBe(true)
+  })
+
   it('auto-merges on the resident kernel without adding a history entry', () => {
     const project = useProjectStore(), history = useHistoryStore()
     const initial = project.acquireEditableMesh(project.activeMesh!)

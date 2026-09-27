@@ -6,18 +6,24 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
 import { TransformGizmo } from '@voluma/three-transform-gizmo'
 import { parseHex } from '../../core/theme/colorMath'
-import { useProjectStore } from '../../stores/projectStore'
+import { useProjectStore, type DroppedImageSource } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import { useAnimationStore } from '../../stores/animationStore'
 import { useLayoutStore } from '../../stores/layoutStore'
 import { useHistoryStore, type AppSnapshot } from '../../stores/historyStore'
 import { useThemeStore, type ThemeColors } from '../../stores/themeStore'
+import { useKeymapStore } from '../../stores/keymapStore'
 import { faceTriIndexSets, meshToThreeGeometry, computeBoneWorldMatrix, updateThreeGeometryAttributes, resolveMeshShadeMode, buildSelectionOverlayGeometries, buildBoneSkinMatrices, meshHasSkinWeights } from '../../core/geometry/Converters'
+import { resolveInstanceMesh } from '../../core/geometry/DuplicateTools'
 import { setIKTargetAndSolve, solveCCDIK } from '../../core/animation/IKSolver'
 import { resolveMeshBoneParentId } from '../../core/animation/Armature'
 import { sampleTrack } from '../../core/animation/Armature'
 import { SpringPhysicsSolver } from '../../core/animation/SpringPhysics'
-import { createPSXMaterial } from '../../core/shaders/PSXShader'
+import { applyConsoleTextureFiltering, createPSXMaterial } from '../../core/shaders/PSXShader'
+import { applyRealtimeDither, ditherPatternIndex, ditherSettingsFromMaterial } from '../../core/materials/RealtimeDither'
+import { createGradientCanvas, gradientKey, materialFillKey, resolveMaterialSurface } from '../../core/materials/MaterialFill'
+import { createTiledTexture, resolveTextureTiling } from '../../core/materials/TextureTiling'
+import type { Material } from '../../types/texture'
 import {
   createHoverVertexMarker,
   createVertexMarkerMesh,
@@ -42,6 +48,7 @@ import { ScaleOperator } from '../../core/operators/ScaleOperator'
 import { ExtrudeOperator } from '../../core/operators/ExtrudeOperator'
 import { InsetOperator } from '../../core/operators/InsetOperator'
 import { BevelOperator } from '../../core/operators/BevelOperator'
+import { BridgeOperator } from '../../core/operators/BridgeOperator'
 import { KnifeOperator } from '../../core/operators/knife/KnifeOperator'
 import { LoopCutOperator } from '../../core/operators/loopCut/LoopCutOperator'
 import {
@@ -52,6 +59,7 @@ import {
   ShrinkFattenOperator,
   SpinOperator,
   ToSphereOperator,
+  CurveOperator,
   VertexSlideOperator
 } from '../../core/operators/MeshEditOperators'
 import { PrimitivePlacementOperator, PrimitivePlacementMode } from '../../core/operators/placement/PrimitivePlacementOperator'
@@ -63,24 +71,33 @@ import { convertComponentSelection, type ComponentMode } from '../../core/geomet
 import { closestScreenSegment, visibleWorldPoint } from '../../core/geometry/ComponentPicking'
 import { cloneRecipe, geometrySignature, shapeSourceIsCurrent } from '../../core/shapeDraw/ShapeRecipe'
 import { PolyBuildOperator } from '../../core/operators/PolyBuildOperator'
+import { BlockoutSketchOperator } from '../../core/operators/BlockoutSketchOperator'
 import { ScreenGeometry, type ViewQuadrant } from '../../core/geometry/ScreenGeometry'
+import { classifyWheel, wheelPanDelta, wheelZoomFactor } from '../../core/view/wheelGesture'
 import { applyWorldDeltaToObjectTRS, meshObjectWorldMatrix } from '../../core/geometry/MeshTransform'
 import { PrimitiveType } from '../../core/primitives/PrimitiveTypes'
-import { EditableMesh } from '../../core/mesh/MeshKernel'
+import { EditableMesh, type MeshSnapshot } from '../../core/mesh/MeshKernel'
 import { MeshBridge } from '../../core/mesh/MeshBridge'
 import { EditorEnvironment } from '../../core/render/EditorEnvironment'
+import { applyPsxLightingUniforms } from '../../core/render/ViewportLighting'
 import { ViewportLayerManager } from '../../core/render/ViewportLayers'
 import { SnapManager } from '../../core/transform/SnapManager'
 import type { PivotMode, TransformOrientation } from '../../core/transform/TransformTypes'
 import { applyLiveSymmetry } from '../../core/transform/LiveSymmetry'
 import { applyGizmoComponentPositions } from '../../core/transform/GizmoComponentDrag'
+import { clipMirrorPosition, mirrorSpace, mirrorStackKey, resolveMirrorObject } from '../../core/geometry/MirrorModifier'
 import type { MeshBridgeData } from '../../core/mesh/MeshRepository'
-import type { MeshChange } from '../../core/mesh/MeshTransaction'
+import { describeMeshChange, type MeshChange } from '../../core/mesh/MeshTransaction'
 import { useFloatingDrag } from '../../composables/useFloatingDrag'
 import { GripHorizontal } from 'lucide-vue-next'
 import BlenderIcon from '../icons/BlenderIcon.vue'
+import ImageDropOptionsModal from '../modals/ImageDropOptionsModal.vue'
+import type { ImageDropChoice } from '../../core/geometry/ImagePlane'
 import { EDITOR_EVENTS, requestCameraView } from '../../core/commands/editorCommands'
-import { paintWithinSelection } from '../../core/painting/PaintSelection'
+import { marqueeRect, paintWithinSelection } from '../../core/painting/PaintSelection'
+import { mirrorPixels, mirrorUvs } from '../../core/painting/PaintMirror'
+import { drawPaintShape, type PaintShapeTool } from '../../core/painting/PaintShapes'
+import { uvFaceMask } from '../../core/painting/UvFill'
 import { stampFacesToRegion } from '../../core/uv/TilesetStamp'
 import {
   tilesetActiveBounds,
@@ -96,6 +113,7 @@ const layoutStore = useLayoutStore()
 const animationStore = useAnimationStore()
 const historyStore = useHistoryStore()
 const themeStore = useThemeStore()
+const keymapStore = useKeymapStore()
 
 const containerRef = ref<HTMLDivElement | null>(null)
 const canvasMountRef = ref<HTMLDivElement | null>(null)
@@ -125,6 +143,8 @@ let combinedControls: TransformGizmo
 let transformControls: TransformControls | TransformGizmo
 /** Handle kind while combined gizmo `mode` is `combined` (mouseDown). */
 let gizmoDragOp: 'translate' | 'rotate' | 'scale' = 'translate'
+const QUAD_GIZMO_SIZE = 1.35
+const SPLIT_GIZMO_SIZE = 1.15
 
 let gridHelper: THREE.GridHelper
 let gridFront: THREE.GridHelper
@@ -175,6 +195,9 @@ let modalBaseline: AppSnapshot | null = null
 const raycaster = new THREE.Raycaster()
 const mouse = new THREE.Vector2()
 let isPaintingOn3D = false
+let shapeDrag: { start: { x: number; y: number }; snapshot: ImageData } | null = null
+let shapeDragEnd: { x: number; y: number } | null = null
+let selectDrag: { x: number; y: number } | null = null
 type PaintFaceInfo = { id: string; vertexIds: string[]; uvs: Array<{ u: number; v: number }> }
 type PaintHit = {
   hit: THREE.Intersection
@@ -184,6 +207,22 @@ type PaintHit = {
 }
 let lastPaintHit: Omit<PaintHit, 'hit'> | null = null
 let lastPaintTextureId: string | undefined
+let lastMirrorUvs: Array<{ u: number; v: number }> | null = null
+const lastSymUvs = new Map<string, { u: number; v: number }>()
+const paintCursorMeshes: THREE.Mesh[] = []
+let paintCursorGeometry: THREE.CircleGeometry | null = null
+let paintCursorMaterial: THREE.MeshBasicMaterial | null = null
+const paintCursorZ = new THREE.Vector3(0, 0, 1)
+const paintCursorNormal = new THREE.Vector3()
+const paintSymPoint = new THREE.Vector3()
+const paintSymNormal = new THREE.Vector3()
+const paintLocalPoint = new THREE.Vector3()
+const paintLocalNormal = new THREE.Vector3()
+const paintInv = new THREE.Matrix4()
+const paintRayOrigin = new THREE.Vector3()
+const paintRayDir = new THREE.Vector3()
+const paintSavedOrigin = new THREE.Vector3()
+const paintSavedDir = new THREE.Vector3()
 let isGizmoDragging = false
 let skipGizmoCommit = false
 let gizmoDragSession = false
@@ -208,6 +247,7 @@ let lastHoverClientPos = { x: 0, y: 0 }
 let lastPointerCtrl = false
 let pointerDownHitMesh = false
 let lmbClickPending = false
+let proportionalMouseDrag = false
 let refDrag: {
   id: string
   plane: 'front' | 'side' | 'top'
@@ -460,18 +500,37 @@ function buildSceneGrids(major: THREE.Color, minor: THREE.Color) {
 }
 
 function setGridsForView(view: 'floor' | 'front' | 'side') {
-  const show = toolStore.viewport.showGrid
+  const show = toolStore.viewport.showGrid && toolStore.viewport.shading !== 'dreamcast'
   if (gridHelper) gridHelper.visible = show && view === 'floor'
   if (gridFront) gridFront.visible = show && view === 'front'
   if (gridSide) gridSide.visible = show && view === 'side'
 }
 
 function isMeshSelectionAllowed() {
-  return toolStore.isMeshWorkspace() || (toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'uv')
+  return toolStore.isMeshWorkspace() || (
+    toolStore.appMode === 'uvpaint'
+    && (toolStore.uvWorkspaceTab === 'uv' || toolStore.paintTool === 'select')
+  )
 }
 
 function meshWorldMatrix(mesh: MeshObject, out?: THREE.Matrix4): THREE.Matrix4 {
   return meshObjectWorldMatrix(mesh, out)
+}
+
+function modifierEval(mesh: MeshObject, editId = mesh.id) {
+  return {
+    scene: projectStore.meshes,
+    purpose: 'viewport' as const,
+    inEditMode: projectStore.activeMeshId === editId && toolStore.selectMode !== 'object'
+  }
+}
+
+function mirrorClipOptions(mesh: MeshObject) {
+  if (!mesh.mirror) return undefined
+  return {
+    modifier: mesh.mirror,
+    space: mirrorSpace(mesh, resolveMirrorObject(mesh, projectStore.meshes))
+  }
 }
 
 function localToWorld(mesh: MeshObject, local: Vector3D, mat = meshWorldMatrix(mesh), out?: THREE.Vector3): THREE.Vector3 {
@@ -596,6 +655,7 @@ function initThree() {
   // Scene
   scene = new THREE.Scene()
   scene.background = new THREE.Color(themeStore.activeColors.viewportBg)
+  syncDreamcastAtmosphere()
 
   // 1. Perspective Camera
   cameraPersp = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000)
@@ -655,9 +715,9 @@ function initThree() {
   orbitControls = new OrbitControls(cameraPersp, canvas)
   orbitControls.enableDamping = true
   orbitControls.dampingFactor = 0.08
-  orbitControls.zoomSpeed = toolStore.viewport.invertZoom ? -1.0 : 1.0
+  orbitControls.zoomSpeed = (toolStore.viewport.invertZoom || keymapStore.mouse.invertWheelZoom) ? -1.0 : 1.0
   orbitControls.target.set(0, 0.5, 0)
-  // Idle LMB click selects; LMB drag orbits in persp (startLightWaveRotate). RMB pans. MMB opens Specials.
+  // Idle LMB click selects; LMB drag orbits in persp. MMB pans. RMB opens specials.
   orbitControls.mouseButtons.LEFT = -1 as unknown as THREE.MOUSE
   orbitControls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY
   orbitControls.mouseButtons.RIGHT = THREE.MOUSE.PAN
@@ -740,6 +800,7 @@ function initThree() {
 
   // Pass 2: Internal Editor Lighting & Soft Shadow Environment Rig
   editorEnv = new EditorEnvironment(scene, layers.shadowGroup)
+  editorEnv.applyLighting(toolStore.viewportLighting)
 
   // Pass 3: Grid & Axes
   buildSceneGrids(
@@ -789,8 +850,8 @@ function initThree() {
   canvas.addEventListener('pointerup', onPointerUp, { capture: true })
   canvas.addEventListener('pointerleave', onPointerUp, { capture: true })
   canvas.addEventListener('pointerleave', clearTopologyHover)
-  canvas.addEventListener('wheel', onWheel, { passive: false })
-  canvas.addEventListener('contextmenu', preventCanvasContextMenu)
+  canvas.addEventListener('wheel', onWheel, { passive: false, capture: true })
+  canvas.addEventListener('contextmenu', preventCanvasContextMenu, { capture: true })
   canvas.addEventListener('dblclick', reopenShapeOnDoubleClick)
   window.addEventListener('resize', onWindowResize)
 
@@ -856,6 +917,28 @@ function initHoverVisuals() {
 }
 
 const textureCache = new Map<string, THREE.CanvasTexture>()
+const materialTextureCache = new Map<string, {
+  texture: THREE.Texture
+  materialId: string
+  sourceId: string
+}>()
+const gradientTextureCache = new Map<string, THREE.CanvasTexture>()
+
+function getGradientTexture(material: Material): THREE.CanvasTexture {
+  const surface = resolveMaterialSurface(material)
+  const key = gradientKey(surface.gradient || { kind: 'linear', angle: 90, stops: [] })
+  let tex = gradientTextureCache.get(key)
+  if (!tex) {
+    tex = new THREE.CanvasTexture(createGradientCanvas(surface.gradient, 128, material.color))
+    tex.colorSpace = THREE.SRGBColorSpace
+    tex.magFilter = THREE.LinearFilter
+    tex.minFilter = THREE.LinearMipmapLinearFilter
+    tex.wrapS = THREE.ClampToEdgeWrapping
+    tex.wrapT = THREE.ClampToEdgeWrapping
+    gradientTextureCache.set(key, tex)
+  }
+  return tex
+}
 
 function configurePaintTexture(tex: THREE.CanvasTexture) {
   tex.magFilter = THREE.NearestFilter
@@ -884,6 +967,31 @@ function getThreeTexture(textureId?: string | null): THREE.CanvasTexture | null 
   return tex
 }
 
+function materialTextureKey(material: Material, sourceId: string): string {
+  const { tileX, tileY } = resolveTextureTiling(material)
+  return `${material.id}:${sourceId}:${tileX}:${tileY}`
+}
+
+function getMaterialTexture(material: Material, sourceId?: string | null): THREE.Texture | null {
+  if (!sourceId) return null
+  const source = getThreeTexture(sourceId)
+  if (!source) return null
+  const key = materialTextureKey(material, sourceId)
+  let entry = materialTextureCache.get(key)
+  if (!entry) {
+    entry = {
+      texture: createTiledTexture(source, resolveTextureTiling(material)),
+      materialId: material.id,
+      sourceId,
+    }
+    materialTextureCache.set(key, entry)
+  } else if (entry.texture.image !== source.image) {
+    entry.texture.image = source.image
+    entry.texture.needsUpdate = true
+  }
+  return entry.texture
+}
+
 function updateThreeTextures() {
   // Dispose cached GPU textures whose source entries no longer exist
   const liveIds = new Set(projectStore.textures.map(t => t.id))
@@ -910,6 +1018,28 @@ function updateThreeTextures() {
       }
     }
   }
+
+  const liveTextureIds = new Set(projectStore.textures.map(t => t.id))
+  const activeTextureId = projectStore.activeTextureId
+  for (const [key, entry] of materialTextureCache) {
+    const material = projectStore.materials.find(item => item.id === entry.materialId)
+    const source = textureCache.get(entry.sourceId)
+    const sourceStillUsed = material?.textureId === entry.sourceId || entry.sourceId === activeTextureId
+    if (
+      !material ||
+      !source ||
+      !liveTextureIds.has(entry.sourceId) ||
+      !sourceStillUsed ||
+      key !== materialTextureKey(material, entry.sourceId)
+    ) {
+      entry.texture.dispose()
+      materialTextureCache.delete(key)
+      continue
+    }
+    entry.texture.image = source.image
+    entry.texture.needsUpdate = true
+  }
+
   threeTexture = getThreeTexture(projectStore.activeTextureId)
   if (psxMaterial && psxMaterial.uniforms && psxMaterial.uniforms.uTexture) {
     psxMaterial.uniforms.uTexture.value = threeTexture
@@ -922,6 +1052,12 @@ function updateThreeTexture() {
 
 const isDraggingImageFile = ref(false)
 const dropTargetPane = ref<'front' | 'side' | 'persp' | null>(null)
+const pendingImageDrop = ref<{
+  source: DroppedImageSource
+  targetMeshId: string | null
+  position: Vector3D
+  rotationY: number
+} | null>(null)
 
 function paneFromClientX(clientX: number): 'front' | 'side' | 'persp' {
   const rect = containerRef.value?.getBoundingClientRect()
@@ -975,16 +1111,26 @@ function onViewportDrop(e: DragEvent) {
   const meshObjects = layers?.modelGroup?.children?.filter(c => !c.name.includes('_')) || []
   const intersects = raycaster.intersectObjects(meshObjects, true)
 
-  let targetMeshId = projectStore.activeMeshId
+  let targetMeshId: string | null = null
   if (intersects.length > 0) {
     const hitObj = intersects[0].object
     const found = projectStore.meshes.find(m => m.id === hitObj.name)
     if (found) {
       targetMeshId = found.id
-      projectStore.activeMeshId = found.id
-      projectStore.selectedMeshIds = [found.id]
     }
   }
+
+  const groundPoint = raycaster.ray.intersectPlane(
+    new THREE.Plane(new THREE.Vector3(0, 1, 0), 0),
+    new THREE.Vector3()
+  )
+  const fallback = orbitControls?.target || new THREE.Vector3()
+  const position = groundPoint || fallback
+  const cameraPosition = cam.getWorldPosition(new THREE.Vector3())
+  const rotationY = THREE.MathUtils.radToDeg(Math.atan2(
+    cameraPosition.x - position.x,
+    cameraPosition.z - position.z
+  ))
 
   const reader = new FileReader()
   reader.onload = (event) => {
@@ -993,15 +1139,56 @@ function onViewportDrop(e: DragEvent) {
     const img = new Image()
     img.onload = () => {
       const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_')
-      const newTex = projectStore.createTexture(cleanName, img.width || 64, img.height || 64, dataUrl)
-      if (targetMeshId) {
-        projectStore.activeMeshId = targetMeshId
-        projectStore.applyTextureToMesh(targetMeshId, newTex.id, 'this_object')
+      pendingImageDrop.value = {
+        source: {
+          name: cleanName || 'Dropped_Image',
+          width: img.width || 64,
+          height: img.height || 64,
+          dataUrl,
+        },
+        targetMeshId,
+        position: { x: position.x, y: position.y, z: position.z },
+        rotationY,
       }
     }
     img.src = dataUrl
   }
   reader.readAsDataURL(file)
+}
+
+function cancelImageDrop() {
+  pendingImageDrop.value = null
+}
+
+function confirmImageDrop(options: {
+  mode: ImageDropChoice
+  cardHeight: number
+  alphaTest: number
+  opacity: number
+}) {
+  const pending = pendingImageDrop.value
+  if (!pending) return
+  pendingImageDrop.value = null
+
+  if (options.mode === 'apply') {
+    if (!pending.targetMeshId) return
+    projectStore.selectMesh(pending.targetMeshId)
+    projectStore.applyDroppedImageToMesh(pending.targetMeshId, pending.source)
+    return
+  }
+
+  projectStore.createImageCard({
+    ...pending.source,
+    kind: options.mode,
+    cardHeight: options.cardHeight,
+    position: pending.position,
+    rotationY: pending.rotationY,
+    alphaTest: options.alphaTest,
+    opacity: options.opacity,
+  })
+  toolStore.enterSelectMode('object')
+  toolStore.setModelTool('move')
+  toolStore.viewport.combinedGizmo = true
 }
 
 function initTexture() {
@@ -1065,7 +1252,7 @@ function syncMeshHelperTransforms(meshId: string, src: THREE.Object3D) {
     for (const obj of group.children) {
       if (obj.name.startsWith(prefix)) {
         obj.position.copy(src.position)
-        obj.rotation.copy(src.rotation)
+        obj.quaternion.copy(src.quaternion)
         obj.scale.copy(src.scale)
       }
     }
@@ -1116,7 +1303,7 @@ function updateMeshTransformsAndAttributes(): boolean {
         const needSkin = Boolean(skeletalContext && meshHasSkinWeights(meshObj))
         if (needSkin || isWeightPaint) {
           const shade = resolveMeshShadeMode(meshObj, toolStore.viewport.shadeMode)
-          const ok = updateThreeGeometryAttributes(meshObj, child.geometry, skeletalContext, weightPaintContext, shade)
+          const ok = updateThreeGeometryAttributes(meshObj, child.geometry, skeletalContext, weightPaintContext, shade, modifierEval(meshObj))
           if (!ok) allSuccess = false
         }
       }
@@ -1351,6 +1538,26 @@ function bonesPosedAtFrame(frame: number) {
   return bones
 }
 
+/** Face-boundary lines for an onion ghost. The GPU triangle split is not an edge. */
+function onionBoundaryGeometry(meshObj: MeshObject, bones: ReturnType<typeof bonesPosedAtFrame>) {
+  const bundle = meshToThreeGeometry(
+    resolveInstanceMesh(meshObj, (id) => projectStore.meshes.find(mesh => mesh.id === id)),
+    [],
+    [],
+    'flat',
+    { isPoseMode: true, bones },
+    undefined,
+    [],
+    { scene: projectStore.meshes, purpose: 'viewport', inEditMode: false }
+  )
+  bundle.geometry.dispose()
+  bundle.vertexPointsGeometry.dispose()
+  bundle.selectedFacesGeometry.dispose()
+  bundle.selectedEdgesGeometry.dispose()
+  bundle.edgeLinesGeometry.dispose()
+  return bundle.wireframeGeometry
+}
+
 function onionOffsets() {
   const clip = animationStore.activeClip
   if (!clip) return [] as { frame: number; color: number; factor: number }[]
@@ -1393,64 +1600,37 @@ function syncOnionSkins() {
   const wanted = new Set<string>()
   for (const ghost of offsets) {
     const ghostBones = bonesPosedAtFrame(ghost.frame)
-    const skinMatrices = ghostBones.length > 0 ? buildBoneSkinMatrices(ghostBones) : undefined
     const opacity = baseOpacity * ghost.factor * 0.45
 
     for (const meshObj of projectStore.meshes) {
       if (!meshObj.visible) continue
       const key = `${meshObj.id}:${ghost.frame}`
       wanted.add(key)
-      let ghostMesh = onionGroup.getObjectByName(key) as THREE.Mesh | undefined
-      if (!ghostMesh) {
-        const {
-          geometry,
-          wireframeGeometry,
-          vertexPointsGeometry,
-          selectedFacesGeometry,
-          selectedEdgesGeometry,
-          edgeLinesGeometry
-        } = meshToThreeGeometry(
-          meshObj,
-          [],
-          [],
-          'flat',
-          { isPoseMode: true, bones: ghostBones }
-        )
-        wireframeGeometry.dispose()
-        vertexPointsGeometry.dispose()
-        selectedFacesGeometry.dispose()
-        selectedEdgesGeometry.dispose()
-        edgeLinesGeometry.dispose()
-        ghostMesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+      const wireGeom = onionBoundaryGeometry(meshObj, ghostBones)
+      let ghostLines = onionGroup.getObjectByName(key) as THREE.LineSegments | undefined
+      if (!ghostLines) {
+        ghostLines = new THREE.LineSegments(wireGeom, new THREE.LineBasicMaterial({
           color: ghost.color,
           transparent: true,
           opacity,
-          wireframe: true,
           depthTest: false
         }))
-        ghostMesh.name = key
-        onionGroup.add(ghostMesh)
+        ghostLines.name = key
+        onionGroup.add(ghostLines)
       } else {
-        const mat = ghostMesh.material as THREE.MeshBasicMaterial
+        ghostLines.geometry.dispose()
+        ghostLines.geometry = wireGeom
+        const mat = ghostLines.material as THREE.LineBasicMaterial
         mat.color.setHex(ghost.color)
         mat.opacity = opacity
-        if (skinMatrices && meshHasSkinWeights(meshObj)) {
-          updateThreeGeometryAttributes(
-            meshObj,
-            ghostMesh.geometry,
-            { isPoseMode: true, bones: ghostBones, skinMatrices },
-            undefined,
-            'flat'
-          )
-        }
       }
-      ghostMesh.position.set(meshObj.position.x, meshObj.position.y, meshObj.position.z)
-      ghostMesh.rotation.set(
+      ghostLines.position.set(meshObj.position.x, meshObj.position.y, meshObj.position.z)
+      ghostLines.rotation.set(
         THREE.MathUtils.degToRad(meshObj.rotation.x),
         THREE.MathUtils.degToRad(meshObj.rotation.y),
         THREE.MathUtils.degToRad(meshObj.rotation.z)
       )
-      ghostMesh.scale.set(meshObj.scale.x, meshObj.scale.y, meshObj.scale.z)
+      ghostLines.scale.set(meshObj.scale.x, meshObj.scale.y, meshObj.scale.z)
     }
   }
 
@@ -1521,7 +1701,7 @@ function rebuildMeshes() {
       faceIndexMap, 
       paintFaceMap,
       vertexIndexMap 
-    } = meshToThreeGeometry(meshObj, selectedFaces, selectedEdges, toolStore.viewport.shadeMode, skeletalContext, weightPaintContext, selectedVerts)
+    } = meshToThreeGeometry(resolveInstanceMesh(meshObj, (id) => projectStore.meshes.find(mesh => mesh.id === id)), selectedFaces, selectedEdges, toolStore.viewport.shadeMode, skeletalContext, weightPaintContext, selectedVerts, modifierEval(meshObj))
 
     // Track which helper geometries get attached to the scene; the rest must be disposed
     let wireGeomUsed = false
@@ -1531,14 +1711,18 @@ function rebuildMeshes() {
     let ptsGeomUsed = false
 
     const meshMatObj = projectStore.materials.find(m => m.id === meshObj.materialId) || projectStore.materials[0]
+    const surface = resolveMaterialSurface(meshMatObj)
     const previewPaintTarget =
+      surface.fill === 'image' &&
       toolStore.appMode === 'uvpaint' &&
       meshObj.id === projectStore.activeMeshId &&
       !!projectStore.activeTextureId
-    const meshTex = getThreeTexture(
-      previewPaintTarget ? projectStore.activeTextureId : meshMatObj?.textureId
-    )
-    const baseColor = new THREE.Color(meshMatObj?.color || '#ffffff')
+    const meshTex = surface.fill === 'gradient' && meshMatObj
+      ? getGradientTexture(meshMatObj)
+      : surface.fill === 'solid'
+        ? null
+        : getMaterialTexture(meshMatObj, previewPaintTarget ? projectStore.activeTextureId : surface.textureId)
+    const baseColor = new THREE.Color(surface.color)
     const roughness = typeof meshMatObj?.roughness === 'number' ? meshMatObj.roughness : 0.75
     const metalness = typeof meshMatObj?.metalness === 'number' ? meshMatObj.metalness : 0.05
     const emissiveColor = meshMatObj?.emissive ? new THREE.Color(meshMatObj.emissive) : new THREE.Color(0x000000)
@@ -1567,40 +1751,33 @@ function rebuildMeshes() {
         opacity: isXRay ? 0.65 : 1.0,
         depthWrite: !isXRay
       })
-    } else if (['psx', 'saturn', 'dreamcast', 'n64'].includes(meshMatObj?.shading || '') || toolStore.viewport.shading === 'psx' || (meshMatObj?.dither || toolStore.viewport.dither)) {
+    } else if (['psx', 'saturn', 'dreamcast', 'n64'].includes(meshMatObj?.shading || '') || toolStore.viewport.shading === 'dreamcast') {
+      const viewportDreamcast = toolStore.viewport.shading === 'dreamcast'
       const psxMat = createPSXMaterial(meshTex)
       psxMat.uniforms.uColor.value = baseColor
+      const textureTiling = resolveTextureTiling(meshMatObj)
+      psxMat.uniforms.uTextureRepeat.value.set(textureTiling.tileX, textureTiling.tileY)
 
-      const shadingType = meshMatObj?.shading || 'psx'
+      const shadingType = viewportDreamcast ? 'dreamcast' : (meshMatObj?.shading || 'psx')
       let consoleMode = 0
       if (shadingType === 'saturn') consoleMode = 1
       else if (shadingType === 'dreamcast') consoleMode = 2
       else if (shadingType === 'n64') consoleMode = 3
       psxMat.uniforms.uConsoleMode.value = consoleMode
+      applyConsoleTextureFiltering(meshTex, consoleMode)
 
-      psxMat.uniforms.uJitterAmount.value = (consoleMode === 0 && (meshMatObj?.psxJitter || toolStore.viewport.psxJitter)) ? 1.0 : 0.0
-      psxMat.uniforms.uAffineEnabled.value = (consoleMode <= 1) && Boolean(meshMatObj?.psxAffine || toolStore.viewport.psxAffine)
-      psxMat.uniforms.uDitherEnabled.value = Boolean(meshMatObj?.dither || toolStore.viewport.dither || consoleMode === 0 || consoleMode === 1)
+      psxMat.uniforms.uJitterAmount.value = (!viewportDreamcast && consoleMode === 0 && (meshMatObj?.psxJitter || toolStore.viewport.psxJitter)) ? 1.0 : 0.0
+      psxMat.uniforms.uAffineEnabled.value = !viewportDreamcast && (consoleMode <= 1) && Boolean(meshMatObj?.psxAffine || toolStore.viewport.psxAffine)
+      psxMat.uniforms.uDitherEnabled.value = viewportDreamcast ? false : Boolean(meshMatObj?.dither || toolStore.viewport.dither)
       psxMat.uniforms.uDitherIntensity.value = typeof meshMatObj?.ditherLevel === 'number' ? (meshMatObj.ditherLevel / 32) : 1.0
       
-      psxMat.uniforms.uSaturnMeshAlpha.value = Boolean(meshMatObj?.saturnMeshAlpha || shadingType === 'saturn')
-      psxMat.uniforms.uDreamcastVQ.value = Boolean(meshMatObj?.dreamcastVQ || shadingType === 'dreamcast')
-      psxMat.uniforms.uDreamcastSpecular.value = Boolean(meshMatObj?.dreamcastSpecular || shadingType === 'dreamcast')
-      psxMat.uniforms.uDreamcastCelOutline.value = Boolean(meshMatObj?.dreamcastCelOutline)
+      psxMat.uniforms.uSaturnMeshAlpha.value = !viewportDreamcast && Boolean(meshMatObj?.saturnMeshAlpha || shadingType === 'saturn')
+      psxMat.uniforms.uDreamcastVQ.value = viewportDreamcast || Boolean(meshMatObj?.dreamcastVQ || shadingType === 'dreamcast')
+      psxMat.uniforms.uDreamcastSpecular.value = viewportDreamcast || Boolean(meshMatObj?.dreamcastSpecular || shadingType === 'dreamcast')
+      psxMat.uniforms.uDreamcastCelOutline.value = !viewportDreamcast && Boolean(meshMatObj?.dreamcastCelOutline)
 
       const patternName = meshMatObj?.ditherPattern || (shadingType === 'saturn' ? 'checker' : 'bayer4x4')
-      let patType = 0
-      if (patternName === 'bayer8x8') patType = 1
-      else if (patternName === 'bayer2x2') patType = 2
-      else if (patternName === 'bayer16x16') patType = 3
-      else if (patternName === 'bluenoise') patType = 4
-      else if (patternName === 'halftone') patType = 5
-      else if (patternName === 'crosshatch') patType = 6
-      else if (patternName === 'horizontal_lines') patType = 7
-      else if (patternName === 'vertical_lines') patType = 8
-      else if (patternName === 'checker') patType = 9
-      else if (patternName === 'noise') patType = 10
-      psxMat.uniforms.uDitherPatternType.value = patType
+      psxMat.uniforms.uDitherPatternType.value = ditherPatternIndex(patternName)
 
       let spaceType = 0
       if (meshMatObj?.ditherSpace === 'uv') spaceType = 1
@@ -1614,7 +1791,9 @@ function rebuildMeshes() {
 
       psxMat.uniforms.uBayerSize.value = patternName === 'bayer2x2' ? 2 : (patternName === 'bayer8x8' ? 8 : (patternName === 'bayer16x16' ? 16 : 4))
       psxMat.uniforms.uDitherScale.value = typeof meshMatObj?.ditherScale === 'number' ? meshMatObj.ditherScale : 1.0
-      psxMat.uniforms.uColorDepth.value = typeof meshMatObj?.colorDepth === 'number' ? meshMatObj.colorDepth : (shadingType === 'dreamcast' ? 0.0 : 32.0)
+      psxMat.uniforms.uColorDepth.value = viewportDreamcast || shadingType === 'dreamcast'
+        ? 0.0
+        : (typeof meshMatObj?.colorDepth === 'number' ? meshMatObj.colorDepth : 32.0)
       psxMat.side = sideSetting
       psxMat.transparent = isTransparent
       psxMat.depthWrite = !isTransparent
@@ -1625,6 +1804,7 @@ function rebuildMeshes() {
       if (psxMat.uniforms.uAlphaTest) {
         psxMat.uniforms.uAlphaTest.value = alphaTest
       }
+      applyPsxLightingUniforms(psxMat.uniforms, toolStore.viewportLighting)
       mat = psxMat
     } else if (meshMatObj?.shading === 'unlit') {
       mat = new THREE.MeshBasicMaterial({
@@ -1632,7 +1812,7 @@ function rebuildMeshes() {
         color: baseColor,
         vertexColors: true,
         side: sideSetting,
-        wireframe: isWireframe,
+        wireframe: false,
         alphaTest: alphaTest,
         transparent: isTransparent,
         opacity: isXRay ? 0.55 : matOpacity,
@@ -1649,7 +1829,7 @@ function rebuildMeshes() {
         vertexColors: true,
         side: sideSetting,
         flatShading: false,
-        wireframe: isWireframe,
+        wireframe: false,
         alphaTest: alphaTest,
         transparent: isTransparent,
         opacity: isXRay ? 0.55 : matOpacity,
@@ -1666,16 +1846,19 @@ function rebuildMeshes() {
         vertexColors: true,
         side: sideSetting,
         flatShading: false,
-        wireframe: isWireframe,
+        wireframe: false,
         alphaTest: alphaTest,
         transparent: isTransparent,
         opacity: isXRay ? 0.55 : matOpacity,
         depthWrite: !isTransparent
       })
     } else if (toolStore.viewport.shading === 'wireframe') {
+      // Invisible pick shell. Face-boundary lines are drawn below; a Three wireframe would stroke the fill triangles.
       mat = new THREE.MeshBasicMaterial({
-        wireframe: true,
-        color: 0x6366f1
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        side: THREE.DoubleSide
       })
     } else if (toolStore.viewport.shading === 'solid') {
       mat = new THREE.MeshStandardMaterial({
@@ -1712,12 +1895,31 @@ function rebuildMeshes() {
         vertexColors: true,
         side: sideSetting,
         flatShading: false,
-        wireframe: isWireframe,
+        wireframe: false,
         alphaTest: alphaTest,
         transparent: isTransparent,
         opacity: isXRay ? 0.55 : matOpacity,
         depthWrite: !isTransparent
       })
+    }
+
+    if (
+      !isWeightPaint &&
+      !toolStore.viewport.faceOrientation &&
+      toolStore.viewport.shading !== 'wireframe' &&
+      (meshMatObj?.dither || toolStore.viewport.dither) &&
+      (mat instanceof THREE.MeshStandardMaterial || mat instanceof THREE.MeshBasicMaterial)
+    ) {
+      applyRealtimeDither(mat, ditherSettingsFromMaterial(meshMatObj, toolStore.viewport.dither))
+    }
+
+    // Material Wireframe hides the fill. Edges are the face loop, not the GPU triangles.
+    const viewportWire = toolStore.viewport.shading === 'wireframe'
+    if (isWireframe && !viewportWire && toolStore.viewport.shading !== 'dreamcast') {
+      mat.transparent = true
+      mat.opacity = 0
+      mat.depthWrite = false
+      if ('wireframe' in mat) (mat as THREE.MeshBasicMaterial).wireframe = false
     }
 
     // Bias polygon depth, not vertex positions. Polygon offset on GL lines has no effect.
@@ -1754,18 +1956,20 @@ function rebuildMeshes() {
       layers.modelGroup.add(backMesh)
     }
 
-    // PASS 5: Wireframe overlay — dark crease lines (Blockbench-style), biased in front of the fill.
-    // Edge mode has its own cage; vertex mode still needs connected polygon boundaries.
+    // PASS 5: Face-boundary edges. Edge mode draws its own cage. Wireframe shading uses the same edges in indigo.
+    const edgeCage = isSelectedMesh && toolStore.selectMode === 'edge'
     const showCreaseWire = (isXRay || meshMatObj?.wireframe || toolStore.isMeshWorkspace())
-      && toolStore.viewport.shading !== 'wireframe'
-      && !(isSelectedMesh && toolStore.selectMode === 'edge')
-    if (showCreaseWire) {
+      && !viewportWire
+      && toolStore.viewport.shading !== 'dreamcast'
+      && !edgeCage
+    const showBoundaryWire = showCreaseWire || (viewportWire && !edgeCage)
+    if (showBoundaryWire) {
       const wireMat = new THREE.LineBasicMaterial({
-        color: isSelectedMesh ? 0x94a3b8 : 0x1e293b,
+        color: viewportWire ? 0x6366f1 : (isSelectedMesh ? 0x94a3b8 : 0x1e293b),
         depthTest: !isXRay,
         depthWrite: false,
         transparent: true,
-        opacity: Math.max(0.72, toolStore.viewport.wireframeOpacity ?? 0.88),
+        opacity: viewportWire ? 1 : Math.max(0.72, toolStore.viewport.wireframeOpacity ?? 0.88),
         polygonOffset: true,
         polygonOffsetFactor: -1,
         polygonOffsetUnits: -1
@@ -1811,8 +2015,9 @@ function rebuildMeshes() {
           polygonOffsetUnits: -1
         })
         const seamLines = new THREE.LineSegments(seamGeom, seamMat)
+        seamLines.name = `${meshObj.id}_seams`
         seamLines.position.copy(threeMesh.position)
-        seamLines.rotation.copy(threeMesh.rotation)
+        seamLines.quaternion.copy(threeMesh.quaternion)
         seamLines.scale.copy(threeMesh.scale)
         layers.wireframeGroup.add(seamLines)
       }
@@ -2203,8 +2408,25 @@ function buildBoneVisuals() {
   updateBonePoses()
 }
 
+function playbackHidesTransformGizmo(): boolean {
+  return toolStore.appMode === 'animate' && animationStore.isPlaying
+}
+
+function concealTransformGizmoForPlayback() {
+  if (!transformControls) return
+  if (gizmoDragSession) skipGizmoCommit = true
+  transformControls.enabled = false
+  if ((transformControls as { object?: THREE.Object3D | null }).object) {
+    transformControls.detach()
+  }
+  const helper = transformControls.getHelper?.()
+  if (helper) helper.visible = false
+  if (transformControls instanceof TransformGizmo) transformControls.visible = false
+}
+
 function isTransformGizmoAttached(): boolean {
   if (operatorManager.activeOperator instanceof ShapeDrawOperator) return false
+  if (playbackHidesTransformGizmo()) return false
   return !!(transformControls && (transformControls as { object?: THREE.Object3D | null }).object)
 }
 
@@ -2212,6 +2434,10 @@ function syncGizmoHelperVisible() {
   if (!transformControls) return
   const helper = transformControls.getHelper()
   if (!helper) return
+  if (playbackHidesTransformGizmo()) {
+    helper.visible = false
+    return
+  }
   const emptyModelScene =
     toolStore.appMode !== 'rig' &&
     toolStore.appMode !== 'animate' &&
@@ -2223,7 +2449,12 @@ function syncGizmoHelperVisible() {
 }
 
 function updateTransformGizmo() {
-  if (isGizmoDragging || !transformControls || !scene) return
+  if (!transformControls || !scene) return
+  if (playbackHidesTransformGizmo()) {
+    concealTransformGizmoForPlayback()
+    return
+  }
+  if (isGizmoDragging) return
   applyTransformGizmoTarget()
   syncGizmoHelperVisible()
 }
@@ -2614,9 +2845,26 @@ function syncActiveGizmo() {
   updateTransformGizmo()
 }
 
+const DREAMCAST_SKY = new THREE.Color(0x7ec8ea)
+
+function syncDreamcastAtmosphere() {
+  if (!scene) return
+  if (toolStore.viewport.shading === 'dreamcast') {
+    scene.background = DREAMCAST_SKY.clone()
+    scene.fog = new THREE.Fog(DREAMCAST_SKY, 14, 52)
+  } else {
+    scene.fog = null
+    scene.background = new THREE.Color(themeStore.activeColors.viewportBg)
+  }
+}
+
 function applyTheme(colors: ThemeColors) {
   if (scene) {
-    scene.background = new THREE.Color(colors.viewportBg)
+    if (toolStore.viewport.shading === 'dreamcast') {
+      scene.background = DREAMCAST_SKY.clone()
+    } else {
+      scene.background = new THREE.Color(colors.viewportBg)
+    }
   }
 
   if (layers && layers.gridGroup) {
@@ -2715,9 +2963,10 @@ function applySelectedMeshesRigidSnap() {
     m.position.y += extra.y
     m.position.z += extra.z
     const threeMesh = layers.modelGroup.getObjectByName(m.id)
-    if (threeMesh) threeMesh.position.set(m.position.x, m.position.y, m.position.z)
-    const wire = layers.wireframeGroup.getObjectByName(`${m.id}_wire`)
-    if (wire) wire.position.copy(threeMesh?.position ?? new THREE.Vector3(m.position.x, m.position.y, m.position.z))
+    if (threeMesh) {
+      threeMesh.position.set(m.position.x, m.position.y, m.position.z)
+      syncMeshHelperTransforms(m.id, threeMesh)
+    }
   }
 }
 
@@ -2792,24 +3041,7 @@ function writeObjectSceneTRS(
     threeMesh.position.copy(pos)
     threeMesh.quaternion.copy(quat)
     threeMesh.scale.copy(scl)
-  }
-  const wire = layers.wireframeGroup.getObjectByName(`${meshObj.id}_wire`)
-  if (wire) {
-    wire.position.copy(pos)
-    wire.quaternion.copy(quat)
-    wire.scale.copy(scl)
-  }
-  const pts = layers.wireframeGroup.getObjectByName(`${meshObj.id}_pts`)
-  if (pts) {
-    pts.position.copy(pos)
-    pts.quaternion.copy(quat)
-    pts.scale.copy(scl)
-  }
-  const selFaces = layers.selectionGroup.getObjectByName(`${meshObj.id}_selfaces`)
-  if (selFaces) {
-    selFaces.position.copy(pos)
-    selFaces.quaternion.copy(quat)
-    selFaces.scale.copy(scl)
+    syncMeshHelperTransforms(meshObj.id, threeMesh)
   }
 }
 
@@ -3104,7 +3336,7 @@ function onGizmoObjectChange() {
       selectedFacesGeometry: selFacesGeom,
       selectedEdgesGeometry: selEdgesGeom,
       edgeLinesGeometry: edgeLinesGeom
-    } = meshToThreeGeometry(activeMesh)
+    } = meshToThreeGeometry(activeMesh, [], [], 'flat', undefined, undefined, [], modifierEval(activeMesh))
     ptsGeom.dispose()
     selFacesGeom.dispose()
     selEdgesGeom.dispose()
@@ -3175,7 +3407,7 @@ function onGizmoObjectChange() {
         startWorld: dragStartVertexMap,
         deltaMatrix,
         worldInverse: invMat,
-        clipMirror: activeMesh.mirror,
+        clipMirror: mirrorClipOptions(activeMesh),
       })
       if (toolStore.snapping.vertex || toolStore.snapping.edge || toolStore.snapping.face) {
         const moving: THREE.Vector3[] = []
@@ -3255,21 +3487,16 @@ function onGizmoObjectChange() {
           let py = local.y
           let pz = local.z
 
-          if (activeMesh.mirror?.enabled && activeMesh.mirror.clipping) {
-            const startLocal = worldToLocal(activeMesh, startWorld, invMat)
-            if (activeMesh.mirror.axisX) {
-              if (startLocal.x >= 0 && px < 0) px = 0
-              if (startLocal.x <= 0 && px > 0) px = 0
-            }
-            if (activeMesh.mirror.axisY) {
-              if (startLocal.y >= 0 && py < 0) py = 0
-              if (startLocal.y <= 0 && py > 0) py = 0
-            }
-            if (activeMesh.mirror.axisZ) {
-              if (startLocal.z >= 0 && pz < 0) pz = 0
-              if (startLocal.z <= 0 && pz > 0) pz = 0
-            }
-          }
+          const startLocal = worldToLocal(activeMesh, startWorld, invMat)
+          const clipped = clipMirrorPosition(
+            { x: px, y: py, z: pz },
+            startLocal,
+            activeMesh.mirror,
+            mirrorSpace(activeMesh, resolveMirrorObject(activeMesh, projectStore.meshes))
+          )
+          px = clipped.x
+          py = clipped.y
+          pz = clipped.z
 
           v.position.x = px
           v.position.y = py
@@ -3353,7 +3580,12 @@ function onGizmoObjectChange() {
     } = meshToThreeGeometry(
       displayMesh,
       toolStore.selectMode === 'face' ? projectStore.selectedFaceIds : [],
-      toolStore.selectMode === 'edge' ? projectStore.selectedEdgeIds : []
+      toolStore.selectMode === 'edge' ? projectStore.selectedEdgeIds : [],
+      'flat',
+      undefined,
+      undefined,
+      [],
+      modifierEval(displayMesh)
     )
     edgeLinesGeometry.dispose()
 
@@ -3422,7 +3654,7 @@ function commitProxyTransform() {
       GIZMO_POSITION_CHANGE,
     )
   } else if (projectStore.activeMesh && !posing) {
-    projectStore.markGeometryUpdated()
+    projectStore.markObjectTransformUpdated()
   }
 
   if (toolStore.appMode === 'animate' && animationStore.autoKey) {
@@ -3490,7 +3722,7 @@ function findClosestEdgeScreen(mesh: MeshObject, maxDistPx = 10): Edge | null {
 
 
 
-function getGizmoPointer(this: { domElement?: HTMLElement }, event: PointerEvent) {
+function getGizmoPointer(this: { domElement?: HTMLElement; camera?: THREE.Camera }, event: PointerEvent) {
   const el = this.domElement
   if (!el) return { x: 0, y: 0, button: event.button }
   if (el.ownerDocument.pointerLockElement) {
@@ -3498,7 +3730,30 @@ function getGizmoPointer(this: { domElement?: HTMLElement }, event: PointerEvent
   }
   const { width, height } = ScreenGeometry.viewSize(el)
   const p = ScreenGeometry.pointerInView({ x: event.clientX, y: event.clientY }, el)
-  if (!isTripleView() || width < 1 || height < 1) {
+  if (width < 1 || height < 1) {
+    return { x: 0, y: 0, button: event.button }
+  }
+  if (toolStore.viewport.quadView) {
+    const halfW = width / 2
+    const halfH = height / 2
+    const isLeft = p.x < halfW
+    const isTop = p.y < halfH
+    const quadrant: ViewQuadrant = isLeft
+      ? (isTop ? 'top_left' : 'bottom_left')
+      : (isTop ? 'top_right' : 'bottom_right')
+    const camera = cameraForQuadrant(quadrant)
+    if (camera) {
+      activeQuadrant.value = quadrant
+      activeCamera = camera
+      this.camera = camera
+    }
+    return {
+      x: (((p.x - (isLeft ? 0 : halfW)) / halfW) * 2) - 1,
+      y: -(((p.y - (isTop ? 0 : halfH)) / halfH) * 2) + 1,
+      button: event.button
+    }
+  }
+  if (!isTripleView()) {
     return {
       x: (p.x / width) * 2 - 1,
       y: -(p.y / height) * 2 + 1,
@@ -3636,7 +3891,7 @@ function beginStickyViewNav(event: PointerEvent) {
 
 function isPolySketchOperator() {
   const op = operatorManager.activeOperator
-  return op instanceof PolyDrawOperator || op instanceof PolyBuildOperator || op instanceof ShapeDrawOperator
+  return op instanceof PolyDrawOperator || op instanceof PolyBuildOperator || op instanceof ShapeDrawOperator || op instanceof BlockoutSketchOperator
 }
 
 function beginPolySketchNav() {
@@ -3757,7 +4012,7 @@ function updateActiveCameraAndQuadrant(event: PointerEvent | MouseEvent) {
     mouse.y = -((mousePxY - height / 2) / (height / 2)) * 2 + 1
   }
 
-  transformControls.camera = activeCamera
+  syncGizmoPickCamera()
 }
 
 // ----------------------------------------------------
@@ -3782,17 +4037,18 @@ function startLightWavePan(camType: 'persp' | 'top' | 'front' | 'right', e: Mous
     prevX = moveEvt.clientX
     prevY = moveEvt.clientY
 
+    const sens = keymapStore.mouse?.mouseSensitivity ?? 1.0
     if (camType === 'persp') {
       const vRight = new THREE.Vector3(1, 0, 0).applyQuaternion(cameraPersp.quaternion)
       const vUp = new THREE.Vector3(0, 1, 0).applyQuaternion(cameraPersp.quaternion)
       const dist = cameraPersp.position.distanceTo(orbitControls.target)
-      const factor = dist * 0.0016
+      const factor = dist * 0.0016 * sens
       const offset = vRight.clone().multiplyScalar(-dx * factor).add(vUp.clone().multiplyScalar(dy * factor))
       cameraPersp.position.add(offset)
       orbitControls.target.add(offset)
     } else {
       const orthoCam = targetCam as THREE.OrthographicCamera
-      const factor = 0.015 / (orthoCam.zoom || 1)
+      const factor = (0.015 / (orthoCam.zoom || 1)) * sens
       const vRight = new THREE.Vector3(1, 0, 0).applyQuaternion(orthoCam.quaternion)
       const vUp = new THREE.Vector3(0, 1, 0).applyQuaternion(orthoCam.quaternion)
       const offset = vRight.clone().multiplyScalar(-dx * factor).add(vUp.clone().multiplyScalar(dy * factor))
@@ -3826,10 +4082,11 @@ function startLightWaveRotate(e: MouseEvent) {
     prevX = moveEvt.clientX
     prevY = moveEvt.clientY
 
+    const sens = keymapStore.mouse?.mouseSensitivity ?? 1.0
     const offset = new THREE.Vector3().subVectors(cameraPersp.position, orbitControls.target)
     const spherical = new THREE.Spherical().setFromVector3(offset)
-    spherical.theta -= dx * 0.007
-    spherical.phi -= dy * 0.007
+    spherical.theta -= dx * 0.007 * sens
+    spherical.phi -= dy * 0.007 * sens
     spherical.phi = Math.max(0.01, Math.min(Math.PI - 0.01, spherical.phi))
     offset.setFromSpherical(spherical)
     cameraPersp.position.copy(orbitControls.target).add(offset)
@@ -3938,45 +4195,58 @@ function centerViewOnContents(camType: 'persp' | 'top' | 'front' | 'right' = 'pe
   }
 }
 
+function nudgeView(kind: 'persp' | 'top' | 'front' | 'right', dx: number, dy: number) {
+  if (kind === 'persp') {
+    if (!orbitControls) return
+    const vRight = new THREE.Vector3(1, 0, 0).applyQuaternion(cameraPersp.quaternion)
+    const vUp = new THREE.Vector3(0, 1, 0).applyQuaternion(cameraPersp.quaternion)
+    const dist = cameraPersp.position.distanceTo(orbitControls.target)
+    const factor = dist * 0.0016
+    const offset = vRight.clone().multiplyScalar(-dx * factor).add(vUp.clone().multiplyScalar(dy * factor))
+    cameraPersp.position.add(offset)
+    orbitControls.target.add(offset)
+    return
+  }
+  const orthoCam = kind === 'top' ? cameraTop : kind === 'front' ? cameraFront : cameraRight
+  const factor = 0.015 / (orthoCam.zoom || 1)
+  const vRight = new THREE.Vector3(1, 0, 0).applyQuaternion(orthoCam.quaternion)
+  const vUp = new THREE.Vector3(0, 1, 0).applyQuaternion(orthoCam.quaternion)
+  orthoCam.position.add(vRight.clone().multiplyScalar(-dx * factor).add(vUp.clone().multiplyScalar(dy * factor)))
+}
+
 function onWheel(event: WheelEvent) {
+  if (operatorManager.state.value.active) return
   if (toolStore.appMode === 'blockout' && event.altKey && projectStore.selectedReferenceId) {
     event.preventDefault()
+    event.stopPropagation()
     const img = projectStore.referenceImages.find(r => r.id === projectStore.selectedReferenceId)
     if (img && !img.locked) {
-      const invert = toolStore.viewport.invertZoom ? -1 : 1
-      const factor = (event.deltaY * invert) < 0 ? 1.08 : 0.92
-      const next = Math.max(0.5, Math.min(24, img.scale * factor))
+      const next = Math.max(0.5, Math.min(24, img.scale * wheelZoomFactor(event.deltaY, event.deltaMode, toolStore.viewport.invertZoom)))
       projectStore.updateReferenceImage(img.id, { scale: next }, { rebuild: false })
     }
     return
   }
-  if (!isSplitView() || !renderer) return
-  const el = renderer.domElement
-  const { width, height } = ScreenGeometry.viewSize(el)
-  const p = ScreenGeometry.pointerInView({ x: event.clientX, y: event.clientY }, el)
-  const mousePxX = p.x
-  const mousePxY = p.y
+  if (!renderer) return
 
-  let cam: THREE.OrthographicCamera | null = null
-  if (isTripleView()) {
-    const hit = tripleHit(mousePxX, width)
-    if (hit.col === 0) cam = cameraFront
-    else if (hit.col === 1) cam = cameraRight
-  } else {
-    const isLeft = mousePxX < width / 2
-    const isTop = mousePxY < height / 2
-    if (isLeft && isTop) cam = cameraTop
-    else if (isLeft && !isTop) cam = cameraFront
-    else if (!isLeft && !isTop) cam = cameraRight
-  }
-
-  if (cam) {
+  const gesture = classifyWheel(event)
+  if (gesture === 'pan') {
     event.preventDefault()
-    const invert = toolStore.viewport.invertZoom ? -1 : 1
-    const zoomFactor = (event.deltaY * invert) < 0 ? 1.15 : 0.85
-    cam.zoom = Math.max(0.1, Math.min(25, cam.zoom * zoomFactor))
-    cam.updateProjectionMatrix()
+    event.stopPropagation()
+    updateActiveCameraAndQuadrant(event)
+    const pan = wheelPanDelta(event)
+    nudgeView(viewportKindFromQuadrant(), pan.x, pan.y)
+    return
   }
+
+  if (!isSplitView()) return
+  updateActiveCameraAndQuadrant(event)
+  const kind = viewportKindFromQuadrant()
+  if (kind === 'persp') return
+  const cam = kind === 'top' ? cameraTop : kind === 'front' ? cameraFront : cameraRight
+  event.preventDefault()
+  event.stopPropagation()
+  cam.zoom = Math.max(0.1, Math.min(25, cam.zoom * wheelZoomFactor(event.deltaY, event.deltaMode, toolStore.viewport.invertZoom || keymapStore.mouse.invertWheelZoom)))
+  cam.updateProjectionMatrix()
 }
 
 // Raycasting for Selection & Hover Highlighting
@@ -4003,27 +4273,69 @@ function onPointerDown(event: PointerEvent) {
     return
   }
 
-  // Middle Mouse Button (button === 1) triggers the Specials Context Menu at cursor!
-  if (event.button === 1) {
+  // Close context specials menu on click in viewport if open
+  if (showSpecialsMenu.value) {
+    showSpecialsMenu.value = false
+  }
+
+  // 1. Emulate 3-Button Mouse (Alt + LMB = Orbit, Alt + Shift + LMB = Pan, Alt + Ctrl + LMB = Zoom)
+  if (keymapStore.mouse.emulate3ButtonMouse && event.altKey && event.button === 0) {
     event.preventDefault()
+    event.stopImmediatePropagation()
+    isViewNavigating = true
+    updateActiveCameraAndQuadrant(event)
+    viewNavPane = isSplitView() ? activeQuadrant.value : 'main'
+    if (event.shiftKey) {
+      startLightWavePan(viewportKindFromQuadrant(), event)
+    } else if (event.ctrlKey || event.metaKey) {
+      startLightWaveZoom(viewportKindFromQuadrant(), event)
+    } else {
+      startLightWaveRotate(event)
+    }
+    return
+  }
+
+  // 2. Context / Specials Menu trigger check
+  const isSpecialsTrigger =
+    (keymapStore.mouse.specialsTrigger === 'middle' && event.button === 1) ||
+    (keymapStore.mouse.specialsTrigger === 'right' && event.button === 2 && keymapStore.mouse.orbitButton !== 'right' && keymapStore.mouse.panButton !== 'right')
+
+  if (isSpecialsTrigger) {
+    event.preventDefault()
+    event.stopImmediatePropagation()
     specialsMenuPos.value = { x: event.clientX, y: event.clientY }
     showSpecialsMenu.value = true
     return
   }
 
+  // 3. Middle Mouse Button (button === 1) navigation routing
+  if (event.button === 1) {
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    isViewNavigating = true
+    updateActiveCameraAndQuadrant(event)
+    viewNavPane = isSplitView() ? activeQuadrant.value : 'main'
+    if (event.shiftKey && keymapStore.mouse.orbitButton === 'middle') {
+      startLightWaveRotate(event)
+    } else {
+      startLightWavePan(viewportKindFromQuadrant(), event)
+    }
+    return
+  }
+
+  // 4. Right Mouse Button (button === 2) navigation routing
   if (event.button === 2) {
     event.preventDefault()
     event.stopImmediatePropagation()
     isViewNavigating = true
     updateActiveCameraAndQuadrant(event)
     viewNavPane = isSplitView() ? activeQuadrant.value : 'main'
-    startLightWavePan(viewportKindFromQuadrant(), event)
+    if (keymapStore.mouse.orbitButton === 'right') {
+      startLightWaveRotate(event)
+    } else {
+      startLightWavePan(viewportKindFromQuadrant(), event)
+    }
     return
-  }
-
-  // Close context specials menu on left/right click in viewport
-  if (showSpecialsMenu.value) {
-    showSpecialsMenu.value = false
   }
 
   if (event.button !== 0) return
@@ -4085,8 +4397,23 @@ function onPointerDown(event: PointerEvent) {
 
   if (toolStore.appMode === 'uvpaint' && tryStampTilesetFace(event)) return
 
-  if (toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'paint') {
+  if (
+    toolStore.appMode === 'uvpaint'
+    && toolStore.uvWorkspaceTab === 'paint'
+  ) {
     const paintHit = getPaintRaycastHit()
+    if (paintHit && toolStore.paintTool === 'wand') {
+      event.stopImmediatePropagation()
+      event.preventDefault()
+      const targetTex = getPaintTextureForHit(paintHit)
+      if (targetTex) {
+        if (projectStore.activeTextureId !== targetTex.id) projectStore.selectTexture(targetTex.id)
+        const pb = projectStore.ensureTextureBuffer(targetTex)
+        const px = texturePixelFromUv(pb.width, pb.height, paintHit.uv)
+        toolStore.requestPaintColorPick(px.x, px.y)
+      }
+      return
+    }
     if (paintHit && is3DPaintToolSupported()) {
       pointerDownHitMesh = true
       orbitControls.enabled = false
@@ -4094,17 +4421,37 @@ function onPointerDown(event: PointerEvent) {
       try { renderer.domElement.setPointerCapture(event.pointerId) } catch { /* optional */ }
       event.stopImmediatePropagation()
       event.preventDefault()
-      if (is3DPaintToolMutating()) projectStore.recordPixels('3D Paint')
-      lastPaintHit = null
+      clearPaintStroke()
       const targetTex = getPaintTextureForHit(paintHit)
       lastPaintTextureId = targetTex?.id
       if (targetTex && projectStore.activeTextureId !== targetTex.id) {
         projectStore.selectTexture(targetTex.id)
       }
+      if (targetTex && toolStore.paintTool === 'select') {
+        const pb = projectStore.ensureTextureBuffer(targetTex)
+        selectDrag = texturePixelFromUv(pb.width, pb.height, paintHit.uv)
+        shapeDrag = null
+        toolStore.requestPaintMarquee(marqueeRect(selectDrag, selectDrag))
+        updatePaintBrushCursor(paintHit)
+        return
+      }
+      if (targetTex && isPaintShapeTool(toolStore.paintTool)) {
+        projectStore.recordPixels('3D Paint')
+        const pb = projectStore.ensureTextureBuffer(targetTex)
+        const start = texturePixelFromUv(pb.width, pb.height, paintHit.uv)
+        const layer = pb.activeLayer
+        shapeDrag = layer ? { start, snapshot: layer.ctx.getImageData(0, 0, pb.width, pb.height) } : null
+        shapeDragEnd = start
+        selectDrag = null
+        updatePaintBrushCursor(paintHit)
+        return
+      }
+      if (is3DPaintToolMutating()) projectStore.recordPixels('3D Paint')
       paintRaycastHit(paintHit)
+      updatePaintBrushCursor(paintHit)
       return
     }
-    if (isPerspQuadrant()) {
+    if (isPerspQuadrant() && !is3DPaintToolSupported()) {
       armLmbClickOrOrbit(event)
       return
     }
@@ -4203,6 +4550,99 @@ function onPointerDown(event: PointerEvent) {
   applyIdleLmbSelection(event)
 }
 
+function beginProportionalMouseDrag(event: PointerEvent): boolean {
+  if (!toolStore.proportionalEdit || !toolStore.isMeshWorkspace()) return false
+  if (toolStore.selectMode !== 'vertex' && toolStore.selectMode !== 'edge' && toolStore.selectMode !== 'face') return false
+  lastHoverClientPos = { x: event.clientX, y: event.clientY }
+  if (!ensureProportionalSelection(event)) return false
+  proportionalMouseDrag = true
+  const onUp = () => {
+    window.removeEventListener('pointerup', onUp)
+    if (!proportionalMouseDrag) return
+    proportionalMouseDrag = false
+    if (operatorManager.state.value.active && operatorManager.activeOperator instanceof MoveOperator) {
+      operatorManager.confirm()
+    }
+  }
+  window.addEventListener('pointerup', onUp)
+  startModalOperator('grab')
+  if (!operatorManager.state.value.active) {
+    proportionalMouseDrag = false
+    return false
+  }
+  return true
+}
+
+function ensureProportionalSelection(event: PointerEvent): boolean {
+  const mesh = projectStore.activeMesh
+  if (!mesh || mesh.locked) return false
+  if (toolStore.selectMode === 'vertex' && projectStore.selectedVertexIds.length > 0) return true
+  if (toolStore.selectMode === 'edge' && projectStore.selectedEdgeIds.length > 0) return true
+  if (toolStore.selectMode === 'face' && projectStore.selectedFaceIds.length > 0) return true
+  updateActiveCameraAndQuadrant(event)
+  raycaster.setFromCamera(mouse, activeCamera)
+  const picked = firstSelectableMeshHit(raycaster.intersectObjects(layers.modelGroup.children, true))
+  const target = picked?.meshObj ?? mesh
+  if (target.locked) return false
+  if (toolStore.selectMode === 'face') {
+    if (!picked || picked.hit.faceIndex == null) return false
+    const faceIndexMap: number[] = picked.hit.object.userData.faceIndexMap || []
+    const face = picked.meshObj.faces[faceIndexMap[picked.hit.faceIndex]]
+    if (!face) return false
+    projectStore.activeMeshId = picked.meshObj.id
+    projectStore.selectedFaceIds = [face.id]
+    picked.meshObj.faces.forEach(item => { item.selected = item.id === face.id })
+    return true
+  }
+  if (toolStore.selectMode === 'edge') {
+    const edge = findClosestEdgeScreen(target, 80) ?? (picked ? closestEdgeOnHit(target, picked.hit.point) : null)
+    if (!edge) return false
+    projectStore.activeMeshId = target.id
+    projectStore.selectedEdgeIds = [edge.id]
+    return true
+  }
+  const vertex = vertexOnHit(target, picked?.hit.point) ?? findClosestVertexScreen(target, 80)
+  if (!vertex) return false
+  projectStore.activeMeshId = target.id
+  projectStore.selectedVertexIds = [vertex.id]
+  target.vertices.forEach(vert => { vert.selected = vert.id === vertex.id })
+  return true
+}
+
+function vertexOnHit(mesh: MeshObject, point?: THREE.Vector3): Vertex | null {
+  if (!point || mesh.vertices.length === 0) return null
+  const mat = meshWorldMatrix(mesh)
+  let best: Vertex | null = null
+  let bestD = Infinity
+  for (const vertex of mesh.vertices) {
+    const distance = localToWorld(mesh, vertex.position, mat).distanceToSquared(point)
+    if (distance < bestD) {
+      bestD = distance
+      best = vertex
+    }
+  }
+  return best
+}
+
+function closestEdgeOnHit(mesh: MeshObject, point: THREE.Vector3): Edge | null {
+  const mat = meshWorldMatrix(mesh)
+  const byId = new Map(mesh.vertices.map(vertex => [vertex.id, vertex]))
+  let best: Edge | null = null
+  let bestD = Infinity
+  for (const edge of getMeshEdges(mesh)) {
+    const a = byId.get(edge.v1)
+    const b = byId.get(edge.v2)
+    if (!a || !b) continue
+    const mid = localToWorld(mesh, a.position, mat).add(localToWorld(mesh, b.position, mat)).multiplyScalar(0.5)
+    const distance = mid.distanceToSquared(point)
+    if (distance < bestD) {
+      bestD = distance
+      best = edge
+    }
+  }
+  return best
+}
+
 function armLmbClickOrOrbit(event: PointerEvent) {
   lmbClickPending = true
   event.stopImmediatePropagation()
@@ -4275,20 +4715,35 @@ function applyIdleLmbSelection(event: PointerEvent) {
     }
   }
 
-  // 3. Face / Object Mode Selection
+  // 3. Face / Object Mode Selection. A click that misses the current
+  // element (empty view, or the mesh body in vertex/edge mode) clears it.
   const intersects = raycaster.intersectObjects(layers.modelGroup.children, true)
-  if (intersects.length > 0) {
+  const picked = firstSelectableMeshHit(intersects)
+  if (picked) {
     pointerDownHitMesh = true
-    const hit = intersects[0]
-    const meshObj = projectStore.meshes.find(m => m.id === hit.object.name)
-    if (!meshObj || meshObj.locked || !meshObj.visible) return
-    if (!isSelectionAllowed) return
+    const { hit, meshObj } = picked
+    if (toolStore.mirrorObjectPickForId) {
+      const sourceId = toolStore.mirrorObjectPickForId
+      toolStore.mirrorObjectPickForId = null
+      const source = projectStore.meshes.find(m => m.id === sourceId)
+      if (source?.mirror && source.id !== meshObj.id) {
+        projectStore.recordState('Mirror Object')
+        source.mirror.mirrorObjectId = meshObj.id
+        projectStore.markGeometryUpdated()
+      }
+      return
+    }
+    if (!isSelectionAllowed) {
+      if (!event.shiftKey) clearIdleViewportSelection()
+      return
+    }
     if (activeMesh?.id !== meshObj.id) projectStore.clearSubSelections()
 
     projectStore.activeMeshId = meshObj.id
     if (toolStore.selectMode !== 'object') projectStore.selectedMeshIds = [meshObj.id]
     projectStore.selectedReferenceId = ''
 
+    let acted = false
     if (toolStore.selectMode === 'object') {
       if (event.shiftKey) {
         if (projectStore.selectedMeshIds.includes(meshObj.id)) {
@@ -4299,6 +4754,7 @@ function applyIdleLmbSelection(event: PointerEvent) {
       } else {
         projectStore.selectedMeshIds = [meshObj.id]
       }
+      acted = true
     } else if (toolStore.selectMode === 'face' && hit.faceIndex !== undefined && hit.faceIndex !== null) {
       const faceIndexMap: number[] = hit.object.userData.faceIndexMap || []
       const fi = hit.faceIndex as number
@@ -4325,17 +4781,29 @@ function applyIdleLmbSelection(event: PointerEvent) {
           projectStore.selectedFaceIds = [face.id]
           meshObj.faces.forEach(f => (f.selected = f.id === face.id))
         }
+        acted = true
       }
     }
-    if (toolStore.selectMode === 'face') {
-      if (!refreshFaceEdgeSelectionOverlays()) scheduleRebuildMeshes()
-    } else {
-      scheduleRebuildMeshes()
+    if (acted) {
+      if (toolStore.selectMode === 'face') {
+        if (!refreshFaceEdgeSelectionOverlays()) scheduleRebuildMeshes()
+      } else {
+        scheduleRebuildMeshes()
+      }
+      return
     }
-    return
   }
 
   if (!event.shiftKey) clearIdleViewportSelection()
+}
+
+function firstSelectableMeshHit(hits: THREE.Intersection[]) {
+  for (const hit of hits) {
+    const id = (hit.object.userData.meshId as string | undefined) || hit.object.name
+    const meshObj = projectStore.meshes.find(m => m.id === id)
+    if (meshObj && !meshObj.locked && meshObj.visible) return { hit, meshObj }
+  }
+  return null
 }
 
 function clearIdleViewportSelection() {
@@ -4376,6 +4844,7 @@ function onPointerMove(event: PointerEvent) {
       pointerDownHitMesh = true
       event.preventDefault()
       event.stopImmediatePropagation()
+      if (beginProportionalMouseDrag(event)) return
       startLightWaveRotate(event)
       return
     }
@@ -4433,8 +4902,36 @@ function onPointerMove(event: PointerEvent) {
     event.preventDefault()
     if (event.pointerType) toolStore.currentPointerType = event.pointerType as any
     if (event.pressure > 0) toolStore.currentPressure = event.pressure
-    paintRaycastHit()
+    const dragHit = getPaintRaycastHit()
+    if (shapeDrag && dragHit) {
+      const tex = getPaintTextureForHit(dragHit)
+      if (tex) {
+        const pb = projectStore.ensureTextureBuffer(tex)
+        shapeDragEnd = texturePixelFromUv(pb.width, pb.height, dragHit.uv)
+        previewPaintShape(shapeDragEnd)
+      }
+      updatePaintBrushCursor(dragHit)
+      return
+    }
+    if (selectDrag && dragHit) {
+      const tex = getPaintTextureForHit(dragHit)
+      if (tex) {
+        const pb = projectStore.ensureTextureBuffer(tex)
+        const end = texturePixelFromUv(pb.width, pb.height, dragHit.uv)
+        toolStore.requestPaintMarquee(marqueeRect(selectDrag, end))
+      }
+      updatePaintBrushCursor(dragHit)
+      return
+    }
+    if (toolStore.paintTool !== 'bucket') paintRaycastHit()
+    updatePaintBrushCursor(dragHit)
     return
+  }
+
+  if (toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'paint') {
+    updatePaintBrushCursor(getPaintRaycastHit())
+  } else {
+    hidePaintBrushCursors()
   }
 
   scheduleHoverUpdate()
@@ -4655,8 +5152,12 @@ function onPointerUp(event?: PointerEvent) {
   }
 
   if (isPaintingOn3D) {
+    if (shapeDrag) previewPaintShape(shapeDragEnd ?? shapeDrag.start)
+    shapeDrag = null
+    shapeDragEnd = null
+    selectDrag = null
     isPaintingOn3D = false
-    lastPaintHit = null
+    clearPaintStroke()
     if (lastPaintTextureId && is3DPaintToolMutating()) {
       projectStore.markTextureUpdated(lastPaintTextureId)
     }
@@ -4707,11 +5208,11 @@ function startModalOperator(tool: string, options?: any) {
     ? projectStore.activeMesh : null
   const shapeOp = tool === 'shapedraw' ? new ShapeDrawOperator(shapeTarget?.shapeSource?.recipe) : null
   const useEmptyKernel = tool === 'polydraw' || (tool === 'shapedraw' && !shapeTarget) || tool === 'primitive' || tool === 'add_primitive'
-  if (tool === 'polybuild' && !projectStore.activeMesh) {
+  if ((tool === 'polybuild' || tool === 'blockout_sketch') && !projectStore.activeMesh) {
     projectStore.addEditableMesh(new EditableMesh(), `Mesh_${projectStore.meshes.length + 1}`)
   }
   const activeMesh = tool === 'shapedraw' ? shapeTarget : useEmptyKernel && tool === 'polydraw' ? null : projectStore.activeMesh
-  const polybuildStartedEmpty = tool === 'polybuild' && !!activeMesh && activeMesh.vertices.length === 0
+  const polybuildStartedEmpty = (tool === 'polybuild' || tool === 'blockout_sketch') && !!activeMesh && activeMesh.vertices.length === 0
   const retargetCuts = tool === 'knife' || tool === 'loop_cut' || tool === 'loopcut'
 
   // Bridge active mesh to EditableMesh kernel (or empty mesh if placing new primitive)
@@ -4722,7 +5223,18 @@ function startModalOperator(tool: string, options?: any) {
   let editableMesh = bridgeData.mesh
 
   if (activeMesh?.locked) return
-  if ((tool === 'extrude' || tool === 'inset' || tool === 'bevel') && !activeMesh) return
+  if ((tool === 'extrude' || tool === 'inset' || tool === 'bevel' || tool === 'bridge') && !activeMesh) return
+  if (tool === 'bridge') {
+    if (projectStore.selectedEdgeIds.length < 2) {
+      projectStore.meshEditError = {
+        success: false,
+        code: 'operation-failed',
+        reason: 'Select two edge loops, then Bridge.'
+      }
+      return
+    }
+    if (toolStore.selectMode !== 'edge') toolStore.selectMode = 'edge'
+  }
   if ((tool === 'knife' || tool === 'loop_cut' || tool === 'loopcut') && toolStore.selectMode === 'object') {
     toolStore.selectMode = 'face'
   }
@@ -4793,6 +5305,7 @@ function startModalOperator(tool: string, options?: any) {
   ) return
 
   modalBaseline = useEmptyKernel ? null : historyStore.captureSnapshot('Mesh Edit', { includeTextures: false })
+  let modalMeshBaseline: MeshSnapshot | null = useEmptyKernel ? null : editableMesh.createSnapshot()
 
   if (isTripleView()) {
     if (layoutStore.blockoutMaximized !== 'none') applyBlockoutMaximizedCamera()
@@ -4829,6 +5342,12 @@ function startModalOperator(tool: string, options?: any) {
     snapVertex: toolStore.snapping.vertex,
     snapEdge: toolStore.snapping.edge,
     snapFace: toolStore.snapping.face,
+    proportional: toolStore.proportionalEdit,
+    proportionalRadius: toolStore.proportionalRadius,
+    onProportionalChange: (enabled, radius) => {
+      toolStore.proportionalEdit = enabled
+      toolStore.proportionalRadius = radius
+    },
     startOrientation: (
       toolStore.transformOrientation === 'local' ? 'LOCAL'
       : toolStore.transformOrientation === 'normal' ? 'NORMAL'
@@ -4872,7 +5391,10 @@ function startModalOperator(tool: string, options?: any) {
           bridgeData.numToStrVertId,
           bridgeData.numToStrFaceId
         )
-        projectStore.publishEditableMesh(updatedMeshObj, bridgeData, true)
+        const change = modalMeshBaseline
+          ? describeMeshChange(modalMeshBaseline, editableMesh.createSnapshot())
+          : undefined
+        projectStore.publishEditableMesh(updatedMeshObj, bridgeData, true, change)
         updateActiveMeshVisualsFast()
       }
     },
@@ -4909,8 +5431,11 @@ function startModalOperator(tool: string, options?: any) {
           bridgeData.numToStrVertId,
           bridgeData.numToStrFaceId
         )
-        projectStore.publishEditableMesh(updatedMeshObj, bridgeData)
-        if (['extrude', 'inset', 'bevel', 'knife', 'loopcut', 'loop_cut'].includes(tool)) {
+        const change = modalMeshBaseline
+          ? describeMeshChange(modalMeshBaseline, editableMesh.createSnapshot())
+          : undefined
+        projectStore.publishEditableMesh(updatedMeshObj, bridgeData, false, change)
+        if (['extrude', 'inset', 'bevel', 'bridge', 'knife', 'loopcut', 'loop_cut'].includes(tool)) {
           const mapVertex = (id: number) => bridgeData.numToStrVertId.get(id) || `v_${id}`
           projectStore.selectedFaceIds = ctx.selectedFaceIds.filter(id => editableMesh.faces.has(id)).map(id => bridgeData.numToStrFaceId.get(id) || `f_${id}`)
           projectStore.selectedVertexIds = ctx.selectedVertIds.filter(id => editableMesh.vertices.has(id)).map(mapVertex)
@@ -4927,12 +5452,22 @@ function startModalOperator(tool: string, options?: any) {
           updatedMeshObj.vertices.forEach(v => { v.selected = vertices.has(v.id) })
           updatedMeshObj.faces.forEach(f => { f.selected = projectStore.selectedFaceIds.includes(f.id) })
         }
-        if (tool === 'polybuild') {
+        if (tool === 'polybuild' || tool === 'blockout_sketch') {
           const born = updatedMeshObj.vertices.filter(v => !priorVertIds.has(v.id)).map(v => v.id)
-          if (polybuildStartedEmpty || born.length > 0) {
+          if (tool === 'polybuild' && (polybuildStartedEmpty || born.length > 0)) {
+            projectStore.centerMeshOrigin(updatedMeshObj.id, { record: false })
+          } else if (tool === 'blockout_sketch' && polybuildStartedEmpty) {
             projectStore.centerMeshOrigin(updatedMeshObj.id, { record: false })
           }
-          if (born.length > 0) {
+          if (tool === 'blockout_sketch') {
+            const faces = ctx.selectedFaceIds
+              .filter(id => editableMesh.faces.has(id))
+              .map(id => bridgeData.numToStrFaceId.get(id) || `f_${id}`)
+            if (faces.length) {
+              projectStore.selectedFaceIds = faces
+              toolStore.selectMode = 'face'
+            }
+          } else if (born.length > 0) {
             projectStore.selectedVertexIds = born
             toolStore.selectMode = 'vertex'
           }
@@ -4952,7 +5487,7 @@ function startModalOperator(tool: string, options?: any) {
       endPolySketchNav()
       orbitControls.enabled = true
       if (transformControls) transformControls.enabled = true
-      if (tool === 'polydraw' || tool === 'polybuild') toolStore.setModelTool('move')
+      if (tool === 'polydraw' || tool === 'polybuild' || tool === 'blockout_sketch') toolStore.setModelTool('move')
       rebuildMeshes()
     },
     validateCommit: () => projectStore.validateEditableMesh(editableMesh),
@@ -4965,12 +5500,15 @@ function startModalOperator(tool: string, options?: any) {
           bridgeData.numToStrVertId,
           bridgeData.numToStrFaceId
         )
-        projectStore.publishEditableMesh(restored, bridgeData)
+        const change = modalMeshBaseline
+          ? describeMeshChange(modalMeshBaseline, editableMesh.createSnapshot())
+          : undefined
+        projectStore.publishEditableMesh(restored, bridgeData, false, change)
       }
       endPolySketchNav()
       orbitControls.enabled = true
       if (transformControls) transformControls.enabled = true
-      if (tool === 'polydraw' || tool === 'polybuild') toolStore.setModelTool('move')
+      if (tool === 'polydraw' || tool === 'polybuild' || tool === 'blockout_sketch') toolStore.setModelTool('move')
       rebuildMeshes()
     }
   }
@@ -4990,6 +5528,7 @@ function startModalOperator(tool: string, options?: any) {
       }
       bridgeData = projectStore.acquireEditableMesh(doc)
       editableMesh = bridgeData.mesh
+      modalMeshBaseline = editableMesh.createSnapshot()
       documentMesh = doc
       ctx.mesh = editableMesh
       ctx.objectMatrix = meshWorldMatrix(doc)
@@ -5036,6 +5575,15 @@ function startModalOperator(tool: string, options?: any) {
     operatorManager.start(new InsetOperator(), ctx, pointerPos)
   } else if (tool === 'bevel') {
     operatorManager.start(new BevelOperator(), ctx, pointerPos)
+  } else if (tool === 'bridge') {
+    operatorManager.start(new BridgeOperator(
+      toolStore.bridgeSegments,
+      toolStore.bridgeTwist,
+      (segments, twist) => {
+        toolStore.bridgeSegments = segments
+        toolStore.bridgeTwist = twist
+      }
+    ), ctx, pointerPos)
   } else if (tool === 'knife') {
     operatorManager.start(new KnifeOperator(), ctx, pointerPos)
   } else if (tool === 'loop_cut' || tool === 'loopcut') {
@@ -5056,6 +5604,8 @@ function startModalOperator(tool: string, options?: any) {
     operatorManager.start(new ShearOperator(), ctx, pointerPos)
   } else if (tool === 'to_sphere') {
     operatorManager.start(new ToSphereOperator(), ctx, pointerPos)
+  } else if (tool === 'curve') {
+    operatorManager.start(new CurveOperator(), ctx, pointerPos)
   } else if (shapeOp) {
     // A panel click has no drawing-pane camera. Start with a coherent front pane;
     // pointer navigation will select another pane as soon as the user enters it.
@@ -5071,6 +5621,9 @@ function startModalOperator(tool: string, options?: any) {
     beginPolySketchNav()
   } else if (tool === 'polybuild') {
     operatorManager.start(new PolyBuildOperator(), ctx, pointerPos)
+    beginPolySketchNav()
+  } else if (tool === 'blockout_sketch') {
+    operatorManager.start(new BlockoutSketchOperator(), ctx, pointerPos)
     beginPolySketchNav()
   } else if (tool === 'primitive' || tool === 'add_primitive') {
     const pType = (options?.primitiveType || 'BOX') as PrimitiveType
@@ -5100,7 +5653,11 @@ function updateActiveMeshVisualsFast() {
     activeMesh,
     toolStore.selectMode === 'face' ? projectStore.selectedFaceIds : [],
     toolStore.selectMode === 'edge' ? projectStore.selectedEdgeIds : [],
-    toolStore.viewport.shadeMode
+    toolStore.viewport.shadeMode,
+    undefined,
+    undefined,
+    [],
+    modifierEval(activeMesh)
   )
   edgeLinesGeometry.dispose()
 
@@ -5175,7 +5732,8 @@ function refreshVertexSelectionColors(): boolean {
 }
 
 function hoverVertexLookup(mesh: MeshObject): Map<string, Vertex> {
-  const key = `${mesh.id}:${projectStore.geometryRevision}:${mesh.vertices.length}`
+  const revision = projectStore.meshRevision(mesh.id)
+  const key = `${mesh.id}:${revision?.topology ?? 0}:${revision?.position ?? 0}`
   if (hoverVertMap && hoverVertMapKey === key) return hoverVertMap
   hoverVertMap = new Map(mesh.vertices.map(v => [v.id, v]))
   hoverVertMapKey = key
@@ -5191,7 +5749,7 @@ function refreshFaceEdgeSelectionOverlays(): boolean {
 
   const faceIds = mode === 'face' ? projectStore.selectedFaceIds : []
   const edgeIds = mode === 'edge' ? projectStore.selectedEdgeIds : []
-  const { selectedFacesGeometry, selectedEdgesGeometry } = buildSelectionOverlayGeometries(mesh, faceIds, edgeIds)
+  const { selectedFacesGeometry, selectedEdgesGeometry } = buildSelectionOverlayGeometries(mesh, faceIds, edgeIds, modifierEval(mesh))
 
   if (mode === 'face') {
     const selFaces = layers.selectionGroup.getObjectByName(`${mesh.id}_selfaces`) as THREE.Mesh | undefined
@@ -5408,12 +5966,197 @@ function tryStampTilesetFace(event: PointerEvent): boolean {
   return true
 }
 
+function isPaintShapeTool(tool: string): tool is PaintShapeTool {
+  return tool === 'line' || tool === 'rect' || tool === 'circle'
+}
+
 function is3DPaintToolSupported() {
-  return ['brush', 'eraser', 'bucket', 'dither', 'picker', 'shade'].includes(toolStore.paintTool)
+  return ['brush', 'eraser', 'bucket', 'dither', 'picker', 'shade', 'wand', 'line', 'rect', 'circle', 'select'].includes(toolStore.paintTool)
 }
 
 function is3DPaintToolMutating() {
-  return toolStore.paintTool !== 'picker' && is3DPaintToolSupported()
+  return !['picker', 'wand', 'select'].includes(toolStore.paintTool) && is3DPaintToolSupported()
+}
+
+function activePaintColor() {
+  return toolStore.paletteSnapEnabled
+    ? snapColorToPalette(toolStore.primaryColor, projectStore.activePalette.colors)
+    : toolStore.primaryColor
+}
+
+function previewPaintShape(end: { x: number; y: number }) {
+  if (!shapeDrag || !lastPaintTextureId) return
+  const tex = projectStore.textures.find(texture => texture.id === lastPaintTextureId)
+  if (!tex) return
+  const pb = projectStore.ensureTextureBuffer(tex)
+  const layer = pb.activeLayer
+  if (!layer) return
+  layer.ctx.putImageData(shapeDrag.snapshot, 0, 0)
+  const tool = toolStore.paintTool
+  if (!isPaintShapeTool(tool)) return
+  const starts = mirrorPixels(shapeDrag.start.x, shapeDrag.start.y, pb.width, pb.height, toolStore.paintMirrorU, toolStore.paintMirrorV)
+  const ends = mirrorPixels(end.x, end.y, pb.width, pb.height, toolStore.paintMirrorU, toolStore.paintMirrorV)
+  for (let i = 0; i < starts.length; i++) {
+    drawPaintShape(pb, tool, starts[i]!, ends[i] || end, activePaintColor(), toolStore.brushSize, toolStore.brushFilled, toolStore.brushOpacity)
+  }
+  const hitTex = textureCache.get(tex.id)
+  if (hitTex) hitTex.needsUpdate = true
+  projectStore.markTexturePreview()
+}
+
+function clearPaintStroke() {
+  lastPaintHit = null
+  lastMirrorUvs = null
+  lastSymUvs.clear()
+}
+
+function texturePixelFromUv(width: number, height: number, uv: { u: number; v: number }) {
+  const u = Math.max(0, Math.min(1, uv.u))
+  const v = Math.max(0, Math.min(1, uv.v))
+  return {
+    x: Math.min(width - 1, Math.max(0, Math.floor(u * width))),
+    y: Math.min(height - 1, Math.max(0, Math.floor((1 - v) * height)))
+  }
+}
+
+function symmetrySignKeys(): string[] {
+  const { symmetryX, symmetryY, symmetryZ } = toolStore.viewport
+  const xs = symmetryX ? [1, -1] : [1]
+  const ys = symmetryY ? [1, -1] : [1]
+  const zs = symmetryZ ? [1, -1] : [1]
+  const keys: string[] = []
+  for (const sx of xs) {
+    for (const sy of ys) {
+      for (const sz of zs) {
+        if (sx === 1 && sy === 1 && sz === 1) continue
+        keys.push(`${sx},${sy},${sz}`)
+      }
+    }
+  }
+  return keys
+}
+
+function paintHitFromIntersection(hit: THREE.Intersection): PaintHit | null {
+  if (!hit.uv || !hit.object.userData.meshId) return null
+  const meshId = hit.object.userData.meshId as string
+  const faceIndex = typeof hit.faceIndex === 'number' ? hit.faceIndex : -1
+  const paintFaceMap = hit.object.userData.paintFaceMap as PaintFaceInfo[] | undefined
+  return {
+    hit,
+    meshId,
+    face: faceIndex >= 0 ? paintFaceMap?.[faceIndex] || null : null,
+    uv: { u: hit.uv.x, v: hit.uv.y }
+  }
+}
+
+function worldSymmetryHits(source: THREE.Intersection): Array<{ key: string; paint: PaintHit }> {
+  const keys = symmetrySignKeys()
+  if (!keys.length || !source.face) return []
+  const object = source.object
+  object.updateWorldMatrix(true, false)
+  paintInv.copy(object.matrixWorld).invert()
+  paintLocalPoint.copy(source.point).applyMatrix4(paintInv)
+  paintLocalNormal.copy(source.face.normal)
+  const found: Array<{ key: string; paint: PaintHit }> = []
+  paintSavedOrigin.copy(raycaster.ray.origin)
+  paintSavedDir.copy(raycaster.ray.direction)
+  try {
+    for (const key of keys) {
+      const [sx, sy, sz] = key.split(',').map(Number)
+      paintSymPoint.set(paintLocalPoint.x * sx, paintLocalPoint.y * sy, paintLocalPoint.z * sz)
+      paintSymNormal.set(paintLocalNormal.x * sx, paintLocalNormal.y * sy, paintLocalNormal.z * sz)
+      paintSymPoint.applyMatrix4(object.matrixWorld)
+      paintSymNormal.transformDirection(object.matrixWorld)
+      if (paintSymNormal.lengthSq() < 1e-8) continue
+      paintSymNormal.normalize()
+      paintRayOrigin.copy(paintSymPoint).addScaledVector(paintSymNormal, 0.05)
+      paintRayDir.copy(paintSymNormal).negate()
+      raycaster.set(paintRayOrigin, paintRayDir)
+      const hit = raycaster.intersectObjects(layers.modelGroup.children, true)
+        .find(candidate => Boolean(candidate.uv && candidate.object.userData.meshId))
+      if (!hit) continue
+      const paint = paintHitFromIntersection(hit)
+      if (paint) found.push({ key, paint })
+    }
+  } finally {
+    raycaster.set(paintSavedOrigin, paintSavedDir)
+  }
+  return found
+}
+
+function hidePaintBrushCursors() {
+  for (const mesh of paintCursorMeshes) mesh.visible = false
+}
+
+function ensurePaintCursor(index: number) {
+  if (!paintCursorGeometry) paintCursorGeometry = new THREE.CircleGeometry(1, 28)
+  if (!paintCursorMaterial) {
+    paintCursorMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.45,
+      depthTest: false,
+      side: THREE.DoubleSide
+    })
+  }
+  while (paintCursorMeshes.length <= index) {
+    const mesh = new THREE.Mesh(paintCursorGeometry, paintCursorMaterial)
+    mesh.renderOrder = 10000
+    mesh.frustumCulled = false
+    mesh.name = 'paint-brush-cursor'
+    mesh.visible = false
+    scene.add(mesh)
+    paintCursorMeshes.push(mesh)
+  }
+  return paintCursorMeshes[index]
+}
+
+function placePaintCursor(index: number, point: THREE.Vector3, normal: THREE.Vector3) {
+  paintCursorNormal.copy(normal)
+  if (paintCursorNormal.lengthSq() < 1e-8) return
+  paintCursorNormal.normalize()
+  const mesh = ensurePaintCursor(index)
+  const dist = Math.max(0.25, activeCamera.position.distanceTo(point))
+  const scale = dist * 0.012 * (Math.max(1, toolStore.brushSize) / 8)
+  mesh.visible = true
+  mesh.scale.setScalar(scale)
+  mesh.position.copy(point).addScaledVector(paintCursorNormal, dist * 0.0015)
+  mesh.quaternion.setFromUnitVectors(paintCursorZ, paintCursorNormal)
+}
+
+function updatePaintBrushCursor(paintHit: PaintHit | null) {
+  if (
+    toolStore.appMode !== 'uvpaint' ||
+    toolStore.uvWorkspaceTab !== 'paint' ||
+    !paintHit?.hit.face ||
+    toolStore.paintTool === 'wand' ||
+    toolStore.paintTool === 'picker' ||
+    toolStore.paintTool === 'select'
+  ) {
+    hidePaintBrushCursors()
+    return
+  }
+  paintLocalNormal.copy(paintHit.hit.face.normal).transformDirection(paintHit.hit.object.matrixWorld)
+  placePaintCursor(0, paintHit.hit.point, paintLocalNormal)
+  const twins = worldSymmetryHits(paintHit.hit)
+  let index = 1
+  for (const twin of twins) {
+    if (!twin.paint.hit.face) continue
+    paintLocalNormal.copy(twin.paint.hit.face.normal).transformDirection(twin.paint.hit.object.matrixWorld)
+    placePaintCursor(index, twin.paint.hit.point, paintLocalNormal)
+    index++
+  }
+  for (let i = index; i < paintCursorMeshes.length; i++) paintCursorMeshes[i].visible = false
+}
+
+function disposePaintBrushCursors() {
+  hidePaintBrushCursors()
+  for (const mesh of paintCursorMeshes) scene?.remove(mesh)
+  paintCursorMeshes.length = 0
+  paintCursorGeometry?.dispose()
+  paintCursorMaterial?.dispose()
+  paintCursorGeometry = null
+  paintCursorMaterial = null
 }
 
 function getPaintRaycastHit(): PaintHit | null {
@@ -5469,19 +6212,18 @@ function paintFacesAreContinuous(previous: Omit<PaintHit, 'hit'>, current: Paint
 
 function paintRaycastHit(paintHit = getPaintRaycastHit()) {
   if (toolStore.appMode !== 'uvpaint' || !paintHit) {
-    lastPaintHit = null
+    clearPaintStroke()
     return
   }
 
   const targetTex = getPaintTextureForHit(paintHit)
   if (!targetTex || (lastPaintTextureId && targetTex.id !== lastPaintTextureId)) {
-    lastPaintHit = null
+    clearPaintStroke()
     return
   }
   const pb = projectStore.ensureTextureBuffer(targetTex)
   const uv = paintHit.uv
-  const px = Math.min(pb.width - 1, Math.max(0, Math.floor(Math.max(0, Math.min(1, uv.u)) * pb.width)))
-  const py = Math.min(pb.height - 1, Math.max(0, Math.floor((1 - Math.max(0, Math.min(1, uv.v))) * pb.height)))
+  const primaryPx = texturePixelFromUv(pb.width, pb.height, uv)
 
   const isPen = toolStore.currentPointerType === 'pen' && toolStore.stylusPressureEnabled
   const effectiveSize = isPen
@@ -5492,31 +6234,55 @@ function paintRaycastHit(paintHit = getPaintRaycastHit()) {
     : toolStore.primaryColor
   const canConnect = Boolean(lastPaintHit && paintFacesAreContinuous(lastPaintHit, paintHit))
   const clip = tilesetPaintClip(targetTex.id, pb.width, pb.height, targetTex.atlas?.cols || 2, targetTex.atlas?.rows || 2)
+  const copies = mirrorUvs(uv, toolStore.paintMirrorU, toolStore.paintMirrorV)
+  const twins = worldSymmetryHits(paintHit.hit)
+  const previousMirrors = lastMirrorUvs && lastMirrorUvs.length === copies.length ? lastMirrorUvs : null
 
-  paintWithinSelection(pb, clip, () => {
+  const stamp = (sample: { u: number; v: number }, previous: { u: number; v: number } | null) => {
+    const px = texturePixelFromUv(pb.width, pb.height, sample)
     if (toolStore.paintTool === 'brush') {
-      if (canConnect && lastPaintHit) {
-        pb.paintLineAtUV(lastPaintHit.uv.u, lastPaintHit.uv.v, uv.u, uv.v, activeDrawColor, effectiveSize, 'brush', toolStore.brushOpacity, toolStore.brushShape)
-      } else {
-        pb.drawBrush(px, py, activeDrawColor, effectiveSize, toolStore.brushOpacity, toolStore.brushShape)
-      }
+      if (previous) pb.paintLineAtUV(previous.u, previous.v, sample.u, sample.v, activeDrawColor, effectiveSize, 'brush', toolStore.brushOpacity, toolStore.brushShape)
+      else pb.drawBrush(px.x, px.y, activeDrawColor, effectiveSize, toolStore.brushOpacity, toolStore.brushShape)
     } else if (toolStore.paintTool === 'eraser') {
-      if (canConnect && lastPaintHit) {
-        pb.paintLineAtUV(lastPaintHit.uv.u, lastPaintHit.uv.v, uv.u, uv.v, activeDrawColor, effectiveSize, 'eraser', 1, toolStore.brushShape)
-      } else {
-        pb.erase(px, py, effectiveSize, toolStore.brushShape)
-      }
-    } else if (toolStore.paintTool === 'bucket') {
-      pb.floodFill(px, py, activeDrawColor)
+      if (previous) pb.paintLineAtUV(previous.u, previous.v, sample.u, sample.v, activeDrawColor, effectiveSize, 'eraser', 1, toolStore.brushShape)
+      else pb.erase(px.x, px.y, effectiveSize, toolStore.brushShape)
     } else if (toolStore.paintTool === 'dither') {
-      pb.drawDither(px, py, activeDrawColor, effectiveSize)
-    } else if (toolStore.paintTool === 'picker') {
-      toolStore.primaryColor = pb.getPixelHex(px, py)
+      pb.drawDither(px.x, px.y, activeDrawColor, effectiveSize)
     } else if (toolStore.paintTool === 'shade') {
-      pb.paintAtUV(uv.u, uv.v, activeDrawColor, effectiveSize, 'shade-light')
+      pb.paintAtUV(sample.u, sample.v, activeDrawColor, effectiveSize, 'shade-light')
     }
-  })
+  }
 
+  if (toolStore.paintTool === 'bucket') {
+    const mesh = projectStore.meshes.find(candidate => candidate.id === paintHit.meshId)
+    const mask = mesh && paintHit.face ? uvFaceMask(mesh, pb.width, pb.height, paintHit.face.id) : null
+    if (mask) {
+      const index = primaryPx.y * pb.width + primaryPx.x
+      if (index >= 0 && index < mask.length) mask[index] = 1
+      pb.floodFill(primaryPx.x, primaryPx.y, activeDrawColor, mask)
+    }
+  } else if (toolStore.paintTool === 'picker') {
+    toolStore.primaryColor = pb.getPixelHex(primaryPx.x, primaryPx.y)
+  } else {
+    paintWithinSelection(pb, clip, () => {
+      copies.forEach((sample, index) => {
+        const previous = index === 0
+          ? (canConnect && lastPaintHit ? lastPaintHit.uv : null)
+          : (previousMirrors?.[index] ?? null)
+        stamp(sample, previous)
+      })
+      for (const twin of twins) {
+        stamp(twin.paint.uv, lastSymUvs.get(twin.key) ?? null)
+      }
+    })
+  }
+
+  lastMirrorUvs = copies.map(sample => ({ u: sample.u, v: sample.v }))
+  const seenSym = new Set(twins.map(twin => twin.key))
+  for (const twin of twins) lastSymUvs.set(twin.key, { u: twin.paint.uv.u, v: twin.paint.uv.v })
+  for (const key of symmetrySignKeys()) {
+    if (!seenSym.has(key)) lastSymUvs.delete(key)
+  }
   lastPaintHit = { meshId: paintHit.meshId, face: paintHit.face, uv: { ...paintHit.uv } }
   if (!lastPaintTextureId) lastPaintTextureId = targetTex.id
   if (is3DPaintToolMutating()) {
@@ -5805,7 +6571,11 @@ function animate() {
   const { width, height } = viewportCssSize()
   if (width < 1 || height < 1) return
 
-  if (axesHelper) axesHelper.visible = toolStore.viewport.showAxes
+  if (axesHelper) axesHelper.visible = toolStore.viewport.showAxes && toolStore.viewport.shading !== 'dreamcast'
+  if (playbackHidesTransformGizmo()) concealTransformGizmoForPlayback()
+  const gizmoSize = toolStore.viewport.quadView ? QUAD_GIZMO_SIZE : isTripleView() ? SPLIT_GIZMO_SIZE : 1
+  classicControls.size = gizmoSize
+  combinedControls.size = gizmoSize
 
   if (isTripleView()) {
     const cols = tripleCols(width)
@@ -5846,36 +6616,41 @@ function animate() {
   } else if (toolStore.viewport.quadView) {
     const halfW = Math.floor(width / 2)
     const halfH = Math.floor(height / 2)
+    const gizmoHelper = transformControls.getHelper()
 
     renderer.setScissorTest(true)
     renderer.clear()
 
-    setGridsForView('floor')
-    renderer.setViewport(0, halfH, halfW, halfH)
-    renderer.setScissor(0, halfH, halfW, halfH)
-    setVertexMarkerViewport(halfW, halfH)
-    renderer.render(scene, cameraTop)
+    const renderPane = (cam: THREE.Camera, x: number, y: number) => {
+      transformControls.camera = cam
+      if (transformControls instanceof TransformGizmo) {
+        transformControls.viewport = new THREE.Vector4(x, y, halfW, halfH)
+      }
+      gizmoHelper.visible = isTransformGizmoAttached()
+      gizmoHelper.updateMatrixWorld(true)
+      renderer.setViewport(x, y, halfW, halfH)
+      renderer.setScissor(x, y, halfW, halfH)
+      setVertexMarkerViewport(halfW, halfH)
+      renderer.render(scene, cam)
+    }
 
     setGridsForView('floor')
-    renderer.setViewport(halfW, halfH, halfW, halfH)
-    renderer.setScissor(halfW, halfH, halfW, halfH)
-    setVertexMarkerViewport(halfW, halfH)
-    renderer.render(scene, cameraPersp)
+    renderPane(cameraTop, 0, halfH)
+
+    setGridsForView('floor')
+    renderPane(cameraPersp, halfW, halfH)
 
     setGridsForView('front')
-    renderer.setViewport(0, 0, halfW, halfH)
-    renderer.setScissor(0, 0, halfW, halfH)
-    setVertexMarkerViewport(halfW, halfH)
-    renderer.render(scene, cameraFront)
+    renderPane(cameraFront, 0, 0)
 
     setGridsForView('side')
-    renderer.setViewport(halfW, 0, halfW, halfH)
-    renderer.setScissor(halfW, 0, halfW, halfH)
-    setVertexMarkerViewport(halfW, halfH)
-    renderer.render(scene, cameraRight)
+    renderPane(cameraRight, halfW, 0)
 
     renderer.setScissorTest(false)
-    if (transformControls) transformControls.getHelper().visible = isTransformGizmoAttached()
+    transformControls.camera = activeCamera
+    syncGizmoViewport()
+    gizmoHelper.visible = isTransformGizmoAttached()
+    gizmoHelper.updateMatrixWorld(true)
   } else {
     setGridsForView('floor')
     renderer.setScissorTest(false)
@@ -5992,6 +6767,15 @@ watch(() => animationStore.isTestPoseActive, () => {
   scheduleRebuildMeshes()
   updateTransformGizmo()
 })
+watch(() => animationStore.isPlaying, (playing) => {
+  if (!transformControls || toolStore.appMode !== 'animate') return
+  if (playing) {
+    concealTransformGizmoForPlayback()
+    return
+  }
+  transformControls.enabled = !operatorManager.state.value.active && !toolStore.isBoxSelectActive && !toolStore.stickyViewNav
+  updateTransformGizmo()
+})
 watch(() => animationStore.currentFrame, () => {
   syncBones()
   if (!animationStore.isPlaying) {
@@ -6066,6 +6850,25 @@ function handleKnifeProjectEvent() {
   if (polylines.length) projectStore.performKnifeProject(polylines)
 }
 
+function handleProjectFromViewEvent(e: Event) {
+  const camera = activeCamera || cameraPersp
+  if (!camera || !projectStore.activeMesh) return
+  camera.updateMatrixWorld()
+  const m = camera.matrixWorld.elements
+  const unit = (x: number, y: number, z: number) => {
+    const len = Math.hypot(x, y, z) || 1
+    return { x: x / len, y: y / len, z: z / len }
+  }
+  const faceIndices = (e as CustomEvent<{ faceIndices?: number[] }>).detail?.faceIndices
+  projectStore.performProjectFromView({
+    position: { x: m[12], y: m[13], z: m[14] },
+    right: unit(m[0], m[1], m[2]),
+    up: unit(m[4], m[5], m[6]),
+    forward: unit(-m[8], -m[9], -m[10]),
+    perspective: (camera as THREE.PerspectiveCamera).isPerspectiveCamera === true
+  }, faceIndices)
+}
+
 function handleBlenderModalEvent(e: any) {
   if (e && e.detail) {
     if (typeof e.detail === 'string') {
@@ -6118,6 +6921,11 @@ function handleGlobalKeyDown(e: KeyboardEvent) {
   if (operatorManager.state.value.active &&
     (e.target as HTMLElement | null)?.closest?.('input, select, textarea, [contenteditable="true"]')) return
   if (e.key === 'Escape') {
+    if (toolStore.mirrorObjectPickForId) {
+      toolStore.mirrorObjectPickForId = null
+      e.preventDefault()
+      return
+    }
     if (toolStore.isBoxSelectActive || isBoxSelectArmed.value) {
       toolStore.isBoxSelectActive = false
       isBoxSelectArmed.value = false
@@ -6310,9 +7118,13 @@ const { startDrag: startHudDrag } = useFloatingDrag(hudPos, {
   maxPadY: 90
 })
 
-watch(() => toolStore.viewport.invertZoom, (inv) => {
+watch(() => toolStore.mirrorObjectPickForId, (id) => {
+  if (renderer?.domElement) renderer.domElement.style.cursor = id ? 'crosshair' : ''
+})
+
+watch(() => [toolStore.viewport.invertZoom, keymapStore.mouse.invertWheelZoom], ([inv1, inv2]) => {
   if (orbitControls) {
-    orbitControls.zoomSpeed = inv ? -1.0 : 1.0
+    orbitControls.zoomSpeed = (inv1 || inv2) ? -1.0 : 1.0
   }
 })
 
@@ -6329,9 +7141,30 @@ watch(() => toolStore.viewport.wireframeOpacity, () => {
 })
 
 watch(() => toolStore.viewport.shading, () => {
+  const consoleMode = toolStore.viewport.shading === 'dreamcast' ? 2 : 0
+  for (const tex of textureCache.values()) applyConsoleTextureFiltering(tex, consoleMode)
+  for (const { texture } of materialTextureCache.values()) applyConsoleTextureFiltering(texture, consoleMode)
+  if (consoleMode === 2) {
+    for (const tex of gradientTextureCache.values()) applyConsoleTextureFiltering(tex, 2)
+  }
   updateThreeTexture()
+  syncDreamcastAtmosphere()
   scheduleRebuildMeshes()
 })
+
+function syncViewportLighting() {
+  if (!editorEnv) return
+  editorEnv.applyLighting(toolStore.viewportLighting)
+  layers?.modelGroup?.traverse((obj) => {
+    const mat = (obj as THREE.Mesh).material
+    const uniforms = (mat as THREE.ShaderMaterial | undefined)?.uniforms
+    if (uniforms?.uKeyIntensity) applyPsxLightingUniforms(uniforms, toolStore.viewportLighting)
+  })
+}
+
+watch(toolStore.viewportLighting, () => {
+  syncViewportLighting()
+}, { deep: true })
 
 watch(() => toolStore.viewport.xray, () => {
   setVertexMarkerSeeThrough(toolStore.viewport.xray)
@@ -6356,13 +7189,13 @@ watch(() => [projectStore.activeTextureId, projectStore.textures.length], () => 
 watch(
   () => projectStore.materials.map(m =>
     [
-      m.id, m.textureId, m.color, m.shading, m.roughness, m.metalness,
+      m.id, m.textureId, m.color, materialFillKey(m), m.shading, m.roughness, m.metalness,
       m.emissive, m.emissiveIntensity, m.psxJitter, m.psxJitterResolution, m.psxAffine,
       m.saturnMeshAlpha, m.saturnGouraud, m.dreamcastVQ, m.dreamcastSpecular, m.dreamcastVGA,
       m.dreamcastCelOutline, m.dither, m.ditherLevel, m.ditherPattern, m.ditherScale,
       m.ditherSpace, m.ditherChannel, m.ditherContrast, m.colorDepth, m.wireframe,
       m.opacity, m.alphaTest, m.blendMode, m.doubleSided, m.clearcoat, m.sheen,
-      m.specularIntensity, m.specularColor
+      m.specularIntensity, m.specularColor, m.tileX, m.tileY
     ].join(':')
   ).join('|'),
   () => {
@@ -6378,7 +7211,9 @@ watch(
     projectStore.selectedMeshIds.join(','),
     projectStore.meshes.map(m =>
       `${m.id}:${m.visible ? 1 : 0}:${m.vertices.length}:${m.faces.length}:${m.materialId}:${m.shadeMode}:${m.autoSmoothAngle ?? ''}:${m.mirror?.enabled ? 1 : 0}:${m.subdivision?.enabled ? 1 : 0}:${m.subdivision?.level ?? 0}:${m.solidify?.enabled ? 1 : 0}:${m.bevelModifier?.enabled ? 1 : 0}`
-    ).join('|')
+    ).join('|'),
+    mirrorStackKey(projectStore.meshes),
+    toolStore.selectMode
   ],
   () => {
     scheduleRebuildMeshes()
@@ -6443,6 +7278,7 @@ onMounted(() => {
   window.addEventListener(EDITOR_EVENTS.modalTool, handleBlenderModalEvent)
   window.addEventListener(EDITOR_EVENTS.fillFace, handleFillFaceEvent)
   window.addEventListener(EDITOR_EVENTS.knifeProject, handleKnifeProjectEvent)
+  window.addEventListener(EDITOR_EVENTS.projectFromView, handleProjectFromViewEvent)
   window.addEventListener(EDITOR_EVENTS.primitiveCreated, handlePrimitiveCreatedEvent)
   window.addEventListener(EDITOR_EVENTS.startPrimitivePlacement, handleStartPrimitivePlacementEvent)
   window.addEventListener('theme-changed', handleThemeChangedEvent)
@@ -6454,11 +7290,16 @@ onMounted(() => {
   document.addEventListener('visibilitychange', handleViewportVisibilityChange)
 })
 
+watch(() => [toolStore.appMode, toolStore.uvWorkspaceTab] as const, () => {
+  if (toolStore.appMode !== 'uvpaint' || toolStore.uvWorkspaceTab !== 'paint') hidePaintBrushCursors()
+})
+
 onUnmounted(() => {
   window.removeEventListener(EDITOR_EVENTS.cameraView, handleCameraViewEvent)
   window.removeEventListener(EDITOR_EVENTS.modalTool, handleBlenderModalEvent)
   window.removeEventListener(EDITOR_EVENTS.fillFace, handleFillFaceEvent)
   window.removeEventListener(EDITOR_EVENTS.knifeProject, handleKnifeProjectEvent)
+  window.removeEventListener(EDITOR_EVENTS.projectFromView, handleProjectFromViewEvent)
   window.removeEventListener(EDITOR_EVENTS.primitiveCreated, handlePrimitiveCreatedEvent)
   window.removeEventListener(EDITOR_EVENTS.startPrimitivePlacement, handleStartPrimitivePlacementEvent)
   window.removeEventListener('theme-changed', handleThemeChangedEvent)
@@ -6483,6 +7324,7 @@ onUnmounted(() => {
     hoverRaf = 0
   }
   clearOnionSkins()
+  disposePaintBrushCursors()
   cancelAnimationFrame(animationFrameId)
   animationFrameId = 0
   if (operatorManager.state.value.active) {
@@ -6493,7 +7335,7 @@ onUnmounted(() => {
     resizeObserver.disconnect()
   }
   if (renderer && renderer.domElement && containerRef.value) {
-    renderer.domElement.removeEventListener('wheel', onWheel)
+    renderer.domElement.removeEventListener('wheel', onWheel, { capture: true } as EventListenerOptions)
     renderer.domElement.removeEventListener('dblclick', reopenShapeOnDoubleClick)
     renderer.domElement.removeEventListener('pointerdown', onPointerDown, { capture: true } as EventListenerOptions)
     renderer.domElement.removeEventListener('pointermove', onPointerMove, { capture: true } as EventListenerOptions)
@@ -6502,7 +7344,7 @@ onUnmounted(() => {
     renderer.domElement.removeEventListener('pointerleave', clearTopologyHover)
     renderer.domElement.removeEventListener('webglcontextlost', handleWebGLContextLost)
     renderer.domElement.removeEventListener('webglcontextrestored', handleWebGLContextRestored)
-    renderer.domElement.removeEventListener('contextmenu', preventCanvasContextMenu)
+    renderer.domElement.removeEventListener('contextmenu', preventCanvasContextMenu, { capture: true })
     renderer.domElement.parentElement?.removeChild(renderer.domElement)
     renderer.dispose()
   }
@@ -6521,6 +7363,14 @@ onUnmounted(() => {
     tex.dispose()
   }
   textureCache.clear()
+  for (const { texture } of materialTextureCache.values()) {
+    texture.dispose()
+  }
+  materialTextureCache.clear()
+  for (const tex of gradientTextureCache.values()) {
+    tex.dispose()
+  }
+  gradientTextureCache.clear()
   if (threeTexture) {
     threeTexture.dispose()
     threeTexture = null
@@ -6570,16 +7420,16 @@ onUnmounted(() => {
           class="m-1.5 rounded-lg border-2 border-dashed flex flex-col items-center justify-center text-center px-3"
           :class="dropTargetPane === 'persp' ? 'bg-sky-950/75 border-sky-400' : 'bg-ui-root/40 border-ui-borderStrong'"
         >
-          <span class="text-xs font-bold text-white font-mono">Apply texture</span>
-          <span class="text-[10px] text-sky-200 font-mono mt-1">Assigns to the 3D object</span>
+          <span class="text-xs font-bold text-white font-mono">Choose image use</span>
+          <span class="text-[10px] text-sky-200 font-mono mt-1">Texture, card, vegetation, or reference</span>
         </div>
       </div>
       <div 
         v-else-if="isDraggingImageFile"
         class="absolute inset-3 bg-sky-950/70 backdrop-blur-xs border-2 border-dashed border-sky-400 rounded-lg z-50 flex flex-col items-center justify-center p-6 text-center pointer-events-none shadow-2xl animate-in fade-in"
       >
-        <span class="text-sm font-bold text-white font-mono">Drop Image to Apply Texture</span>
-        <span class="text-[10px] text-sky-300 font-mono mt-1">Assigns image texture directly to 3D object</span>
+        <span class="text-sm font-bold text-white font-mono">Drop Image into Scene</span>
+        <span class="text-[10px] text-sky-300 font-mono mt-1">Choose texture, card, vegetation, or reference after dropping</span>
       </div>
       <div
         v-if="isWebGLContextLost || rendererInitError"
@@ -7700,6 +8550,7 @@ onUnmounted(() => {
       class="fixed z-50 bg-[#181a20]/95 border border-ui-borderStrong rounded-xs shadow-2xl p-1 font-mono text-xs select-none backdrop-blur-md min-w-[210px] animate-in fade-in zoom-in-95 duration-100"
       :style="{ left: `${specialsMenuPos.x}px`, top: `${specialsMenuPos.y}px` }"
       @click.stop
+      @contextmenu.prevent.stop
     >
       <div class="px-2 py-1 bg-ui-header border-b border-ui-borderSubtle text-[10px] text-amber-400 font-bold uppercase tracking-wider flex items-center justify-between">
         <span>{{ toolStore.selectMode.toUpperCase() }} SPECIALS</span>
@@ -7860,5 +8711,15 @@ onUnmounted(() => {
         </template>
       </div>
     </div>
+    <ImageDropOptionsModal
+      v-if="pendingImageDrop"
+      :preview-url="pendingImageDrop.source.dataUrl"
+      :file-name="pendingImageDrop.source.name"
+      :width="pendingImageDrop.source.width"
+      :height="pendingImageDrop.source.height"
+      :can-apply="Boolean(pendingImageDrop.targetMeshId)"
+      @confirm="confirmImageDrop"
+      @cancel="cancelImageDrop"
+    />
   </div>
 </template>

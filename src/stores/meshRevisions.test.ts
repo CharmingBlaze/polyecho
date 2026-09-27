@@ -72,10 +72,27 @@ describe('per-object mesh revisions', () => {
   it('bumps no mesh counter for object TRS', () => {
     const project = useProjectStore()
     const id = project.activeMeshId
+    const positions = project.activeMesh!.vertices.map(vertex => ({ ...vertex.position }))
     const before = project.geometryRevision
     project.performRotateObject('y', 90)
     expect(project.geometryRevision).toBeGreaterThan(before)
     expect(project.meshRevision(id)).toBeUndefined()
+    expect(project.activeMesh!.vertices.map(vertex => vertex.position)).toEqual(positions)
+    expect(project.activeMesh!.rotation.y).toBe(90)
+  })
+
+  it('reports explicit rotation and scale bake as a position change', () => {
+    const project = useProjectStore()
+    const id = project.activeMeshId
+    project.activeMesh!.rotation.y = 90
+    project.activeMesh!.scale = { x: 2, y: 1, z: 1 }
+    project.performApplyRotationScale()
+    const rev = project.meshRevision(id)!
+    expect(rev.position).toBeGreaterThan(0)
+    expect(rev.topology).toBe(0)
+    expect(rev.attribute).toBe(0)
+    expect(project.activeMesh!.rotation).toEqual({ x: 0, y: 0, z: 0 })
+    expect(project.activeMesh!.scale).toEqual({ x: 1, y: 1, z: 1 })
   })
 
   it('preview bumps counters without committing', () => {

@@ -99,6 +99,40 @@ describe('modal G/R/S numeric evaluate', () => {
     expect(ctx.mesh.vertices.get(ids[0])!.position.distanceTo(expectA)).toBeLessThan(1e-4)
     expect(ctx.mesh.vertices.get(ids[1])!.position.distanceTo(expectB)).toBeLessThan(1e-4)
   })
+
+  it('fades a grab onto connected verts inside the radius', () => {
+    const ctx = editContext([])
+    const source = [...ctx.mesh.vertices.keys()][0]!
+    const neighbor = [...ctx.mesh.edges.values()].find(e => e.v1 === source || e.v2 === source)!
+    const near = neighbor.v1 === source ? neighbor.v2 : neighbor.v1
+    const far = [...ctx.mesh.vertices.keys()].find(id => {
+      const p = ctx.mesh.vertices.get(id)!.position
+      const s = ctx.mesh.vertices.get(source)!.position
+      return Math.abs(p.x - s.x) > 1 && Math.abs(p.y - s.y) > 1 && Math.abs(p.z - s.z) > 1
+    })!
+    ctx.selectedVertIds = [source]
+    ctx.proportional = true
+    ctx.proportionalRadius = 3
+    const near0 = ctx.mesh.vertices.get(near)!.position.clone()
+    const far0 = ctx.mesh.vertices.get(far)!.position.clone()
+    const source0 = ctx.mesh.vertices.get(source)!.position.clone()
+    const op = new MoveOperator()
+    op.begin(ctx, { x: 400, y: 300 })
+    op.keyDown(key('x'))
+    op.keyDown(key('1'))
+    const source1 = ctx.mesh.vertices.get(source)!.position
+    const near1 = ctx.mesh.vertices.get(near)!.position
+    expect(source1.x - source0.x).toBeCloseTo(1, 4)
+    const nearMove = near1.x - near0.x
+    expect(nearMove).toBeGreaterThan(0.05)
+    expect(nearMove).toBeLessThan(0.9)
+    expect(ctx.mesh.vertices.get(far)!.position.distanceTo(far0)).toBeLessThan(1e-4)
+    expect(op.statusText).toContain('Prop')
+
+    op.keyDown(key('o'))
+    expect(ctx.mesh.vertices.get(near)!.position.distanceTo(near0)).toBeLessThan(1e-4)
+    expect(ctx.mesh.vertices.get(source)!.position.x - source0.x).toBeCloseTo(1, 4)
+  })
 })
 
 describe('object-mode G/R/S', () => {

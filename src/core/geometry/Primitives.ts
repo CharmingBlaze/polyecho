@@ -119,10 +119,6 @@ export function createCylinder(name = 'Cylinder', radius = 1, height = 2, segmen
   const faces = []
   const halfH = height / 2
 
-  const topCenter = { id: genId('v'), position: { x: 0, y: halfH, z: 0 }, color: '#ffffff' }
-  const bottomCenter = { id: genId('v'), position: { x: 0, y: -halfH, z: 0 }, color: '#ffffff' }
-  vertices.push(topCenter, bottomCenter)
-
   const topRing = []
   const bottomRing = []
 
@@ -149,21 +145,24 @@ export function createCylinder(name = 'Cylinder', radius = 1, height = 2, segmen
       uvs: [{ u: u0, v: 0 }, { u: u1, v: 0 }, { u: u1, v: 1 }, { u: u0, v: 1 }],
       materialIndex: 0
     })
-
-    faces.push({
-      id: genId('f'),
-      vertexIds: [topCenter.id, topRing[i].id, topRing[next].id],
-      uvs: [{ u: 0.5, v: 0.5 }, { u: 0.5 + 0.5 * Math.cos((i / segments) * Math.PI * 2), v: 0.5 + 0.5 * Math.sin((i / segments) * Math.PI * 2) }, { u: 0.5 + 0.5 * Math.cos((next / segments) * Math.PI * 2), v: 0.5 + 0.5 * Math.sin((next / segments) * Math.PI * 2) }],
-      materialIndex: 0
-    })
-
-    faces.push({
-      id: genId('f'),
-      vertexIds: [bottomCenter.id, bottomRing[next].id, bottomRing[i].id],
-      uvs: [{ u: 0.5, v: 0.5 }, { u: 0.5 + 0.5 * Math.cos((next / segments) * Math.PI * 2), v: 0.5 + 0.5 * Math.sin((next / segments) * Math.PI * 2) }, { u: 0.5 + 0.5 * Math.cos((next / segments) * Math.PI * 2), v: 0.5 + 0.5 * Math.sin((next / segments) * Math.PI * 2) }],
-      materialIndex: 0
-    })
   }
+
+  const ringUvs = (ring: { position: { x: number; z: number } }[]) => ring.map((v) => ({
+    u: 0.5 + v.position.x / (2 * radius),
+    v: 0.5 + v.position.z / (2 * radius),
+  }))
+  faces.push({
+    id: genId('f'),
+    vertexIds: topRing.map((v) => v.id),
+    uvs: ringUvs(topRing),
+    materialIndex: 0
+  })
+  faces.push({
+    id: genId('f'),
+    vertexIds: [...bottomRing].reverse().map((v) => v.id),
+    uvs: ringUvs([...bottomRing].reverse()),
+    materialIndex: 0
+  })
 
   return {
     id,
@@ -187,8 +186,7 @@ export function createCone(name = 'Cone', radius = 1, height = 2, segments = 8):
   const halfH = height / 2
 
   const tip = { id: genId('v'), position: { x: 0, y: halfH, z: 0 }, color: '#ffffff' }
-  const bottomCenter = { id: genId('v'), position: { x: 0, y: -halfH, z: 0 }, color: '#ffffff' }
-  vertices.push(tip, bottomCenter)
+  vertices.push(tip)
 
   const bottomRing = []
   for (let i = 0; i < segments; i++) {
@@ -208,13 +206,18 @@ export function createCone(name = 'Cone', radius = 1, height = 2, segments = 8):
       uvs: [{ u: 0.5, v: 1 }, { u: i / segments, v: 0 }, { u: (i + 1) / segments, v: 0 }],
       materialIndex: 0
     })
-    faces.push({
-      id: genId('f'),
-      vertexIds: [bottomCenter.id, bottomRing[next].id, bottomRing[i].id],
-      uvs: [{ u: 0.5, v: 0.5 }, { u: 0.5 + 0.5 * Math.cos((next / segments) * Math.PI * 2), v: 0.5 + 0.5 * Math.sin((next / segments) * Math.PI * 2) }, { u: 0.5 + 0.5 * Math.cos((next / segments) * Math.PI * 2), v: 0.5 + 0.5 * Math.sin((next / segments) * Math.PI * 2) }],
-      materialIndex: 0
-    })
   }
+
+  const base = [...bottomRing].reverse()
+  faces.push({
+    id: genId('f'),
+    vertexIds: base.map((v) => v.id),
+    uvs: base.map((v) => ({
+      u: 0.5 + v.position.x / (2 * radius),
+      v: 0.5 + v.position.z / (2 * radius),
+    })),
+    materialIndex: 0
+  })
 
   return {
     id,

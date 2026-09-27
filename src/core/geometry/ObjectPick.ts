@@ -3,6 +3,7 @@ import type { MeshObject } from '../../types/mesh'
 import { getMeshEdges } from './EdgeUtils'
 import { meshObjectWorldMatrix } from './MeshTransform'
 import { ScreenGeometry, type ViewQuadrant } from './ScreenGeometry'
+import { surfaceTriangles } from './SurfaceGeometry'
 
 export interface EditMeshPick {
   meshId: string
@@ -100,18 +101,14 @@ export function pickEditMesh(
     const localRay = new THREE.Ray(_localOrigin.clone(), _localDir.clone())
     const cullBack = _world.determinant() >= 0
 
+    const byId = new Map(mesh.vertices.map((v) => [v.id, v.position]))
     for (const face of mesh.faces) {
-      const ids = face.vertexIds
-      if (ids.length < 3) continue
-      const v0 = mesh.vertices.find((v) => v.id === ids[0])
-      if (!v0) continue
-      _p0.set(v0.position.x, v0.position.y, v0.position.z)
-      for (let i = 1; i < ids.length - 1; i++) {
-        const v1 = mesh.vertices.find((v) => v.id === ids[i])
-        const v2 = mesh.vertices.find((v) => v.id === ids[i + 1])
-        if (!v1 || !v2) continue
-        _p1.set(v1.position.x, v1.position.y, v1.position.z)
-        _p2.set(v2.position.x, v2.position.y, v2.position.z)
+      if (face.vertexIds.length < 3) continue
+      const corners = face.vertexIds.map((id) => byId.get(id))
+      if (corners.some((p) => !p)) continue
+      const points = corners.map((p) => new THREE.Vector3(p!.x, p!.y, p!.z))
+      for (const [i, j, k] of surfaceTriangles(points)) {
+        _p0.copy(points[i]); _p1.copy(points[j]); _p2.copy(points[k])
         const hit = localRay.intersectTriangle(_p0, _p1, _p2, cullBack, _hit)
         if (!hit) continue
         const worldHit = hit.clone().applyMatrix4(_world)

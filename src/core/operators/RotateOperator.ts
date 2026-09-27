@@ -5,6 +5,7 @@ import { PivotManager } from '../transform/PivotManager'
 
 export class RotateOperator extends ModalOperator {
   readonly name = 'Rotate'
+  protected usesProportional = true
   private isTrackball = false
 
   keyDown(event: KeyboardEvent): boolean {
@@ -51,16 +52,17 @@ export class RotateOperator extends ModalOperator {
       return
     }
 
+    this.restoreEditPositions()
     const targetVertIds = this.collectTargetVertIds()
+    const weights = this.falloffWeights(targetVertIds)
+    const spun = new THREE.Quaternion()
 
-    for (const [vId] of this.ctx.mesh.vertices) {
-      if (targetVertIds.has(vId)) {
-        const initPos = this.initialVertices.get(vId)
-        if (initPos) {
-          const rel = initPos.clone().sub(this.pivot).applyQuaternion(q)
-          this.writeWorldPos(vId, this.pivot.clone().add(rel))
-        }
-      }
+    for (const [vId, initPos] of this.initialVertices) {
+      const w = weights ? (weights.get(vId) ?? 0) : (targetVertIds.has(vId) ? 1 : 0)
+      if (w <= 1e-6) continue
+      spun.setFromAxisAngle(rotAxis, angleRad * w)
+      const rel = initPos.clone().sub(this.pivot).applyQuaternion(spun)
+      this.writeWorldPos(vId, this.pivot.clone().add(rel))
     }
 
     this.applyLiveSymmetry()
@@ -70,6 +72,6 @@ export class RotateOperator extends ModalOperator {
   updateStatus() {
     const mode = this.isTrackball ? ' (Trackball)' : this.constraint !== 'FREE' ? ` ${this.constraint} (${this.orientation})` : ''
     const num = this.numericInput.text ? `: ${this.numericInput.text}°` : ''
-    this.statusText = `Rotate${mode}${num}`
+    this.statusText = `Rotate${mode}${num}${this.proportionalStatus()}`
   }
 }

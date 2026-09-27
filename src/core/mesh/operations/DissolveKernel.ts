@@ -14,40 +14,35 @@ export class DissolveKernel {
     const face2 = mesh.faces.get(f2Id)
     if (!face1 || !face2) return false
 
-    const vA = edge.v1
-    const vB = edge.v2
+    // face1 runs p→q across the edge and face2 runs q→p. The merged loop is face1 from q
+    // round to p, then face2 from after p up to (not including) q.
     const verts1 = face1.vertexIds
     const n1 = verts1.length
-    const idxA = verts1.indexOf(vA)
-    if (idxA < 0) return false
-
-    const loop1: number[] = []
-    const uvs1: THREE.Vector2[] = []
+    let iP = -1
     for (let i = 0; i < n1; i++) {
-      const idx = (idxA + i) % n1
-      loop1.push(verts1[idx])
-      uvs1.push(face1.uvs[idx]?.clone() ?? new THREE.Vector2())
+      const a = verts1[i], b = verts1[(i + 1) % n1]
+      if ((a === edge.v1 && b === edge.v2) || (a === edge.v2 && b === edge.v1)) { iP = i; break }
     }
+    if (iP < 0) return false
+    const p = verts1[iP]
+    const q = verts1[(iP + 1) % n1]
 
     const verts2 = face2.vertexIds
-    const otherVerts2: number[] = []
-    const otherUvs2: THREE.Vector2[] = []
-    for (let i = 0; i < verts2.length; i++) {
-      const vid = verts2[i]
-      if (vid === vA || vid === vB) continue
-      otherVerts2.push(vid)
-      otherUvs2.push(face2.uvs[i]?.clone() ?? new THREE.Vector2())
-    }
+    const n2 = verts2.length
+    const jP = verts2.indexOf(p)
+    if (jP < 0 || verts2[(jP + n2 - 1) % n2] !== q) return false
 
     const finalVerts: number[] = []
     const finalUvs: THREE.Vector2[] = []
-    for (let i = 0; i < loop1.length; i++) {
-      finalVerts.push(loop1[i])
-      finalUvs.push(uvs1[i])
-      if (loop1[i] === vB) {
-        finalVerts.push(...otherVerts2)
-        finalUvs.push(...otherUvs2)
-      }
+    for (let k = 0; k < n1; k++) {
+      const idx = (iP + 1 + k) % n1
+      finalVerts.push(verts1[idx])
+      finalUvs.push(face1.uvs[idx]?.clone() ?? new THREE.Vector2())
+    }
+    for (let k = 1; k < n2 - 1; k++) {
+      const idx = (jP + k) % n2
+      finalVerts.push(verts2[idx])
+      finalUvs.push(face2.uvs[idx]?.clone() ?? new THREE.Vector2())
     }
 
     const matIdx = face1.materialIndex

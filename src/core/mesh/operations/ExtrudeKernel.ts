@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { EditableMesh } from '../MeshKernel'
 import { HalfEdgeTopology } from '../HalfEdgeTopology'
 import { AttributeInterpolator } from '../attributes/AttributeInterpolator'
+import { isTriangulatedPlanarPatch, loopUvs, orientedFaceBoundary } from './PlanarPatch'
 
 export interface ExtrudeResult {
   mesh: EditableMesh
@@ -63,6 +64,9 @@ export class ExtrudeKernel {
    * Pure topological region extrusion.
    * Finds boundary edges, duplicates vertices for the cap, creates perimeter side-quads,
    * and updates cap faces in-place without moving geometry.
+   * A single face of any size (triangle, quad, or n-gon) stays that loop.
+   * A flat patch stored only as triangles becomes one polygon of its outline,
+   * so the cap is not a fan. A bent region keeps each face.
    */
   static extrudeFaces(mesh: EditableMesh, selectedFaceIds: number[]): ExtrudeResult {
     const faces = [...new Set(selectedFaceIds)].filter((id) => mesh.faces.has(id))
@@ -77,6 +81,25 @@ export class ExtrudeKernel {
 
     const regionNormal = HalfEdgeTopology.computeRegionNormal(mesh, faces)
     const boundaryEdges = HalfEdgeTopology.findRegionBoundaryEdges(mesh, faces)
+    const components = HalfEdgeTopology.connectedFaceComponents(mesh, faces)
+    const collapses = new Map<number, { loop: number[]; uvs: THREE.Vector2[]; materialIndex: number; color?: string }>()
+    for (const comp of components) {
+      const loop = orientedFaceBoundary(mesh, comp)
+      if (!loop || !isTriangulatedPlanarPatch(mesh, comp, loop)) continue
+      const sample = mesh.faces.get(comp[0]!)
+      if (!sample) continue
+      collapses.set(comp[0]!, {
+        loop,
+        uvs: loopUvs(mesh, comp, loop),
+        materialIndex: sample.materialIndex,
+        color: sample.color,
+      })
+    }
+    const collapseFaceIds = new Set<number>()
+    for (const comp of components) {
+      if (!collapses.has(comp[0]!)) continue
+      for (const id of comp) collapseFaceIds.add(id)
+    }
 
     const oldToNewVertMap = new Map<number, number>()
     const newVertexIds: number[] = []
@@ -124,7 +147,9 @@ export class ExtrudeKernel {
       }
     }
 
+    const extrudedFaceIds: number[] = []
     for (const fId of faces) {
+      if (collapseFaceIds.has(fId)) continue
       const face = mesh.faces.get(fId)
       if (!face) continue
       const newFaceVerts = face.vertexIds.map((oldVId) => oldToNewVertMap.get(oldVId) ?? oldVId)
@@ -132,19 +157,40 @@ export class ExtrudeKernel {
       const matIdx = face.materialIndex
       const color = face.color
       mesh.replaceFace(fId, newFaceVerts, uvs, matIdx, color)
+      extrudedFaceIds.push(fId)
     }
 
-    // Interior originals have no remaining surface after the cap moves.
+    for (const comp of components) {
+      const plan = collapses.get(comp[0]!)
+      if (!plan) continue
+      for (const id of comp) mesh.removeFace(id)
+      const capVerts = plan.loop.map((id) => oldToNewVertMap.get(id)).filter((id): id is number => id !== undefined)
+      if (capVerts.length !== plan.loop.length) continue
+      const face = mesh.addFace(capVerts, plan.uvs, plan.materialIndex, plan.color)
+      if (face) extrudedFaceIds.push(face.id)
+    }
+
+    // Interior originals, and interior copies of a collapsed fan, have no remaining surface.
     for (const id of allSelectedFaceVertIds) {
       const vertex = mesh.vertices.get(id)
       if (vertex && vertex.faceIds.length === 0 && vertex.edgeIds.length === 0) mesh.removeVertex(id)
+    }
+    const keptNew: number[] = []
+    for (const id of newVertexIds) {
+      const vertex = mesh.vertices.get(id)
+      if (!vertex) continue
+      if (vertex.faceIds.length === 0 && vertex.edgeIds.length === 0) {
+        mesh.removeVertex(id)
+        continue
+      }
+      keptNew.push(id)
     }
     mesh.recalculateNormals()
 
     return {
       mesh,
-      newVertexIds,
-      extrudedFaceIds: [...faces],
+      newVertexIds: keptNew,
+      extrudedFaceIds,
       regionNormal,
     }
   }

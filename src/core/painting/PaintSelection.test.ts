@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { PixelBuffer } from './PixelCanvas'
-import { marqueeRect, translateSelection, moveSelectedPixels, flipSelectedPixels, paintWithinSelection, copySelectedPixels } from './PaintSelection'
+import { marqueeRect, translateSelection, moveSelectedPixels, flipSelectedPixels, paintWithinSelection, copySelectedPixels, selectPixelsByColor, combineSelection, offsetSelection, invertPixelSelection } from './PaintSelection'
 
 describe('pixel selections', () => {
   it('includes both drag endpoints and clamps movement at the canvas edges', () => {
@@ -95,5 +95,41 @@ describe('paint layers and pixel edges', () => {
     pb.drawCircle(8, 8, 3, '#ffffff', 1, false)
     expect(pb.activeLayer!.ctx.getImageData(8, 8, 1, 1).data[3]).toBe(0)
     expect(pb.activeLayer!.ctx.getImageData(11, 8, 1, 1).data[3]).toBe(255)
+  })
+  it('selects a connected color and leaves a separated patch out', () => {
+    const pb = new PixelBuffer(6, 4)
+    pb.clear('#000000')
+    pb.setPixel(1, 1, '#ff0000')
+    pb.setPixel(2, 1, '#ff0000')
+    pb.setPixel(5, 1, '#ff0000')
+    const connected = selectPixelsByColor(pb, 1, 1, true)
+    expect(connected?.rect).toEqual({ x: 1, y: 1, w: 2, h: 1 })
+    expect([...(connected?.mask ?? [])]).toEqual([1, 1])
+    const all = selectPixelsByColor(pb, 1, 1, false)
+    expect(all?.rect).toEqual({ x: 1, y: 1, w: 5, h: 1 })
+    expect([...(all?.mask ?? [])].filter(bit => bit === 1)).toHaveLength(3)
+    const mask = all!.mask
+    paintWithinSelection(pb, all!.rect, () => {
+      pb.setPixel(1, 1, '#00ff00')
+      pb.setPixel(3, 1, '#00ff00')
+      pb.setPixel(5, 1, '#00ff00')
+    }, mask)
+    expect(pb.getPixelHex(1, 1)).toBe('#00ff00')
+    expect(pb.getPixelHex(3, 1)).toBe('#000000')
+    expect(pb.getPixelHex(5, 1)).toBe('#00ff00')
+  })
+  it('adds, subtracts, and slides a marquee like a Photoshop selection', () => {
+    const base = { rect: { x: 0, y: 0, w: 2, h: 2 }, mask: null }
+    const added = combineSelection(base, { x: 1, y: 0, w: 2, h: 1 }, 'add', 8, 8)
+    expect(added?.rect).toEqual({ x: 0, y: 0, w: 3, h: 2 })
+    expect(added?.mask?.[1]).toBe(1)
+    expect(added?.mask?.[2]).toBe(1)
+    const cut = combineSelection(base, { x: 1, y: 0, w: 1, h: 2 }, 'subtract', 8, 8)
+    expect(cut?.rect).toEqual({ x: 0, y: 0, w: 1, h: 2 })
+    expect(cut?.mask).toBeNull()
+    const slid = offsetSelection(base, 1, 0, 8, 8)
+    expect(slid?.rect).toEqual({ x: 1, y: 0, w: 2, h: 2 })
+    const inverted = invertPixelSelection({ rect: { x: 0, y: 0, w: 1, h: 1 }, mask: null }, 2, 1)
+    expect(inverted?.rect).toEqual({ x: 1, y: 0, w: 1, h: 1 })
   })
 })

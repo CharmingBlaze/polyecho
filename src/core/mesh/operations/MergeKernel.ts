@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { EditableMesh } from '../MeshKernel'
+import { AttributeInterpolator } from '../attributes/AttributeInterpolator'
 
 function remapFaceLoop(
   vertexIds: number[],
@@ -34,6 +35,10 @@ export class MergeKernel {
     const targetId = keepId ?? vertexIds[0]
     const targetVert = mesh.vertices.get(targetId)
     if (!targetVert) return 0
+    AttributeInterpolator.mergeVertices(
+      vertexIds.map(id => mesh.vertices.get(id)).filter(vertex => vertex !== undefined),
+      targetVert,
+    )
     targetVert.position.copy(targetPosition)
 
     const vertSet = new Set([...vertexIds, targetId])

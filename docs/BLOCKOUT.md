@@ -38,7 +38,7 @@ Poly Draw commits a new mesh (`Block_N`) through `MeshBridge`. Concave silhouett
 
 ## Topology for game assets
 
-Poly Draw and Poly Build choose well-shaped triangles and merge compatible pairs into convex, planar quads. Bent quads stay triangulated. Both tools report the planned quad/triangle count and reject crossed, repeated, or collapsed outlines before filling. The silhouette and boundary vertices are preserved; no subdivision vertices are added.
+Poly Draw and Poly Build keep a convex quad as one face, including a bent quad. The diagonal that fills it is draw-only. Concave outlines are split into triangles and convex quads. Both tools report the planned quad/triangle count and reject crossed, repeated, or collapsed outlines before filling. The silhouette and boundary vertices are preserved; no subdivision vertices are added.
 
 Poly Build can connect vertices across angled surfaces, including character limbs, torsos, props, and architectural forms. Shared boundary edges determine winding, so new patches follow neighboring normals. Fills that duplicate a face, overfill an edge, or conflict with neighboring winding are rejected with an explanation. UV coordinates are shared across each filled patch.
 

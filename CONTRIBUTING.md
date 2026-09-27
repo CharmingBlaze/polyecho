@@ -55,7 +55,7 @@ Do not rewrite `Viewport3D.vue` or `projectStore.ts` unless the feature cannot l
 
 ## Verification
 
-`npm test` runs Vitest on core invariants (edge ids, mesh bridge, project parse, OBJ round-trip, UV islands, skin weights). Add a `*.test.ts` next to the module you change. CI runs typecheck, tests, `npm run build`, and on Windows an unpacked Electron pack. PixelBuffer tests use the happy-dom 2D stub in `src/test/canvas2dStub.ts`.
+`npm test` runs Vitest on core invariants (edge ids, mesh bridge, strict project/autosave parsing, topology fuzz sequences, 5k/20k/50k performance budgets, OBJ/GLB round-trip, UV islands, skin weights, and history/repository lifecycle). Add a `*.test.ts` next to the module you change. Focused suites are available through `test:topology`, `test:mesh`, `test:io`, and `handoff:glb`. CI runs typecheck, tests, `npm run build`, then packages unpacked Electron apps on Windows, Linux, and macOS and checks each `app.asar`. PixelBuffer tests use the happy-dom 2D stub in `src/test/canvas2dStub.ts`.
 
 For modeling, rigging, paint, and export work, still run the app and exercise the flow by hand:
 

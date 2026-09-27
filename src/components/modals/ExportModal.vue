@@ -6,6 +6,7 @@ import { exportToGLTF, buildExportTextureMap } from '../../core/export/GltfExpor
 import { exportToBlockbench } from '../../core/export/BlockbenchExport'
 import { renderSpriteSheet } from '../../core/export/SpriteSheet'
 import { pngFromCanvas } from '../../core/painting/encodePng'
+import { createGradientCanvas, resolveMaterialSurface } from '../../core/materials/MaterialFill'
 import { saveBlobDocument, type DesktopFileFilter } from '../../core/desktop/desktopApi'
 import { useAnimationStore } from '../../stores/animationStore'
 import BlenderIcon from '../icons/BlenderIcon.vue'
@@ -105,20 +106,36 @@ function textureFileName(tex: { id: string; name: string }, used: Set<string>): 
 function handleExportOBJ() {
   const usedNames = new Set<string>()
   const fileByTexId = new Map<string, string>()
+  const gradientPngs: { fileName: string; canvas: HTMLCanvasElement }[] = []
   const mtlList = projectStore.materials.map(mat => {
-    const texObj = mat.textureId ? projectStore.getTextureById(mat.textureId) : undefined
+    const surface = resolveMaterialSurface(mat)
     let textureFileNameStr: string | undefined
-    if (texObj) {
-      if (!fileByTexId.has(texObj.id)) {
-        fileByTexId.set(texObj.id, textureFileName(texObj, usedNames))
+    let color = surface.color
+    if (surface.fill === 'image' && surface.textureId) {
+      const texObj = projectStore.getTextureById(surface.textureId)
+      if (texObj) {
+        if (!fileByTexId.has(texObj.id)) {
+          fileByTexId.set(texObj.id, textureFileName(texObj, usedNames))
+        }
+        textureFileNameStr = fileByTexId.get(texObj.id)
       }
-      textureFileNameStr = fileByTexId.get(texObj.id)
+    } else if (surface.fill === 'gradient' && surface.gradient) {
+      const fileName = textureFileName({ id: mat.id, name: `${mat.name}_gradient` }, usedNames)
+      textureFileNameStr = fileName
+      color = '#ffffff'
+      gradientPngs.push({ fileName, canvas: createGradientCanvas(surface.gradient, 128, mat.color) })
     }
     return {
       id: mat.id,
       name: mat.name,
-      color: mat.color,
-      textureFileName: textureFileNameStr
+      color,
+      textureFileName: textureFileNameStr,
+      tileX: mat.tileX,
+      tileY: mat.tileY,
+      opacity: mat.opacity,
+      alphaTest: mat.blendMode === 'mask' ? mat.alphaTest : undefined,
+      doubleSided: mat.doubleSided,
+      useTextureAlpha: Boolean(textureFileNameStr && (mat.blendMode === 'mask' || mat.blendMode === 'blend'))
     }
   })
   const nameMap = new Map(projectStore.materials.map(mat => [mat.id, mat.name] as const))
@@ -130,6 +147,15 @@ function handleExportOBJ() {
 
   const mtlBlob = new Blob([mtlText], { type: 'text/plain' })
   downloadFile(mtlBlob, `${projectStore.projectName}.mtl`)
+
+  for (const grad of gradientPngs) {
+    const png = pngFromCanvas(grad.canvas)
+    if (png) {
+      const bytes = new ArrayBuffer(png.byteLength)
+      new Uint8Array(bytes).set(png)
+      downloadFile(new Blob([bytes], { type: 'image/png' }), grad.fileName)
+    }
+  }
 
   for (const [texId, fileName] of fileByTexId) {
     const texObj = projectStore.getTextureById(texId)

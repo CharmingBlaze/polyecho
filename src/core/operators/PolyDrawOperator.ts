@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { ModalOperator, OperatorContext } from './ModalOperator'
 import { ScreenGeometry, type ViewQuadrant } from '../geometry/ScreenGeometry'
+import { surfaceTriangles } from '../geometry/SurfaceGeometry'
 import { ExtrudeKernel, ExtrudeResult } from '../mesh/operations/ExtrudeKernel'
 import { PolyDrawKernel, DrawPlane, DrawViewKind } from '../mesh/operations/PolyDrawKernel'
 import { TransformSolver } from '../transform/TransformSolver'
@@ -579,13 +580,10 @@ export class PolyDrawOperator extends ModalOperator {
     this.disposeSolidPreview()
     const positions: number[] = []
     for (const face of this.ctx.mesh.faces.values()) {
-      const ids = face.vertexIds
-      for (let i = 1; i < ids.length - 1; i++) {
-        const a = this.ctx.mesh.vertices.get(ids[0])
-        const b = this.ctx.mesh.vertices.get(ids[i])
-        const c = this.ctx.mesh.vertices.get(ids[i + 1])
-        if (!a || !b || !c) continue
-        positions.push(a.position.x, a.position.y, a.position.z, b.position.x, b.position.y, b.position.z, c.position.x, c.position.y, c.position.z)
+      const points = face.vertexIds.map(id => this.ctx.mesh.vertices.get(id)?.position)
+      if (points.some(p => !p)) continue
+      for (const tri of surfaceTriangles(points as THREE.Vector3[])) {
+        for (const i of tri) positions.push(points[i]!.x, points[i]!.y, points[i]!.z)
       }
     }
     if (positions.length === 0) return

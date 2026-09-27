@@ -83,7 +83,26 @@ Related:
 | UV / Pixel **Import** | `createTexture` via modal, then bind active object | — | `this_object` (fork if shared) |
 | Texture library click | — | UV/Paint: bind active object; Model: `selectTexture` | **Use on** + prompt |
 | Import modal | `createTexture` only | — | caller may apply afterward |
-| Viewport file drop | create + apply this object | — | silent fork if shared |
+| Viewport file drop | chooser: apply, image card, crossed vegetation, or reference card | — | Apply silently forks if shared; card creation is one undo step |
+
+### Viewport image drop
+
+Drop an image over the perspective 3D viewport to preview it and choose its use:
+
+- **Apply to object** keeps the existing object-texturing workflow and is available when the pointer hit a mesh.
+- **Image card** creates one upright quad. The material is double-sided; the geometry is not duplicated, so it cannot z-fight.
+- **Crossed vegetation** creates two perpendicular quads in one object for low-poly trees, grass, and shrubs.
+- **Reference card** creates a translucent, camera-facing scene object instead of an editor-only lightbox.
+
+Cards preserve the source aspect ratio, use a bottom-center origin for ground placement, and open with the combined move/rotate/scale gizmo. Texture, material, and mesh creation share one undo entry. Blockout Front/Side drops still use the fixed tracing lightboxes.
+
+## Material texture tiling
+
+Image materials expose **Tile X** and **Tile Y** in the Material inspector. Values are decimal repeats clamped to `0.01–64`; **1×** resets both axes. Tiling is stored on the material and never bakes or changes mesh UVs or texture pixels. Materials that share one `TextureMap` can therefore repeat it differently.
+
+`setMaterialTextureTiling` records undo and bumps `geometryRevision`. `TextureTiling.ts` owns defaults and clamping. The viewport clones a material-local Three.js texture transform so repeat wrapping cannot leak into another material; retro shaders use the same values through `uTextureRepeat`.
+
+Projects preserve the optional fields without a format change. GLB writes `KHR_texture_transform` and round-trips the values; OBJ/MTL writes `map_Kd -s X Y 1`. GLB is the highest-fidelity exchange path.
 
 ## Atlas workflow
 
@@ -111,8 +130,9 @@ Math: `src/core/uv/AtlasCells.ts`. Do not remap UVs in Vue.
 - After a bind: also `markGeometryUpdated()` so materials rebuild.
 - History clones each `PixelBuffer` including its layer stack, not just `dataUrl`.
 - Three.js `CanvasTexture`s are cached by texture id in `Viewport3D.vue`. Draw mutations write the active `PixelBuffer` layer, then `composite()`.
-- **Seam Dilation (`PixelBuffer.dilateSeamPadding(margin)`):** Dilates painted non-transparent pixels 1px outward into adjacent transparent pixels to prevent UV edge rendering seams.
-- **3D X-Symmetry:** `toolStore.viewport.symmetryX` mirrors 3D paint raycast hits across the X axis.
+- **Seam padding:** Paint bar and the Brush inspector run `PixelBuffer.dilateSeamPadding` (1–4 px) and record it as **Pad UV seams**.
+- **3D symmetry:** Header symmetry X/Y/Z mirrors 3D paint across those object axes. The paint bar **Mirror U** / **Mirror V** flips strokes on the texture. A disc follows the brush on the mesh, with a twin for each world-symmetry hit.
+- **Select by color (Q):** Exact RGBA match. **Connected only** keeps the region that touches the click.
 
 ## Do not
 

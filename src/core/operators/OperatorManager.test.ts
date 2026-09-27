@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { OperatorManager } from './OperatorManager'
+import { OperatorManager, inspectorClickRestartsModal, inspectorTargetInterruptsModal, modalCommitsOnUiInterrupt } from './OperatorManager'
 import { ModalOperator, type OperatorContext } from './ModalOperator'
 
 class FakeOp extends ModalOperator {
@@ -94,5 +94,37 @@ describe('OperatorManager', () => {
     expect(commits).toBe(1)
     expect(mgr.state.value.active).toBe(false)
     expect(cancels).toBe(1)
+  })
+})
+
+describe('inspector modal commit', () => {
+  it('treats drag tools as ready to commit and leaves multi-step tools open', () => {
+    expect(modalCommitsOnUiInterrupt('Bisect')).toBe(true)
+    expect(modalCommitsOnUiInterrupt('Edge Slide')).toBe(true)
+    expect(modalCommitsOnUiInterrupt('Move')).toBe(true)
+    expect(modalCommitsOnUiInterrupt('Knife')).toBe(false)
+    expect(modalCommitsOnUiInterrupt('Loop Cut')).toBe(false)
+    expect(modalCommitsOnUiInterrupt('Poly Draw')).toBe(false)
+    expect(modalCommitsOnUiInterrupt('')).toBe(false)
+  })
+
+  it('interrupts on inspector controls except cancel, and only swallows modal-tool buttons', () => {
+    const host = document.createElement('div')
+    const tool = document.createElement('button')
+    tool.setAttribute('data-modal-tool', 'bisect')
+    const cancel = document.createElement('button')
+    cancel.setAttribute('data-modal-action', 'cancel')
+    const apply = document.createElement('button')
+    const confirm = document.createElement('button')
+    confirm.setAttribute('data-modal-action', 'confirm')
+    host.append(tool, cancel, apply, confirm)
+
+    expect(inspectorTargetInterruptsModal(tool)).toBe(true)
+    expect(inspectorTargetInterruptsModal(apply)).toBe(true)
+    expect(inspectorTargetInterruptsModal(cancel)).toBe(false)
+    expect(inspectorTargetInterruptsModal(confirm)).toBe(false)
+    expect(inspectorTargetInterruptsModal(host)).toBe(false)
+    expect(inspectorClickRestartsModal(tool)).toBe(true)
+    expect(inspectorClickRestartsModal(apply)).toBe(false)
   })
 })

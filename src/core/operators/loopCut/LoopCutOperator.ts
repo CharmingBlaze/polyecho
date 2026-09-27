@@ -32,6 +32,8 @@ export class LoopCutOperator extends ModalOperator {
 
   private objectWorld = new THREE.Matrix4()
   private slideStart = 0.5
+  /** Edge parameter the slide is anchored to, so the cut stays where the click put it. */
+  private lockedEdgeT = 0.5
   public error = ''
 
   begin(ctx: OperatorContext, startPointer: { x: number; y: number }) {
@@ -80,6 +82,7 @@ export class LoopCutOperator extends ModalOperator {
     if (!Number.isFinite(value) || this.loopState !== LoopCutState.FINDING_RING) return
     this.cutCount = Math.max(1,Math.min(64,Math.round(value)))
     if (resetInput) this.numericInput.reset()
+    this.placePreview(this.isCtrlHeld)
     this.refresh()
   }
 
@@ -88,7 +91,7 @@ export class LoopCutOperator extends ModalOperator {
     if (this.loopState === LoopCutState.FINDING_RING) {
       this.loopState = LoopCutState.SLIDING
       this.slideStart = this.pointerParameter()
-      this.slideFactor = 0.5
+      this.lockedEdgeT = this.edgeTFromSlideFactor(this.slideFactor)
       this.numericInput.reset()
       this.refresh()
     } else operatorManager.confirm()
@@ -157,7 +160,7 @@ export class LoopCutOperator extends ModalOperator {
       }
       this.hoveredEdgeId = this.closestEdgeOnHitFace()
       this.ringEdgeIds = this.hoveredEdgeId === null ? [] : LoopCutKernel.ringEdges(this.ctx.mesh,this.hoveredEdgeId)
-      this.slideFactor = 0.5
+      this.placePreview(ctrlKey)
     } else this.updateSlideFromPointer(shiftKey,ctrlKey)
     this.refresh()
   }
@@ -181,13 +184,39 @@ export class LoopCutOperator extends ModalOperator {
       }
     }
 
-    if (hitFaceId === null) return null
-    const face = this.ctx.mesh.faces.get(hitFaceId)
-    if (!face || face.vertexIds.length !== 4) return null
-
     const overlay = this.overlayPointer(this.currentMouse)
-    let bestId: number | null = null
-    let bestDist = Infinity
+    const ranked = hitFaceId === null ? [] : this.edgesByScreenDistance(hitFaceId, overlay)
+    const sticky = this.hoveredEdgeId
+    if (sticky !== null && LoopCutKernel.ringEdges(this.ctx.mesh, sticky).length) {
+      const stickyHit = ranked.find(edge => edge.id === sticky)
+      const best = ranked[0]
+      if (stickyHit && best && stickyHit.dist <= best.dist + 10) return sticky
+    }
+    for (const edge of ranked) {
+      if (LoopCutKernel.ringEdges(this.ctx.mesh, edge.id).length) return edge.id
+    }
+    if (hitFaceId !== null) return null
+
+    let nearId: number | null = null
+    let nearDist = 18
+    for (const [edgeId, edge] of this.ctx.mesh.edges) {
+      const a = this.ctx.mesh.vertices.get(edge.v1)?.position
+      const b = this.ctx.mesh.vertices.get(edge.v2)?.position
+      if (!a || !b) continue
+      const { distance } = ScreenGeometry.distancePointToSegment2D(overlay, this.toOverlay(a), this.toOverlay(b))
+      if (distance < nearDist) {
+        nearDist = distance
+        nearId = edgeId
+      }
+    }
+    if (nearId !== null && LoopCutKernel.ringEdges(this.ctx.mesh, nearId).length) return nearId
+    return null
+  }
+
+  private edgesByScreenDistance(faceId: number, overlay: THREE.Vector2): { id: number; dist: number }[] {
+    const face = this.ctx.mesh.faces.get(faceId)
+    if (!face) return []
+    const ranked: { id: number; dist: number }[] = []
     const n = face.vertexIds.length
     for (let i = 0; i < n; i++) {
       const a = this.ctx.mesh.vertices.get(face.vertexIds[i]!)?.position
@@ -195,17 +224,11 @@ export class LoopCutOperator extends ModalOperator {
       if (!a || !b) continue
       const edgeId = this.edgeIdBetween(face.vertexIds[i]!, face.vertexIds[(i + 1) % n]!)
       if (edgeId === null) continue
-      const { distance } = ScreenGeometry.distancePointToSegment2D(
-        overlay,
-        this.toOverlay(a),
-        this.toOverlay(b)
-      )
-      if (distance < bestDist) {
-        bestDist = distance
-        bestId = edgeId
-      }
+      const { distance } = ScreenGeometry.distancePointToSegment2D(overlay, this.toOverlay(a), this.toOverlay(b))
+      ranked.push({ id: edgeId, dist: distance })
     }
-    return bestId
+    ranked.sort((a, b) => a.dist - b.dist)
+    return ranked
   }
 
   private edgeIdBetween(a: number, b: number): number | null {
@@ -221,11 +244,33 @@ export class LoopCutOperator extends ModalOperator {
     return perspectiveEdgeParameter(t,this.toWorld(a),this.toWorld(b),this.ctx.camera)
   }
 
+  private spacing() {
+    return 1 / (this.cutCount + 1)
+  }
+
+  /** Map an edge parameter to the slide factor whose centered cuts sit on that parameter. */
+  private slideFactorFromEdgeT(t: number): number {
+    const spacing = this.spacing()
+    return THREE.MathUtils.clamp(0.5 + (t - 0.5) / (2 * spacing), 0.001, 0.999)
+  }
+
+  private edgeTFromSlideFactor(factor: number): number {
+    const spacing = this.spacing()
+    return THREE.MathUtils.clamp(0.5 + (factor - 0.5) * 2 * spacing, 0.001, 0.999)
+  }
+
+  private placePreview(ctrl: boolean) {
+    if (!this.ringEdgeIds.length || this.hoveredEdgeId === null) return
+    let t = this.pointerParameter()
+    if (ctrl) t = Math.round(t * 10) / 10
+    this.slideFactor = this.slideFactorFromEdgeT(t)
+  }
+
   private updateSlideFromPointer(shift: boolean, ctrl: boolean) {
     if (this.numericInput.active) return
-    let offset = (this.pointerParameter() - this.slideStart) * (shift ? 0.2 : 1)
-    if (ctrl) offset = Math.round(offset * 10) / 10
-    this.slideFactor = Math.max(0.001,Math.min(0.999,0.5 + offset))
+    let delta = (this.pointerParameter() - this.slideStart) * (shift ? 0.2 : 1)
+    if (ctrl) delta = Math.round(delta * 10) / 10
+    this.slideFactor = this.slideFactorFromEdgeT(this.lockedEdgeT + delta)
   }
 
   private getCutParameters(): number[] {
@@ -276,8 +321,8 @@ export class LoopCutOperator extends ModalOperator {
     this.statusText = this.loopState === LoopCutState.SLIDING
       ? `Slide ${(2*this.slideFactor-1).toFixed(3)} · move or type -1 to 1 · Shift precision · Ctrl snap · click/Enter apply · RMB center · Esc cancel`
       : this.ringEdgeIds.length
-        ? `${this.cutCount} cuts · scroll or type count · click/Enter to slide · Esc cancel`
-        : 'Hover a quad face · loops stop at triangles, n-gons, and boundaries · Esc cancel'
+        ? `${this.cutCount} cuts · move to place · scroll or type count · Ctrl snap · click/Enter to slide · Esc cancel`
+        : 'Hover a face · loops follow quads and even n-gons · triangles stop the ring · Esc cancel'
   }
 
 }

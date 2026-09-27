@@ -72,6 +72,14 @@ export function joinMeshObjects(primary: MeshObject, others: MeshObject[], bridg
       const edge = v1 === undefined || v2 === undefined ? undefined : kernel.findEdge(v1, v2)
       if (edge) edge.seam = true
     }
+    for (const sharpEdgeId of other.sharpEdgeIds ?? []) {
+      const parsed = parseUndirectedEdgeId(sharpEdgeId, other.vertices.map(v => v.id))
+      if (!parsed) continue
+      const v1 = kernelVertIds.get(parsed.v1)
+      const v2 = kernelVertIds.get(parsed.v2)
+      const edge = v1 === undefined || v2 === undefined ? undefined : kernel.findEdge(v1, v2)
+      if (edge) edge.sharp = true
+    }
   }
 
   return kernel
@@ -116,12 +124,19 @@ export function separateMeshFaces(
     return parsed !== null && movedVertIds.has(parsed.v1) && movedVertIds.has(parsed.v2)
   })
   const keptSeams = new Set((source.seamEdgeIds ?? []).filter(edgeId => !separatedSeams.includes(edgeId)))
+  const separatedSharps = (source.sharpEdgeIds ?? []).filter(edgeId => {
+    const parsed = parseUndirectedEdgeId(edgeId, source.vertices.map(v => v.id))
+    return parsed !== null && movedVertIds.has(parsed.v1) && movedVertIds.has(parsed.v2)
+  })
+  const keptSharps = new Set((source.sharpEdgeIds ?? []).filter(edgeId => !separatedSharps.includes(edgeId)))
   const documentIds = new Map<number, string>()
   for (const vertex of kernel.vertices.values()) if (vertex.documentId) documentIds.set(vertex.id, vertex.documentId)
   for (const edge of kernel.edges.values()) {
     const v1 = documentIds.get(edge.v1)
     const v2 = documentIds.get(edge.v2)
-    edge.seam = v1 !== undefined && v2 !== undefined && keptSeams.has(undirectedEdgeId(v1, v2))
+    const key = v1 !== undefined && v2 !== undefined ? undirectedEdgeId(v1, v2) : ''
+    edge.seam = key !== '' && keptSeams.has(key)
+    edge.sharp = key !== '' && keptSharps.has(key)
   }
 
   return {
@@ -140,7 +155,8 @@ export function separateMeshFaces(
       // Keep the clone: it is what carries `boneWeights`, vertex `color` and face UVs.
       vertices: JSON.parse(JSON.stringify(source.vertices.filter(v => movedVertIds.has(v.id)))),
       faces: JSON.parse(JSON.stringify(movedFaces)),
-      seamEdgeIds: separatedSeams
+      seamEdgeIds: separatedSeams,
+      sharpEdgeIds: separatedSharps
     }
   }
 }

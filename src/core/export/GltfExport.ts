@@ -2,10 +2,13 @@ import * as THREE from 'three'
 import { MeshObject } from '../../types/mesh'
 import { AnimationClip, Armature } from '../../types/animation'
 import { meshToThreeGeometry, resolveMeshShadeMode } from '../geometry/Converters'
+import { resolveInstanceMesh } from '../geometry/DuplicateTools'
 import { DEFAULT_AUTO_SMOOTH_ANGLE, shadeUserData } from '../geometry/MeshShading'
 import { resolveMeshBoneParentId } from '../animation/Armature'
 
 import { Material, TextureMap } from '../../types/texture'
+import { createGradientCanvas, resolveMaterialSurface } from '../materials/MaterialFill'
+import { createTiledTexture, resolveTextureTiling } from '../materials/TextureTiling'
 import { embedPngImages, injectClipExtras, injectNodeExtras } from './gltfBinary'
 import { pngFromCanvas } from '../painting/encodePng'
 
@@ -26,7 +29,7 @@ function stampShadeExtras(target: THREE.Object3D, geometry: THREE.BufferGeometry
     shadeMode: resolveMeshShadeMode(meshObj),
     autoSmoothAngle: meshObj.autoSmoothAngle ?? DEFAULT_AUTO_SMOOTH_ANGLE
   })
-  delete geometry.userData.renderCornerKeys
+  delete geometry.userData.renderTopology
   Object.assign(geometry.userData, extras)
   Object.assign(target.userData, extras)
 }
@@ -55,6 +58,7 @@ export async function exportToGLTF(
   materials?: Material[]
 ): Promise<Blob> {
   const scene = new THREE.Scene()
+  const ownedMaterialTextures = new Set<THREE.Texture>()
 
   // 1. Build Three.js Bone hierarchy & Skeleton if armature exists
   const hasArmature = armature && armature.bones && armature.bones.length > 0
@@ -121,7 +125,7 @@ export async function exportToGLTF(
       selectedFacesGeometry,
       selectedEdgesGeometry,
       edgeLinesGeometry
-    } = meshToThreeGeometry(meshObj)
+    } = meshToThreeGeometry(resolveInstanceMesh(meshObj, (id) => meshes.find(mesh => mesh.id === id)), [], [], 'flat', undefined, undefined, [], { scene: meshes, purpose: 'render' })
     wireframeGeometry.dispose()
     vertexPointsGeometry.dispose()
     selectedFacesGeometry.dispose()
@@ -129,13 +133,32 @@ export async function exportToGLTF(
     edgeLinesGeometry.dispose()
 
     const matObj = materials?.find(m => m.id === meshObj.materialId)
-    const texId = matObj?.textureId || null
-    const texture = (texId && textureMap.get(texId)) || null
+    const surface = resolveMaterialSurface(matObj)
+    let texture: THREE.Texture | null = null
+    if (surface.fill === 'image' && surface.textureId) {
+      const sourceTexture = textureMap.get(surface.textureId)
+      if (sourceTexture) {
+        texture = createTiledTexture(sourceTexture, resolveTextureTiling(matObj))
+        ownedMaterialTextures.add(texture)
+      }
+    } else if (surface.fill === 'gradient' && surface.gradient && matObj) {
+      const gradId = `gradient:${matObj.id}`
+      let gradTex = textureMap.get(gradId)
+      if (!gradTex) {
+        gradTex = new THREE.CanvasTexture(createGradientCanvas(surface.gradient, 128, matObj.color))
+        gradTex.colorSpace = THREE.SRGBColorSpace
+        gradTex.magFilter = THREE.LinearFilter
+        gradTex.minFilter = THREE.LinearFilter
+        textureMap.set(gradId, gradTex)
+      }
+      texture = gradTex
+    }
 
     let material: THREE.Material
-    const baseColor = matObj?.color ? new THREE.Color(matObj.color) : new THREE.Color(0xffffff)
+    const baseColor = new THREE.Color(surface.color)
     const useVertexColors = meshObj.vertices.some(v => v.color)
     const side = matObj?.doubleSided === false ? THREE.FrontSide : THREE.DoubleSide
+    const isUnlit = matObj?.shading === 'unlit'
     if (texture) {
       texture.magFilter = THREE.NearestFilter
       texture.minFilter = THREE.NearestFilter
@@ -145,19 +168,24 @@ export async function exportToGLTF(
         ? (storedAlphaTest > 0 ? storedAlphaTest : 0.05)
         : storedAlphaTest
       const isBlend = blendMode === 'blend' || blendMode === 'additive'
-      material = new THREE.MeshStandardMaterial({
+      const common = {
         name: matObj?.name || meshObj.materialId || 'Material',
         map: texture,
         color: baseColor,
-        roughness: typeof matObj?.roughness === 'number' ? matObj.roughness : 0.8,
-        metalness: typeof matObj?.metalness === 'number' ? matObj.metalness : 0.05,
         side,
         alphaTest,
         transparent: isBlend,
         depthWrite: !isBlend,
         opacity: typeof matObj?.opacity === 'number' ? matObj.opacity : 1,
         vertexColors: useVertexColors
-      })
+      }
+      material = isUnlit
+        ? new THREE.MeshBasicMaterial(common)
+        : new THREE.MeshStandardMaterial({
+            ...common,
+            roughness: typeof matObj?.roughness === 'number' ? matObj.roughness : 0.8,
+            metalness: typeof matObj?.metalness === 'number' ? matObj.metalness : 0.05,
+          })
     } else {
       const blendMode = matObj?.blendMode ?? 'opaque'
       const storedAlphaTest = typeof matObj?.alphaTest === 'number' ? matObj.alphaTest : 0
@@ -165,18 +193,26 @@ export async function exportToGLTF(
         ? (storedAlphaTest > 0 ? storedAlphaTest : 0.05)
         : storedAlphaTest
       const isBlend = blendMode === 'blend' || blendMode === 'additive'
-      material = new THREE.MeshStandardMaterial({
+      const common = {
         name: matObj?.name || meshObj.materialId || 'Material',
         color: baseColor,
         vertexColors: useVertexColors,
-        roughness: typeof matObj?.roughness === 'number' ? matObj.roughness : 0.8,
-        metalness: typeof matObj?.metalness === 'number' ? matObj.metalness : 0.05,
         side,
         alphaTest,
         transparent: isBlend,
         depthWrite: !isBlend,
         opacity: typeof matObj?.opacity === 'number' ? matObj.opacity : 1
-      })
+      }
+      material = isUnlit
+        ? new THREE.MeshBasicMaterial(common)
+        : new THREE.MeshStandardMaterial({
+            ...common,
+            roughness: typeof matObj?.roughness === 'number' ? matObj.roughness : 0.8,
+            metalness: typeof matObj?.metalness === 'number' ? matObj.metalness : 0.05,
+          })
+    }
+    if (matObj && texture) {
+      material.userData.polyechoTextureTiling = resolveTextureTiling(matObj)
     }
 
     if (hasArmature && skeleton) {
@@ -375,6 +411,8 @@ export async function exportToGLTF(
         }
       }
     })
+    for (const texture of ownedMaterialTextures) texture.dispose()
+    ownedMaterialTextures.clear()
   }
   return new Promise((resolve, reject) => {
     exporter.parse(

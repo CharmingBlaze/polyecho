@@ -45,11 +45,11 @@ describe('Poly Build connected patches', () => {
     expect(ctx.onCancel).toHaveBeenCalledOnce()
   })
 
-  it('fills a patch across different depths', () => {
+  it('fills a bent patch across different depths as one quad', () => {
     const { mesh, op, add } = setup()
     op.chain = [add(0, 0), add(1, 0), add(1, 1, 0.5), add(0, 1)]
     expect(op.fillFromHud()).toBe(true)
-    expect(mesh.faces.size).toBe(2)
+    expect([...mesh.faces.values()].map(f => f.vertexIds.length)).toEqual([4])
     expect(op.chain).toHaveLength(0)
   })
 

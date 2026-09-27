@@ -183,12 +183,34 @@ export class IcosphereBuilder implements IPrimitiveBuilder<IcosphereParameters> 
 
     const vIds = baseVerts.map(pos => mesh.addVertex(pos).id)
 
-    const faces = [
+    let faces: number[][] = [
       [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
       [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
       [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
       [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]
-    ]
+    ].map((face) => face.map((index) => vIds[index]!))
+
+    const levels = Math.max(0, Math.min(4, Math.round(params.subdivisions ?? 1)))
+    for (let level = 0; level < levels; level++) {
+      const midpoint = new Map<string, number>()
+      const split = (a: number, b: number) => {
+        const key = a < b ? `${a},${b}` : `${b},${a}`
+        const existing = midpoint.get(key)
+        if (existing !== undefined) return existing
+        const p = mesh.vertices.get(a)!.position.clone().add(mesh.vertices.get(b)!.position).multiplyScalar(0.5).normalize().multiplyScalar(r)
+        const id = mesh.addVertex(p).id
+        midpoint.set(key, id)
+        return id
+      }
+      const next: number[][] = []
+      for (const [a, b, c] of faces) {
+        const ab = split(a!, b!)
+        const bc = split(b!, c!)
+        const ca = split(c!, a!)
+        next.push([a!, ab, ca], [b!, bc, ab], [c!, ca, bc], [ab, bc, ca])
+      }
+      faces = next
+    }
 
     const triUvs = [
       new THREE.Vector2(0, 0),
@@ -196,8 +218,8 @@ export class IcosphereBuilder implements IPrimitiveBuilder<IcosphereParameters> 
       new THREE.Vector2(0.5, 1)
     ]
 
-    for (const f of faces) {
-      mesh.addFace([vIds[f[0]], vIds[f[1]], vIds[f[2]]], triUvs, 0)
+    for (const [a, b, c] of faces) {
+      mesh.addFace([a!, b!, c!], triUvs, 0)
     }
 
     mesh.recalculateNormals()

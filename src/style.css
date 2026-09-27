@@ -74,6 +74,8 @@
 @layer base {
   *, ::before, ::after {
     border-color: var(--ui-border-default);
+    scrollbar-color: var(--ui-border-strong) var(--ui-bg-input);
+    scrollbar-width: thin;
   }
 
   body {
@@ -83,23 +85,28 @@
     font-feature-settings: "cv02", "cv03", "cv04", "cv11", "tnum";
   }
 
-  /* Custom scrollbar for DCC panels */
+  /* Compact themed scrollbars for both horizontal and vertical DCC panels. */
   ::-webkit-scrollbar {
-    width: 4px;
-    height: 4px;
+    width: 6px;
+    height: 6px;
   }
 
   ::-webkit-scrollbar-track {
-    background: var(--ui-bg-panel);
+    background: var(--ui-bg-input);
   }
 
   ::-webkit-scrollbar-thumb {
-    background: var(--ui-border-default);
-    border-radius: 2px;
+    background: var(--ui-border-strong);
+    border: 1px solid var(--ui-bg-input);
+    border-radius: 999px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--ui-border-strong);
+    background: color-mix(in srgb, var(--ui-text-muted) 72%, var(--ui-border-strong));
+  }
+
+  ::-webkit-scrollbar-corner {
+    background: var(--ui-bg-input);
   }
 
   /* Number input styling & Tabular numerals */
@@ -199,6 +206,10 @@
     border-radius: var(--ui-radius-xs);
   }
   .inspector-seg-btn {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    min-width: 0;
     height: 20px;
     padding: 0 8px;
     display: inline-flex;

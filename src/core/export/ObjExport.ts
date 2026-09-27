@@ -4,6 +4,7 @@ import { computeFaceNormal } from '../../utils/math'
 import { evaluateModifiers } from '../geometry/Modifiers'
 import { meshCornerNormals, resolveMeshShadeMode } from '../geometry/Converters'
 import { DEFAULT_AUTO_SMOOTH_ANGLE, formatObjShadeComment } from '../geometry/MeshShading'
+import { normalizeTextureTile } from '../materials/TextureTiling'
 
 export function exportToOBJ(meshes: MeshObject[], mtlName = 'model.mtl', materialNames?: Map<string, string>): string {
   let output = `# PolyEcho Low-Poly 3D OBJ Export\n`
@@ -16,7 +17,7 @@ export function exportToOBJ(meshes: MeshObject[], mtlName = 'model.mtl', materia
   for (const rawMesh of meshes) {
     if (!rawMesh.visible) continue
 
-    const evaluated = evaluateModifiers(rawMesh)
+    const evaluated = evaluateModifiers(rawMesh, { scene: meshes, purpose: 'render' })
     const shade = resolveMeshShadeMode(rawMesh)
     const autoSmoothAngle = rawMesh.autoSmoothAngle ?? DEFAULT_AUTO_SMOOTH_ANGLE
     output += `o ${rawMesh.name.replace(/\s+/g, '_')}\n`
@@ -50,7 +51,7 @@ export function exportToOBJ(meshes: MeshObject[], mtlName = 'model.mtl', materia
       }
     }
 
-    const cornerNormals = meshCornerNormals(evaluated.faces, evaluated.vertices, shade, autoSmoothAngle)
+    const cornerNormals = meshCornerNormals(evaluated.faces, evaluated.vertices, shade, autoSmoothAngle, rawMesh.sharpEdgeIds)
     const cornerVnIndex: number[][] = []
     let localVnCount = 0
 
@@ -117,6 +118,12 @@ export interface MtlMaterialDef {
   name?: string
   color?: string
   textureFileName?: string
+  tileX?: number
+  tileY?: number
+  opacity?: number
+  alphaTest?: number
+  doubleSided?: boolean
+  useTextureAlpha?: boolean
 }
 
 export function exportToMTL(materialIdOrList: string | MtlMaterialDef[], textureFileName = 'texture.png'): string {
@@ -131,10 +138,16 @@ export function exportToMTL(materialIdOrList: string | MtlMaterialDef[], texture
     const c = mat.color ? new THREE.Color(mat.color) : new THREE.Color(1, 1, 1)
     output += `Kd ${c.r.toFixed(3)} ${c.g.toFixed(3)} ${c.b.toFixed(3)}\n`
     output += `Ks 0.000 0.000 0.000\n`
-    output += `d 1.0\n`
+    output += `d ${Math.max(0, Math.min(1, mat.opacity ?? 1)).toFixed(3)}\n`
     output += `illum 1\n`
+    if (typeof mat.alphaTest === 'number' && mat.alphaTest > 0) {
+      output += `# polyecho_alpha_cutoff ${Math.max(0, Math.min(1, mat.alphaTest)).toFixed(3)}\n`
+    }
+    if (mat.doubleSided) output += `# polyecho_double_sided true\n`
     if (mat.textureFileName) {
-      output += `map_Kd ${mat.textureFileName}\n`
+      const scale = `-s ${normalizeTextureTile(mat.tileX)} ${normalizeTextureTile(mat.tileY)} 1`
+      output += `map_Kd ${scale} ${mat.textureFileName}\n`
+      if (mat.useTextureAlpha) output += `map_d ${scale} -imfchan a ${mat.textureFileName}\n`
     }
     output += `\n`
   }

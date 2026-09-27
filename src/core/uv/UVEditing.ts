@@ -3,6 +3,44 @@ import { expandFacesToIslands, expandWeldedUvEdges, findUvIslands } from './UVIs
 
 export interface UvCorner { faceIndex: number; vertIndex: number }
 export type UvSelectionMode = 'vertex' | 'edge' | 'face' | 'island'
+
+/** Click: Shift/Ctrl toggles. A plain click keeps a selection when the hit is already inside it. */
+export function clickSelection<T>(existing: T[], incoming: T[], additive: boolean, key: (item: T) => string): T[] {
+  if (incoming.length === 0) return existing
+  const incomingKeys = new Set(incoming.map(key))
+  const have = new Set(existing.map(key))
+  const allOn = [...incomingKeys].every(k => have.has(k))
+  if (additive) {
+    if (allOn) return existing.filter(item => !incomingKeys.has(key(item)))
+    const next = [...existing]
+    for (const item of incoming) {
+      const k = key(item)
+      if (!have.has(k)) {
+        have.add(k)
+        next.push(item)
+      }
+    }
+    return next
+  }
+  if (allOn) return existing
+  return [...incoming]
+}
+
+/** Box select replaces, or unions when Shift/Ctrl is held. */
+export function extendSelection<T>(existing: T[], incoming: T[], additive: boolean, key: (item: T) => string): T[] {
+  if (!additive) return [...incoming]
+  const have = new Set(existing.map(key))
+  const next = [...existing]
+  for (const item of incoming) {
+    const k = key(item)
+    if (!have.has(k)) {
+      have.add(k)
+      next.push(item)
+    }
+  }
+  return next
+}
+
 export function selectedUvCorners(mesh: MeshObject, mode: UvSelectionMode, faces: number[], vertices: UvCorner[], edges: { faceIndex: number; edgeIndex: number }[]): UvCorner[] {
   let corners: UvCorner[]
   if (mode === 'vertex') corners = vertices
@@ -102,6 +140,117 @@ export function relaxUvCorners(mesh: MeshObject, corners: UvCorner[], iterations
     for (const [k, uv] of updates) nodes.get(k)!.uv = uv
   }
   return [...nodes.values()].filter(n => !n.fixed).flatMap(n => n.corners.map(c => ({ ...c, ...n.uv })))
+}
+
+function weldedUvNodes(mesh: MeshObject, corners: UvCorner[]) {
+  const selected = new Set(corners.map(c => `${c.faceIndex}:${c.vertIndex}`))
+  const nodes = new Map<string, { u: number; v: number; corners: UvCorner[] }>()
+  const links: [string, string][] = []
+  const keyOf = (faceIndex: number, vertIndex: number) => {
+    const face = mesh.faces[faceIndex]
+    const uv = face.uvs[vertIndex]
+    return `${face.vertexIds[vertIndex]}:${Math.round(uv.u * 1e6)}:${Math.round(uv.v * 1e6)}`
+  }
+  for (const corner of corners) {
+    const face = mesh.faces[corner.faceIndex]
+    const uv = face?.uvs[corner.vertIndex]
+    if (!uv) continue
+    const key = keyOf(corner.faceIndex, corner.vertIndex)
+    let node = nodes.get(key)
+    if (!node) {
+      node = { u: uv.u, v: uv.v, corners: [] }
+      nodes.set(key, node)
+    }
+    node.corners.push(corner)
+  }
+  mesh.faces.forEach((face, faceIndex) => {
+    for (let i = 0; i < face.uvs.length; i++) {
+      const next = (i + 1) % face.uvs.length
+      if (!selected.has(`${faceIndex}:${i}`) || !selected.has(`${faceIndex}:${next}`)) continue
+      links.push([keyOf(faceIndex, i), keyOf(faceIndex, next)])
+    }
+  })
+  return { nodes, links }
+}
+
+/** Project each selected UV chain onto the line between its two farthest points. */
+export function straightenUvCorners(mesh: MeshObject, corners: UvCorner[], pinned: (c: UvCorner) => boolean = () => false) {
+  const { nodes, links } = weldedUvNodes(mesh, corners)
+  const neighbors = new Map<string, Set<string>>()
+  for (const key of nodes.keys()) neighbors.set(key, new Set())
+  for (const [a, b] of links) {
+    if (!nodes.has(a) || !nodes.has(b) || a === b) continue
+    neighbors.get(a)!.add(b)
+    neighbors.get(b)!.add(a)
+  }
+  const seen = new Set<string>()
+  const edits: (UvCorner & UV)[] = []
+  for (const start of nodes.keys()) {
+    if (seen.has(start)) continue
+    const chain: string[] = []
+    const stack = [start]
+    seen.add(start)
+    while (stack.length) {
+      const key = stack.pop()!
+      chain.push(key)
+      for (const next of neighbors.get(key) ?? []) {
+        if (!seen.has(next)) {
+          seen.add(next)
+          stack.push(next)
+        }
+      }
+    }
+    if (chain.length < 3) continue
+    let farA = chain[0]
+    let farB = chain[1]
+    let best = -1
+    for (const a of chain) {
+      for (const b of chain) {
+        const du = nodes.get(a)!.u - nodes.get(b)!.u
+        const dv = nodes.get(a)!.v - nodes.get(b)!.v
+        const d = du * du + dv * dv
+        if (d > best) {
+          best = d
+          farA = a
+          farB = b
+        }
+      }
+    }
+    const a = nodes.get(farA)!
+    const b = nodes.get(farB)!
+    const abU = b.u - a.u
+    const abV = b.v - a.v
+    const len2 = abU * abU + abV * abV
+    if (len2 < 1e-12) continue
+    for (const key of chain) {
+      const node = nodes.get(key)!
+      const t = ((node.u - a.u) * abU + (node.v - a.v) * abV) / len2
+      const u = a.u + abU * t
+      const v = a.v + abV * t
+      for (const corner of node.corners) {
+        if (pinned(corner)) continue
+        const current = mesh.faces[corner.faceIndex]?.uvs[corner.vertIndex]
+        if (!current || (Math.abs(current.u - u) < 1e-8 && Math.abs(current.v - v) < 1e-8)) continue
+        edits.push({ ...corner, u, v })
+      }
+    }
+  }
+  return edits
+}
+
+/** Reflect selected corners across the middle of the 0–1 texture. */
+export function mirrorUvCorners(mesh: MeshObject, corners: UvCorner[], axis: 'u' | 'v', pinned: (c: UvCorner) => boolean = () => false) {
+  const edits: (UvCorner & UV)[] = []
+  for (const corner of corners) {
+    if (pinned(corner)) continue
+    const current = mesh.faces[corner.faceIndex]?.uvs[corner.vertIndex]
+    if (!current) continue
+    const u = axis === 'u' ? 1 - current.u : current.u
+    const v = axis === 'v' ? 1 - current.v : current.v
+    if (Math.abs(u - current.u) < 1e-8 && Math.abs(v - current.v) < 1e-8) continue
+    edits.push({ ...corner, u, v })
+  }
+  return edits
 }
 
 /** Inspect stays closed until there is a UV selection, and stays closed if the user dismissed it. */

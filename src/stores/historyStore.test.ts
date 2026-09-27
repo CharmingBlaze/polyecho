@@ -1,4 +1,4 @@
-import { createPinia, setActivePinia } from 'pinia'
+import { createPinia, disposePinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as THREE from 'three'
 import { createCube } from '../core/geometry/Primitives'
@@ -8,13 +8,16 @@ import { KnifeOperator } from '../core/operators/knife/KnifeOperator'
 import { MoveOperator } from '../core/operators/MoveOperator'
 import { ProjectStorage } from '../core/storage/ProjectStorage'
 import { useAnimationStore } from './animationStore'
-import { useHistoryStore } from './historyStore'
+import { HISTORY_STACK_LIMIT, useHistoryStore } from './historyStore'
 import { useProjectStore } from './projectStore'
 import { useToolStore } from './toolStore'
 
+let pinia: ReturnType<typeof createPinia>
+
 describe('historyStore', () => {
   beforeEach(() => {
-    setActivePinia(createPinia())
+    pinia = createPinia()
+    setActivePinia(pinia)
   })
 
   it('undo restores a mesh vertex after recordState', () => {
@@ -160,6 +163,26 @@ describe('historyStore', () => {
     expect(project.activeMesh?.faces.length).toBe(startFaces)
     expect(project.activeMesh?.vertices.length).toBe(startVerts)
     expect(project.activeMesh?.faces.some(f => f.id === faceId)).toBe(true)
+  })
+
+  it('undo and redo restore exact resident edge and corner identities', () => {
+    const project = useProjectStore()
+    const history = useHistoryStore()
+    const document = project.activeMesh!
+    const resident = project.acquireEditableMesh(document)
+    const initialEdges = new Set(resident.mesh.edges.keys())
+    project.selectedFaceIds = [document.faces[0]!.id]
+    project.performExtrude(0.5)
+    const after = resident.mesh.createSnapshot()
+    const createdEdgeIds = after.edges.map(edge => edge.id).filter(id => !initialEdges.has(id))
+    const cornerIds = after.corners?.map(corner => corner.id) ?? []
+    expect(createdEdgeIds.length).toBeGreaterThan(0)
+    history.undo()
+    history.redo()
+    const restored = project.acquireEditableMesh(project.activeMesh!).mesh
+    expect(restored).toBe(resident.mesh)
+    expect(restored.createSnapshot().edges.map(edge => edge.id)).toEqual(after.edges.map(edge => edge.id))
+    expect(restored.createSnapshot().corners?.map(corner => corner.id)).toEqual(cornerIds)
   })
 
   it('subdivide records one history step that undo and redo round-trip', () => {
@@ -462,8 +485,45 @@ describe('historyStore', () => {
     history.undo()
     expect(project.materials[0]?.color).toBe(color)
   })
+
+  it('bounds history and resident kernels through repeated create, delete, undo, and redo', () => {
+    const project = useProjectStore()
+    const history = useHistoryStore()
+    const baselineIds = project.meshes.map(mesh => mesh.id)
+
+    for (let cycle = 0; cycle < 30; cycle++) {
+      const created = project.createMesh('BOX')
+      project.acquireEditableMesh(created)
+      project.deleteMesh(created.id)
+      expect(project.meshes.map(mesh => mesh.id)).toEqual(baselineIds)
+      expect(project.captureResidentMeshes().map(snapshot => snapshot.objectId)).not.toContain(created.id)
+
+      history.undo()
+      expect(project.meshes.some(mesh => mesh.id === created.id)).toBe(true)
+      history.undo()
+      expect(project.meshes.map(mesh => mesh.id)).toEqual(baselineIds)
+      history.redo()
+      expect(project.meshes.some(mesh => mesh.id === created.id)).toBe(true)
+      history.redo()
+      expect(project.meshes.map(mesh => mesh.id)).toEqual(baselineIds)
+
+      expect(history.undoStack.length).toBeLessThanOrEqual(50)
+      expect(history.redoStack.length).toBeLessThanOrEqual(50)
+      expect(project.captureResidentMeshes().length).toBeLessThanOrEqual(project.meshes.length)
+    }
+  })
+
+  it('evicts the oldest action at the exported history limit', () => {
+    const history = useHistoryStore()
+    for (let i = 0; i <= HISTORY_STACK_LIMIT; i++) history.recordState(`Edit ${i}`, { includeTextures: false })
+
+    expect(history.undoStack).toHaveLength(HISTORY_STACK_LIMIT)
+    expect(history.undoStack[0]?.description).toBe('Edit 1')
+    expect(history.undoStack.at(-1)?.description).toBe(`Edit ${HISTORY_STACK_LIMIT}`)
+  })
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
+  disposePinia(pinia)
 })

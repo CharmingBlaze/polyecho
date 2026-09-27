@@ -60,6 +60,7 @@ export async function loadOpenProject(text: string, filePath?: string | null): P
     return { id: t.id, name: t.name, width: t.width, height: t.height, dataUrl: t.dataUrl, atlas: t.atlas, pixelBuffer: markRaw(buffer) }
   }))
   projectStore.projectName = proj.projectName || 'Project'
+  projectStore.clearResidentMeshes()
   projectStore.meshes = proj.meshes || []
   if (proj.materials) projectStore.materials = proj.materials
   if (proj.activePalette) projectStore.activePalette = proj.activePalette

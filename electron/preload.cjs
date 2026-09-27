@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('polyechoDesktop', {
   revealCrashLog: () => ipcRenderer.invoke('desktop:revealCrashLog'),
   showAbout: () => ipcRenderer.invoke('desktop:showAbout'),
   requestQuit: () => ipcRenderer.invoke('desktop:requestQuit'),
+  toggleFullscreen: () => ipcRenderer.invoke('desktop:toggleFullscreen'),
   revealInFolder: (filePath) => ipcRenderer.invoke('desktop:revealInFolder', filePath),
   onOpenExternal: (callback) => {
     const listener = (_event, filePath) => {

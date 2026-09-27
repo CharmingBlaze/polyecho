@@ -8,6 +8,7 @@ import { useKeymapStore } from '../../stores/keymapStore'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import PolyEchoLogo from '../icons/PolyEchoLogo.vue'
 import ImportTextureModal from '../modals/ImportTextureModal.vue'
+import { HelpCircle, BookOpen } from 'lucide-vue-next'
 
 import type { PivotPoint } from '../../types/tools'
 import { loadOpenProject, saveOpenProject } from '../../core/project/projectIo'
@@ -22,13 +23,14 @@ import {
   openProjectPath,
   openTextFile,
   requestDesktopQuit,
+  toggleDesktopFullscreen,
   revealCrashLog,
   revealInFolder,
   showDesktopAbout
 } from '../../core/desktop/desktopApi'
 import { EDITOR_EVENTS, requestCameraView, requestFillFace, requestModalTool, requestKnifeProject } from '../../core/commands/editorCommands'
 
-type NavMenu = 'file' | 'edit' | 'mesh' | 'workspace' | 'space' | 'view' | 'snap' | 'overlays' | null
+type NavMenu = 'file' | 'edit' | 'mesh' | 'help' | 'workspace' | 'space' | 'view' | 'snap' | 'overlays' | null
 type CameraView = 'persp' | 'top' | 'front' | 'right' | 'iso'
 
 const projectStore = useProjectStore()
@@ -50,12 +52,18 @@ const lastSavedPath = ref<string | null>(null)
 const activeDropdown = ref<NavMenu>(null)
 const cameraView = ref<CameraView>('persp')
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'open-export'): void
   (e: 'open-hotkeys'): void
-  (e: 'open-preferences'): void
+  (e: 'open-preferences', tab?: 'themes' | 'keymap' | 'interface' | 'viewport' | 'input' | 'system'): void
   (e: 'new-project'): void
+  (e: 'open-help', topic?: string): void
 }>()
+
+function triggerHelp(topic?: string) {
+  closeDropdowns()
+  emit('open-help', topic)
+}
 
 // Hidden file input refs
 const loadProjectInput = ref<HTMLInputElement | null>(null)
@@ -139,7 +147,7 @@ const shadingModes = [
   { id: 'textured' as const, icon: 'shading-textured' as const, title: 'Textured' },
   { id: 'solid' as const, icon: 'shading-solid' as const, title: 'Solid' },
   { id: 'wireframe' as const, icon: 'shading-wire' as const, title: 'Wireframe' },
-  { id: 'psx' as const, icon: 'shading-rendered' as const, title: 'PSX Retro' },
+  { id: 'dreamcast' as const, icon: 'shading-rendered' as const, title: 'Dreamcast' },
 ]
 
 const workspaces = [
@@ -447,13 +455,13 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <header class="master-header-container relative h-8 w-full min-w-0 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between text-xs select-none z-40 font-sans shrink-0">
+  <header class="master-header-container relative h-8 w-full min-w-0 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between text-xs select-none z-40 font-sans shrink-0 gap-1">
     <!-- Hidden Inputs for File Import -->
-    <input ref="loadProjectInput" type="file" accept=".psxproj" class="hidden" @change="handleLoadProject">
-    <input ref="importObjInput" type="file" accept=".obj" class="hidden" @change="handleImportObj">
-    <input ref="importGltfInput" type="file" accept=".gltf,.glb" class="hidden" @change="handleImportGltf">
-    <input ref="importBbInput" type="file" accept=".bbmodel,.json" class="hidden" @change="handleImportBlockbench">
-    <input ref="importTextureInput" type="file" accept="image/*" class="hidden" @change="handleImportTexture">
+    <input ref="loadProjectInput" type="file" accept=".psxproj" class="hidden" @change="handleLoadProject" />
+    <input ref="importObjInput" type="file" accept=".obj" class="hidden" @change="handleImportObj" />
+    <input ref="importGltfInput" type="file" accept=".gltf,.glb" class="hidden" @change="handleImportGltf" />
+    <input ref="importBbInput" type="file" accept=".bbmodel,.json" class="hidden" @change="handleImportBlockbench" />
+    <input ref="importTextureInput" type="file" accept="image/*" class="hidden" @change="handleImportTexture" />
 
     <!-- 1. LEFT: Logo + File, Edit, Mesh + Space/Snap/Symmetry -->
     <div class="flex items-center space-x-1 shrink-0 z-20">
@@ -470,19 +478,19 @@ onUnmounted(() => {
         </button>
 
         <div v-if="activeDropdown === 'file'" class="absolute left-0 top-full mt-0.5 w-64 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between font-medium" @click="$emit('new-project'); closeDropdowns()">
+          <button @click="$emit('new-project'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between font-medium">
             <span class="flex items-center gap-2"><BlenderIcon name="plus" :size="14" /> New Project</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+N</span>
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="openProject">
+          <button @click="openProject" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2"><BlenderIcon name="folder" :size="14" color="#fbbf24" /> Open (.psxproj)</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+O</span>
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="saveProject(false)">
+          <button @click="saveProject(false)" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2"><BlenderIcon name="save" :size="14" color="#34d399" /> Save Project</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+S</span>
           </button>
-          <button v-if="isDesktopApp()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="saveProject(true)">
+          <button v-if="isDesktopApp()" @click="saveProject(true)" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2"><BlenderIcon name="save" :size="14" color="#34d399" /> Save As…</span>
           </button>
           <button
@@ -494,7 +502,7 @@ onUnmounted(() => {
           </button>
 
           <template v-if="isDesktopApp() && recentProjects.length > 0">
-            <div class="h-px bg-ui-borderSubtle my-1" />
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
             <div class="px-3 py-1 text-[9.5px] font-bold text-ui-textMuted uppercase tracking-wider">Open Recent</div>
             <button
               v-for="item in recentProjects"
@@ -507,32 +515,32 @@ onUnmounted(() => {
             </button>
           </template>
 
-          <div class="h-px bg-ui-borderSubtle my-1" />
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
 
           <div class="px-3 py-1 text-[9.5px] font-bold text-ui-textMuted uppercase tracking-wider">Import</div>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2" @click="importObj">
+          <button @click="importObj" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
             <BlenderIcon name="import" :size="14" /> Wavefront (.obj)
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2" @click="importGltf">
+          <button @click="importGltf" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
             <BlenderIcon name="import" :size="14" /> GLTF / GLB (.glb)
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2" @click="importBlockbenchFile">
+          <button @click="importBlockbenchFile" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
             <BlenderIcon name="import" :size="14" /> Blockbench (.bbmodel)
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2" @click="importTexture">
+          <button @click="importTexture" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
             <BlenderIcon name="image" :size="14" /> Texture (PNG, JPG)
           </button>
 
-          <div class="h-px bg-ui-borderSubtle my-1" />
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
           <div class="px-3 py-1 text-[9.5px] font-bold text-ui-textMuted uppercase tracking-wider">Export</div>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="$emit('open-export'); closeDropdowns()">
+          <button @click="$emit('open-export'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2"><BlenderIcon name="export" :size="14" /> Game Assets…</span>
             <span class="text-ui-textMuted font-mono text-[10px]">GLB · OBJ · BB</span>
           </button>
 
-          <div class="h-px bg-ui-borderSubtle my-1" />
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
 
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="$emit('open-preferences'); closeDropdowns()">
+          <button @click="$emit('open-preferences'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2"><BlenderIcon name="settings" :size="14" color="#38bdf8" /> Properties & Preferences</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+,</span>
           </button>
@@ -574,35 +582,57 @@ onUnmounted(() => {
         <div v-if="activeDropdown === 'edit'" class="absolute left-0 top-full mt-0.5 w-56 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
           <button
             :disabled="historyStore.undoStack.length === 0"
-            class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between disabled:opacity-40 disabled:pointer-events-none"
             @click="historyStore.undo(); closeDropdowns()"
+            class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between disabled:opacity-40 disabled:pointer-events-none"
           >
             <span class="flex items-center gap-2"><BlenderIcon name="undo" :size="14" /> {{ undoDescription ? `Undo ${undoDescription}` : 'Undo' }}</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+Z</span>
           </button>
           <button
             :disabled="historyStore.redoStack.length === 0"
-            class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between disabled:opacity-40 disabled:pointer-events-none"
             @click="historyStore.redo(); closeDropdowns()"
+            class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between disabled:opacity-40 disabled:pointer-events-none"
           >
             <span class="flex items-center gap-2"><BlenderIcon name="redo" :size="14" /> {{ redoDescription ? `Redo ${redoDescription}` : 'Redo' }}</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+Y</span>
           </button>
-          <div class="h-px bg-ui-borderSubtle my-1" />
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="projectStore.selectAll(toolStore.selectMode); closeDropdowns()">
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+          <button @click="projectStore.selectAll(toolStore.selectMode); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span>Select All</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+A</span>
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="projectStore.deselectAll(); closeDropdowns()">
+          <button @click="projectStore.deselectAll(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span>Deselect All</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Alt+A</span>
           </button>
-          <div class="h-px bg-ui-borderSubtle my-1" />
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2" @click="$emit('open-preferences'); closeDropdowns()">
+          <button @click="projectStore.selectInverse(toolStore.selectMode); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Invert</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+I</span>
+          </button>
+          <button @click="projectStore.growSelection(toolStore.selectMode); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Select More</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+=</span>
+          </button>
+          <button @click="projectStore.shrinkSelection(toolStore.selectMode); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Select Less</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+-</span>
+          </button>
+          <button @click="projectStore.selectConnected(toolStore.selectMode); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Select Linked</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+L</span>
+          </button>
+          <button @click="projectStore.selectBoundaryEdges(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Select Boundary</button>
+          <button @click="projectStore.selectNonManifoldEdges(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Select Non-manifold</button>
+          <button @click="projectStore.selectSharpEdges(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Select Sharp</button>
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+          <button @click="$emit('open-preferences', 'keymap'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span class="flex items-center gap-2"><BlenderIcon name="keyboard" :size="14" color="#38bdf8" /> Shortkeys & Mouse Input Settings...</span>
+          </button>
+          <button @click="$emit('open-preferences', 'themes'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
             <BlenderIcon name="material" :size="14" color="#f59e0b" /> Preferences & Themes
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2" @click="$emit('open-hotkeys'); closeDropdowns()">
-            <BlenderIcon name="keyboard" :size="14" color="#38bdf8" /> Hotkey Map
+          <button @click="$emit('open-hotkeys'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
+            <BlenderIcon name="keyboard" :size="14" color="#38bdf8" /> Hotkey Cheat Sheet
           </button>
         </div>
       </div>
@@ -618,155 +648,356 @@ onUnmounted(() => {
         </button>
 
         <div v-if="activeDropdown === 'mesh'" class="absolute left-0 top-full mt-0.5 w-56 max-h-[min(80vh,36rem)] overflow-y-auto bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="requestModalTool('extrude'); closeDropdowns()">
+          <button @click="requestModalTool('extrude'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2"><BlenderIcon name="tool-extrude" :size="14" /> Extrude</span>
             <span class="text-ui-textMuted font-mono text-[10px]">E</span>
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="requestModalTool('inset'); closeDropdowns()">
+          <button @click="requestModalTool('inset'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2"><BlenderIcon name="tool-inset" :size="14" /> Inset Faces</span>
             <span class="text-ui-textMuted font-mono text-[10px]">I</span>
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="requestModalTool('bevel'); closeDropdowns()">
+          <button @click="requestModalTool('bevel'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2"><BlenderIcon name="tool-bevel" :size="14" /> Bevel</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+B</span>
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="requestModalTool('loop_cut'); closeDropdowns()">
+          <button @click="requestModalTool('loop_cut'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2"><BlenderIcon name="tool-loopcut" :size="14" /> Loop Cut</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+R</span>
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="requestModalTool('knife'); closeDropdowns()">
+          <button @click="requestModalTool('knife'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2"><BlenderIcon name="tool-knife" :size="14" /> Knife</span>
             <span class="text-ui-textMuted font-mono text-[10px]">K</span>
           </button>
-          <div class="h-px bg-ui-borderSubtle my-1" />
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
           <button
-            class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between"
             @click="runMeshSubdivide()"
+            class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between"
           >
             <span class="flex items-center gap-2"><BlenderIcon name="tool-subdivide" :size="14" /> Subdivide</span>
             <span class="text-ui-textMuted font-mono text-[10px]">W</span>
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="projectStore.performPokeFaces(); closeDropdowns()">
+          <button @click="projectStore.performSimpleSubdivide(toolStore.selectMode === 'object' || toolStore.selectMode === 'vertex' || toolStore.selectMode === 'edge' || toolStore.selectMode === 'face' ? toolStore.selectMode : undefined); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
+            Simple Subdivide
+          </button>
+          <button @click="projectStore.performCatmullClark(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
+            Catmull–Clark Subdivide
+          </button>
+          <button @click="projectStore.performPokeFaces(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span>Poke Faces</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Alt+P</span>
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="projectStore.performTriangulate(); closeDropdowns()">
+          <button @click="projectStore.performTriangulate(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span>Triangulate Faces</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+T</span>
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="requestFillFace(); closeDropdowns()">
+          <button @click="requestFillFace(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2"><BlenderIcon name="fill-face" :size="14" /> Fill</span>
             <span class="text-ui-textMuted font-mono text-[10px]">{{ toolStore.appMode === 'model' ? 'F' : '' }}</span>
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performGridFill(); closeDropdowns()">
+          <button @click="projectStore.performGridFill(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
             Grid Fill
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2" @click="projectStore.performBridgeEdges(toolStore.bridgeSegments, toolStore.bridgeTwist); closeDropdowns()">
+          <button @click="requestModalTool('bridge'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
             <BlenderIcon name="bridge-edges" :size="14" /> Bridge Edge Loops
           </button>
-          <div class="h-px bg-ui-borderSubtle my-1" />
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="projectStore.performMerge('center'); closeDropdowns()">
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+          <button @click="projectStore.performMerge('center'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2"><BlenderIcon name="tool-merge" :size="14" /> Merge at Center</span>
             <span class="text-ui-textMuted font-mono text-[10px]">M</span>
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="projectStore.performConnectVertices(); closeDropdowns()">
+          <button @click="projectStore.performMerge('first'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Merge at First</button>
+          <button @click="projectStore.performMerge('last'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Merge at Last</button>
+          <button @click="projectStore.performMerge('cursor'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Merge at Cursor</button>
+          <button @click="projectStore.performMerge('vertex'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Merge at Vertex</button>
+          <button @click="projectStore.performMerge('distance'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Weld by Distance</button>
+          <button @click="projectStore.performSplitEdges(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Split Edge</button>
+          <button @click="projectStore.performConnectVertices(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2"><BlenderIcon name="connect-verts" :size="14" /> Connect Vertices</span>
             <span class="text-ui-textMuted font-mono text-[10px]">J</span>
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="projectStore.performFlipNormals(); closeDropdowns()">
+          <button @click="projectStore.performFlipNormals(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2"><BlenderIcon name="flip-normals" :size="14" /> Flip Normals</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Shift+N</span>
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="projectStore.setShadeMode('smooth'); closeDropdowns()">
+          <button @click="projectStore.setShadeMode('smooth'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2"><BlenderIcon name="shading-solid" :size="14" /> Shade Smooth</span>
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="projectStore.setShadeMode('flat'); closeDropdowns()">
+          <button @click="projectStore.setShadeMode('flat'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span class="flex items-center gap-2"><BlenderIcon name="shading-wire" :size="14" /> Shade Flat</span>
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="projectStore.setShadeMode('auto'); closeDropdowns()">
+          <button @click="projectStore.setShadeMode('auto'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span>Shade Smooth by Angle</span>
           </button>
-          <div class="h-px bg-ui-borderSubtle my-1" />
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performFlipAxis('x'); closeDropdowns()">
+          <button @click="projectStore.markSelectedEdgesSharp(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Mark Sharp</button>
+          <button @click="projectStore.clearSelectedEdgesSharp(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Clear Sharp</button>
+          <button @click="projectStore.performApplyRotationScale(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Apply Rotation &amp; Scale</button>
+          <button @click="projectStore.performMakeUnique(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Make Unique</button>
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+          <button @click="projectStore.performFlipAxis('x'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
             Flip Horizontal (X)
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performFlipAxis('y'); closeDropdowns()">
+          <button @click="projectStore.performFlipAxis('y'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
             Flip Vertical (Y)
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performFlipAxis('z'); closeDropdowns()">
+          <button @click="projectStore.performFlipAxis('z'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
             Flip Z
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performDuplicateMirror('x'); closeDropdowns()">
+          <button @click="projectStore.performDuplicateMirror('x'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
             Mirror Copy X
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performDuplicateMirror('y'); closeDropdowns()">
+          <button @click="projectStore.performDuplicateMirror('y'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
             Mirror Copy Y
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performDuplicateMirror('z'); closeDropdowns()">
+          <button @click="projectStore.performMirror('x'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Mirror X</button>
+          <button @click="projectStore.performMirror('y'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Mirror Y</button>
+          <button @click="projectStore.performMirror('z'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Mirror Z</button>
+          <button @click="projectStore.performLinearArray(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Linear Array</button>
+          <button @click="projectStore.performRadialArray(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Radial Array</button>
+          <button @click="projectStore.performInstanceDuplicate(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Instance Duplicate</button>
+          <button @click="projectStore.performDuplicateMirror('z'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
             Mirror Copy Z
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performRotateObject('y', 90); closeDropdowns()">
+          <button @click="projectStore.performRotateObject('y', 90); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
             Rotate +90° Y
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performRotateObject('y', -90); closeDropdowns()">
+          <button @click="projectStore.performRotateObject('y', -90); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
             Rotate −90° Y
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performRotateObject('y', 180); closeDropdowns()">
+          <button @click="projectStore.performRotateObject('y', 180); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
             Rotate 180° Y
           </button>
           <button
-            class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between"
             @click="(toolStore.selectMode === 'face' ? projectStore.performDissolve('face') : toolStore.selectMode === 'edge' ? projectStore.performDissolve('edge') : projectStore.performDissolve('vertex')); closeDropdowns()"
+            class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between"
           >
             <span class="flex items-center gap-2"><BlenderIcon name="dissolve" :size="14" /> Dissolve</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+X</span>
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performFlipEdge(); closeDropdowns()">Rotate Edge</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="projectStore.performRecalculateOutside(); closeDropdowns()">
+          <button @click="projectStore.performFlipEdge(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Rotate Edge</button>
+          <button @click="projectStore.performRecalculateOutside(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
             <span>Recalculate Outside</span>
             <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+Shift+N</span>
           </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performTrisToQuads(); closeDropdowns()">Tris to Quads</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performFillHoles(); closeDropdowns()">Fill Holes</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="requestModalTool('edge_slide'); closeDropdowns()">Edge Slide</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="requestModalTool('vertex_slide'); closeDropdowns()">Vertex Slide</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="requestModalTool('offset_loop'); closeDropdowns()">Offset Edge Loop</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performRip(false); closeDropdowns()">Rip</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performRip(true); closeDropdowns()">Rip Fill</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performSplit(); closeDropdowns()">Split</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performMakePlanar(); closeDropdowns()">Make Planar Faces</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performLimitedDissolve(toolStore.limitedDissolveAngle); closeDropdowns()">Limited Dissolve</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performDeleteOnlyFaces(); closeDropdowns()">Delete Only Faces</button>
-          <div class="h-px bg-ui-borderSubtle my-1" />
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performBoolean('union'); closeDropdowns()">Boolean Union</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performBoolean('difference'); closeDropdowns()">Boolean Difference</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performBoolean('intersect'); closeDropdowns()">Boolean Intersect</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="requestKnifeProject(); closeDropdowns()">Knife Project</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="requestModalTool('bisect'); closeDropdowns()">Bisect</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="requestModalTool('spin'); closeDropdowns()">Spin</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performSolidifyFaces(); closeDropdowns()">Solidify Faces</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performSymmetrize('x'); closeDropdowns()">Symmetrize X</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performSeparateByLooseParts(); closeDropdowns()">Separate by Loose Parts</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performSeparateByMaterial(); closeDropdowns()">Separate by Material</button>
-          <div class="h-px bg-ui-borderSubtle my-1" />
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="requestModalTool('shrink_fatten'); closeDropdowns()">Shrink/Fatten</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="requestModalTool('shear'); closeDropdowns()">Shear</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="requestModalTool('to_sphere'); closeDropdowns()">To Sphere</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performSmoothVertices(); closeDropdowns()">Smooth Vertices</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performRandomizeVertices(); closeDropdowns()">Randomize Vertices</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performUnsubdivide(); closeDropdowns()">Unsubdivide</button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.performDecimate(); closeDropdowns()">Decimate</button>
+          <button @click="projectStore.performTrisToQuads(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Tris to Quads</button>
+          <button @click="projectStore.performFillHoles(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Fill Holes</button>
+          <button @click="requestModalTool('edge_slide'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Edge Slide</button>
+          <button @click="requestModalTool('vertex_slide'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Vertex Slide</button>
+          <button @click="requestModalTool('offset_loop'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Offset Edge Loop</button>
+          <button @click="projectStore.performRip(false); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Rip</button>
+          <button @click="projectStore.performRip(true); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Rip Fill</button>
+          <button @click="projectStore.performSplit(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Detach</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Y</span>
+          </button>
+          <button @click="projectStore.performSeparateMesh(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Separate</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">P</span>
+          </button>
+          <button @click="projectStore.performJoinMeshes(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Join</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+J</span>
+          </button>
+          <button @click="projectStore.performLathe(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Lathe / Revolve</button>
+          <button @click="projectStore.performShell(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Shell</button>
+          <button @click="projectStore.performMakePlanar(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Make Planar Faces</button>
+          <button @click="projectStore.performLimitedDissolve(toolStore.limitedDissolveAngle); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Limited Dissolve</button>
+          <button @click="projectStore.performDeleteOnlyFaces(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Delete Only Faces</button>
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+          <button @click="projectStore.performBoolean('union'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Boolean Union</button>
+          <button @click="projectStore.performBoolean('difference'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Boolean Difference</button>
+          <button @click="projectStore.performBoolean('intersect'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Boolean Intersect</button>
+          <button @click="requestKnifeProject(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Knife Project</button>
+          <button @click="requestModalTool('bisect'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Bisect</button>
+          <button @click="requestModalTool('spin'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Spin</button>
+          <button @click="projectStore.performSolidifyFaces(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Solidify</button>
+          <button @click="projectStore.performSymmetrize('x'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Symmetrize X</button>
+          <button @click="projectStore.performSymmetrize('y'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Symmetrize Y</button>
+          <button @click="projectStore.performSymmetrize('z'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Symmetrize Z</button>
+          <button @click="projectStore.performSeparateByLooseParts(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Separate by Loose Parts</button>
+          <button @click="projectStore.performSeparateByMaterial(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Separate by Material</button>
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+          <button @click="requestModalTool('shrink_fatten'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Shrink/Fatten</button>
+          <button @click="requestModalTool('shear'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Shear</button>
+          <button @click="requestModalTool('curve'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Curve</button>
+          <button @click="projectStore.performSpherize(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
+            <span>Spherize</span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Shift+Alt+S</span>
+          </button>
+          <button @click="projectStore.performSmoothVertices(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Smooth Vertices</button>
+          <button @click="projectStore.performCircle(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Circle</button>
+          <button @click="projectStore.performStraighten('horizontal'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Straighten Horizontal</button>
+          <button @click="projectStore.performStraighten('vertical'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Straighten Vertical</button>
+          <button @click="projectStore.performRandomizeVertices(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Randomize Vertices</button>
+          <button @click="projectStore.performUnsubdivide(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Unsubdivide</button>
+          <button @click="projectStore.performDecimate(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Decimate</button>
         </div>
       </div>
 
-      <div class="w-px h-3.5 bg-ui-borderSubtle mx-0.5 shrink-0" />
+      <!-- Help Menu -->
+      <div class="relative">
+        <button 
+          class="px-1.5 py-0.5 text-[11.5px] font-medium rounded-xs hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary transition cursor-pointer"
+          :class="{ 'bg-ui-hover text-ui-textPrimary font-bold': activeDropdown === 'help' }"
+          @click="toggleDropdown('help')"
+        >
+          Help
+        </button>
+
+        <div v-if="activeDropdown === 'help'" class="absolute left-0 top-full mt-0.5 w-72 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs max-h-[min(85vh,38rem)] overflow-y-auto">
+          <!-- Main Documentation -->
+          <button @click="triggerHelp('overview')" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between font-medium cursor-pointer">
+            <span class="flex items-center gap-2 text-ui-textAccent font-semibold">
+              <BookOpen class="w-3.5 h-3.5 text-ui-textAccent" /> Documentation & User Manual
+            </span>
+            <span class="text-ui-textMuted font-mono text-[10px]">F1</span>
+          </button>
+          
+          <button @click="$emit('open-hotkeys'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between cursor-pointer">
+            <span class="flex items-center gap-2">
+              <BlenderIcon name="keyboard" :size="14" color="#38bdf8" /> Keyboard Shortcuts Map
+            </span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+/</span>
+          </button>
+
+          <button @click="triggerHelp('navigation')" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between cursor-pointer">
+            <span class="flex items-center gap-2">
+              <BlenderIcon name="display" :size="14" color="#a78bfa" /> Mouse & Navigation Controls
+            </span>
+          </button>
+
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+          <div class="px-3 py-1 text-[9.5px] font-bold text-ui-textMuted uppercase tracking-wider">Workspace Guides</div>
+
+          <button @click="triggerHelp('modeling')" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between cursor-pointer">
+            <span class="flex items-center gap-2">
+              <BlenderIcon name="workspace-model" :size="14" /> Modeling & Topology Guide
+            </span>
+            <span class="text-ui-textMuted text-[10px]">Extrude, Inset, Bevel</span>
+          </button>
+
+          <button @click="triggerHelp('blockout')" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between cursor-pointer">
+            <span class="flex items-center gap-2">
+              <BlenderIcon name="workspace-blockout" :size="14" /> Blockout & Tracing Guide
+            </span>
+            <span class="text-ui-textMuted text-[10px]">Shape Draw, Refs</span>
+          </button>
+
+          <button @click="triggerHelp('uv')" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between cursor-pointer">
+            <span class="flex items-center gap-2">
+              <BlenderIcon name="uv" :size="14" /> UV Mapping & Unwrapping Guide
+            </span>
+            <span class="text-ui-textMuted text-[10px]">Smart UV, Seams</span>
+          </button>
+
+          <button @click="triggerHelp('paint')" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between cursor-pointer">
+            <span class="flex items-center gap-2">
+              <BlenderIcon name="workspace-paint" :size="14" /> Pixel Texture Painting Guide
+            </span>
+            <span class="text-ui-textMuted text-[10px]">Layers, Dithering</span>
+          </button>
+
+          <button @click="triggerHelp('tileset')" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between cursor-pointer">
+            <span class="flex items-center gap-2">
+              <BlenderIcon name="material" :size="14" /> Tileset Atlas & Stamping Guide
+            </span>
+            <span class="text-ui-textMuted text-[10px]">Grid Atlas, Stamping</span>
+          </button>
+
+          <button @click="triggerHelp('rigging')" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between cursor-pointer">
+            <span class="flex items-center gap-2">
+              <BlenderIcon name="workspace-rig" :size="14" /> Rigging & Armatures Guide
+            </span>
+            <span class="text-ui-textMuted text-[10px]">Bones, Skinning</span>
+          </button>
+
+          <button @click="triggerHelp('humanoid')" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between cursor-pointer">
+            <span class="flex items-center gap-2">
+              <BlenderIcon name="armature" :size="14" /> Humanoid Auto-Rig Wizard
+            </span>
+            <span class="text-ui-textMuted text-[10px]">Landmark Setup</span>
+          </button>
+
+          <button @click="triggerHelp('animation')" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between cursor-pointer">
+            <span class="flex items-center gap-2">
+              <BlenderIcon name="workspace-animation" :size="14" /> Animation & Keyframes Guide
+            </span>
+            <span class="text-ui-textMuted text-[10px]">Dope Sheet, Events</span>
+          </button>
+
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+          <div class="px-3 py-1 text-[9.5px] font-bold text-ui-textMuted uppercase tracking-wider">Systems & Shading</div>
+
+          <button @click="triggerHelp('shading')" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between cursor-pointer">
+            <span class="flex items-center gap-2">
+              <BlenderIcon name="display" :size="14" /> Retro PSX & CRT Shading
+            </span>
+          </button>
+
+          <button @click="triggerHelp('modifiers')" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between cursor-pointer">
+            <span class="flex items-center gap-2">
+              <BlenderIcon name="modifier" :size="14" /> Modifiers (Mirror, Subd)
+            </span>
+          </button>
+
+          <button @click="triggerHelp('export')" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between cursor-pointer">
+            <span class="flex items-center gap-2">
+              <BlenderIcon name="export" :size="14" /> Game Engine Export (Godot/Unity)
+            </span>
+          </button>
+
+          <button @click="triggerHelp('faq')" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between cursor-pointer">
+            <span class="flex items-center gap-2">
+              <HelpCircle class="w-3.5 h-3.5 text-amber-400" /> FAQ & Troubleshooting
+            </span>
+          </button>
+
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+
+          <button @click="triggerCommandPalette" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between cursor-pointer">
+            <span class="flex items-center gap-2">
+              <BlenderIcon name="search" :size="14" /> Search Commands
+            </span>
+            <span class="text-ui-textMuted font-mono text-[10px]">F3</span>
+          </button>
+
+          <button @click="$emit('open-preferences', 'keymap'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between cursor-pointer">
+            <span class="flex items-center gap-2">
+              <BlenderIcon name="keyboard" :size="14" color="#38bdf8" /> Shortkeys & Mouse Controls...
+            </span>
+          </button>
+
+          <button @click="$emit('open-preferences'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between cursor-pointer">
+            <span class="flex items-center gap-2">
+              <BlenderIcon name="settings" :size="14" /> Properties & Preferences
+            </span>
+            <span class="text-ui-textMuted font-mono text-[10px]">Ctrl+,</span>
+          </button>
+
+          <button
+            v-if="isDesktopApp()"
+            class="w-full text-left px-3 py-1.5 hover:bg-ui-hover cursor-pointer"
+            @click="void showDesktopAbout(); closeDropdowns()"
+          >
+            About PolyEcho
+          </button>
+          <button
+            v-else
+            class="w-full text-left px-3 py-1.5 hover:bg-ui-hover cursor-pointer"
+            @click="triggerHelp('overview')"
+          >
+            About PolyEcho
+          </button>
+        </div>
+      </div>
+
+      <div class="w-px h-3.5 bg-ui-borderSubtle mx-0.5 shrink-0"></div>
 
       <!-- Space & Pivot Combo Dropdown -->
       <div class="relative">
         <button 
+          @click="toggleDropdown('space')"
           class="h-6 px-1.5 rounded-xs bg-ui-input border border-ui-borderDefault text-ui-textPrimary hover:bg-ui-hover flex items-center gap-1 text-[10.5px]"
           title="Transform Space & Pivot Point"
-          @click="toggleDropdown('space')"
         >
           <BlenderIcon name="empty-axis" :size="12" color="#38bdf8" />
           <span class="capitalize">{{ toolStore.transformOrientation }}</span>
@@ -782,9 +1013,9 @@ onUnmounted(() => {
             <button
               v-for="ori in (['global', 'local', 'normal', 'view'] as const)"
               :key="ori"
+              @click="toolStore.transformOrientation = ori; closeDropdowns()"
               class="w-full text-left px-1.5 py-1 rounded-xs capitalize hover:bg-ui-hover flex items-center justify-between"
               :class="{ 'text-sky-400 font-semibold': toolStore.transformOrientation === ori }"
-              @click="toolStore.transformOrientation = ori; closeDropdowns()"
             >
               <span>{{ ori }}</span>
               <BlenderIcon v-if="toolStore.transformOrientation === ori" name="check" :size="12" />
@@ -799,9 +1030,9 @@ onUnmounted(() => {
                 { id: 'cursor' as const, label: '3D Cursor' }
               ])"
               :key="piv.id"
+              @click="toolStore.pivotPoint = piv.id; closeDropdowns()"
               class="w-full text-left px-1.5 py-1 rounded-xs hover:bg-ui-hover flex items-center justify-between"
               :class="{ 'text-ui-textAccent font-semibold': toolStore.pivotPoint === piv.id }"
-              @click="toolStore.pivotPoint = piv.id; closeDropdowns()"
             >
               <span>{{ piv.label }}</span>
               <BlenderIcon v-if="toolStore.pivotPoint === piv.id" name="check" :size="12" />
@@ -890,24 +1121,22 @@ onUnmounted(() => {
                   ? 'bg-ui-accentSubtle text-ui-textAccent border-ui-accent/40 font-semibold'
                   : 'border-ui-borderSubtle text-ui-textMuted hover:text-ui-textPrimary'"
                 @click="setGridStep(sz)"
-              >
-                {{ sz }}
-              </button>
+              >{{ sz }}</button>
             </div>
           </div>
           <div class="border-t border-ui-borderSubtle pt-1.5 space-y-1">
             <div class="text-[9px] font-bold uppercase tracking-wider text-ui-textMuted">Also snap to</div>
             <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5">
               <span>Vertex</span>
-              <input v-model="toolStore.snapping.vertex" type="checkbox" class="rounded-xs accent-ui-accent">
+              <input type="checkbox" v-model="toolStore.snapping.vertex" class="rounded-xs accent-ui-accent" />
             </label>
             <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5">
               <span>Edge midpoint</span>
-              <input v-model="toolStore.snapping.edge" type="checkbox" class="rounded-xs accent-ui-accent">
+              <input type="checkbox" v-model="toolStore.snapping.edge" class="rounded-xs accent-ui-accent" />
             </label>
             <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5">
               <span>Face center</span>
-              <input v-model="toolStore.snapping.face" type="checkbox" class="rounded-xs accent-ui-accent">
+              <input type="checkbox" v-model="toolStore.snapping.face" class="rounded-xs accent-ui-accent" />
             </label>
           </div>
         </div>
@@ -933,11 +1162,12 @@ onUnmounted(() => {
     </div>
 
     <!-- 2. CENTER: Primary workspace navigation -->
-    <nav class="flex items-center justify-center shrink-0 z-10 px-2" aria-label="Workspaces">
+    <nav class="flex items-center justify-center min-w-0 z-10 px-1" aria-label="Workspaces">
       <div class="workspace-switcher flex items-center gap-0.5 bg-ui-input/90 p-0.5 rounded-xs border border-ui-borderSubtle font-sans text-xs shrink-0 shadow-inner">
         <button
           v-for="w in workspaces"
           :key="w.id"
+          @click="toolStore.setAppMode(w.id)"
           class="workspace-switcher__item relative h-6 px-2.5 rounded-xs text-[11px] font-semibold transition-[color,background-color,border-color,box-shadow] duration-150 cursor-pointer flex items-center gap-1.5 whitespace-nowrap select-none"
           :class="toolStore.appMode === w.id 
             ? 'bg-ui-active text-ui-textPrimary font-bold shadow-xs border border-ui-borderDefault/80' 
@@ -945,7 +1175,6 @@ onUnmounted(() => {
           :title="w.desc"
           :aria-label="w.label + ' workspace'"
           :aria-current="toolStore.appMode === w.id ? 'page' : undefined"
-          @click="toolStore.setAppMode(w.id)"
         >
           <BlenderIcon :name="w.icon" :size="16" :class="toolStore.appMode === w.id ? 'text-ui-textAccent' : ''" />
           <span class="hidden min-[1280px]:inline">{{ w.label }}</span>
@@ -953,7 +1182,7 @@ onUnmounted(() => {
             v-if="toolStore.appMode === w.id"
             class="absolute left-2 right-2 -bottom-px h-0.5 rounded-full bg-ui-accent"
             aria-hidden="true"
-          />
+          ></span>
         </button>
       </div>
     </nav>
@@ -963,49 +1192,63 @@ onUnmounted(() => {
       <!-- Camera View Dropdown -->
       <div class="relative">
         <button
+          @click="toggleDropdown('view')"
           class="h-6 px-1.5 rounded-xs bg-ui-input border border-ui-borderDefault text-ui-textPrimary hover:bg-ui-hover flex items-center gap-1 text-[10.5px]"
           title="Camera View"
-          @click="toggleDropdown('view')"
         >
           <span class="text-ui-textAccent font-semibold">{{ toolStore.viewport.quadView ? 'Quad' : viewLabel[cameraView] }}</span>
           <BlenderIcon name="chevron-down" :size="12" />
         </button>
 
         <div v-if="activeDropdown === 'view'" class="absolute right-0 top-full mt-0.5 w-44 bg-ui-panel border border-ui-borderStrong rounded-xs shadow-2xl p-1 z-50 text-[11px] font-mono">
-          <button class="w-full text-left px-2 py-1 hover:bg-ui-hover flex justify-between" @click="setCameraView('persp')">
+          <button @click="setCameraView('persp')" class="w-full text-left px-2 py-1 hover:bg-ui-hover flex justify-between">
             <span>Perspective</span><span class="text-ui-textMuted">Home</span>
           </button>
-          <button class="w-full text-left px-2 py-1 hover:bg-ui-hover flex justify-between" @click="setCameraView('front')">
+          <button @click="setCameraView('front')" class="w-full text-left px-2 py-1 hover:bg-ui-hover flex justify-between">
             <span>Front Ortho</span><span class="text-ui-textMuted">Num 1</span>
           </button>
-          <button class="w-full text-left px-2 py-1 hover:bg-ui-hover flex justify-between" @click="setCameraView('right')">
+          <button @click="setCameraView('right')" class="w-full text-left px-2 py-1 hover:bg-ui-hover flex justify-between">
             <span>Right Ortho</span><span class="text-ui-textMuted">Num 3</span>
           </button>
-          <button class="w-full text-left px-2 py-1 hover:bg-ui-hover flex justify-between" @click="setCameraView('top')">
+          <button @click="setCameraView('top')" class="w-full text-left px-2 py-1 hover:bg-ui-hover flex justify-between">
             <span>Top Ortho</span><span class="text-ui-textMuted">Num 7</span>
           </button>
-          <button class="w-full text-left px-2 py-1 hover:bg-ui-hover flex justify-between" @click="setCameraView('iso')">
+          <button @click="setCameraView('iso')" class="w-full text-left px-2 py-1 hover:bg-ui-hover flex justify-between">
             <span>Isometric</span><span class="text-ui-textMuted">Num 0</span>
           </button>
-          <div class="h-px bg-ui-borderSubtle my-1" />
-          <button class="w-full text-left px-2 py-1 hover:bg-ui-hover flex justify-between text-amber-400" @click="toolStore.viewport.quadView = !toolStore.viewport.quadView; closeDropdowns()">
+          <div class="h-px bg-ui-borderSubtle my-1"></div>
+          <button @click="toolStore.viewport.quadView = !toolStore.viewport.quadView; closeDropdowns()" class="w-full text-left px-2 py-1 hover:bg-ui-hover flex justify-between text-amber-400">
             <span>Quad View</span><span class="text-ui-textMuted">Ctrl+Alt+Q</span>
+          </button>
+          <button
+            v-if="isDesktopApp()"
+            @click="void toggleDesktopFullscreen(); closeDropdowns()"
+            class="w-full text-left px-2 py-1 hover:bg-ui-hover flex justify-between"
+          >
+            <span>Full Screen</span><span class="text-ui-textMuted">F11</span>
           </button>
         </div>
       </div>
 
-      <!-- Shading Mode Group (Wire, Solid, Textured, PSX) -->
+      <!-- Shading Mode Group (Wire, Solid, Textured, Dreamcast) -->
       <div class="flex items-center h-6 px-0.5 rounded-xs bg-ui-input border border-ui-borderDefault">
         <button
           v-for="s in shadingModes"
           :key="s.id"
           type="button"
-          class="w-5 h-5 rounded-xs flex items-center justify-center transition"
-          :class="toolStore.viewport.shading === s.id ? 'bg-ui-active text-ui-textPrimary' : 'text-ui-textMuted hover:text-ui-textPrimary'"
+          class="h-5 rounded-xs flex items-center justify-center gap-1 transition"
+          :class="[
+            toolStore.viewport.shading === s.id ? 'bg-ui-active text-ui-textPrimary' : 'text-ui-textMuted hover:text-ui-textPrimary',
+            s.id === 'dreamcast' && toolStore.viewport.shading === 'dreamcast' ? 'px-1.5' : 'w-5'
+          ]"
           :title="s.title"
           @click="toolStore.viewport.shading = s.id"
         >
           <BlenderIcon :name="s.icon" :size="11" />
+          <span
+            v-if="s.id === 'dreamcast' && toolStore.viewport.shading === 'dreamcast'"
+            class="text-[9px] font-semibold tracking-wide pr-0.5"
+          >Dreamcast</span>
         </button>
       </div>
 
@@ -1026,22 +1269,22 @@ onUnmounted(() => {
           <div class="text-[9px] font-bold uppercase tracking-wider text-ui-textMuted">Overlays</div>
           <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5 hover:bg-ui-hover rounded-xs">
             <span>Face orientation</span>
-            <input v-model="toolStore.viewport.faceOrientation" type="checkbox" class="rounded-xs accent-ui-accent">
+            <input type="checkbox" v-model="toolStore.viewport.faceOrientation" class="rounded-xs accent-ui-accent" />
           </label>
           <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5 hover:bg-ui-hover rounded-xs">
             <span>Grid</span>
-            <input v-model="toolStore.viewport.showGrid" type="checkbox" class="rounded-xs accent-ui-accent">
+            <input type="checkbox" v-model="toolStore.viewport.showGrid" class="rounded-xs accent-ui-accent" />
           </label>
           <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5 hover:bg-ui-hover rounded-xs">
             <span>World axes</span>
-            <input v-model="toolStore.viewport.showAxes" type="checkbox" class="rounded-xs accent-ui-accent">
+            <input type="checkbox" v-model="toolStore.viewport.showAxes" class="rounded-xs accent-ui-accent" />
           </label>
           <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5 hover:bg-ui-hover rounded-xs">
             <span class="flex items-center gap-1.5" title="Voluma combined translate / rotate / scale">
               <BlenderIcon name="gizmo-combined" :size="12" />
               Combined gizmo
             </span>
-            <input v-model="toolStore.viewport.combinedGizmo" type="checkbox" class="rounded-xs accent-ui-accent">
+            <input type="checkbox" v-model="toolStore.viewport.combinedGizmo" class="rounded-xs accent-ui-accent" />
           </label>
           <label class="flex items-center justify-between cursor-pointer py-0.5 px-0.5 hover:bg-ui-hover rounded-xs">
             <span>Bones</span>
@@ -1050,7 +1293,7 @@ onUnmounted(() => {
               :checked="animationStore.showBones"
               class="rounded-xs accent-ui-accent"
               @change="animationStore.setShowBones(!animationStore.showBones)"
-            >
+            />
           </label>
           <div class="border-t border-ui-borderSubtle pt-1.5 space-y-1">
             <div class="flex items-center justify-between text-[10px] text-ui-textMuted">
@@ -1058,13 +1301,13 @@ onUnmounted(() => {
               <span class="tabular-nums">{{ Math.round(toolStore.viewport.wireframeOpacity * 100) }}%</span>
             </div>
             <input
-              v-model.number="toolStore.viewport.wireframeOpacity"
               type="range"
               min="0.1"
               max="1.0"
               step="0.05"
+              v-model.number="toolStore.viewport.wireframeOpacity"
               class="w-full h-1 bg-ui-borderStrong rounded-lg appearance-none cursor-pointer accent-ui-accent"
-            >
+            />
           </div>
         </div>
       </div>
@@ -1093,23 +1336,23 @@ onUnmounted(() => {
 
       <!-- CRT / TV Scanline Filter -->
       <button 
-        class="h-6 px-1.5 rounded-xs flex items-center gap-1 text-[10px] font-mono transition border cursor-pointer select-none"
+        @click="toolStore.viewport.crtFilter = !toolStore.viewport.crtFilter"
+        class="h-6 px-1.5 rounded-xs flex items-center gap-1 text-[10px] font-mono transition border cursor-pointer select-none max-[1080px]:hidden"
         :class="toolStore.viewport.crtFilter 
           ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-xs font-bold' 
           : 'text-ui-textMuted hover:text-ui-textPrimary border-ui-borderDefault bg-ui-input'"
         title="Toggle CRT Retro Scanlines"
-        @click="toolStore.viewport.crtFilter = !toolStore.viewport.crtFilter"
       >
         <BlenderIcon name="display" :size="12" :color="toolStore.viewport.crtFilter ? '#fbbf24' : 'currentColor'" />
       </button>
 
       <!-- Main Export Button -->
       <button 
-        class="flex items-center gap-1 px-2.5 h-6 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs text-[11px] font-semibold shadow-xs transition active:scale-95 cursor-pointer ml-1"
         @click="$emit('open-export')"
+        class="flex items-center gap-1 px-2.5 h-6 bg-ui-accent hover:bg-ui-accentHover text-white rounded-xs text-[11px] font-semibold shadow-xs transition active:scale-95 cursor-pointer ml-1"
       >
         <BlenderIcon name="export" :size="12" />
-        <span>Export</span>
+        <span class="hidden min-[1180px]:inline">Export</span>
       </button>
     </div>
 

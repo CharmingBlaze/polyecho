@@ -2,6 +2,7 @@ import { MeshObject } from '../../types/mesh'
 import { Material, Palette } from '../../types/texture'
 import { Armature } from '../../types/animation'
 import type { SavedPaintLayer } from '../painting/PaintLayerStorage'
+import { ProjectSerializer } from '../project/ProjectSerializer'
 
 export interface TextureStorageData {
   id: string
@@ -74,19 +75,12 @@ export class ProjectStorage {
     if (typeof obj.name !== 'string' || !Array.isArray(obj.meshes) || obj.meshes.length === 0) {
       return false
     }
-    for (let i = 0; i < obj.meshes.length; i++) {
-      const mesh = obj.meshes[i]
-      if (!mesh || typeof mesh !== 'object') return false
-      const m = mesh as Record<string, unknown>
-      if (!Array.isArray(m.vertices) || !Array.isArray(m.faces)) return false
-      for (const face of m.faces) {
-        if (!face || typeof face !== 'object') return false
-        const f = face as Record<string, unknown>
-        if (!Array.isArray(f.vertexIds) || f.vertexIds.length < 3) return false
-        if (Array.isArray(f.uvs) && f.uvs.length !== f.vertexIds.length) return false
-      }
+    try {
+      ProjectSerializer.assertValidMeshes(obj.meshes)
+      return true
+    } catch {
+      return false
     }
-    return true
   }
 
   static async saveProject(data: Omit<ProjectStorageData, 'id' | 'updatedAt'>, id = AUTOSAVE_KEY): Promise<void> {

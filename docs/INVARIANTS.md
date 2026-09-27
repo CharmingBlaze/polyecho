@@ -12,9 +12,18 @@ Breaking any of these usually looks like “selection vanished”, “undo corru
 
 ## Winding and UVs
 
-- Face `vertexIds` and `uvs` are the same length (at least 3; n-gons are supported).
+- Inside `EditableMesh`, the polygon is the half-edge walk (`walkFace`). Each half-edge has a corner, and the corner owns that slot's UV. `face.vertexIds` and `face.uvs` are a cache of that walk: `face.uvs[i]` is the corner's `Vector2`, so changing `uv.x` updates the corner. Replacing the array, splicing the loop, or reordering one list without the other desynchronizes them. Change a loop with `replaceFace`, `setFaceUvs`, or `publishLoop`. See `docs/TOPOLOGY.md`.
+- On the saved `MeshObject`, `vertexIds` and `uvs` are still parallel arrays of the same length (at least 3; n-gons are supported). `MeshBridge` flattens corners into those arrays. `uvs[i]` belongs to `vertexIds[i]`. A mismatch folds the texture across the fill diagonal while the cage still looks right.
 - Winding is counter-clockwise for outward normals.
-- Quad faces are triangulated at convert/export time (two tris). Do not drop the fourth vertex on the document model.
+- Polygon normals and region extrusion directions use every loop corner (`polygonAreaVector`). Never derive an n-gon normal from only its first three vertices: an edge split can make those three corners collinear while the polygon remains valid.
+- The face loop is the topology, Blockbench-style. A quad is one face. `faceTriIndexSets` splits it only so WebGL can fill the polygon. That diagonal is not an edge.
+- Wireframe shading, the material Wireframe checkbox, onion skins, crease lines, edge select, and primitive placement draw face-boundary edges (`wireframeGeometry` / half-edges). Do not set Three.js `material.wireframe` on a mesh — that strokes every render triangle.
+- A convex quad stays one face when drawn or patched, including a bent quad. A concave outline is still split into triangles and convex quads, because a face loop cannot cross itself.
+- Commands that write a real diagonal: Triangulate (`Ctrl+T`), Poke, and Connect on two opposite corners. If a face drops to 3 vertices after any other tool, that tool wrote the fill diagonal; fix the tool, do not hide the edge with an angle threshold.
+- Cylinder, prism, and circle caps are one n-gon face. Triangles are stored only where faces meet a point: cone, pyramid, and wedge-end sides, sphere and capsule poles, and every icosphere face.
+- One triangle source: fill, raycast, pick, previews, boolean input, and GLB export all use `surfaceTriangles` (`faceTriIndexSets` in `Converters.ts`). Do not fan-triangulate a face loop by hand; a fan is wrong for concave n-gons.
+- GLB export writes triangles into the file only. OBJ export writes the face loops as-is. The document stays loops. Do not drop the fourth vertex on the document model.
+- glTF and OBJ import run `weldImportedMesh` (`src/core/import/ImportWeld.ts`): coincident corners with matching color and weights are welded, then `mergePlanarPairs` folds coplanar convex triangle pairs back into quads. The merged loop starts on a file-diagonal endpoint so `surfaceTriangles`’ 0–2 fan recreates those two triangles. Pairs that meet on a UV cut, seam, sharp edge, or material change stay split, and so do bent pairs. Boolean output uses the same merge.
 
 ## History
 
@@ -22,7 +31,10 @@ Breaking any of these usually looks like “selection vanished”, “undo corru
 - Texture undo requires cloning `PixelBuffer`, not only cloning the `dataUrl`.
 - Modal operators restore an `EditableMesh` snapshot on cancel; they must not call `recordState` on every mouse move.
 - Snapshots include document identity, vertex colors and bone weights, and edge seam/sharp flags. Attribute records must be copied, not shared with snapshots or document projections.
+- In-memory undo snapshots carry resident kernel snapshots beside the document clone. Restore the resident snapshot before the next acquire so numeric edge and corner IDs survive undo/redo; never serialize this payload into `.psxproj`.
 - Modal commits validate through the project store; rejection follows cancel/rollback and reports a structured error. Extrude/Inset menu commits stage and validate before changing the resident kernel or recording history.
+- `HISTORY_STACK_LIMIT` is 50. Both `recordState` and `pushAction` evict the oldest record above that limit; lifecycle tests must cover repeated create/delete/undo/redo.
+- Deleting an object prunes its unheld resident kernel. Open Project, autosave recovery, and New Project clear the repository before installing new meshes; a kernel from one document must never be reused by another document with the same string id.
 
 ## Textures
 
@@ -80,6 +92,7 @@ Breaking any of these usually looks like “selection vanished”, “undo corru
 ## Project files
 
 - `.psxproj` version is `'1.0'` and `appName` is `'PSXModeller'`. Changing either is a format break. `ProjectSerializer.migrateRaw` only fills missing 1.x fields (`version`/`appName` omitted, empty armature). Unknown versions still throw.
-- Autosave goes through `ProjectStorage`. Guard restore so it does not immediately re-trigger save.
+- `.psxproj` and autosave use `ProjectSerializer.assertValidMeshes`: mesh/vertex/face ids are unique strings, positions and UVs are finite, face corners reference existing vertices without repeats, and UV/corner lengths match. Missing legacy UV arrays migrate to zero UVs; malformed arrays reject.
+- Autosave goes through `ProjectStorage` and the same mesh validation gate. Guard restore so it does not immediately re-trigger save.
 - Packaged File → Save / Open / Export use `desktopApi` native dialogs. Browser `dev:web` keeps `<input type="file">` and download fallbacks.
 - Closing the desktop window with unsaved history (`historyStore.isDirty`) must prompt Save / Don't Save / Cancel. Cancel and a failed Save call `cancelClose` so the window stays open. If the renderer never answers, main force-closes after 8s. Load and New Project mark the document clean.

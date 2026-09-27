@@ -1,6 +1,7 @@
 import { MeshObject, Vertex, Face, Vector3D } from '../../types/mesh'
 import { computeFaceNormal } from '../../utils/math'
 import { ensureMeshUVs, boxUnwrap } from '../geometry/UVUnwrap'
+import { weldImportedMesh } from './ImportWeld'
 import {
   inferShadeModeFromTriangles,
   parseObjShadeComment,
@@ -116,7 +117,7 @@ export class ObjImport {
         const inferred = pendingShade ?? {
           shadeMode: smoothingOn ? inferShadeModeFromTriangles(samples) : 'flat'
         }
-        const objMesh: MeshObject = {
+        const objMesh: MeshObject = weldImportedMesh({
           id: `mesh_obj_${Date.now()}_${meshes.length + 1}`,
           name: currentMeshName,
           visible: true,
@@ -129,10 +130,10 @@ export class ObjImport {
           autoSmoothAngle: inferred.autoSmoothAngle,
           vertices: meshVertices,
           faces: meshFaces
-        }
+        })
 
         // Check if all UVs are (0,0) or missing -> auto unwrap with Smart Box Unwrap
-        const hasCustomUVs = meshFaces.some(f => f.uvs && f.uvs.some(u => u.u !== 0 || u.v !== 0))
+        const hasCustomUVs = objMesh.faces.some(f => f.uvs && f.uvs.some(u => u.u !== 0 || u.v !== 0))
         if (!hasCustomUVs) {
           const unwrapped = boxUnwrap(objMesh)
           objMesh.faces = unwrapped.faces

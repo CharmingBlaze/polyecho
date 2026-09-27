@@ -30,6 +30,7 @@ export interface DesktopBridge {
   revealCrashLog(): Promise<void>
   showAbout(): Promise<void>
   requestQuit(): Promise<void>
+  toggleFullscreen(): Promise<boolean>
   onOpenExternal(callback: (filePath: string) => void): () => void
   revealInFolder(filePath: string): Promise<void>
 }
@@ -172,6 +173,10 @@ export async function showDesktopAbout(): Promise<void> {
 
 export async function requestDesktopQuit(): Promise<void> {
   await window.polyechoDesktop?.requestQuit()
+}
+
+export async function toggleDesktopFullscreen(): Promise<void> {
+  await window.polyechoDesktop?.toggleFullscreen()
 }
 
 export function onOpenExternalProject(callback: (filePath: string) => void): () => void {

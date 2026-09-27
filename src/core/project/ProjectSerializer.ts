@@ -124,6 +124,81 @@ export class ProjectSerializer {
     return saved
   }
 
+  /** Shared topology gate for project files and IndexedDB recovery records. */
+  static assertValidMeshes(meshes: unknown): asserts meshes is MeshObject[] {
+    if (!Array.isArray(meshes)) {
+      throw new Error('Invalid project file: missing meshes.')
+    }
+    const meshIds = new Set<string>()
+    for (let i = 0; i < meshes.length; i++) {
+      const mesh = meshes[i]
+      if (!mesh || typeof mesh !== 'object') {
+        throw new Error(`Invalid project file: mesh ${i} is not an object.`)
+      }
+      const m = mesh as Record<string, unknown>
+      if (typeof m.id !== 'string' || typeof m.name !== 'string') {
+        throw new Error(`Invalid project file: mesh ${i} is missing id or name.`)
+      }
+      if (meshIds.has(m.id)) {
+        throw new Error(`Invalid project file: duplicate mesh id "${m.id}".`)
+      }
+      meshIds.add(m.id)
+      if (!Array.isArray(m.vertices) || !Array.isArray(m.faces)) {
+        throw new Error(`Invalid project file: mesh ${i} is missing vertices or faces.`)
+      }
+      const vertexIds = new Set<string>()
+      for (let vi = 0; vi < m.vertices.length; vi++) {
+        const vertex = m.vertices[vi] as Record<string, unknown> | undefined
+        const position = vertex?.position as Record<string, unknown> | undefined
+        if (!vertex || typeof vertex.id !== 'string' || !position ||
+            ![position.x, position.y, position.z].every(value => typeof value === 'number' && Number.isFinite(value))) {
+          throw new Error(`Invalid project file: mesh ${i} vertex ${vi} has an invalid id or position.`)
+        }
+        if (vertexIds.has(vertex.id)) {
+          throw new Error(`Invalid project file: mesh ${i} has duplicate vertex id "${vertex.id}".`)
+        }
+        vertexIds.add(vertex.id)
+      }
+      const faceIds = new Set<string>()
+      for (let fi = 0; fi < m.faces.length; fi++) {
+        const face = m.faces[fi] as Record<string, unknown> | undefined
+        if (!face || typeof face.id !== 'string' || !Array.isArray(face.vertexIds)) {
+          throw new Error(`Invalid project file: mesh ${i} face ${fi} is missing id or vertexIds.`)
+        }
+        if (face.vertexIds.length < 3) {
+          throw new Error(`Invalid project file: mesh ${i} face ${fi} has fewer than 3 vertices.`)
+        }
+        if (faceIds.has(face.id)) {
+          throw new Error(`Invalid project file: mesh ${i} has duplicate face id "${face.id}".`)
+        }
+        faceIds.add(face.id)
+        if (face.vertexIds.some(id => typeof id !== 'string' || !vertexIds.has(id))) {
+          throw new Error(`Invalid project file: mesh ${i} face ${fi} references a missing vertex.`)
+        }
+        if (new Set(face.vertexIds).size !== face.vertexIds.length) {
+          throw new Error(`Invalid project file: mesh ${i} face ${fi} repeats a vertex.`)
+        }
+        if (face.uvs == null) {
+          face.uvs = face.vertexIds.map(() => ({ u: 0, v: 0 }))
+        }
+        if (!Array.isArray(face.uvs)) {
+          throw new Error(`Invalid project file: mesh ${i} face ${fi} has invalid uvs.`)
+        }
+        if (face.uvs.length !== face.vertexIds.length) {
+          throw new Error(`Invalid project file: mesh ${i} face ${fi} uvs length does not match vertexIds.`)
+        }
+        if (face.uvs.some(uv => {
+          if (!uv || typeof uv !== 'object') return true
+          const point = uv as Record<string, unknown>
+          return typeof point.u !== 'number' || !Number.isFinite(point.u) ||
+            typeof point.v !== 'number' || !Number.isFinite(point.v)
+        })) {
+          throw new Error(`Invalid project file: mesh ${i} face ${fi} has invalid uvs.`)
+        }
+      }
+    }
+  }
+
   /**
    * Parses and validates a project file.
    */
@@ -144,34 +219,7 @@ export class ProjectSerializer {
     if (obj.appName !== this.APP_NAME) {
       throw new Error(`Unsupported project app: ${String(obj.appName)}`)
     }
-    if (!Array.isArray(obj.meshes)) {
-      throw new Error('Invalid project file: missing meshes.')
-    }
-    for (let i = 0; i < obj.meshes.length; i++) {
-      const mesh = obj.meshes[i]
-      if (!mesh || typeof mesh !== 'object') {
-        throw new Error(`Invalid project file: mesh ${i} is not an object.`)
-      }
-      const m = mesh as Record<string, unknown>
-      if (typeof m.id !== 'string' || typeof m.name !== 'string') {
-        throw new Error(`Invalid project file: mesh ${i} is missing id or name.`)
-      }
-      if (!Array.isArray(m.vertices) || !Array.isArray(m.faces)) {
-        throw new Error(`Invalid project file: mesh ${i} is missing vertices or faces.`)
-      }
-      for (let fi = 0; fi < m.faces.length; fi++) {
-        const face = m.faces[fi] as Record<string, unknown> | undefined
-        if (!face || !Array.isArray(face.vertexIds)) {
-          throw new Error(`Invalid project file: mesh ${i} face ${fi} is missing vertexIds.`)
-        }
-        if (face.vertexIds.length < 3) {
-          throw new Error(`Invalid project file: mesh ${i} face ${fi} has fewer than 3 vertices.`)
-        }
-        if (Array.isArray(face.uvs) && face.uvs.length !== face.vertexIds.length) {
-          throw new Error(`Invalid project file: mesh ${i} face ${fi} uvs length does not match vertexIds.`)
-        }
-      }
-    }
+    this.assertValidMeshes(obj.meshes)
     return obj as unknown as PsxProjectFile
   }
 }

@@ -13,7 +13,8 @@ export const EDITOR_EVENTS = {
   openPie: 'editor:open-pie',
   toggleUvOverlay: 'editor:toggle-uv-overlay',
   smartUvProject: 'editor:smart-uv-project',
-  knifeProject: 'editor:knife-project'
+  knifeProject: 'editor:knife-project',
+  projectFromView: 'editor:project-from-view'
 } as const
 
 export type ModalToolCommand =
@@ -23,6 +24,7 @@ export type ModalToolCommand =
   | 'extrude'
   | 'inset'
   | 'bevel'
+  | 'bridge'
   | 'knife'
   | 'loop_cut'
   | 'edge_slide'
@@ -33,9 +35,11 @@ export type ModalToolCommand =
   | 'shrink_fatten'
   | 'shear'
   | 'to_sphere'
+  | 'curve'
   | 'polydraw'
   | 'shapedraw'
   | 'polybuild'
+  | 'blockout_sketch'
 
 export type CameraViewCommand = 'persp' | 'top' | 'front' | 'right' | 'iso'
 export type ExportFormatCommand = 'glb' | 'obj'
@@ -91,4 +95,9 @@ export function requestSmartUvProject() {
 
 export function requestKnifeProject() {
   window.dispatchEvent(new CustomEvent(EDITOR_EVENTS.knifeProject))
+}
+
+/** The 3D viewport answers with its camera. Explicit face indices scope it like the other unwraps. */
+export function requestProjectFromView(faceIndices?: number[]) {
+  window.dispatchEvent(new CustomEvent(EDITOR_EVENTS.projectFromView, { detail: { faceIndices } }))
 }

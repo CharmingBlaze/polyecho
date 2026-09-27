@@ -24,6 +24,30 @@ export class AttributeInterpolator {
       : a.color ?? b.color
   }
 
+  /** Average attributes for vertices collapsed by merge, capped to four normalized weights. */
+  static mergeVertices(sources: MeshVertex[], target: MeshVertex): void {
+    if (sources.length === 0) return
+    const weights: Record<string, number> = {}
+    for (const source of sources) {
+      for (const [bone, weight] of Object.entries(source.boneWeights ?? {})) {
+        if (Number.isFinite(weight) && weight > 0) weights[bone] = (weights[bone] ?? 0) + weight
+      }
+    }
+    const influences = Object.entries(weights).filter(([, weight]) => weight > 0)
+      .sort(([aId, aw], [bId, bw]) => bw - aw || aId.localeCompare(bId)).slice(0, 4)
+    const total = influences.reduce((sum, [, weight]) => sum + weight, 0)
+    target.boneWeights = total > 0
+      ? Object.fromEntries(influences.map(([id, weight]) => [id, weight / total]))
+      : undefined
+
+    const colors = sources.flatMap(source => source.color ? [new THREE.Color(source.color)] : [])
+    if (colors.length === 0) target.color = undefined
+    else {
+      const sum = colors.reduce((acc, color) => acc.add(color), new THREE.Color(0, 0, 0))
+      target.color = `#${sum.multiplyScalar(1 / colors.length).getHexString()}`
+    }
+  }
+
   /**
    * Interpolates face corner UVs along an edge (vA -> vB) at parameter t (0..1).
    */

@@ -26,6 +26,12 @@ describe('layoutStore sidebar memory', () => {
     layout.applySidebarForMode('uvpaint')
     expect(layout.showRightSidebar).toBe(false)
     expect(layout.inspectorTab).toBe('props')
+
+    layout.showRightSidebar = true
+    layout.noteSidebarVisible('uvpaint', true)
+    layout.applySidebarForMode('model')
+    layout.applySidebarForMode('uvpaint')
+    expect(layout.showRightSidebar).toBe(false)
   })
 
   it('opens Mesh Tools in Modeling and the UV sheet in UV/Paint', () => {
@@ -48,5 +54,18 @@ describe('layoutStore sidebar memory', () => {
     layout.applySidebarForMode('model')
     layout.applySidebarForMode('rig')
     expect(layout.inspectorTab).toBe('weights')
+  })
+
+  it('moves, closes, and restores the UV and Paint tool shelves', () => {
+    const layout = useLayoutStore()
+
+    layout.moveToolShelf('uv', 120, 80)
+    layout.patchToolShelf('paint', { open: false, minimized: true })
+    expect(layout.toolShelves.uv).toMatchObject({ x: 120, y: 80 })
+    expect(layout.toolShelves.paint).toMatchObject({ open: false, minimized: true })
+
+    layout.resetLayout()
+    expect(layout.toolShelves.uv).toEqual({ open: true, minimized: false, x: 12, y: 12 })
+    expect(layout.toolShelves.paint).toEqual({ open: true, minimized: false, x: 12, y: 12 })
   })
 })

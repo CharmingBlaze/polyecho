@@ -19,6 +19,8 @@ The renderer (Vue, Three.js, Pinia) is bundled into `dist/` by Vite. Those packa
 
 `electron-builder` uses `build/icon.ico` (PNG-in-ICO from the favicon crystal). `npm run icon` regenerates it. Window chrome loads `public/icon.ico` (copied into `dist/` on build). If `release/win-unpacked` is locked (running app, Defender), packaging fails with `EPERM` on rename; close PolyEcho and delete `release/`, or pass `--config.directories.output` to a writable folder.
 
+CI builds unpacked desktop packages on native Windows, Linux, and macOS runners (`--win dir`, `--linux dir`, `--mac dir`). A package is accepted only when a non-empty `app.asar` exists under `release/`. This is a packaging smoke check, not a renderer interaction test; use the manual production flow in `docs/PRODUCTION.md` for UI verification.
+
 The first `npm run dev` downloads the Electron Chromium binary (can take a few minutes). If the window never appears, run `npx electron .` after Vite is up on port 5180 and read the error.
 
 ## Layout

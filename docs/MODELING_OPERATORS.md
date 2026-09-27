@@ -57,12 +57,13 @@ Live controls sit next to Space / Pivot in the app header. Magnet + chevron: gri
 
 | Key | Tool | Operator Class | Description |
 | :--- | :--- | :--- | :--- |
-| **`G`** | Grab / Move | `MoveOperator` | Translates selection along view plane or locked axes (`X`/`Y`/`Z`). **Ctrl**: increment snap. Viewport **Vertex Snap** / **Edge Midpoint**: rigid snap of the whole selection to the closest unused vertex or edge midpoint. |
+| **`G`** | Grab / Move | `MoveOperator` | Translates selection along view plane or locked axes (`X`/`Y`/`Z`). **Ctrl**: increment snap. Viewport **Vertex Snap** / **Edge Midpoint**: rigid snap of the whole selection to the closest unused vertex or edge midpoint. **O** toggles proportional editing (also Rotate and Scale): connected verts inside the radius follow with a smooth falloff. Scroll changes the radius. The Tools panel Falloff switch remembers it. |
 | **`R`** | Rotate | `RotateOperator` | Rotates selection around pivot axis based on angular pointer delta. |
 | **`S`** | Scale | `ScaleOperator` | Scales selection uniformly or along constrained axes. |
 | **`E`** | Extrude | `ExtrudeOperator` | Duplicates and projects boundary topology along face normals. **`I`** individual, **`M`** manifold (dissolve coplanar side walls after the move). |
 | **`I`** | Inset | `InsetOperator` | Region inset (connected faces share one inner loop). Mouse = thickness from click. **`I`** individual, **`O`** outset, **`B`** boundary, **Ctrl** depth. |
 | **`Ctrl+B`** | Bevel | `BevelOperator` | Splits sharp edges/vertices into chamfered/rounded bevel strips. |
+|  | Bridge | `BridgeOperator` | Two edge loops of equal length. The strip previews immediately. Drag sets segments, scroll sets twist, click confirms one undo step. A mismatched pair cancels with nothing recorded. |
 | **`K`** | Knife Tool | `KnifeOperator` | Raycasts onto visible faces to cut arbitrary edges and vertices. |
 | **`Ctrl+R`**| Loop Cut | `LoopCutOperator` | Detects even n-gon edge rings (quads, hexes, …) and splits with interactive slide + scroll wheel count. Odd faces (tris) still stop the ring. |
 | **`Shift+G`** | Edge Slide | `EdgeSlideOperator` | Slides selected edges along neighboring rails. |
@@ -136,6 +137,18 @@ UI: header magnet chevron (`HeaderMenu.vue`). Flags were historically unused exc
 Do not snap each vertex independently (selection would squash). Skip edge midpoints if either endpoint is moving.
 
 ---
+
+## Blockbench face topology
+
+The document stays `MeshObject` / half-edges. What matches Blockbench is the face, not their vertex dictionary.
+
+- A cube or plane is quads with shared corners, the same as one Blockbench cube. A Blockbench import keeps each cube as its own mesh, so corners are not welded to the next cube.
+- Viewport wireframe, the material Wireframe checkbox, and onion skins draw those face boundaries. The indigo wireframe is not a second mesh of triangles.
+- Extrude, inset, bevel, loop cut, knife, bridge, grid fill, fill, dissolve, merge, solidify, and subdivide edit the face loop. Extrude and bevel work on any mesh. Extrude keeps a triangle, quad, or n-gon cap and adds quad walls; a flat triangle patch extrudes as one outline. Bevel chamfers manifold edges on quads and on triangle corners (a cylinder rim as well as a cube). A face stored as a flat triangle fan is beveled along that outline, not along every spoke. Strips are quads. A corner where the chamfer meets three edges stays a triangle. A cube face stays quads: extrude and inset add side quads, bevel adds quad strips, loop cut and subdivide split quads into quads. A knife point inside a quad cuts one chord, so the face becomes two quads instead of a triangle fan. Subdivide on a longer face prefers quads into the center; only an odd remainder is a triangle. A knife point inside a triangle, and an edge-bevel corner where three edges meet, stay triangles.
+- Boolean runs on triangles internally, then merges coplanar pairs back into quads so an uncut cube face does not keep a diagonal.
+- GLB and OBJ import do the same: `weldImportedMesh` welds coincident corners and folds coplanar triangle pairs back into quads, so a cube exported as GLB comes back as six quads on eight vertices. OBJ export writes the face loops as-is.
+- Triangulate, Poke, and Connect are the tools that store that diagonal. After they run, it is a real edge and every tool above will see it.
+- Cylinder, cone, prism, and circle caps are one face each. Cone sides, pyramid sides, and wedge ends are real triangles because they meet at a point. Sphere and capsule poles are triangles; their bands are quads. An icosphere is triangles, and its subdivision count is applied. Cube, plane, torus, tube, wall, stairs, and arch faces are quads.
 
 ## Blockbench `js/modeling` (reference, not a port)
 

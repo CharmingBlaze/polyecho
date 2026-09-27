@@ -6,6 +6,7 @@
 
 - Opening **UV / Paint** uses **face** select (`setAppMode('uvpaint')`). Vertex / edge / island stay available (1–4). The UV vs Paint tab is remembered when you leave and come back. Leaving for Modeling restores the last object/vertex/edge/face mode.
 - **Vertex / edge / face** — only those elements. Edge select/drag also moves the welded twin on the other island face (same 3D verts + coincident UVs) and writes `selectedEdgeIds` so the 3D overlay follows.
+- **3D face pick** — selecting a face on the model highlights that face in the UV editor, draws it above any stacked twin, and frames it so the amber move / scale handles can edit it. A click inside that selection drags the face you picked in 3D, even when another face occupies the same UVs.
 - **Island** — click or box-select a face, then grow to the UV island (faces that share a 3D edge whose UV endpoints are welded). Matching UV coordinates alone do not merge stacked faces. See `expandFacesToIslands` in `src/core/uv/UVIslands.ts`.
 - **Transforms** (move, rotate, flip, scale, align) run on `getTargetFaces()`. If nothing is selected, they no-op. They used to rewrite the whole mesh.
 - **Unwrap / pack** — if faces (or an island) are selected, only those faces change. If nothing is selected, the whole mesh is the target (explicit menu action).

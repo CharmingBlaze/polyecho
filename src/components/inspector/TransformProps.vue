@@ -64,7 +64,11 @@ function beginTransformEdit() {
 }
 
 function updateTransform() {
-  projectStore.markGeometryUpdated()
+  projectStore.markObjectTransformUpdated()
+}
+
+function commitRotationScale() {
+  updateTransform()
 }
 
 const rotateAxis = ref<'x' | 'y' | 'z'>('y')
@@ -141,12 +145,9 @@ function handleOriginNumericChange(axis: 'x' | 'y' | 'z', newPos: number) {
   else if (axis === 'z') projectStore.offsetMeshOrigin(activeMesh.value.id, 0, 0, delta, 'Edit Origin Z', { record: false })
 }
 
-function handleSmoothShading(on: boolean) {
-  projectStore.setShadeMode(on ? 'smooth' : 'flat')
-}
-
-function handleShadeByAngle(on: boolean) {
-  projectStore.setShadeMode(on ? 'auto' : 'smooth')
+function chooseShade(mode: 'flat' | 'smooth' | 'auto') {
+  if ((activeMesh.value?.shadeMode || 'flat') === mode) return
+  projectStore.setShadeMode(mode)
 }
 
 function handleAutoSmoothAngle(angle: number) {
@@ -154,7 +155,6 @@ function handleAutoSmoothAngle(angle: number) {
 }
 
 const objectShade = computed(() => activeMesh.value?.shadeMode || 'flat')
-const smoothShadingOn = computed(() => objectShade.value !== 'flat')
 const autoSmoothAngle = computed(() => activeMesh.value?.autoSmoothAngle ?? 30)
 
 function toggleOriginMode() {
@@ -185,32 +185,32 @@ function toggleOriginMode() {
 
     <div v-if="activeItem" class="flex flex-col">
       <UiSection v-if="activeMesh" title="Shading" blender-icon="shading-solid" :default-open="true">
-        <label class="flex items-start justify-between gap-3 py-0.5 cursor-pointer">
-          <div class="min-w-0">
-            <span class="text-[11px] font-medium text-ui-textPrimary">Smooth shading</span>
-            <p class="text-[10px] leading-snug text-ui-textMuted">On interpolates vertex normals. Off keeps faceted flat faces.</p>
-          </div>
-          <input
-            type="checkbox"
-            class="mt-0.5 rounded-xs text-amber-500 cursor-pointer"
-            :checked="smoothShadingOn"
-            :title="smoothShadingOn ? 'Smooth shading on — click to shade flat' : 'Smooth shading off — click to shade smooth'"
-            @change="handleSmoothShading(($event.target as HTMLInputElement).checked)"
-          >
-        </label>
-        <label
-          v-if="smoothShadingOn"
-          class="flex items-center justify-between gap-2 pt-1 cursor-pointer"
-        >
-          <span class="text-[10px] text-ui-textSecondary">Keep sharp edges by angle</span>
-          <input
-            type="checkbox"
-            class="rounded-xs text-amber-500 cursor-pointer"
-            :checked="objectShade === 'auto'"
-            title="Shade Smooth by Angle"
-            @change="handleShadeByAngle(($event.target as HTMLInputElement).checked)"
-          >
-        </label>
+        <nav class="inspector-seg is-stretch" aria-label="Object shading">
+          <button
+            type="button"
+            class="inspector-seg-btn"
+            :class="{ 'is-active': objectShade === 'flat' }"
+            :aria-pressed="objectShade === 'flat'"
+            title="Flat — each face keeps its own normal"
+            @click="chooseShade('flat')"
+          >Flat</button>
+          <button
+            type="button"
+            class="inspector-seg-btn"
+            :class="{ 'is-active': objectShade === 'smooth' }"
+            :aria-pressed="objectShade === 'smooth'"
+            title="Smooth — interpolate vertex normals"
+            @click="chooseShade('smooth')"
+          >Smooth</button>
+          <button
+            type="button"
+            class="inspector-seg-btn"
+            :class="{ 'is-active': objectShade === 'auto' }"
+            :aria-pressed="objectShade === 'auto'"
+            title="Smooth, but edges sharper than the angle stay flat"
+            @click="chooseShade('auto')"
+          >Angle</button>
+        </nav>
         <UiNumberField
           v-if="objectShade === 'auto'"
           class="w-full"
@@ -244,9 +244,9 @@ function toggleOriginMode() {
             <span>Rotation (°)</span>
           </div>
           <div class="grid grid-cols-3 gap-1">
-            <UiNumberField v-model="activeItem.rotation.x" label="X" label-color="text-rose-400" :step="1" :precision="1" @before-change="beginTransformEdit" @change="updateTransform" />
-            <UiNumberField v-model="activeItem.rotation.y" label="Y" label-color="text-emerald-400" :step="1" :precision="1" @before-change="beginTransformEdit" @change="updateTransform" />
-            <UiNumberField v-model="activeItem.rotation.z" label="Z" label-color="text-sky-400" :step="1" :precision="1" @before-change="beginTransformEdit" @change="updateTransform" />
+            <UiNumberField v-model="activeItem.rotation.x" label="X" label-color="text-rose-400" :step="1" :precision="1" @before-change="beginTransformEdit" @change="updateTransform" @commit="commitRotationScale" />
+            <UiNumberField v-model="activeItem.rotation.y" label="Y" label-color="text-emerald-400" :step="1" :precision="1" @before-change="beginTransformEdit" @change="updateTransform" @commit="commitRotationScale" />
+            <UiNumberField v-model="activeItem.rotation.z" label="Z" label-color="text-sky-400" :step="1" :precision="1" @before-change="beginTransformEdit" @change="updateTransform" @commit="commitRotationScale" />
           </div>
         </div>
 
@@ -256,18 +256,18 @@ function toggleOriginMode() {
             <span>Scale</span>
           </div>
           <div class="grid grid-cols-3 gap-1">
-            <UiNumberField v-model="activeItem.scale.x" label="X" label-color="text-rose-400" :step="0.05" @before-change="beginTransformEdit" @change="updateTransform" />
-            <UiNumberField v-model="activeItem.scale.y" label="Y" label-color="text-emerald-400" :step="0.05" @before-change="beginTransformEdit" @change="updateTransform" />
-            <UiNumberField v-model="activeItem.scale.z" label="Z" label-color="text-sky-400" :step="0.05" @before-change="beginTransformEdit" @change="updateTransform" />
+            <UiNumberField v-model="activeItem.scale.x" label="X" label-color="text-rose-400" :step="0.05" @before-change="beginTransformEdit" @change="updateTransform" @commit="commitRotationScale" />
+            <UiNumberField v-model="activeItem.scale.y" label="Y" label-color="text-emerald-400" :step="0.05" @before-change="beginTransformEdit" @change="updateTransform" @commit="commitRotationScale" />
+            <UiNumberField v-model="activeItem.scale.z" label="Z" label-color="text-sky-400" :step="0.05" @before-change="beginTransformEdit" @change="updateTransform" @commit="commitRotationScale" />
           </div>
         </div>
       </UiSection>
 
       <UiSection
         v-if="showObjectSymmetry"
-        v-model:is-open="symmetryOpen"
         title="Flip & rotate"
         :icon="FlipHorizontal"
+        v-model:is-open="symmetryOpen"
       >
         <div class="flex items-center gap-1">
           <span class="text-[9.5px] text-ui-textMuted font-semibold w-9 shrink-0">Flip</span>
@@ -297,8 +297,8 @@ function toggleOriginMode() {
           <UiButton size="xs" class="flex-1" :active="rotateAxis === 'y'" @click="rotateAxis = 'y'">Y</UiButton>
           <UiButton size="xs" class="flex-1" :active="rotateAxis === 'z'" @click="rotateAxis = 'z'">Z</UiButton>
           <UiNumberField
-            v-model="rotateAmount"
             class="w-16 shrink-0"
+            v-model="rotateAmount"
             label="°"
             :step="15"
             :precision="1"
@@ -314,16 +314,16 @@ function toggleOriginMode() {
 
       <UiSection
         v-if="toolStore.appMode === 'model' || toolStore.appMode === 'blockout'"
-        v-model:is-open="originOpen"
         title="Origin"
         :icon="Crosshair"
+        v-model:is-open="originOpen"
       >
         <template #actions>
           <UiButton
             size="xs"
             :variant="toolStore.selectMode === 'origin' ? 'accent' : 'default'"
-            :title="toolStore.selectMode === 'origin' ? 'Exit Origin Edit Mode' : 'Enter Interactive 3D Origin Edit Mode'"
             @click="toggleOriginMode"
+            :title="toolStore.selectMode === 'origin' ? 'Exit Origin Edit Mode' : 'Enter Interactive 3D Origin Edit Mode'"
           >
             <Crosshair class="w-3 h-3" />
             <span>{{ toolStore.selectMode === 'origin' ? 'Done' : 'Edit' }}</span>
@@ -335,13 +335,13 @@ function toggleOriginMode() {
           class="px-2 py-1.5 bg-amber-950/30 border border-amber-500/40 rounded-xs text-[10.5px] text-amber-300 font-medium flex items-center justify-between"
         >
           <div class="flex items-center gap-1.5">
-            <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+            <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
             <span>Drag the gizmo</span>
           </div>
           <button
             type="button"
-            class="px-2 py-0.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xs text-[10px] cursor-pointer"
             @click="toolStore.selectMode = 'object'"
+            class="px-2 py-0.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xs text-[10px] cursor-pointer"
           >
             Done
           </button>
@@ -376,18 +376,18 @@ function toggleOriginMode() {
 
         <div class="text-[9.5px] text-ui-textMuted font-semibold">Snap to</div>
         <div class="grid grid-cols-3 gap-1">
-          <UiButton size="xs" title="Snap pivot to mesh bounding box center" @click="handleOriginPreset('center')">Center</UiButton>
-          <UiButton size="xs" title="Snap pivot to mesh bottom center (Base / Floor)" @click="handleOriginPreset('bottom')">Bottom</UiButton>
-          <UiButton size="xs" title="Snap pivot to mesh top center" @click="handleOriginPreset('top')">Top</UiButton>
-          <UiButton size="xs" title="Snap pivot to Left face center (-X)" @click="handleOriginPreset('min_x')">−X</UiButton>
-          <UiButton size="xs" title="Snap pivot to Right face center (+X)" @click="handleOriginPreset('max_x')">+X</UiButton>
-          <UiButton size="xs" title="Snap pivot to World Origin (0, 0, 0)" @click="handleOriginPreset('world_zero')">World</UiButton>
-          <UiButton size="xs" title="Snap pivot to Front face center (-Z)" @click="handleOriginPreset('min_z')">−Z</UiButton>
-          <UiButton size="xs" title="Snap pivot to Back face center (+Z)" @click="handleOriginPreset('max_z')">+Z</UiButton>
-          <UiButton size="xs" title="Snap pivot to currently selected Vertices, Edges, or Faces" @click="handleOriginPreset('selection')">To Sel</UiButton>
-          <UiButton size="xs" title="Snap pivot to the 3D cursor" @click="handleOriginToCursor">To Cursor</UiButton>
+          <UiButton @click="handleOriginPreset('center')" size="xs" title="Snap pivot to mesh bounding box center">Center</UiButton>
+          <UiButton @click="handleOriginPreset('bottom')" size="xs" title="Snap pivot to mesh bottom center (Base / Floor)">Bottom</UiButton>
+          <UiButton @click="handleOriginPreset('top')" size="xs" title="Snap pivot to mesh top center">Top</UiButton>
+          <UiButton @click="handleOriginPreset('min_x')" size="xs" title="Snap pivot to Left face center (-X)">−X</UiButton>
+          <UiButton @click="handleOriginPreset('max_x')" size="xs" title="Snap pivot to Right face center (+X)">+X</UiButton>
+          <UiButton @click="handleOriginPreset('world_zero')" size="xs" title="Snap pivot to World Origin (0, 0, 0)">World</UiButton>
+          <UiButton @click="handleOriginPreset('min_z')" size="xs" title="Snap pivot to Front face center (-Z)">−Z</UiButton>
+          <UiButton @click="handleOriginPreset('max_z')" size="xs" title="Snap pivot to Back face center (+Z)">+Z</UiButton>
+          <UiButton @click="handleOriginPreset('selection')" size="xs" title="Snap pivot to currently selected Vertices, Edges, or Faces">To Sel</UiButton>
+          <UiButton @click="handleOriginToCursor" size="xs" title="Snap pivot to the 3D cursor">To Cursor</UiButton>
         </div>
-        <UiButton size="xs" class="w-full" title="Recenter mesh geometry around its local origin" @click="handleGeometryToOrigin">
+        <UiButton @click="handleGeometryToOrigin" size="xs" class="w-full" title="Recenter mesh geometry around its local origin">
           Geometry to origin
         </UiButton>
       </UiSection>
@@ -395,8 +395,8 @@ function toggleOriginMode() {
       <UiSection v-if="activeMesh && toolStore.appMode === 'model'" title="Parent" :icon="Link" :default-open="false">
         <select
           :value="activeMesh.parentId || ''"
-          class="w-full bg-ui-surface border border-ui-borderDefault rounded-xs px-2 py-1 text-[11px] text-ui-textPrimary focus:outline-none focus:border-ui-accent cursor-pointer"
           @change="setParent(($event.target as HTMLSelectElement).value)"
+          class="w-full bg-ui-surface border border-ui-borderDefault rounded-xs px-2 py-1 text-[11px] text-ui-textPrimary focus:outline-none focus:border-ui-accent cursor-pointer"
         >
           <option value="">Scene root</option>
           <option v-for="m in parentOptions" :key="m.id" :value="m.id">{{ m.name }}</option>
@@ -405,11 +405,11 @@ function toggleOriginMode() {
 
       <UiSection v-if="showObjectSymmetry" title="Actions" :icon="Wrench" :default-open="false">
         <div class="grid grid-cols-2 gap-1">
-          <UiButton size="xs" title="Open this object in the UV / Paint workspace" @click="openUvWorkspace">
+          <UiButton @click="openUvWorkspace" size="xs" title="Open this object in the UV / Paint workspace">
             <ImageIcon class="w-3 h-3 text-ui-textMuted" />
             <span>UV / Paint</span>
           </UiButton>
-          <UiButton size="xs" title="Fit a skeleton to this object" @click="toolStore.setAppMode('rig')">
+          <UiButton @click="toolStore.setAppMode('rig')" size="xs" title="Fit a skeleton to this object">
             <span>Rig</span>
           </UiButton>
         </div>

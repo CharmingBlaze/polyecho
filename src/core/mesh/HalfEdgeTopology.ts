@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { polygonAreaVector } from '../geometry/PolygonGeometry'
 import { EditableMesh, MeshEdge } from './MeshKernel'
 
 export interface BoundaryEdgeLoop {
@@ -99,19 +100,9 @@ export class HalfEdgeTopology {
       const face = mesh.faces.get(fId)
       if (!face || face.vertexIds.length < 3) continue
 
-      const p0 = mesh.vertices.get(face.vertexIds[0])?.position
-      const p1 = mesh.vertices.get(face.vertexIds[1])?.position
-      const p2 = mesh.vertices.get(face.vertexIds[2])?.position
-
-      if (p0 && p1 && p2) {
-        const vA = p1.clone().sub(p0)
-        const vB = p2.clone().sub(p0)
-        const cross = new THREE.Vector3().crossVectors(vA, vB)
-        const area = cross.length() * 0.5
-        if (area > 0.000001) {
-          totalNormal.add(cross.normalize().multiplyScalar(area))
-        }
-      }
+      const points = face.vertexIds.map(id => mesh.vertices.get(id)?.position)
+      if (points.some(point => !point)) continue
+      totalNormal.add(polygonAreaVector(points as THREE.Vector3[]))
     }
 
     if (totalNormal.lengthSq() < 0.0001) {

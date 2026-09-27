@@ -30,33 +30,70 @@ export function triangleQuality(a: THREE.Vector2, b: THREE.Vector2, c: THREE.Vec
   return Math.abs(orient(a, b, c)) * 2 * Math.sqrt(3) / Math.max(1e-20, a.distanceToSquared(b) + b.distanceToSquared(c) + c.distanceToSquared(a))
 }
 
-function isPlanarConvexQuad(mesh: EditableMesh, ids: number[]) {
+function isPlanarConvexQuad(mesh: EditableMesh, ids: number[], planarTolerance = 1e-6) {
   const points = ids.map(id => mesh.vertices.get(id)!.position)
   const n = points[1].clone().sub(points[0]).cross(points[2].clone().sub(points[0]))
   const scale = Math.max(...points.map(p => p.distanceTo(points[0])), 1e-8)
   if (n.lengthSq() < scale ** 4 * 1e-14) return false
   n.normalize()
-  if (Math.abs(points[3].clone().sub(points[0]).dot(n)) > scale * 1e-6) return false
+  if (Math.abs(points[3].clone().sub(points[0]).dot(n)) > scale * planarTolerance) return false
   return points.every((a, i) => points[(i + 1) % 4].clone().sub(a).cross(points[(i + 2) % 4].clone().sub(points[(i + 1) % 4])).dot(n) > scale * scale * 1e-10)
 }
 
-export function addSurfacePatch(mesh: EditableMesh, ids: number[]) {
-  const faces = ids.length === 4 && !isPlanarConvexQuad(mesh, ids) ? [[ids[0], ids[1], ids[2]], [ids[0], ids[2], ids[3]]] : [ids]
-  faces.forEach(face => mesh.addFace(face, face.map(() => new THREE.Vector2()), 0))
+/** Sum of corner deviations from 90°. A split rectangle scores 0; a pair joined across the wrong edge scores high. */
+function quadShapeError(mesh: EditableMesh, ids: number[]) {
+  const points = ids.map(id => mesh.vertices.get(id)!.position)
+  let error = 0
+  for (let i = 0; i < 4; i++) {
+    const prev = points[(i + 3) % 4].clone().sub(points[i]), next = points[(i + 1) % 4].clone().sub(points[i])
+    error += Math.abs(prev.angleTo(next) - Math.PI / 2)
+  }
+  return error
 }
 
-/** Only merge coplanar convex pairs. Curved or twisted patches keep their explicit diagonal. */
-export function mergePlanarPairs(mesh: EditableMesh) {
-  for (const edge of [...mesh.edges.values()]) {
-    if (edge.faceIds.length !== 2) continue
+/** One loop, one face. A quad stays a quad when it bends; the draw split is not stored. */
+export function addSurfacePatch(mesh: EditableMesh, ids: number[]) {
+  mesh.addFace(ids, ids.map(() => new THREE.Vector2()), 0)
+}
+
+/**
+ * Only merge coplanar convex pairs. Curved or twisted patches keep their explicit diagonal.
+ * Pairs that meet on a seam, sharp edge, UV cut, or material change stay split.
+ * Best-shaped pairs merge first, so a triangulated grid folds back along its original diagonals.
+ */
+export function mergePlanarPairs(mesh: EditableMesh, options: { planarTolerance?: number } = {}) {
+  const uvEps = 1e-5
+  const candidates: { a: number; b: number; quad: number[]; uvs: THREE.Vector2[]; error: number }[] = []
+  for (const edge of mesh.edges.values()) {
+    if (edge.faceIds.length !== 2 || edge.seam || edge.sharp) continue
     const a = mesh.faces.get(edge.faceIds[0]), b = mesh.faces.get(edge.faceIds[1])
-    if (!a || !b || a.vertexIds.length !== 3 || b.vertexIds.length !== 3) continue
+    if (!a || !b || a.vertexIds.length !== 3 || b.vertexIds.length !== 3 || a.materialIndex !== b.materialIndex) continue
     const idx = a.vertexIds.findIndex((v, i) => (v === edge.v1 && a.vertexIds[(i + 1) % 3] === edge.v2) || (v === edge.v2 && a.vertexIds[(i + 1) % 3] === edge.v1))
     if (idx < 0) continue
-    const first = a.vertexIds[idx], second = a.vertexIds[(idx + 1) % 3], third = a.vertexIds[(idx + 2) % 3], fourth = b.vertexIds.find(v => v !== first && v !== second)!
-    const quad = [third, first, fourth, second]
-    if (!isPlanarConvexQuad(mesh, quad)) continue
-    mesh.removeFace(a.id); mesh.removeFace(b.id); addSurfacePatch(mesh, quad)
+    const first = a.vertexIds[idx], second = a.vertexIds[(idx + 1) % 3], third = a.vertexIds[(idx + 2) % 3]
+    const bFirst = b.vertexIds.indexOf(first), bSecond = b.vertexIds.indexOf(second)
+    if (bFirst < 0 || bSecond < 0 || b.vertexIds[(bSecond + 1) % 3] !== first) continue
+    const bFourth = 3 - bFirst - bSecond, fourth = b.vertexIds[bFourth]
+    const uvA = (i: number) => a.uvs[i] ?? new THREE.Vector2(), uvB = (i: number) => b.uvs[i] ?? new THREE.Vector2()
+    if (uvA(idx).distanceTo(uvB(bFirst)) > uvEps || uvA((idx + 1) % 3).distanceTo(uvB(bSecond)) > uvEps) continue
+    // Start on a diagonal endpoint so a 0–2 fan recreates the file's two triangles.
+    const quad = [first, fourth, second, third]
+    if (!isPlanarConvexQuad(mesh, quad, options.planarTolerance)) continue
+    candidates.push({
+      a: a.id, b: b.id, quad,
+      uvs: [uvA(idx), uvB(bFourth), uvA((idx + 1) % 3), uvA((idx + 2) % 3)].map(uv => uv.clone()),
+      error: quadShapeError(mesh, quad)
+    })
+  }
+  candidates.sort((x, y) => x.error - y.error)
+  const used = new Set<number>()
+  for (const { a, b, quad, uvs } of candidates) {
+    if (used.has(a) || used.has(b)) continue
+    used.add(a); used.add(b)
+    const bEdges = [...mesh.faces.get(b)!.edgeIds]
+    mesh.removeFace(b, true)
+    mesh.replaceFace(a, quad, uvs)
+    for (const id of bEdges) if (mesh.edges.get(id)?.faceIds.length === 0) mesh.removeEdge(id)
   }
 }
 

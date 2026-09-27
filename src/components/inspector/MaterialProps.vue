@@ -5,9 +5,12 @@ import { useToolStore } from '../../stores/toolStore'
 import { useLayoutStore } from '../../stores/layoutStore'
 import UiSection from '../ui/UiSection.vue'
 import UiButton from '../ui/UiButton.vue'
+import UiNumberField from '../ui/UiNumberField.vue'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import { DEFAULT_PALETTES, loadCustomPalettes, saveCustomPalettes } from '../../utils/color'
-import type { Palette } from '../../types/texture'
+import type { MaterialFill, MaterialGradient, Palette } from '../../types/texture'
+import { defaultGradient, resolveMaterialFill } from '../../core/materials/MaterialFill'
+import { resolveTextureTiling } from '../../core/materials/TextureTiling'
 import { 
   Plus, 
   Trash2, 
@@ -25,10 +28,12 @@ import {
   SlidersHorizontal
 } from 'lucide-vue-next'
 import ImportTextureModal from '../modals/ImportTextureModal.vue'
+import GradientEditor from './GradientEditor.vue'
 import { DEFAULT_GRADIENT_PRESETS, loadCustomGradients, saveCustomGradients, SavedGradient } from '../../utils/gradient'
-import { 
-  DITHER_PRESETS, 
+import {
+  DITHER_LOOK_GROUPS,
   DitherPreset, 
+  ditherPresetsInGroup,
   renderDitherCanvasPreview
 } from '../../utils/dithering'
 
@@ -58,6 +63,64 @@ const activeMaterial = computed(() => projectStore.activeMaterial)
 const isAssignedToActiveMesh = computed(() => {
   return activeMesh.value?.materialId === projectStore.activeMaterialId
 })
+
+const materialFill = computed(() => resolveMaterialFill(activeMaterial.value))
+const materialTiling = computed(() => resolveTextureTiling(activeMaterial.value))
+
+const liveGradient = computed(() => activeMaterial.value?.gradient || defaultGradient(activeMaterial.value?.color || '#ffffff'))
+
+function chooseFill(fill: MaterialFill) {
+  if (!activeMaterial.value) return
+  projectStore.setMaterialFill(activeMaterial.value.id, fill)
+}
+
+function beginTextureTilingEdit() {
+  projectStore.recordState('Texture Tiling')
+}
+
+function updateTextureTiling(axis: 'x' | 'y', value: number) {
+  if (!activeMaterial.value) return
+  const current = materialTiling.value
+  projectStore.setMaterialTextureTiling(
+    activeMaterial.value.id,
+    axis === 'x' ? value : current.tileX,
+    axis === 'y' ? value : current.tileY,
+    { record: false },
+  )
+}
+
+function resetTextureTiling() {
+  if (!activeMaterial.value) return
+  projectStore.setMaterialTextureTiling(activeMaterial.value.id, 1, 1)
+}
+
+function nudgeTextureTiling(axis: 'x' | 'y', amount: number) {
+  if (!activeMaterial.value) return
+  const current = materialTiling.value
+  projectStore.setMaterialTextureTiling(
+    activeMaterial.value.id,
+    axis === 'x' ? current.tileX + amount : current.tileX,
+    axis === 'y' ? current.tileY + amount : current.tileY,
+  )
+}
+
+function writeGradient(next: MaterialGradient) {
+  if (!activeMaterial.value) return
+  activeMaterial.value.gradient = next
+  projectStore.markGeometryUpdated()
+}
+
+function useGradientPreset(preset: SavedGradient) {
+  if (!activeMaterial.value) return
+  projectStore.recordState(`Apply Gradient (${preset.name})`)
+  activeMaterial.value.fill = 'gradient'
+  activeMaterial.value.gradient = {
+    kind: preset.type === 'Radial' ? 'radial' : 'linear',
+    angle: preset.angle,
+    stops: preset.stops.map(stop => ({ color: stop.color, offset: stop.position / 100 }))
+  }
+  projectStore.markGeometryUpdated()
+}
 
 const boundTexture = computed(() => {
   const id = activeMaterial.value?.textureId
@@ -166,10 +229,12 @@ function commitRename() {
 
 // Material slot actions
 function handleAddMaterial() {
+  const mesh = projectStore.activeMesh
   const newMat = projectStore.createMaterial()
   newMat.shading = 'pbr'
   newMat.roughness = 0.7
   newMat.metalness = 0.05
+  if (mesh) projectStore.assignMaterialToActiveMesh(newMat.id)
 }
 
 function handleDuplicateMaterial() {
@@ -262,12 +327,13 @@ function applyMaterialPreset(p: MaterialPreset) {
   activeMaterial.value.metalness = p.metalness
   activeMaterial.value.shading = p.shading
   if (p.hasTexture) {
+    activeMaterial.value.fill = 'image'
     if (!activeMaterial.value.textureId) {
       const fallback = projectStore.textures[0]?.id
       if (fallback) projectStore.applyTextureToMaterial(activeMaterial.value.id, fallback, { record: false })
     }
   } else {
-    projectStore.applyTextureToMaterial(activeMaterial.value.id, null, { record: false })
+    activeMaterial.value.fill = 'solid'
   }
   if (p.emissive) {
     activeMaterial.value.emissive = p.emissive
@@ -398,6 +464,16 @@ function updateDitherPreview() {
     mat.color || '#38bdf8',
     mat.ditherChannel || 'rgb'
   )
+}
+
+function ditherLookActive(preset: DitherPreset) {
+  const mat = activeMaterial.value
+  if (!mat?.dither) return false
+  return (mat.ditherPattern || 'bayer4x4') === preset.pattern
+    && (mat.ditherLevel ?? 32) === preset.ditherLevel
+    && (mat.colorDepth ?? 32) === preset.colorDepth
+    && (mat.ditherScale ?? 1) === preset.scale
+    && (mat.ditherChannel || 'rgb') === (preset.channel || 'rgb')
 }
 
 function applyDitherPreset(preset: DitherPreset) {
@@ -622,7 +698,10 @@ function sampleGradientAt(t: number, curve: string): { r: number; g: number; b: 
     adjustedT = Math.floor(adjustedT * 4) / 3
   }
 
-  const sorted = [...gradientStops.value].sort((a, b) => a.pos - b.pos)
+  const fromMaterial = activeMaterial.value?.fill === 'gradient' ? activeMaterial.value.gradient?.stops : null
+  const sorted = fromMaterial?.length
+    ? fromMaterial.map(stop => ({ pos: stop.offset, color: stop.color })).sort((a, b) => a.pos - b.pos)
+    : [...gradientStops.value].sort((a, b) => a.pos - b.pos)
   if (sorted.length === 0) return { r: 255, g: 255, b: 255 }
   if (adjustedT <= sorted[0].pos) return hexToRgb(sorted[0].color)
   if (adjustedT >= sorted[sorted.length - 1].pos) return hexToRgb(sorted[sorted.length - 1].color)
@@ -911,9 +990,9 @@ function rgbToHex(r: number, g: number, b: number): string {
       <div class="flex items-center gap-1">
         <select
           :value="projectStore.activeMaterialId"
+          @change="projectStore.selectMaterial(($event.target as HTMLSelectElement).value)"
           class="inspector-select flex-1 font-mono"
           title="Inspect a material. Use assigns it to the object."
-          @change="projectStore.selectMaterial(($event.target as HTMLSelectElement).value)"
         >
           <option v-for="mat in projectStore.materials" :key="mat.id" :value="mat.id">
             {{ mat.name }}{{ activeMesh?.materialId === mat.id ? ' · object' : '' }}
@@ -929,18 +1008,18 @@ function rgbToHex(r: number, g: number, b: number): string {
           <Check v-if="isAssignedToActiveMesh" class="w-3 h-3" />
           <span>{{ isAssignedToActiveMesh ? 'In use' : 'Use' }}</span>
         </UiButton>
-        <UiButton size="xs" variant="ghost" title="New slot — does not assign" @click="handleAddMaterial">
+        <UiButton size="xs" variant="ghost" @click="handleAddMaterial" title="New material on the active object. Then pick Color, Gradient, or Image.">
           <Plus class="w-3 h-3" />
         </UiButton>
-        <UiButton size="xs" variant="ghost" title="Duplicate — does not assign" @click="handleDuplicateMaterial">
+        <UiButton size="xs" variant="ghost" @click="handleDuplicateMaterial" title="Duplicate — does not assign">
           <Copy class="w-3 h-3" />
         </UiButton>
         <UiButton
           size="xs"
           variant="ghost"
           :disabled="projectStore.materials.length <= 1"
-          title="Delete material"
           @click="handleDeleteMaterial"
+          title="Delete material"
         >
           <Trash2 class="w-3 h-3" />
         </UiButton>
@@ -949,11 +1028,11 @@ function rgbToHex(r: number, g: number, b: number): string {
       <div v-if="editingName && activeMaterial" class="flex items-center gap-1">
         <input
           v-model="matNameInput"
-          class="flex-1 h-5.5 bg-ui-surface text-ui-textPrimary px-2 rounded-xs font-mono text-xs border border-ui-accent focus:outline-none"
-          autoFocus
           @blur="commitRename"
           @keydown.enter="commitRename"
-        >
+          class="flex-1 h-5.5 bg-ui-surface text-ui-textPrimary px-2 rounded-xs font-mono text-xs border border-ui-accent focus:outline-none"
+          autoFocus
+        />
         <UiButton size="xs" variant="accent" @click="commitRename">Done</UiButton>
       </div>
       <div v-else class="flex items-center gap-1">
@@ -974,47 +1053,146 @@ function rgbToHex(r: number, g: number, b: number): string {
         class="flex items-center justify-between gap-2 px-1.5 h-6 bg-ui-active border border-ui-borderSubtle rounded-xs"
       >
         <span class="text-[10px] text-ui-textSecondary truncate">Shared · {{ sharedMeshesCount }}</span>
-        <UiButton size="xs" variant="accent" title="Fork for this object" @click="handleMakeMaterialUnique">
+        <UiButton size="xs" variant="accent" @click="handleMakeMaterialUnique" title="Fork for this object">
           Unique
         </UiButton>
       </div>
 
-      <input ref="importTextureInput" type="file" accept="image/*" class="hidden" @change="handleImportTexture">
+      <input ref="importTextureInput" type="file" accept="image/*" class="hidden" @change="handleImportTexture" />
 
-      <div class="flex items-center gap-2">
-        <button
-          type="button"
-          class="w-12 h-12 rounded-xs border border-ui-borderDefault overflow-hidden tex-checker shrink-0 flex items-center justify-center"
-          :class="boundTexture ? 'cursor-pointer hover:border-ui-accent' : 'cursor-default'"
-          :title="boundTexture ? 'Open in Texture tab' : 'No texture'"
-          :disabled="!boundTexture"
-          @click="openBoundTexture"
-        >
-          <img
-            v-if="boundTexture?.dataUrl"
-            :src="boundTexture.dataUrl"
-            class="w-full h-full object-contain [image-rendering:pixelated]"
-            alt=""
+      <div v-if="activeMaterial" class="space-y-1.5">
+        <nav class="inspector-seg is-stretch" aria-label="Material fill">
+          <button
+            v-for="mode in (['solid', 'gradient', 'image'] as const)"
+            :key="mode"
+            type="button"
+            class="inspector-seg-btn"
+            :class="{ 'is-active': materialFill === mode }"
+            :aria-pressed="materialFill === mode"
+            :title="mode === 'solid' ? 'Solid color' : mode === 'gradient' ? 'Gradient' : 'Image'"
+            @click="chooseFill(mode)"
           >
-          <span v-else class="text-[8px] text-ui-textMuted font-mono">None</span>
-        </button>
-        <div class="flex-1 min-w-0 space-y-1">
-          <select
-            v-if="activeMaterial"
-            :value="activeMaterial.textureId || ''"
-            class="inspector-select w-full font-mono truncate"
-            @change="handleSelectMaterialTexture(($event.target as HTMLSelectElement).value || null)"
-          >
-            <option value="">None (tint only)</option>
-            <option v-for="tex in projectStore.textures" :key="tex.id" :value="tex.id">
-              {{ tex.name }} {{ tex.width }}×{{ tex.height }}
-            </option>
-          </select>
-          <div class="grid grid-cols-4 gap-1">
-            <UiButton size="xs" title="Create and bind to this material" @click="showCreateTexModal = true">New</UiButton>
-            <UiButton size="xs" title="Import onto this material" @click="importTextureInput?.click()">Import</UiButton>
-            <UiButton size="xs" :title="`Copy pixels for ${activeMesh?.name || 'object'}`" @click="handleForkTextureForObject">Fork</UiButton>
-            <UiButton size="xs" title="Bind default atlas" @click="handleRestoreAtlasOnMaterial">Atlas</UiButton>
+            {{ mode === 'solid' ? 'Color' : mode === 'gradient' ? 'Gradient' : 'Image' }}
+          </button>
+        </nav>
+
+        <div v-if="materialFill === 'solid'" class="flex items-center gap-2">
+          <input
+            type="color"
+            :value="activeMaterial.color"
+            class="w-6 h-6 rounded-xs cursor-pointer border border-ui-borderDefault bg-transparent p-0 shrink-0"
+            @mousedown="beginMaterialEdit"
+            @input="activeMaterial.color = ($event.target as HTMLInputElement).value; projectStore.markGeometryUpdated()"
+          />
+          <span class="flex-1 font-mono text-[11px] text-ui-textPrimary uppercase truncate">{{ activeMaterial.color }}</span>
+          <span class="w-8 h-5 rounded-xs border border-ui-borderSubtle" :style="{ background: activeMaterial.color }"></span>
+        </div>
+
+        <div v-else-if="materialFill === 'gradient'" class="space-y-1.5">
+          <GradientEditor
+            :gradient="liveGradient"
+            @begin="beginMaterialEdit"
+            @update="writeGradient"
+          />
+          <div class="flex items-center gap-1 overflow-x-auto pb-0.5 custom-scrollbar">
+            <button
+              v-for="preset in allGradientPresets"
+              :key="preset.id"
+              type="button"
+              class="px-1.5 h-5 rounded-xs border border-ui-borderSubtle bg-ui-surface text-[9px] text-ui-textSecondary shrink-0 cursor-pointer hover:text-ui-textPrimary"
+              @click="useGradientPreset(preset)"
+            >
+              {{ preset.name }}
+            </button>
+          </div>
+          <UiButton size="xs" class="w-full" :disabled="!activeMesh" @click="executeGradientBake">Bake onto vertices</UiButton>
+        </div>
+
+        <div v-else class="space-y-1.5">
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="w-12 h-12 rounded-xs border border-ui-borderDefault overflow-hidden tex-checker shrink-0 flex items-center justify-center"
+              :class="boundTexture ? 'cursor-pointer hover:border-ui-accent' : 'cursor-default'"
+              :title="boundTexture ? 'Open in Texture tab' : 'No texture'"
+              :disabled="!boundTexture"
+              @click="openBoundTexture"
+            >
+              <img
+                v-if="boundTexture?.dataUrl"
+                :src="boundTexture.dataUrl"
+                class="w-full h-full object-contain [image-rendering:pixelated]"
+                alt=""
+              />
+              <span v-else class="text-[8px] text-ui-textMuted font-mono">None</span>
+            </button>
+            <div class="flex-1 min-w-0 space-y-1">
+              <select
+                :value="activeMaterial.textureId || ''"
+                @change="handleSelectMaterialTexture(($event.target as HTMLSelectElement).value || null)"
+                class="inspector-select w-full font-mono truncate"
+              >
+                <option value="">No image</option>
+                <option v-for="tex in projectStore.textures" :key="tex.id" :value="tex.id">
+                  {{ tex.name }} {{ tex.width }}×{{ tex.height }}
+                </option>
+              </select>
+              <div class="grid grid-cols-4 gap-1">
+                <UiButton size="xs" @click="showCreateTexModal = true" title="Create and bind to this material">New</UiButton>
+                <UiButton size="xs" @click="importTextureInput?.click()" title="Import onto this material">Import</UiButton>
+                <UiButton size="xs" @click="handleForkTextureForObject" :title="`Copy pixels for ${activeMesh?.name || 'object'}`">Fork</UiButton>
+                <UiButton size="xs" @click="handleRestoreAtlasOnMaterial" title="Bind default atlas">Atlas</UiButton>
+              </div>
+            </div>
+          </div>
+          <div class="rounded-xs border border-ui-borderSubtle bg-ui-surface/60 p-1 space-y-1">
+            <div class="flex items-center justify-between px-0.5">
+              <span class="text-[9px] font-semibold uppercase tracking-wide text-ui-textMuted">Texture repeat</span>
+              <button
+                type="button"
+                class="h-6 min-w-8 px-1.5 rounded-xs border border-ui-borderSubtle bg-ui-input text-[10px] font-mono text-ui-textSecondary hover:border-ui-borderDefault hover:text-ui-textPrimary active:bg-ui-active"
+                title="Reset texture tiling to 1×1"
+                @click="resetTextureTiling"
+              >
+                1×
+              </button>
+            </div>
+            <div class="grid grid-cols-2 gap-1">
+              <div v-for="axis in (['x', 'y'] as const)" :key="axis" class="space-y-0.5">
+                <span class="block px-0.5 text-[9px] text-ui-textSecondary">Tile {{ axis.toUpperCase() }}</span>
+                <div class="grid grid-cols-[1.75rem_minmax(0,1fr)_1.75rem] gap-0.5">
+                  <button
+                    type="button"
+                    class="h-7 rounded-xs border border-ui-borderSubtle bg-ui-input text-sm font-semibold text-ui-textSecondary hover:border-ui-borderDefault hover:text-ui-textPrimary active:bg-ui-active"
+                    :aria-label="`Decrease Tile ${axis.toUpperCase()}`"
+                    :title="`Decrease Tile ${axis.toUpperCase()} by 0.25`"
+                    @click="nudgeTextureTiling(axis, -0.25)"
+                  >
+                    −
+                  </button>
+                  <UiNumberField
+                    class="!h-7 !px-1"
+                    :model-value="axis === 'x' ? materialTiling.tileX : materialTiling.tileY"
+                    :min="0.01"
+                    :max="64"
+                    :step="0.1"
+                    :precision="2"
+                    unit="×"
+                    @before-change="beginTextureTilingEdit"
+                    @update:model-value="updateTextureTiling(axis, $event)"
+                  />
+                  <button
+                    type="button"
+                    class="h-7 rounded-xs border border-ui-borderSubtle bg-ui-input text-sm font-semibold text-ui-textSecondary hover:border-ui-borderDefault hover:text-ui-textPrimary active:bg-ui-active"
+                    :aria-label="`Increase Tile ${axis.toUpperCase()}`"
+                    :title="`Increase Tile ${axis.toUpperCase()} by 0.25`"
+                    @click="nudgeTextureTiling(axis, 0.25)"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1042,8 +1220,8 @@ function rgbToHex(r: number, g: number, b: number): string {
         <select
           v-if="activeMaterial"
           v-model="activeMaterial.shading"
-          class="w-full h-5.5 bg-ui-surface border border-ui-borderDefault rounded-xs px-2 text-[11px] text-ui-textPrimary focus:outline-none focus:border-ui-accent cursor-pointer"
           @mousedown="beginMaterialEdit"
+          class="w-full h-5.5 bg-ui-surface border border-ui-borderDefault rounded-xs px-2 text-[11px] text-ui-textPrimary focus:outline-none focus:border-ui-accent cursor-pointer"
         >
           <option value="pbr">PBR</option>
           <option value="psx">PS1</option>
@@ -1056,16 +1234,16 @@ function rgbToHex(r: number, g: number, b: number): string {
           <option value="unlit">Unlit</option>
         </select>
 
-        <div v-if="activeMaterial" class="flex items-center gap-2">
+        <div v-if="activeMaterial && materialFill === 'image'" class="flex items-center gap-2">
           <input
-            v-model="activeMaterial.color"
             type="color"
-            class="w-6 h-6 rounded-xs cursor-pointer border border-ui-borderDefault bg-transparent p-0 shrink-0"
+            v-model="activeMaterial.color"
             @mousedown="beginMaterialEdit"
             @change="projectStore.markGeometryUpdated()"
-          >
-          <span class="flex-1 font-mono text-[11px] text-ui-textPrimary uppercase truncate">{{ activeMaterial.color }}</span>
-          <UiButton size="xs" title="Reset tint to white" @click="clearMaterialTint">White</UiButton>
+            class="w-6 h-6 rounded-xs cursor-pointer border border-ui-borderDefault bg-transparent p-0 shrink-0"
+          />
+          <span class="flex-1 font-mono text-[11px] text-ui-textPrimary uppercase truncate">Tint {{ activeMaterial.color }}</span>
+          <UiButton size="xs" @click="clearMaterialTint" title="Reset tint to white">White</UiButton>
         </div>
 
         <template v-if="activeMaterial && ['pbr', 'textured', 'flat', 'gouraud'].includes(activeMaterial.shading)">
@@ -1073,19 +1251,19 @@ function rgbToHex(r: number, g: number, b: number): string {
             <span class="text-ui-textSecondary">Roughness</span>
             <span class="font-mono inspector-value">{{ ((activeMaterial.roughness ?? 0.7) * 100).toFixed(0) }}%</span>
           </div>
-          <input v-model.number="activeMaterial.roughness" type="range" min="0" max="1" step="0.01" class="inspector-range" @mousedown="beginMaterialEdit">
+          <input type="range" min="0" max="1" step="0.01" v-model.number="activeMaterial.roughness" @mousedown="beginMaterialEdit" class="inspector-range" />
           <div class="flex items-center justify-between text-[10px] pt-1">
             <span class="text-ui-textSecondary">Metallic</span>
             <span class="font-mono inspector-value">{{ ((activeMaterial.metalness ?? 0.05) * 100).toFixed(0) }}%</span>
           </div>
-          <input v-model.number="activeMaterial.metalness" type="range" min="0" max="1" step="0.01" class="inspector-range" @mousedown="beginMaterialEdit">
+          <input type="range" min="0" max="1" step="0.01" v-model.number="activeMaterial.metalness" @mousedown="beginMaterialEdit" class="inspector-range" />
           <div class="flex items-center justify-between text-[10px] pt-1">
             <span class="text-ui-textSecondary">Emissive</span>
             <span class="font-mono inspector-value">{{ (activeMaterial.emissiveIntensity || 0).toFixed(1) }}×</span>
           </div>
           <div class="flex items-center gap-1.5">
-            <input v-model="activeMaterial.emissive" type="color" class="w-4 h-4 rounded-xs cursor-pointer border border-ui-borderDefault bg-transparent p-0 shrink-0" @mousedown="beginMaterialEdit">
-            <input v-model.number="activeMaterial.emissiveIntensity" type="range" min="0" max="5" step="0.1" class="inspector-range flex-1" @mousedown="beginMaterialEdit">
+            <input type="color" v-model="activeMaterial.emissive" @mousedown="beginMaterialEdit" class="w-4 h-4 rounded-xs cursor-pointer border border-ui-borderDefault bg-transparent p-0 shrink-0" />
+            <input type="range" min="0" max="5" step="0.1" v-model.number="activeMaterial.emissiveIntensity" @mousedown="beginMaterialEdit" class="inspector-range flex-1" />
           </div>
         </template>
       </UiSection>
@@ -1112,7 +1290,7 @@ function rgbToHex(r: number, g: number, b: number): string {
             :title="`${preset.name} (${preset.shading.toUpperCase()})`"
             @click="applyMaterialPreset(preset)"
           >
-            <span class="w-2.5 h-2.5 rounded-full border border-black/40 shrink-0" :style="{ backgroundColor: preset.color }" />
+            <span class="w-2.5 h-2.5 rounded-full border border-black/40 shrink-0" :style="{ backgroundColor: preset.color }"></span>
             <span class="truncate">{{ preset.label }}</span>
           </button>
         </div>
@@ -1123,15 +1301,15 @@ function rgbToHex(r: number, g: number, b: number): string {
           <span class="text-ui-textSecondary">Opacity</span>
           <span class="font-mono text-ui-textAccent">{{ Math.round((activeMaterial.opacity ?? 1.0) * 100) }}%</span>
         </div>
-        <input v-model.number="activeMaterial.opacity" type="range" min="0" max="1" step="0.01" class="inspector-range" @mousedown="beginMaterialEdit">
+          <input type="range" min="0" max="1" step="0.01" v-model.number="activeMaterial.opacity" @mousedown="beginMaterialEdit" class="inspector-range" />
         <div class="grid grid-cols-2 gap-1.5 pt-1">
           <div>
             <label class="text-[9px] text-ui-textMuted block mb-0.5">Mode</label>
             <select
               :value="activeMaterial.blendMode || (activeMaterial.textureId ? 'mask' : 'opaque')"
-              class="w-full h-5.5 bg-ui-surface border border-ui-borderSubtle rounded-xs px-1.5 text-ui-textPrimary text-[10px] focus:outline-none cursor-pointer"
               @change="activeMaterial.blendMode = ($event.target as HTMLSelectElement).value as typeof activeMaterial.blendMode"
               @mousedown="beginMaterialEdit"
+              class="w-full h-5.5 bg-ui-surface border border-ui-borderSubtle rounded-xs px-1.5 text-ui-textPrimary text-[10px] focus:outline-none cursor-pointer"
             >
               <option value="opaque">Opaque</option>
               <option value="mask">Mask</option>
@@ -1142,30 +1320,30 @@ function rgbToHex(r: number, g: number, b: number): string {
           <div>
             <label class="text-[9px] text-ui-textMuted block mb-0.5">Cutoff</label>
             <input
-              v-model.number="activeMaterial.alphaTest"
               type="range"
               min="0"
               max="1"
               step="0.05"
+              v-model.number="activeMaterial.alphaTest"
+              @mousedown="beginMaterialEdit"
               :disabled="(activeMaterial.blendMode || (activeMaterial.textureId ? 'mask' : 'opaque')) !== 'mask'"
               class="inspector-range disabled:opacity-30 mt-2"
-              @mousedown="beginMaterialEdit"
-            >
+            />
           </div>
         </div>
       </UiSection>
 
       <UiSection v-if="activeMaterial" title="Flags" :icon="Layers" :default-open="false">
         <template #actions>
-          <UiButton size="xs" variant="ghost" title="Drop unused slots" @click="purgeUnusedMaterials">Purge</UiButton>
+          <UiButton size="xs" variant="ghost" @click="purgeUnusedMaterials" title="Drop unused slots">Purge</UiButton>
         </template>
         <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
           <span class="text-ui-textSecondary text-[10px]">Double-sided</span>
-          <input v-model="activeMaterial.doubleSided" type="checkbox" class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" @mousedown="beginMaterialEdit">
+          <input type="checkbox" v-model="activeMaterial.doubleSided" @mousedown="beginMaterialEdit" class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
         </label>
         <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
           <span class="text-ui-textSecondary text-[10px]">Wireframe</span>
-          <input v-model="activeMaterial.wireframe" type="checkbox" class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" @mousedown="beginMaterialEdit">
+          <input type="checkbox" v-model="activeMaterial.wireframe" @mousedown="beginMaterialEdit" class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
         </label>
       </UiSection>
     </div>
@@ -1187,65 +1365,65 @@ function rgbToHex(r: number, g: number, b: number): string {
         <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
           <span class="text-ui-textSecondary text-[10px]">Vertex jitter</span>
           <input 
-            v-model="activeMaterial.psxJitter" 
-            type="checkbox"
-            class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer"
+            type="checkbox" 
+            v-model="activeMaterial.psxJitter"
             @mousedown="beginMaterialEdit"
-            @change="projectStore.markGeometryUpdated()" 
-          >
+            @change="projectStore.markGeometryUpdated()"
+            class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" 
+          />
         </label>
         <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
           <span class="text-ui-textSecondary text-[10px]">Affine warp</span>
           <input 
-            v-model="activeMaterial.psxAffine" 
-            type="checkbox"
-            class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer"
+            type="checkbox" 
+            v-model="activeMaterial.psxAffine"
             @mousedown="beginMaterialEdit"
-            @change="projectStore.markGeometryUpdated()" 
-          >
+            @change="projectStore.markGeometryUpdated()"
+            class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" 
+          />
         </label>
         <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
           <span class="text-ui-textSecondary text-[10px]">Hardware dither</span>
           <input 
-            v-model="activeMaterial.dither" 
-            type="checkbox"
-            class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer"
+            type="checkbox" 
+            v-model="activeMaterial.dither"
             @mousedown="beginMaterialEdit"
-            @change="projectStore.markGeometryUpdated()" 
-          >
+            @change="projectStore.markGeometryUpdated()"
+            class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" 
+          />
         </label>
       </UiSection>
 
       <UiSection v-if="activeMaterial && activeMaterial.shading === 'saturn'" title="Saturn" :icon="Tv" :default-open="true">
         <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
           <span class="text-ui-textSecondary text-[10px]">Mesh alpha</span>
-          <input v-model="activeMaterial.saturnMeshAlpha" type="checkbox" class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" @mousedown="beginMaterialEdit" @change="projectStore.markGeometryUpdated()">
+          <input type="checkbox" v-model="activeMaterial.saturnMeshAlpha" @mousedown="beginMaterialEdit" @change="projectStore.markGeometryUpdated()" class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
         </label>
         <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
           <span class="text-ui-textSecondary text-[10px]">Affine quads</span>
-          <input v-model="activeMaterial.psxAffine" type="checkbox" class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" @mousedown="beginMaterialEdit" @change="projectStore.markGeometryUpdated()">
+          <input type="checkbox" v-model="activeMaterial.psxAffine" @mousedown="beginMaterialEdit" @change="projectStore.markGeometryUpdated()" class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
         </label>
       </UiSection>
 
       <UiSection v-if="activeMaterial && activeMaterial.shading === 'dreamcast'" title="Dreamcast" :icon="Tv" :default-open="true">
         <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
           <span class="text-ui-textSecondary text-[10px]">VQ look</span>
-          <input v-model="activeMaterial.dreamcastVQ" type="checkbox" class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" @mousedown="beginMaterialEdit" @change="projectStore.markGeometryUpdated()">
+          <input type="checkbox" v-model="activeMaterial.dreamcastVQ" @mousedown="beginMaterialEdit" @change="projectStore.markGeometryUpdated()" class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
         </label>
         <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
           <span class="text-ui-textSecondary text-[10px]">Specular</span>
-          <input v-model="activeMaterial.dreamcastSpecular" type="checkbox" class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" @mousedown="beginMaterialEdit" @change="projectStore.markGeometryUpdated()">
+          <input type="checkbox" v-model="activeMaterial.dreamcastSpecular" @mousedown="beginMaterialEdit" @change="projectStore.markGeometryUpdated()" class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
         </label>
         <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
           <span class="text-ui-textSecondary text-[10px]">Cel outline</span>
-          <input v-model="activeMaterial.dreamcastCelOutline" type="checkbox" class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" @mousedown="beginMaterialEdit" @change="projectStore.markGeometryUpdated()">
+          <input type="checkbox" v-model="activeMaterial.dreamcastCelOutline" @mousedown="beginMaterialEdit" @change="projectStore.markGeometryUpdated()" class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
         </label>
       </UiSection>
 
       <UiSection title="Viewport" :icon="Tv" :default-open="false">
         <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
           <span class="text-ui-textSecondary text-[10px]">CRT scanlines</span>
-          <input v-model="toolStore.viewport.crtFilter" type="checkbox" class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer">
+          <input type="checkbox" v-model="toolStore.viewport.crtFilter" class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer" />
         </label>
       </UiSection>
     </div>
@@ -1256,47 +1434,52 @@ function rgbToHex(r: number, g: number, b: number): string {
     <div v-show="activeCategory === 'dithering'">
       <UiSection v-if="activeMaterial" title="Dither" :icon="Sparkles" :default-open="true">
         <label class="flex items-center justify-between cursor-pointer bg-ui-surface px-2 h-5.5 rounded-xs border border-ui-borderSubtle">
-          <span class="text-ui-textSecondary text-[10px]">GPU dither</span>
+          <span class="text-ui-textSecondary text-[10px]">Live dither</span>
           <input
-            v-model="activeMaterial.dither"
             type="checkbox"
-            class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer"
+            v-model="activeMaterial.dither"
             @mousedown="beginMaterialEdit"
-            @change="projectStore.markGeometryUpdated()"
-          >
+            @change="projectStore.markGeometryUpdated(); nextTick(() => updateDitherPreview())"
+            class="rounded-xs text-ui-accent bg-ui-panel border-ui-borderDefault focus:ring-0 cursor-pointer"
+          />
         </label>
+        <p class="text-[9px] leading-snug text-ui-textMuted">
+          Runs on the lit image, so it works on PBR, flat, unlit, and console shading.
+        </p>
+
+        <canvas
+          ref="ditherPreviewCanvasRef"
+          width="280"
+          height="64"
+          class="w-full h-16 rounded-xs border border-ui-borderSubtle bg-black block"
+        ></canvas>
+
+        <div v-for="group in DITHER_LOOK_GROUPS" :key="group.id" class="space-y-1">
+          <div class="text-[9px] uppercase tracking-wide text-ui-textMuted">{{ group.label }}</div>
+          <div class="grid grid-cols-2 gap-1">
+            <button
+              v-for="preset in ditherPresetsInGroup(group)"
+              :key="preset.id"
+              type="button"
+              class="h-5.5 px-1.5 rounded-xs border text-left text-[10px] truncate cursor-pointer"
+              :class="ditherLookActive(preset)
+                ? 'bg-ui-active border-ui-accent text-ui-textPrimary'
+                : 'bg-ui-surface border-ui-borderSubtle text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
+              :title="preset.description"
+              :aria-pressed="ditherLookActive(preset)"
+              @click="applyDitherPreset(preset)"
+            >
+              {{ preset.name }}
+            </button>
+          </div>
+        </div>
 
         <template v-if="activeMaterial.dither">
-          <canvas
-            ref="ditherPreviewCanvasRef"
-            width="280"
-            height="64"
-            class="w-full h-16 rounded-xs border border-ui-borderSubtle bg-black block"
-          />
-
-          <select
-            v-model="activeMaterial.ditherPattern"
-            class="w-full h-5.5 bg-ui-surface border border-ui-borderSubtle rounded-xs px-2 text-ui-textPrimary text-[10px] focus:outline-none cursor-pointer"
-            @mousedown="beginMaterialEdit"
-            @change="projectStore.markGeometryUpdated(); updateDitherPreview()"
-          >
-            <option value="bayer4x4">Bayer 4×4</option>
-            <option value="bayer8x8">Bayer 8×8</option>
-            <option value="bayer2x2">Bayer 2×2</option>
-            <option value="bayer16x16">Bayer 16×16</option>
-            <option value="bluenoise">Blue noise</option>
-            <option value="halftone">Halftone</option>
-            <option value="crosshatch">Crosshatch</option>
-            <option value="horizontal_lines">Scanlines</option>
-            <option value="vertical_lines">Aperture</option>
-            <option value="checker">Checker</option>
-            <option value="noise">Noise</option>
-          </select>
-
           <div class="grid grid-cols-2 gap-1.5">
             <select
               v-model="activeMaterial.ditherSpace"
               class="h-5.5 bg-ui-surface border border-ui-borderSubtle rounded-xs px-1.5 text-ui-textPrimary text-[10px] focus:outline-none cursor-pointer"
+              aria-label="Dither space"
               @mousedown="beginMaterialEdit"
               @change="projectStore.markGeometryUpdated()"
             >
@@ -1307,6 +1490,7 @@ function rgbToHex(r: number, g: number, b: number): string {
             <select
               v-model="activeMaterial.ditherChannel"
               class="h-5.5 bg-ui-surface border border-ui-borderSubtle rounded-xs px-1.5 text-ui-textPrimary text-[10px] focus:outline-none cursor-pointer"
+              aria-label="Dither channel"
               @mousedown="beginMaterialEdit"
               @change="projectStore.markGeometryUpdated(); updateDitherPreview()"
             >
@@ -1321,19 +1505,37 @@ function rgbToHex(r: number, g: number, b: number): string {
             <span class="font-mono inspector-value">{{ Math.round(((activeMaterial.ditherLevel ?? 32) / 32) * 100) }}%</span>
           </div>
           <input
-            v-model.number="activeMaterial.ditherLevel"
             type="range"
             min="4"
             max="64"
             step="1"
+            v-model.number="activeMaterial.ditherLevel"
             class="inspector-range"
+            aria-label="Dither strength"
             @mousedown="beginMaterialEdit"
             @input="projectStore.markGeometryUpdated(); updateDitherPreview()"
-          >
+          />
+
+          <div class="flex items-center justify-between text-[10px]">
+            <span class="text-ui-textSecondary">Pixel size</span>
+            <span class="font-mono inspector-value">{{ activeMaterial.ditherScale ?? 1 }}×</span>
+          </div>
+          <input
+            type="range"
+            min="1"
+            max="4"
+            step="1"
+            :value="activeMaterial.ditherScale ?? 1"
+            class="inspector-range"
+            aria-label="Dither pixel size"
+            @mousedown="beginMaterialEdit"
+            @input="activeMaterial.ditherScale = Number(($event.target as HTMLInputElement).value); projectStore.markGeometryUpdated(); updateDitherPreview()"
+          />
 
           <select
             v-model.number="activeMaterial.colorDepth"
             class="w-full h-5.5 bg-ui-surface border border-ui-borderSubtle rounded-xs px-2 text-ui-textPrimary text-[10px] focus:outline-none cursor-pointer"
+            aria-label="Color depth"
             @mousedown="beginMaterialEdit"
             @change="projectStore.markGeometryUpdated(); updateDitherPreview()"
           >
@@ -1346,21 +1548,6 @@ function rgbToHex(r: number, g: number, b: number): string {
           </select>
         </template>
       </UiSection>
-
-      <UiSection v-if="activeMaterial?.dither" title="Presets" :icon="Sparkles" :default-open="false">
-        <div class="grid grid-cols-2 gap-1">
-          <button
-            v-for="dp in DITHER_PRESETS"
-            :key="dp.id"
-            type="button"
-            class="h-5.5 px-1.5 rounded-xs bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle text-left text-[10px] text-ui-textSecondary hover:text-ui-textPrimary truncate cursor-pointer"
-            :title="dp.description"
-            @click="applyDitherPreset(dp)"
-          >
-            {{ dp.name }}
-          </button>
-        </div>
-      </UiSection>
     </div>
 
     <!-- ==================================================== -->
@@ -1372,44 +1559,44 @@ function rgbToHex(r: number, g: number, b: number): string {
         <div class="text-[10px] font-semibold text-ui-textMuted uppercase">Color Adjustment Quick Filters</div>
         <div class="grid grid-cols-6 gap-1">
           <button 
+            @click="adjustMaterialColor('brighten')"
             class="py-1 px-1 bg-ui-surface hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary border border-ui-borderSubtle rounded-xs text-[9px] font-mono transition text-center cursor-pointer"
             title="Brighten tint (+20%)"
-            @click="adjustMaterialColor('brighten')"
           >
             +Light
           </button>
           <button 
+            @click="adjustMaterialColor('darken')"
             class="py-1 px-1 bg-ui-surface hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary border border-ui-borderSubtle rounded-xs text-[9px] font-mono transition text-center cursor-pointer"
             title="Darken tint (-20%)"
-            @click="adjustMaterialColor('darken')"
           >
             -Dark
           </button>
           <button 
+            @click="adjustMaterialColor('warm')"
             class="py-1 px-1 bg-ui-surface hover:bg-ui-hover text-amber-300/90 hover:text-amber-200 border border-ui-borderSubtle rounded-xs text-[9px] font-mono transition text-center cursor-pointer"
             title="Shift warmth towards red/gold"
-            @click="adjustMaterialColor('warm')"
           >
             +Warm
           </button>
           <button 
+            @click="adjustMaterialColor('cool')"
             class="py-1 px-1 bg-ui-surface hover:bg-ui-hover text-sky-300/90 hover:text-sky-200 border border-ui-borderSubtle rounded-xs text-[9px] font-mono transition text-center cursor-pointer"
             title="Shift temperature towards blue"
-            @click="adjustMaterialColor('cool')"
           >
             +Cool
           </button>
           <button 
+            @click="adjustMaterialColor('grayscale')"
             class="py-1 px-1 bg-ui-surface hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary border border-ui-borderSubtle rounded-xs text-[9px] font-mono transition text-center cursor-pointer"
             title="Desaturate into pure grayscale"
-            @click="adjustMaterialColor('grayscale')"
           >
             Mono
           </button>
           <button 
+            @click="adjustMaterialColor('invert')"
             class="py-1 px-1 bg-ui-surface hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary border border-ui-borderSubtle rounded-xs text-[9px] font-mono transition text-center cursor-pointer"
             title="Invert color RGB channels"
-            @click="adjustMaterialColor('invert')"
           >
             Invert
           </button>
@@ -1421,9 +1608,9 @@ function rgbToHex(r: number, g: number, b: number): string {
         <div class="flex items-center justify-between">
           <span class="text-[10px] font-semibold text-ui-textMuted uppercase">Palette Sets Library</span>
           <button 
+            @click="showNewPaletteDialog = !showNewPaletteDialog"
             class="px-1.5 py-0.5 rounded-xs bg-ui-surface hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary border border-ui-borderSubtle transition flex items-center gap-0.5 text-[9.5px] cursor-pointer"
             title="Create New Custom Color Set"
-            @click="showNewPaletteDialog = !showNewPaletteDialog"
           >
             <Plus class="w-3 h-3" />
             <span>New Set</span>
@@ -1435,13 +1622,13 @@ function rgbToHex(r: number, g: number, b: number): string {
           <input 
             v-model="newPaletteName" 
             placeholder="Custom Palette Name..."
+            @keydown.enter="createNewCustomPalette"
             class="w-full bg-ui-input text-ui-textPrimary px-1.5 py-0.5 rounded-xs font-mono text-[10.5px] border border-ui-borderSubtle focus:outline-none"
             autoFocus
-            @keydown.enter="createNewCustomPalette"
-          >
+          />
           <div class="flex justify-end gap-1">
-            <button class="px-2 py-0.5 text-[9px] text-ui-textMuted hover:text-ui-textPrimary" @click="showNewPaletteDialog = false">Cancel</button>
-            <button class="px-2 py-0.5 bg-emerald-600 text-white rounded-xs text-[9px] font-bold" @click="createNewCustomPalette">Create</button>
+            <button @click="showNewPaletteDialog = false" class="px-2 py-0.5 text-[9px] text-ui-textMuted hover:text-ui-textPrimary">Cancel</button>
+            <button @click="createNewCustomPalette" class="px-2 py-0.5 bg-emerald-600 text-white rounded-xs text-[9px] font-bold">Create</button>
           </div>
         </div>
 
@@ -1450,9 +1637,9 @@ function rgbToHex(r: number, g: number, b: number): string {
           <button 
             v-for="cat in paletteCategories" 
             :key="cat"
+            @click="selectedPaletteCategory = cat"
             class="px-1.5 py-0.5 rounded-xs border shrink-0 transition cursor-pointer"
             :class="selectedPaletteCategory === cat ? 'inspector-chip is-active' : 'inspector-chip'"
-            @click="selectedPaletteCategory = cat"
           >
             {{ cat }}
           </button>
@@ -1471,9 +1658,9 @@ function rgbToHex(r: number, g: number, b: number): string {
             </select>
             <button 
               v-if="activePalette.isCustom"
+              @click="deleteCurrentCustomPalette"
               class="p-1 rounded-xs bg-ui-surface hover:bg-rose-950/40 text-ui-textMuted hover:text-rose-400 border border-ui-borderSubtle transition cursor-pointer"
               title="Delete Custom Color Set"
-              @click="deleteCurrentCustomPalette"
             >
               <Trash2 class="w-3 h-3" />
             </button>
@@ -1484,19 +1671,19 @@ function rgbToHex(r: number, g: number, b: number): string {
             <button 
               v-for="(hex, idx) in activePalette.colors" 
               :key="`${hex}_${idx}`"
+              @click="pickPaletteColor(hex)"
               class="w-full aspect-square rounded-2xs border transition cursor-pointer hover:scale-110 shadow-2xs"
               :class="activeMaterial?.color.toLowerCase() === hex.toLowerCase() ? 'border-white ring-1 ring-amber-400' : 'border-black/30 hover:border-white/80'"
               :style="{ backgroundColor: hex }"
               :title="hex"
-              @click="pickPaletteColor(hex)"
-            />
+            ></button>
           </div>
 
           <!-- Add Color to Set Button -->
           <button 
+            @click="addCurrentColorToActivePalette"
             class="w-full py-1 bg-ui-surface hover:bg-ui-hover text-ui-textSecondary hover:text-ui-textPrimary border border-ui-borderSubtle rounded-xs text-[10px] font-medium flex items-center justify-center gap-1 transition cursor-pointer"
             title="Add current material color to this palette"
-            @click="addCurrentColorToActivePalette"
           >
             <Plus class="w-3 h-3" />
             <span>Add Active Tint ({{ activeMaterial?.color }}) to Palette</span>
@@ -1515,17 +1702,17 @@ function rgbToHex(r: number, g: number, b: number): string {
           <span class="text-[10px] font-semibold text-ui-textMuted uppercase">Procedural Gradient</span>
           <div class="flex items-center gap-1">
             <button 
+              @click="reverseGradientStops"
               class="p-0.5 px-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[9px] text-ui-textSecondary transition cursor-pointer"
               title="Reverse gradient stops"
-              @click="reverseGradientStops"
             >
               <ArrowLeftRight class="w-2.5 h-2.5 inline mr-0.5" />
               <span>Flip</span>
             </button>
             <button 
+              @click="showSaveGradientDialog = !showSaveGradientDialog"
               class="p-0.5 px-1 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[9px] text-ui-textSecondary transition cursor-pointer"
               title="Save gradient preset"
-              @click="showSaveGradientDialog = !showSaveGradientDialog"
             >
               <Save class="w-2.5 h-2.5 inline mr-0.5" />
               <span>Save</span>
@@ -1538,13 +1725,13 @@ function rgbToHex(r: number, g: number, b: number): string {
           <input 
             v-model="newGradientName" 
             placeholder="Preset Name..."
+            @keydown.enter="saveCurrentGradient"
             class="w-full bg-ui-input text-ui-textPrimary px-1.5 py-0.5 rounded-xs font-mono text-[10.5px] border border-ui-borderSubtle focus:outline-none"
             autoFocus
-            @keydown.enter="saveCurrentGradient"
-          >
+          />
           <div class="flex justify-end gap-1">
-            <button class="px-2 py-0.5 text-[9px] text-ui-textMuted" @click="showSaveGradientDialog = false">Cancel</button>
-            <button class="px-2 py-0.5 bg-emerald-600 text-white rounded-xs text-[9px] font-bold" @click="saveCurrentGradient">Save</button>
+            <button @click="showSaveGradientDialog = false" class="px-2 py-0.5 text-[9px] text-ui-textMuted">Cancel</button>
+            <button @click="saveCurrentGradient" class="px-2 py-0.5 bg-emerald-600 text-white rounded-xs text-[9px] font-bold">Save</button>
           </div>
         </div>
 
@@ -1553,10 +1740,10 @@ function rgbToHex(r: number, g: number, b: number): string {
           <button 
             v-for="gp in allGradientPresets" 
             :key="gp.id"
-            class="px-1.5 py-0.5 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[9px] font-medium text-ui-textSecondary hover:text-ui-textPrimary shrink-0 transition cursor-pointer flex items-center gap-1"
             @click="applyGradientPreset(gp)"
+            class="px-1.5 py-0.5 bg-ui-surface hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[9px] font-medium text-ui-textSecondary hover:text-ui-textPrimary shrink-0 transition cursor-pointer flex items-center gap-1"
           >
-            <span class="w-2.5 h-2.5 rounded-full border border-black/40 shrink-0" :style="{ background: `linear-gradient(to right, ${gp.stops[0].color}, ${gp.stops[gp.stops.length-1].color})` }" />
+            <span class="w-2.5 h-2.5 rounded-full border border-black/40 shrink-0" :style="{ background: `linear-gradient(to right, ${gp.stops[0].color}, ${gp.stops[gp.stops.length-1].color})` }"></span>
             <span>{{ gp.name }}</span>
           </button>
         </div>
@@ -1564,29 +1751,29 @@ function rgbToHex(r: number, g: number, b: number): string {
         <!-- Interactive Multi-Stop Gradient Bar -->
         <div class="space-y-1 pt-1">
           <div 
-            class="h-6 w-full rounded-xs border border-ui-borderDefault cursor-crosshair relative shadow-inner"
-            :style="{ background: gradientCss }"
-            title="Click anywhere on the bar to add a color stop"
             @click="e => {
               const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
               const x = (e.clientX - rect.left) / rect.width
               addGradientStopAt(x)
             }"
+            class="h-6 w-full rounded-xs border border-ui-borderDefault cursor-crosshair relative shadow-inner"
+            :style="{ background: gradientCss }"
+            title="Click anywhere on the bar to add a color stop"
           >
             <!-- Draggable Color Stop Pins -->
             <div 
               v-for="stop in gradientStops" 
               :key="stop.id"
+              @click.stop="activeStopId = stop.id"
               class="absolute top-0 bottom-0 w-3 -ml-1.5 flex flex-col items-center justify-between cursor-pointer group"
               :style="{ left: `${stop.pos * 100}%` }"
-              @click.stop="activeStopId = stop.id"
             >
               <div 
                 class="w-2.5 h-2.5 rounded-full border border-black shadow-md transition transform group-hover:scale-125"
                 :class="activeStopId === stop.id ? 'ring-2 ring-white scale-125' : ''"
                 :style="{ backgroundColor: stop.color }"
-              />
-              <div class="w-0.5 flex-1 bg-white/60" />
+              ></div>
+              <div class="w-0.5 flex-1 bg-white/60"></div>
             </div>
           </div>
         </div>
@@ -1594,34 +1781,34 @@ function rgbToHex(r: number, g: number, b: number): string {
         <!-- Active Stop Color & Position Editor -->
         <div v-if="activeStop" class="flex items-center gap-2 bg-ui-surface p-1.5 rounded-xs border border-ui-borderSubtle">
           <input 
-            v-model="activeStop.color" 
             type="color" 
+            v-model="activeStop.color" 
             class="w-5 h-5 rounded-xs cursor-pointer border border-ui-borderDefault bg-transparent p-0 shrink-0" 
-          >
+          />
           <div class="flex-1 flex items-center gap-2 text-[10px]">
             <input 
-              v-model="activeStop.color" 
               type="text" 
+              v-model="activeStop.color" 
               class="w-16 bg-ui-input px-1 py-0.5 rounded-xs font-mono font-bold text-ui-textPrimary uppercase border border-ui-borderSubtle text-[10px]" 
-            >
+            />
             <div class="flex items-center gap-1 flex-1">
               <span class="text-ui-textMuted text-[9px]">Pos:</span>
               <input 
-                v-model.number="activeStop.pos" 
                 type="range" 
                 min="0" 
                 max="1" 
                 step="0.01" 
+                v-model.number="activeStop.pos" 
                 class="flex-1 accent-indigo-500 bg-ui-input h-1 rounded cursor-pointer" 
-              >
+              />
               <span class="font-mono text-ui-textSecondary text-[9px] w-6">{{ Math.round(activeStop.pos * 100) }}%</span>
             </div>
           </div>
           <button 
-            :disabled="gradientStops.length <= 2" 
+            @click="removeActiveStop" 
+            :disabled="gradientStops.length <= 2"
             class="p-1 rounded-xs bg-ui-input hover:bg-rose-950/40 text-ui-textMuted hover:text-rose-400 border border-ui-borderSubtle disabled:opacity-20 transition"
             title="Delete this color stop"
-            @click="removeActiveStop"
           >
             <X class="w-3 h-3" />
           </button>
@@ -1644,9 +1831,9 @@ function rgbToHex(r: number, g: number, b: number): string {
               { id: 'ao', label: 'Fake AO' }
             ]" 
             :key="ax.id"
+            @click="gradAxis = ax.id as any"
             class="py-1 px-1 rounded-xs border text-center font-bold transition cursor-pointer"
             :class="gradAxis === ax.id ? 'inspector-chip is-active' : 'inspector-chip'"
-            @click="gradAxis = ax.id as any"
           >
             {{ ax.label }}
           </button>
@@ -1659,14 +1846,14 @@ function rgbToHex(r: number, g: number, b: number): string {
               <span>Elev:</span>
               <span class="inspector-value font-bold">{{ sunElevation }} deg</span>
             </div>
-            <input v-model.number="sunElevation" type="range" min="0" max="90" class="inspector-range">
+            <input type="range" min="0" max="90" v-model.number="sunElevation" class="inspector-range" />
           </div>
           <div>
             <div class="flex justify-between">
               <span>Azim:</span>
               <span class="inspector-value font-bold">{{ sunAzimuth }} deg</span>
             </div>
-            <input v-model.number="sunAzimuth" type="range" min="0" max="360" class="inspector-range">
+            <input type="range" min="0" max="360" v-model.number="sunAzimuth" class="inspector-range" />
           </div>
         </div>
 
@@ -1693,8 +1880,8 @@ function rgbToHex(r: number, g: number, b: number): string {
 
         <!-- Execute Bake Button -->
         <button 
-          class="w-full py-1.5 px-2 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold rounded-xs text-[10.5px] flex items-center justify-center gap-1.5 shadow-xs transition cursor-pointer active:scale-98" 
-          @click="executeGradientBake"
+          @click="executeGradientBake" 
+          class="w-full py-1.5 px-2 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold rounded-xs text-[10.5px] flex items-center justify-center gap-1.5 shadow-xs transition cursor-pointer active:scale-98"
         >
           <Zap class="w-3.5 h-3.5 fill-slate-950" />
           <span>Bake Multi-Stop Gradient to Vertices</span>
@@ -1710,36 +1897,36 @@ function rgbToHex(r: number, g: number, b: number): string {
 
         <div class="flex items-center gap-1.5 bg-ui-surface p-1 rounded-xs border border-ui-borderSubtle">
           <input 
-            v-model="toolStore.vertexPaintColor" 
             type="color" 
-            class="w-5 h-5 rounded-xs cursor-pointer border border-ui-borderDefault bg-transparent p-0 shrink-0" 
-          >
-          <input 
             v-model="toolStore.vertexPaintColor" 
+            class="w-5 h-5 rounded-xs cursor-pointer border border-ui-borderDefault bg-transparent p-0 shrink-0" 
+          />
+          <input 
             type="text" 
+            v-model="toolStore.vertexPaintColor" 
             class="flex-1 bg-transparent text-[11px] font-mono font-bold text-ui-textPrimary uppercase focus:outline-none" 
-          >
+          />
         </div>
 
         <div class="grid grid-cols-3 gap-1">
           <button 
-            class="py-1 px-1.5 bg-indigo-600/80 hover:bg-indigo-600 text-white rounded-xs text-[10px] font-bold transition text-center shadow-xs cursor-pointer" 
+            @click="fillSelectedVertices" 
+            class="py-1 px-1.5 bg-indigo-600/80 hover:bg-indigo-600 text-white rounded-xs text-[10px] font-bold transition text-center shadow-xs cursor-pointer"
             title="Fill selected vertices with active color"
-            @click="fillSelectedVertices"
           >
             Fill Sel
           </button>
           <button 
-            class="py-1 px-1.5 bg-ui-surface hover:bg-ui-hover text-ui-textPrimary border border-ui-borderSubtle rounded-xs text-[10px] font-medium transition text-center cursor-pointer" 
+            @click="fillEntireMesh" 
+            class="py-1 px-1.5 bg-ui-surface hover:bg-ui-hover text-ui-textPrimary border border-ui-borderSubtle rounded-xs text-[10px] font-medium transition text-center cursor-pointer"
             title="Fill entire mesh with active color"
-            @click="fillEntireMesh"
           >
             Fill Mesh
           </button>
           <button 
-            class="py-1 px-1.5 bg-ui-surface hover:bg-rose-950/40 text-ui-textMuted hover:text-rose-300 border border-ui-borderSubtle rounded-xs text-[10px] font-medium transition text-center cursor-pointer" 
+            @click="resetVertexColors" 
+            class="py-1 px-1.5 bg-ui-surface hover:bg-rose-950/40 text-ui-textMuted hover:text-rose-300 border border-ui-borderSubtle rounded-xs text-[10px] font-medium transition text-center cursor-pointer"
             title="Reset all vertices to white"
-            @click="resetVertexColors"
           >
             Reset
           </button>
@@ -1748,23 +1935,23 @@ function rgbToHex(r: number, g: number, b: number): string {
         <!-- Post-Processing Actions -->
         <div class="grid grid-cols-3 gap-1 pt-1 border-t border-ui-borderSubtle">
           <button 
-            class="py-1 px-1 bg-ui-surface hover:bg-ui-hover text-indigo-300 border border-ui-borderSubtle rounded-xs text-[9px] font-bold transition text-center cursor-pointer" 
+            @click="smoothVertexColors" 
+            class="py-1 px-1 bg-ui-surface hover:bg-ui-hover text-indigo-300 border border-ui-borderSubtle rounded-xs text-[9px] font-bold transition text-center cursor-pointer"
             title="Smooth / Blur colors across connected vertices"
-            @click="smoothVertexColors"
           >
             Smooth Blur
           </button>
           <button 
-            class="py-1 px-1 bg-ui-surface hover:bg-ui-hover text-amber-300 border border-ui-borderSubtle rounded-xs text-[9px] font-bold transition text-center cursor-pointer" 
+            @click="clampPSX5Bit" 
+            class="py-1 px-1 bg-ui-surface hover:bg-ui-hover text-amber-300 border border-ui-borderSubtle rounded-xs text-[9px] font-bold transition text-center cursor-pointer"
             title="Quantize to PSX 5-bit RGB555"
-            @click="clampPSX5Bit"
           >
             PSX 5-Bit
           </button>
           <button 
-            class="py-1 px-1 bg-ui-surface hover:bg-ui-hover text-ui-textPrimary border border-ui-borderSubtle rounded-xs text-[9px] font-bold transition text-center cursor-pointer" 
+            @click="invertVertexColors" 
+            class="py-1 px-1 bg-ui-surface hover:bg-ui-hover text-ui-textPrimary border border-ui-borderSubtle rounded-xs text-[9px] font-bold transition text-center cursor-pointer"
             title="Invert vertex colors"
-            @click="invertVertexColors"
           >
             Invert Colors
           </button>
@@ -1780,7 +1967,7 @@ function rgbToHex(r: number, g: number, b: number): string {
             <ImageIcon class="w-4 h-4 text-ui-textMuted" />
             <span>New Texture for {{ activeMaterial?.name }}</span>
           </div>
-          <button class="p-1 hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary rounded-xs cursor-pointer" @click="showCreateTexModal = false">
+          <button @click="showCreateTexModal = false" class="p-1 hover:bg-ui-hover text-ui-textMuted hover:text-ui-textPrimary rounded-xs cursor-pointer">
             <X class="w-3.5 h-3.5" />
           </button>
         </div>
@@ -1794,7 +1981,7 @@ function rgbToHex(r: number, g: number, b: number): string {
               class="w-full bg-ui-input border border-ui-borderDefault focus:border-ui-accent rounded-xs px-2 py-1 text-ui-textPrimary font-mono text-xs focus:outline-none"
               autoFocus
               @keydown.enter="handleCreateNewTexture"
-            >
+            />
           </div>
 
           <div class="space-y-1">
@@ -1804,9 +1991,9 @@ function rgbToHex(r: number, g: number, b: number): string {
                 v-for="s in [16, 32, 64, 128]" 
                 :key="s"
                 type="button"
+                @click="newTexSize = s"
                 class="py-1 rounded-xs font-mono text-[10px] font-bold border transition cursor-pointer text-center"
                 :class="newTexSize === s ? 'inspector-chip is-active' : 'inspector-chip'"
-                @click="newTexSize = s"
               >
                 {{ s }}px
               </button>
@@ -1816,14 +2003,14 @@ function rgbToHex(r: number, g: number, b: number): string {
 
         <div class="p-2.5 bg-ui-header border-t border-ui-borderDefault flex justify-end gap-1.5">
           <button 
-            class="px-2.5 py-1 rounded-xs text-[11px] font-medium text-ui-textSecondary hover:bg-ui-hover border border-ui-borderSubtle cursor-pointer"
             @click="showCreateTexModal = false"
+            class="px-2.5 py-1 rounded-xs text-[11px] font-medium text-ui-textSecondary hover:bg-ui-hover border border-ui-borderSubtle cursor-pointer"
           >
             Cancel
           </button>
           <button 
-            class="px-3 py-1 rounded-xs text-[11px] font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-xs cursor-pointer flex items-center gap-1"
             @click="handleCreateNewTexture"
+            class="px-3 py-1 rounded-xs text-[11px] font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-xs cursor-pointer flex items-center gap-1"
           >
             <Plus class="w-3.5 h-3.5" />
             <span>Create & Assign</span>

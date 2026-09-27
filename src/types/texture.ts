@@ -45,11 +45,58 @@ export interface TextureMap {
 
 export type ShadingModel = 'pbr' | 'unlit' | 'gouraud' | 'flat' | 'textured' | 'psx' | 'saturn' | 'dreamcast' | 'n64' | 'solid' | 'wireframe'
 
+export type DitherPattern =
+  | 'bayer4x4'
+  | 'bayer8x8'
+  | 'bayer2x2'
+  | 'bayer16x16'
+  | 'bluenoise'
+  | 'halftone'
+  | 'crosshatch'
+  | 'horizontal_lines'
+  | 'vertical_lines'
+  | 'ordered'
+  | 'noise'
+  | 'checker'
+  | 'snes'
+  | 'saturn_mesh'
+  | 'dreamcast'
+  | 'gba'
+  | 'diagonal'
+  | 'dots'
+  | 'rgb_shift'
+
+/** What colors the surface. Missing on old files: image when `textureId` is set, otherwise solid. */
+export type MaterialFill = 'solid' | 'gradient' | 'image'
+
+export interface MaterialGradientStop {
+  color: string
+  /** 0–1 along the ramp */
+  offset: number
+  /** Where the halfway blend to the next stop sits, 0–1. 0.5 is even. Ignored on the last stop. */
+  midpoint?: number
+  /** 0–1. Omitted means fully opaque. */
+  opacity?: number
+}
+
+export interface MaterialGradient {
+  kind: 'linear' | 'radial'
+  /** Degrees. 0 runs left to right in UV space. */
+  angle: number
+  stops: MaterialGradientStop[]
+}
+
 export interface Material {
   id: string
   name: string
   textureId: string | null
+  /** Non-destructive per-material texture repeats. Missing values mean 1. */
+  tileX?: number
+  tileY?: number
   color: string
+  /** Surface color source. Shading (PBR, PS1, …) still applies on top. */
+  fill?: MaterialFill
+  gradient?: MaterialGradient
   shading: ShadingModel
   roughness?: number
   metalness?: number
@@ -70,7 +117,7 @@ export interface Material {
   // Dithering Suite
   dither: boolean
   ditherLevel: number
-  ditherPattern?: 'bayer4x4' | 'bayer8x8' | 'bayer2x2' | 'bayer16x16' | 'bluenoise' | 'halftone' | 'crosshatch' | 'horizontal_lines' | 'vertical_lines' | 'ordered' | 'noise' | 'checker'
+  ditherPattern?: DitherPattern
   ditherScale?: number
   ditherSpace?: 'screen' | 'uv' | 'world'
   ditherChannel?: 'luma' | 'rgb' | 'alpha'

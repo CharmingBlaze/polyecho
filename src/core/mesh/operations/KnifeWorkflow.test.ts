@@ -5,6 +5,7 @@ import { MeshBridge } from '../MeshBridge'
 import { MeshValidator } from '../MeshValidator'
 import { createCube } from '../../geometry/Primitives'
 import { ScreenGeometry } from '../../geometry/ScreenGeometry'
+import { surfaceTriangles } from '../../geometry/SurfaceGeometry'
 import { KnifeKernel, type KnifePoint } from './KnifeKernel'
 
 const camera = new THREE.OrthographicCamera(-2,2,2,-2,0.1,20)
@@ -22,12 +23,13 @@ describe('Knife cross-face cuts', () => {
     const face = mesh.addFace(ids, positions.map(p => new THREE.Vector2(p.x / 3, p.y / 3)))
     mesh.recalculateNormals()
     const cut = KnifeKernel.insertSurfaceVertex(mesh, new THREE.Vector3(0.5,2,0), face!.id)
+    expect(cut).not.toBeNull()
     let area = 0
     for (const f of mesh.faces.values()) {
       const ps = f.vertexIds.map(id => mesh.vertices.get(id)!.position)
-      area += new THREE.Triangle(ps[0], ps[1], ps[2]).getArea()
+      for (const [a, b, c] of surfaceTriangles(ps)) area += new THREE.Triangle(ps[a], ps[b], ps[c]).getArea()
       expect(f.normal.z).toBeGreaterThan(0)
-      const index = f.vertexIds.indexOf(cut)
+      const index = f.vertexIds.indexOf(cut!)
       if(index >= 0) { expect(f.uvs[index].x).toBeCloseTo(1/6); expect(f.uvs[index].y).toBeCloseTo(2/3) }
     }
     expect(area).toBeCloseTo(5)

@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { EditableMesh } from '../MeshKernel'
-import { MeshEditOps } from './MeshEditOps'
+import { mergePlanarPairs } from '../../shapeDraw/ShapeTopology'
+import { surfaceTriangles } from '../../geometry/SurfaceGeometry'
 
 export type BooleanOp = 'union' | 'difference' | 'intersect'
 
@@ -21,10 +22,10 @@ function triangulate(mesh: EditableMesh): Poly[] {
   for (const face of mesh.faces.values()) {
     const pts = face.vertexIds.map(id => mesh.vertices.get(id)!.position.clone())
     const uvs = face.vertexIds.map((_, i) => face.uvs[i]?.clone() ?? new THREE.Vector2())
-    for (let i = 1; i < pts.length - 1; i++) {
+    for (const tri of surfaceTriangles(pts)) {
       out.push({
-        vertices: [pts[0].clone(), pts[i].clone(), pts[i + 1].clone()],
-        uvs: [uvs[0].clone(), uvs[i].clone(), uvs[i + 1].clone()],
+        vertices: tri.map(i => pts[i].clone()),
+        uvs: tri.map(i => uvs[i].clone()),
         materialIndex: face.materialIndex
       })
     }
@@ -177,7 +178,65 @@ function intoMesh(mesh: EditableMesh, polys: Poly[]) {
     if (new Set(ids).size < 3) continue
     mesh.addFace(ids, poly.uvs.map(u => u.clone()), poly.materialIndex)
   }
-  MeshEditOps.recalculateOutside(mesh)
+  // The cutter runs on triangles. Fold coplanar pairs back into quads so a face does not keep its draw diagonal.
+  for (let pass = 0; pass < 8; pass++) {
+    const before = mesh.faces.size
+    mergePlanarPairs(mesh)
+    if (mesh.faces.size === before) break
+  }
+  weldTJunctions(mesh)
+  mesh.recalculateNormals()
+}
+
+/**
+ * BSP splits one side of an edge and not the other, leaving a vertex on the middle of its
+ * neighbour's edge. That is a crack in engines and under deformation. Insert each such vertex
+ * into the face loop so both sides share it.
+ */
+function weldTJunctions(mesh: EditableMesh, eps = 1e-5) {
+  for (let pass = 0; pass < 8; pass++) {
+    const open = [...mesh.edges.values()].filter(e => e.faceIds.length === 1)
+    if (!open.length) return
+    const candidates = new Set<number>()
+    for (const e of open) { candidates.add(e.v1); candidates.add(e.v2) }
+    let changed = false
+    const seg = new THREE.Vector3(), rel = new THREE.Vector3()
+    for (const edge of open) {
+      if (!mesh.edges.has(edge.id) || edge.faceIds.length !== 1) continue
+      const face = mesh.faces.get(edge.faceIds[0]!)
+      if (!face) continue
+      const n = face.vertexIds.length
+      const i = face.vertexIds.findIndex((v, k) => {
+        const w = face.vertexIds[(k + 1) % n]
+        return (v === edge.v1 && w === edge.v2) || (v === edge.v2 && w === edge.v1)
+      })
+      if (i < 0) continue
+      const a = face.vertexIds[i], b = face.vertexIds[(i + 1) % n]
+      const pa = mesh.vertices.get(a)!.position, pb = mesh.vertices.get(b)!.position
+      seg.subVectors(pb, pa)
+      const len2 = seg.lengthSq()
+      if (len2 < eps * eps) continue
+      const hits: { id: number; t: number }[] = []
+      for (const id of candidates) {
+        if (id === a || id === b || face.vertexIds.includes(id)) continue
+        const p = mesh.vertices.get(id)?.position
+        if (!p) continue
+        rel.subVectors(p, pa)
+        const t = rel.dot(seg) / len2
+        if (t <= eps || t >= 1 - eps) continue
+        if (rel.addScaledVector(seg, -t).lengthSq() > eps * eps) continue
+        hits.push({ id, t })
+      }
+      if (!hits.length) continue
+      hits.sort((x, y) => x.t - y.t)
+      const uvA = face.uvs[i]!, uvB = face.uvs[(i + 1) % n]!
+      const verts = [...face.vertexIds], uvs = face.uvs.map(uv => uv.clone())
+      verts.splice(i + 1, 0, ...hits.map(h => h.id))
+      uvs.splice(i + 1, 0, ...hits.map(h => uvA.clone().lerp(uvB, h.t)))
+      if (mesh.replaceFace(face.id, verts, uvs)) changed = true
+    }
+    if (!changed) return
+  }
 }
 
 export class BooleanKernel {
@@ -201,7 +260,9 @@ export class BooleanKernel {
       b2.invert()
       b2.clipTo(a2)
       b2.invert()
+      // csg.js merges b into a before the final invert, so b's polygons flip too.
       a2.invert()
+      b2.invert()
       intoMesh(a, a2.all().concat(b2.all()))
     } else {
       const a2 = A.clone(), b2 = B.clone()
@@ -211,6 +272,7 @@ export class BooleanKernel {
       a2.clipTo(b2)
       b2.clipTo(a2)
       a2.invert()
+      b2.invert()
       intoMesh(a, a2.all().concat(b2.all()))
     }
     return a.faces.size > 0

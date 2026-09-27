@@ -9,7 +9,9 @@ import { useFloatingDrag } from '../../composables/useFloatingDrag'
 import { PlacementOrientation } from '../../core/placement/SurfacePlacementSolver'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import UiButton from '../ui/UiButton.vue'
-import { EDITOR_EVENTS, requestPrimitivePlacement } from '../../core/commands/editorCommands'
+import { PolyDrawOperator } from '../../core/operators/PolyDrawOperator'
+import { BlockoutSketchOperator } from '../../core/operators/BlockoutSketchOperator'
+import { EDITOR_EVENTS, requestModalTool, requestPrimitivePlacement } from '../../core/commands/editorCommands'
 import { X, GripHorizontal, Minus, Plus } from 'lucide-vue-next'
 
 const layoutStore = useLayoutStore()
@@ -46,7 +48,20 @@ const fieldLabels: Record<string, string> = {
   openingHeight: 'Opening height'
 }
 const fields = computed(() => Object.keys(settings.value).filter(key => placementMode.value === PrimitivePlacementMode.PLACE || /segments|rings|sides|steps|subdivisions|cap|filled|flip/i.test(key)))
-const chosenLabel = computed(() => PrimitiveRegistry.get(chosenType.value)?.label || 'Box')
+const polyDrawActive = computed(() => {
+  void operatorManager.state.value.active
+  void operatorManager.state.value.previewTick
+  return operatorManager.activeOperator instanceof PolyDrawOperator
+})
+const sketch = computed(() => {
+  void operatorManager.state.value.active
+  void operatorManager.state.value.previewTick
+  const statusText = operatorManager.state.value.statusText
+  const op = operatorManager.activeOperator
+  if (!(op instanceof BlockoutSketchOperator)) return null
+  return { mode: op.mode, statusText, finish: () => op.finishFromHud() }
+})
+const chosenLabel = computed(() => sketch.value ? 'Blockout Sketch' : polyDrawActive.value ? 'Poly Draw' : (PrimitiveRegistry.get(chosenType.value)?.label || 'Box'))
 const placing = computed(() => {
   void operatorManager.state.value.active
   void operatorManager.state.value.previewTick
@@ -152,6 +167,22 @@ function toggle() {
 function close() {
   visible.value = false
   layoutStore.showPrimitivePanel = false
+}
+
+function startPolyDraw() {
+  requestModalTool('polydraw')
+}
+
+function startBlockoutSketch() {
+  requestModalTool('blockout_sketch')
+}
+
+function setSketchMode(mode: 'draw' | 'pull') {
+  const op = operatorManager.activeOperator
+  if (!(op instanceof BlockoutSketchOperator)) return
+  op.setMode(mode)
+  operatorManager.state.value.statusText = op.statusText
+  operatorManager.state.value.previewTick++
 }
 
 function selectPrimitive(type: PrimitiveType) {
@@ -289,11 +320,31 @@ defineExpose({
 
       <div class="flex flex-col gap-0.5">
         <button
+          type="button"
+          class="inspector-chip w-full justify-start"
+          :class="{ 'is-active': polyDrawActive }"
+          title="Trace a silhouette, close it, then pull thickness"
+          @click="startPolyDraw"
+        >
+          <BlenderIcon name="tool-poly-draw" :size="14" />
+          <span class="truncate">Poly Draw</span>
+        </button>
+        <button
+          type="button"
+          class="inspector-chip w-full justify-start"
+          :class="{ 'is-active': !!sketch }"
+          title="Draw a rectangle to cut a face, then push or pull it"
+          @click="startBlockoutSketch"
+        >
+          <BlenderIcon name="mesh-cube" :size="14" />
+          <span class="truncate">Blockout Sketch</span>
+        </button>
+        <button
           v-for="item in categoryPrimitives"
           :key="item.type"
           type="button"
           class="inspector-chip w-full justify-start"
-          :class="{ 'is-active': chosenType === item.type }"
+          :class="{ 'is-active': chosenType === item.type && !polyDrawActive && !sketch }"
           :title="item.label"
           @click="selectPrimitive(item.type)"
         >
@@ -302,7 +353,18 @@ defineExpose({
         </button>
       </div>
 
-      <div class="border-t border-ui-borderSubtle pt-1.5 space-y-1">
+      <div v-if="sketch" class="border-t border-ui-borderSubtle pt-1.5 space-y-1">
+        <div class="inspector-seg is-stretch" aria-label="Blockout Sketch mode">
+          <button type="button" class="inspector-seg-btn" :class="{ 'is-active': sketch.mode === 'draw' }" @click="setSketchMode('draw')">Draw</button>
+          <button type="button" class="inspector-seg-btn" :class="{ 'is-active': sketch.mode === 'pull' }" @click="setSketchMode('pull')">Push/Pull</button>
+        </div>
+        <p class="text-[10px] text-ui-textMuted leading-snug">{{ sketch.statusText }}</p>
+        <UiButton size="xs" variant="accent" class="w-full" @click="sketch.finish()">Done</UiButton>
+      </div>
+      <div v-else-if="polyDrawActive" class="border-t border-ui-borderSubtle pt-1.5">
+        <p class="text-[10px] text-ui-textMuted leading-snug">Same Poly Draw as the toolbar. Click the outline, close it, then set thickness in the options panel.</p>
+      </div>
+      <div v-else class="border-t border-ui-borderSubtle pt-1.5 space-y-1">
         <label
           v-for="key in fields"
           :key="key"

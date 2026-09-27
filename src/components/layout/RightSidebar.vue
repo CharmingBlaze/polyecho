@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useToolStore } from '../../stores/toolStore'
 import { useLayoutStore } from '../../stores/layoutStore'
 import OutlinerTree from '../outliner/OutlinerTree.vue'
@@ -16,9 +16,41 @@ import AnimationInspector from '../inspector/AnimationInspector.vue'
 import UVPaintProps from '../uvpaint/UVPaintProps.vue'
 import MeshToolsProps from '../inspector/MeshToolsProps.vue'
 import BlenderIcon from '../icons/BlenderIcon.vue'
+import { sidebarWidthLimit } from '../../core/desktop/workspaceFit'
+import {
+  inspectorClickRestartsModal,
+  inspectorTargetInterruptsModal,
+  modalCommitsOnUiInterrupt,
+  operatorManager,
+} from '../../core/operators/OperatorManager'
 
 const toolStore = useToolStore()
 const layoutStore = useLayoutStore()
+
+/** Set when a pointer-down already committed a drag tool, so that same click does not restart it. */
+let swallowModalRestartClick = false
+
+const pendingModal = computed(() => {
+  const state = operatorManager.state.value
+  if (!state.active || !modalCommitsOnUiInterrupt(state.operatorName)) return null
+  return state
+})
+
+function onInspectorPointerDown(e: PointerEvent) {
+  const name = operatorManager.state.value.operatorName
+  if (!operatorManager.state.value.active || !modalCommitsOnUiInterrupt(name)) return
+  if (!inspectorTargetInterruptsModal(e.target)) return
+  operatorManager.confirm()
+  swallowModalRestartClick = true
+}
+
+function onInspectorClickCapture(e: MouseEvent) {
+  if (!swallowModalRestartClick) return
+  swallowModalRestartClick = false
+  if (!inspectorClickRestartsModal(e.target)) return
+  e.preventDefault()
+  e.stopPropagation()
+}
 
 type PanelViewMode = 'split' | 'outliner' | 'props'
 const panelViewMode = ref<PanelViewMode>('props')
@@ -36,6 +68,7 @@ const activeTab = computed({
 })
 
 // Sidebar Width Resizing
+const preferredWidth = ref(320)
 const width = ref(320)
 const isResizingWidth = ref(false)
 let resizeStartX = 0
@@ -50,7 +83,8 @@ function startResizeLeft(e: MouseEvent) {
   const onMouseMove = (moveEvent: MouseEvent) => {
     if (!isResizingWidth.value) return
     const delta = resizeStartX - moveEvent.clientX
-    width.value = Math.max(260, Math.min(600, startW + delta))
+    preferredWidth.value = Math.max(200, Math.min(600, startW + delta))
+    width.value = Math.min(preferredWidth.value, sidebarWidthLimit(window.innerWidth))
   }
 
   const onMouseUp = () => {
@@ -153,12 +187,27 @@ watch(
 watch(panelViewMode, (mode) => {
   lastPanelViewByMode.value[toolStore.appMode] = mode
 })
+
+function clampSidebarWidth() {
+  width.value = Math.max(200, Math.min(preferredWidth.value, sidebarWidthLimit(window.innerWidth)))
+}
+
+onMounted(() => {
+  clampSidebarWidth()
+  window.addEventListener('resize', clampSidebarWidth)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', clampSidebarWidth)
+})
 </script>
 
 <template>
   <aside 
     class="relative h-full bg-ui-panel border-l border-ui-borderSubtle flex flex-col select-none z-30 font-sans text-xs overflow-hidden shrink-0"
     :style="{ width: `${width}px` }"
+    @pointerdown.capture="onInspectorPointerDown"
+    @click.capture="onInspectorClickCapture"
   >
     <!-- Left Resize Handle -->
     <div 
@@ -208,6 +257,33 @@ watch(panelViewMode, (mode) => {
         @click="layoutStore.showRightSidebar = false"
       >
         <BlenderIcon name="sidebar" :size="14" />
+      </button>
+    </div>
+
+    <div
+      v-if="pendingModal"
+      class="shrink-0 flex items-center gap-1 px-2 py-1 border-b border-ui-borderSubtle bg-ui-header"
+    >
+      <span class="flex-1 min-w-0 truncate text-[10px] text-ui-textSecondary" :title="pendingModal.statusText">
+        {{ pendingModal.operatorName }}
+      </span>
+      <button
+        type="button"
+        data-modal-action="confirm"
+        class="px-2 py-0.5 rounded-xs bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-medium"
+        title="Keep this edit"
+        @click="operatorManager.confirm()"
+      >
+        Confirm
+      </button>
+      <button
+        type="button"
+        data-modal-action="cancel"
+        class="px-2 py-0.5 rounded-xs bg-ui-surface hover:bg-rose-950/60 hover:text-rose-300 text-ui-textMuted border border-ui-borderSubtle text-[10px]"
+        title="Cancel this edit"
+        @click="operatorManager.cancel()"
+      >
+        Cancel
       </button>
     </div>
 

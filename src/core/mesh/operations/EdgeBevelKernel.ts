@@ -2,13 +2,16 @@ import * as THREE from 'three'
 import { EditableMesh } from '../MeshKernel'
 import type { BevelOptions, BevelResult } from './BevelKernel'
 import { MeshValidator } from '../MeshValidator'
+import { planarTriPatchSpokes } from './PlanarPatch'
 
 /** Chamfer selected manifold edges, preserving neighboring face connectivity. */
 export function bevelEdges(mesh: EditableMesh, edgeIds: number[], options: BevelOptions): BevelResult {
   const snapshot = mesh.createSnapshot()
   const wasClosed = [...mesh.edges.values()].every(e => e.faceIds.length === 2)
   const result = buildBevel(mesh, edgeIds, options)
-  if (!MeshValidator.validate(mesh).valid || (wasClosed && [...mesh.edges.values()].some(e => e.faceIds.length !== 2))) {
+  const validation = MeshValidator.validate(mesh)
+  const opened = wasClosed && [...mesh.edges.values()].some(e => e.faceIds.length !== 2)
+  if (!validation.valid || opened) {
     mesh.restoreSnapshot(snapshot)
     return { mesh, beveledFaceIds: [], beveledVertexIds: [], error: 'This corner cannot be beveled cleanly. Try a smaller width or fewer edges.' }
   }
@@ -18,7 +21,9 @@ export function bevelEdges(mesh: EditableMesh, edgeIds: number[], options: Bevel
 function buildBevel(mesh: EditableMesh, edgeIds: number[], options: BevelOptions): BevelResult {
   const result: BevelResult = { mesh, beveledFaceIds: [], beveledVertexIds: [] }
   if (!Number.isFinite(options.width) || options.width <= 1e-9) return result
+  const spokes = planarTriPatchSpokes(mesh, edgeIds)
   const edges = [...new Set(edgeIds)].flatMap(id => {
+    if (spokes.has(id)) return []
     const e = mesh.edges.get(id)
     return e && e.faceIds.length === 2 ? [{ ...e, faceIds: [...e.faceIds] }] : []
   })
@@ -113,7 +118,13 @@ function buildBevel(mesh: EditableMesh, edgeIds: number[], options: BevelOptions
   }
   // Close only the small boundary loops created around affected corners.
   for (const [old, vertices] of atVertex) {
-    const boundary = [...mesh.halfEdges.values()].filter(h => h.twinId === null && vertices.has(h.vertexId) && vertices.has(mesh.halfEdges.get(h.nextId)!.vertexId))
+    const pool = new Set(vertices)
+    const original = mesh.vertices.get(old)
+    if (original && original.faceIds.length > 0) pool.add(old)
+    const boundary = [...mesh.halfEdges.values()].filter(h => {
+      const next = mesh.halfEdges.get(h.nextId)
+      return h.twinId === null && !!next && pool.has(h.vertexId) && pool.has(next.vertexId)
+    })
     if (boundary.length < 3) continue
     const loop = [boundary[0].vertexId], used = new Set<number>()
     let next = boundary[0]

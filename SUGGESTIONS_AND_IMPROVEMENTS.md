@@ -180,15 +180,11 @@ The following modules lack dedicated test files (found via directory scan):
 
 **Suggestion:** Use `@vitest/web-worker` or a lightweight Three.js mock/stub. At minimum, mock `THREE.WebGLRenderer`, `THREE.BufferGeometry`, and `THREE.Material` for unit tests. Consider using `vitest-canvas-mock` or a custom `setup.ts` that mocks `HTMLCanvasElement.getContext('webgl')`.
 
-### 3.3 No Performance / Benchmark Tests
+### 3.3 Performance Regression Coverage — Partially Addressed
 
-**Problem:** There are no tests that verify mesh operations perform within acceptable bounds on large meshes.
+`src/core/geometry/PerformanceBudget.test.ts` now builds deterministic 5k, 20k, and 50k quad grids and gates the document → resident kernel → render-triangle path with CI-safe budgets. This closes the original “no large-mesh test” gap without another benchmark dependency.
 
-**Suggestion:** Add `@vitest/bench` tests for:
-- Extrude 1000 faces on a 10K-vertex mesh
-- Undo/redo serialization for a 100K-vertex document
-- UV unwrap on a dense mesh
-- GLTF export for a multi-material, multi-clip animated mesh
+Remaining benchmark work is narrower: profile large selection extrude, undo snapshot cost, conformal unwrap, and multi-material animated GLB export. Keep microbenchmarks opt-in if timing noise makes them unsuitable for the default test suite.
 
 ### 3.4 No Snapshot / Visual Regression Tests
 
@@ -241,11 +237,9 @@ The following modules lack dedicated test files (found via directory scan):
 
 **Suggestion:** Add a small Three.js-rendered preview (a sphere or cube with the material applied) in the material inspector panel.
 
-### 4.7 No Auto-Save on Timer
+### 4.7 Autosave Recovery — Addressed
 
-**Problem:** `projectStore.triggerAutosave()` exists but there's no automatic periodic autosave timer. Users must manually save or rely on recovery sessions.
-
-**Suggestion:** Implement an interval-based autosave (every 5 minutes of non-idle time) that writes to a `.psxproj.autosave` file. Trigger recovery detection on launch.
+`projectStore.triggerAutosave()` now debounces document changes into IndexedDB recovery records, and launch checks offer the recovery banner. Recovery payloads pass the same strict mesh validation as `.psxproj` before replacing editor state. A periodic disk-side `.psxproj.autosave` remains an optional product policy, not a missing recovery mechanism.
 
 ---
 
@@ -359,11 +353,9 @@ The following modules lack dedicated test files (found via directory scan):
 
 **Suggestion:** Use a save queue/mutex pattern. Drop redundant autosave requests if a manual save was just completed.
 
-### 7.7 MeshRepository Memory Leak
+### 7.7 MeshRepository Lifecycle — Addressed
 
-**Problem:** `MeshRepository` retains kernels via `entries` Map. If a mesh is deleted without calling `retain()` with remaining IDs, the old kernel stays in memory.
-
-**Suggestion:** Add a `watch` on `projectStore.meshes` that calls `meshRepository.retain()` with the current mesh IDs automatically.
+Delete paths now call `meshRepository.retain()` with live object ids. Open Project, autosave recovery, New Project, and store disposal clear repository state. Lifecycle tests cover repeated create/delete/undo/redo, immediate deleted-kernel pruning, and cross-project isolation. No broad Vue watcher is needed.
 
 ---
 

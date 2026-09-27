@@ -1,6 +1,27 @@
 import { describe, expect, it } from 'vitest'
 import { createCube } from '../geometry/Primitives'
-import { relaxUvCorners, selectedUvCorners, transformUvCorners, uvBounds, uvInspectAfterSelection, uvInspectToggled } from './UVEditing'
+import { clickSelection, extendSelection, mirrorUvCorners, relaxUvCorners, selectedUvCorners, straightenUvCorners, transformUvCorners, uvBounds, uvInspectAfterSelection, uvInspectToggled } from './UVEditing'
+
+describe('UV multi-selection', () => {
+  const key = (item: { faceIndex: number; vertIndex?: number; edgeIndex?: number }) => `${item.faceIndex}:${item.vertIndex ?? item.edgeIndex}`
+  it('adds and toggles vertices, edges, and faces', () => {
+    const verts = clickSelection([{ faceIndex: 0, vertIndex: 0 }], [{ faceIndex: 1, vertIndex: 2 }], true, key)
+    expect(verts).toEqual([{ faceIndex: 0, vertIndex: 0 }, { faceIndex: 1, vertIndex: 2 }])
+    expect(clickSelection(verts, [{ faceIndex: 0, vertIndex: 0 }], true, key)).toEqual([{ faceIndex: 1, vertIndex: 2 }])
+    const edges = clickSelection([{ faceIndex: 0, edgeIndex: 1 }], [{ faceIndex: 2, edgeIndex: 0 }, { faceIndex: 3, edgeIndex: 1 }], true, key)
+    expect(edges).toHaveLength(3)
+    const faces = clickSelection([0], [2, 4], true, index => String(index))
+    expect(faces).toEqual([0, 2, 4])
+  })
+  it('keeps a multi-selection when the click is already inside it', () => {
+    const faces = [0, 2, 4]
+    expect(clickSelection(faces, [2], false, index => String(index))).toEqual(faces)
+  })
+  it('box-select unions with Shift and replaces otherwise', () => {
+    expect(extendSelection([0, 1], [1, 3], true, index => String(index))).toEqual([0, 1, 3])
+    expect(extendSelection([0, 1], [3, 4], false, index => String(index))).toEqual([3, 4])
+  })
+})
 
 describe('precision UV editing', () => {
   it('never falls back to faces when vertex or edge selection is empty', () => {
@@ -80,5 +101,24 @@ describe('UV inspect panel', () => {
     expect(uvInspectAfterSelection(4, false, true)).toEqual({ showPrecision: false, inspectDismissed: true })
     expect(uvInspectAfterSelection(0, false, true)).toEqual({ showPrecision: false, inspectDismissed: false })
     expect(uvInspectAfterSelection(2, false, false)).toEqual({ showPrecision: true, inspectDismissed: false })
+  })
+  it('straightens a UV chain and mirrors across the texture center', () => {
+    const mesh = createCube('cube', 2)
+    const corners = [
+      { faceIndex: 0, vertIndex: 0 },
+      { faceIndex: 0, vertIndex: 1 },
+      { faceIndex: 0, vertIndex: 3 }
+    ]
+    const straightened = straightenUvCorners(mesh, corners)
+    expect(straightened.length).toBeGreaterThan(0)
+    const moved = straightened.find(edit => edit.vertIndex === 0)!
+    const uvs = mesh.faces[0].uvs
+    const ax = uvs[1].u - uvs[3].u
+    const ay = uvs[1].v - uvs[3].v
+    const bx = moved.u - uvs[3].u
+    const by = moved.v - uvs[3].v
+    expect(ax * by - ay * bx).toBeCloseTo(0)
+    const mirrored = mirrorUvCorners(mesh, [{ faceIndex: 0, vertIndex: 1 }], 'u')
+    expect(mirrored[0].u).toBeCloseTo(1 - uvs[1].u)
   })
 })

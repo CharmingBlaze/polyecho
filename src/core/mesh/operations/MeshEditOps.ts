@@ -26,6 +26,38 @@ function dupVertex(mesh: EditableMesh, id: number): number {
   return copy.id
 }
 
+/** Walk selected vertices along mesh edges. A loop is marked closed so lathe can cap the profile. */
+function orderProfile(mesh: EditableMesh, vertexIds: number[]): { ids: number[]; closed: boolean } {
+  const want = new Set(vertexIds.filter(id => mesh.vertices.has(id)))
+  const adj = new Map<number, number[]>()
+  const link = (a: number, b: number) => {
+    if (!want.has(a) || !want.has(b) || a === b) return
+    const list = adj.get(a) ?? []
+    if (!list.includes(b)) list.push(b)
+    adj.set(a, list)
+  }
+  for (const edge of mesh.edges.values()) {
+    link(edge.v1, edge.v2)
+    link(edge.v2, edge.v1)
+  }
+  if (want.size < 2) return { ids: [...want], closed: false }
+  const endpoints = [...want].filter(id => (adj.get(id)?.length ?? 0) <= 1)
+  const start = endpoints[0] ?? vertexIds.find(id => want.has(id)) ?? [...want][0]
+  const ordered: number[] = []
+  const seen = new Set<number>()
+  let cur: number | undefined = start
+  while (cur !== undefined && !seen.has(cur)) {
+    seen.add(cur)
+    ordered.push(cur)
+    cur = (adj.get(cur) ?? []).find(next => !seen.has(next))
+  }
+  for (const id of vertexIds) if (want.has(id) && !seen.has(id)) ordered.push(id)
+  const closed = endpoints.length === 0
+    && ordered.length > 2
+    && (adj.get(ordered[0]) ?? []).includes(ordered[ordered.length - 1])
+  return { ids: ordered, closed }
+}
+
 function floodFaces(mesh: EditableMesh, start: number, blocked: Set<number>): Set<number> {
   const seen = new Set<number>()
   const stack = [start]
@@ -51,30 +83,43 @@ function boundaryEdges(mesh: EditableMesh): number[] {
 
 /** Closed loops of vertex ids from boundary (or selected) edges. */
 export function edgeLoopsFromIds(mesh: EditableMesh, edgeIds: number[]): number[][] {
+  return edgeChainsFromIds(mesh, edgeIds).map(chain => chain.verts)
+}
+
+/** Selected edges as vertex chains. An open chain is walked from both ends, so any start edge gives the whole chain. */
+export function edgeChainsFromIds(mesh: EditableMesh, edgeIds: number[]): { verts: number[]; closed: boolean }[] {
   const unused = new Set(edgeIds.filter(id => mesh.edges.has(id)))
-  const loops: number[][] = []
+  const chains: { verts: number[]; closed: boolean }[] = []
+  const take = (end: number) => {
+    for (const id of unused) {
+      const e = mesh.edges.get(id)
+      if (!e) continue
+      if (e.v1 === end) { unused.delete(id); return e.v2 }
+      if (e.v2 === end) { unused.delete(id); return e.v1 }
+    }
+    return undefined
+  }
   while (unused.size) {
     const start = mesh.edges.get([...unused][0])!
     unused.delete(start.id)
     const loop = [start.v1, start.v2]
-    let guard = 0
-    while (guard++ < mesh.edges.size + 2) {
-      const tail = loop[loop.length - 1]
-      let next: { id: number; other: number } | undefined
-      for (const id of unused) {
-        const e = mesh.edges.get(id)
-        if (!e) continue
-        if (e.v1 === tail) { next = { id, other: e.v2 }; break }
-        if (e.v2 === tail) { next = { id, other: e.v1 }; break }
-      }
-      if (!next) break
-      unused.delete(next.id)
-      if (next.other === loop[0]) break
-      loop.push(next.other)
+    let closed = false
+    for (let guard = 0; guard < mesh.edges.size + 2; guard++) {
+      const next = take(loop[loop.length - 1])
+      if (next === undefined) break
+      if (next === loop[0]) { closed = true; break }
+      loop.push(next)
     }
-    if (loop.length >= 2) loops.push(loop)
+    if (!closed) {
+      for (let guard = 0; guard < mesh.edges.size + 2; guard++) {
+        const prev = take(loop[0])
+        if (prev === undefined) break
+        loop.unshift(prev)
+      }
+    }
+    chains.push({ verts: loop, closed })
   }
-  return loops
+  return chains
 }
 
 export class MeshEditOps {
@@ -366,7 +411,8 @@ export class MeshEditOps {
       const ids: number[] = []
       for (const world of line) {
         const local = world.clone().applyMatrix4(inv)
-        ids.push(KnifeKernel.insertSurfaceVertex(mesh, local))
+        const id = KnifeKernel.insertSurfaceVertex(mesh, local)
+        if (id !== null) ids.push(id)
       }
       for (let i = 0; i < ids.length - 1; i++) {
         if (ids[i] === ids[i + 1]) continue
@@ -424,17 +470,39 @@ export class MeshEditOps {
     mesh.recalculateNormals()
   }
 
+  /**
+   * Reorder loop B so B[i] is the vertex across from A[i]: pick the direction and (for closed
+   * loops) the start that minimise the summed corner distances, as Blender's Bridge does.
+   */
+  static alignBridgeLoop(mesh: EditableMesh, loopA: number[], loopB: number[], closed: boolean): number[] {
+    const n = loopA.length
+    const pa = loopA.map(id => mesh.vertices.get(id)!.position)
+    const pb = loopB.map(id => mesh.vertices.get(id)!.position)
+    let best = loopB, bestCost = Infinity
+    for (const dir of [1, -1]) {
+      for (let shift = 0; shift < (closed ? n : 1); shift++) {
+        const order = loopB.map((_, i) => (dir === 1 ? (shift + i) : (shift - i + n * 2)) % n)
+        let cost = 0
+        for (let i = 0; i < n; i++) cost += pa[i]!.distanceTo(pb[order[i]!]!)
+        if (cost < bestCost - 1e-9) { bestCost = cost; best = order.map(k => loopB[k]!) }
+      }
+    }
+    return best
+  }
+
   static bridgeLoopsAdvanced(
     mesh: EditableMesh,
     loopA: number[],
     loopB: number[],
     segments = 1,
-    twist = 0
+    twist = 0,
+    closed = true
   ): number[] {
     if (loopA.length < 2 || loopA.length !== loopB.length) return []
     const n = loopA.length
-    const shift = ((Math.round(twist) % n) + n) % n
-    const b = loopB.map((_, i) => loopB[(i + shift) % n]!)
+    const aligned = this.alignBridgeLoop(mesh, loopA, loopB, closed)
+    const shift = closed ? ((Math.round(twist) % n) + n) % n : 0
+    const b = aligned.map((_, i) => aligned[(i + shift) % n]!)
     const rings = [loopA]
     const segs = Math.max(1, Math.min(16, Math.round(segments)))
     for (let s = 1; s < segs; s++) {
@@ -448,7 +516,7 @@ export class MeshEditOps {
     const created: number[] = []
     for (let r = 0; r < rings.length - 1; r++) {
       const a = rings[r], c = rings[r + 1]
-      for (let i = 0; i < n; i++) {
+      for (let i = 0; i < (closed ? n : n - 1); i++) {
         const id = MeshTopologyService.bridgeTwoEdges(mesh, a[i], a[(i + 1) % n], c[i], c[(i + 1) % n], false)
         if (id != null) created.push(id)
       }
@@ -463,12 +531,14 @@ export class MeshEditOps {
     origin: THREE.Vector3,
     axis: THREE.Vector3,
     steps: number,
-    angleDeg: number
+    angleDeg: number,
+    closeProfile = false
   ): void {
     const profile = vertexIds.filter(id => mesh.vertices.has(id))
     if (profile.length < 2) return
     const count = Math.max(2, Math.min(64, Math.round(steps)))
     const axisN = axis.clone().normalize()
+    if (axisN.lengthSq() < 1e-12) return
     const q = new THREE.Quaternion()
     const rings: number[][] = [profile]
     for (let s = 1; s <= count; s++) {
@@ -483,17 +553,48 @@ export class MeshEditOps {
     }
     const closed = Math.abs(Math.abs(angleDeg) - 360) < 0.5
     const ringCount = closed ? rings.length - 1 : rings.length
-    for (let r = 0; r < ringCount - 1; r++) {
-      const a = rings[r]
-      const b = rings[r + 1]
-      for (let i = 0; i < a.length - 1; i++) {
-        MeshTopologyService.bridgeTwoEdges(mesh, a[i], a[i + 1], b[i], b[i + 1], false)
+    const link = (a: number[], b: number[]) => {
+      const segments = closeProfile ? a.length : Math.max(0, a.length - 1)
+      for (let i = 0; i < segments; i++) {
+        const i2 = (i + 1) % a.length
+        MeshTopologyService.bridgeTwoEdges(mesh, a[i], a[i2], b[i], b[i2], false)
       }
     }
+    for (let r = 0; r < ringCount - 1; r++) link(rings[r], rings[r + 1])
     if (closed) {
+      link(rings[ringCount - 1], rings[0])
       MergeKernel.mergeByDistance(mesh, 1e-5, [...rings[0], ...rings[rings.length - 1]])
     }
     mesh.recalculateNormals()
+  }
+
+  /** Revolve an ordered profile 360° around an axis through `origin`. */
+  static lathe(
+    mesh: EditableMesh,
+    vertexIds: number[],
+    origin: THREE.Vector3,
+    axis: THREE.Vector3,
+    steps: number
+  ): void {
+    const profile = orderProfile(mesh, vertexIds)
+    if (profile.ids.length < 2) return
+    this.spin(mesh, profile.ids, origin, axis, steps, 360, profile.closed)
+  }
+
+  /**
+   * Hollow a closed mesh, keeping the outer surface and adding an inner wall.
+   * A partial face selection is treated as an opening and removed.
+   */
+  static shell(mesh: EditableMesh, openingFaceIds: number[], thickness: number): void {
+    const wall = Math.abs(thickness)
+    if (wall < 1e-8 || mesh.faces.size === 0) return
+    const openings = new Set(openingFaceIds.filter(id => mesh.faces.has(id)))
+    if (openings.size > 0 && openings.size < mesh.faces.size) {
+      for (const id of openings) mesh.removeFace(id)
+    }
+    const walls = [...mesh.faces.keys()]
+    if (!walls.length) return
+    this.solidifyFaces(mesh, walls, -wall)
   }
 
   static extrudeManifold(mesh: EditableMesh, faceIds: number[]): ReturnType<typeof ExtrudeKernel.extrude> {
@@ -567,11 +668,17 @@ export class MeshEditOps {
       AttributeInterpolator.copyVertex(v, nv)
       shell.set(id, nv.id)
     }
+    const shellFaces: number[] = []
     for (const fId of selected) {
       const face = mesh.faces.get(fId)!
       const ids = face.vertexIds.map(id => shell.get(id)!)
-      mesh.addFace(ids, face.uvs.map(uv => uv.clone()), face.materialIndex, face.color)
+      const added = mesh.addFace(ids, face.uvs.map(uv => uv.clone()), face.materialIndex, face.color)
+      if (added) shellFaces.push(added.id)
     }
+    // The layer on the inside of the shell faces inward. Flip it before the rim walls are
+    // built, since each wall takes its winding from the faces beside it.
+    if (thickness > 0) for (const id of selected) mesh.reverseFace(id)
+    else for (const id of shellFaces) mesh.reverseFace(id)
     for (const id of selected) {
       const face = mesh.faces.get(id)!
       for (let i = 0; i < face.vertexIds.length; i++) {
@@ -587,6 +694,9 @@ export class MeshEditOps {
   }
 
   static symmetrize(mesh: EditableMesh, axis: 'x' | 'y' | 'z', threshold = 1e-4): void {
+    // Cut faces that cross the plane first, or a straddling face is mirrored onto itself.
+    const planeNormal = new THREE.Vector3(axis === 'x' ? 1 : 0, axis === 'y' ? 1 : 0, axis === 'z' ? 1 : 0)
+    this.bisect(mesh, new THREE.Plane(planeNormal, 0), false, true)
     const negative: number[] = []
     for (const face of mesh.faces.values()) {
       const mid = new THREE.Vector3()

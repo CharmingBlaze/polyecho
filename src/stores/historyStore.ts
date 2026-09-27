@@ -4,6 +4,7 @@ import { useProjectStore } from './projectStore'
 import { useAnimationStore } from './animationStore'
 import { PixelBuffer } from '../core/painting/PixelCanvas'
 import { cloneMeshDocumentSlice } from '../core/history/applyMeshDocument'
+import type { ResidentMeshSnapshot } from '../core/mesh/MeshRepository'
 
 export interface TextureSnapshot {
   id: string
@@ -19,6 +20,8 @@ export interface AppSnapshot {
   description: string
   timestamp: number
   meshes: any[]
+  /** In-memory resident topology; never persisted in .psxproj files. */
+  residentMeshes?: ResidentMeshSnapshot[]
   activeMeshId: string
   selectedMeshIds: string[]
   selectedVertexIds: string[]
@@ -49,6 +52,8 @@ export interface HistoryRecord {
   redo: () => void
   snapshot?: AppSnapshot
 }
+
+export const HISTORY_STACK_LIMIT = 50
 
 export const useHistoryStore = defineStore('history', () => {
   const undoStack = ref<HistoryRecord[]>([])
@@ -98,6 +103,7 @@ export const useHistoryStore = defineStore('history', () => {
       description,
       timestamp: Date.now(),
       meshes: JSON.parse(JSON.stringify(projectStore.meshes)),
+      residentMeshes: projectStore.captureResidentMeshes(),
       activeMeshId: projectStore.activeMeshId,
       selectedMeshIds: [...projectStore.selectedMeshIds],
       selectedVertexIds: [...projectStore.selectedVertexIds],
@@ -136,6 +142,7 @@ export const useHistoryStore = defineStore('history', () => {
       projectStore.selectedVertexIds = meshSlice.selectedVertexIds
       projectStore.selectedEdgeIds = meshSlice.selectedEdgeIds
       projectStore.selectedFaceIds = meshSlice.selectedFaceIds
+      if (snapshot.residentMeshes) projectStore.restoreResidentMeshes(snapshot.residentMeshes)
       projectStore.materials = JSON.parse(JSON.stringify(snapshot.materials))
       if (snapshot.activePalette) {
         projectStore.activePalette = JSON.parse(JSON.stringify(snapshot.activePalette))
@@ -196,7 +203,7 @@ export const useHistoryStore = defineStore('history', () => {
       redo: () => applySnapshot(snapshot)
     })
 
-    if (undoStack.value.length > 50) {
+    if (undoStack.value.length > HISTORY_STACK_LIMIT) {
       undoStack.value.shift()
     }
     redoStack.value = []
@@ -206,7 +213,7 @@ export const useHistoryStore = defineStore('history', () => {
   function pushAction(action: HistoryRecord) {
     if (isApplyingHistory.value) return
     undoStack.value.push(action)
-    if (undoStack.value.length > 50) {
+    if (undoStack.value.length > HISTORY_STACK_LIMIT) {
       undoStack.value.shift()
     }
     redoStack.value = []

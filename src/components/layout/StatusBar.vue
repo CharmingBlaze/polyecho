@@ -84,7 +84,7 @@ const contextualHints = computed(() => {
 </script>
 
 <template>
-  <footer class="h-6 bg-ui-header border-t border-ui-borderSubtle px-2.5 flex items-center justify-between text-[11px] font-sans text-ui-textMuted select-none shrink-0 z-30">
+  <footer class="h-6 min-w-0 bg-ui-header border-t border-ui-borderSubtle px-2.5 flex items-center justify-between text-[11px] font-sans text-ui-textMuted select-none shrink-0 z-30 overflow-hidden">
     <!-- Left: Contextual Shortcut Hints -->
     <div class="flex items-center space-x-2 truncate" :class="operatorState.active || toolStore.isBoxSelectActive || toolStore.stickyViewNav ? 'max-w-[62%]' : 'max-w-[45%]'">
       <span class="font-semibold text-[10px] uppercase text-ui-textSecondary shrink-0">{{ statusModeLabel }}:</span>
@@ -116,7 +116,7 @@ const contextualHints = computed(() => {
     </div>
 
     <!-- Right: Scene Statistics, Active Profile, Snap & Mode -->
-    <div class="flex items-center space-x-2.5 shrink-0 text-[10px]">
+    <div class="flex items-center space-x-2.5 shrink min-w-0 text-[10px]">
       <!-- Profile Selector & Budget Alerts -->
       <div class="flex items-center space-x-1 border-r border-ui-borderSubtle pr-2.5">
         <select 
@@ -138,7 +138,7 @@ const contextualHints = computed(() => {
       </div>
 
       <!-- Stats (Tris, Verts, Faces) with Tabular Numerals -->
-      <div class="flex items-center space-x-2 border-r border-ui-borderSubtle pr-2.5">
+      <div class="hidden min-[900px]:flex items-center space-x-2 border-r border-ui-borderSubtle pr-2.5">
         <span class="text-ui-textMuted">Tris <span class="text-ui-textPrimary font-mono tabular-nums font-medium">{{ projectStore.stats?.tris ?? 0 }}</span></span>
         <span class="text-ui-textMuted">Verts <span class="text-ui-textPrimary font-mono tabular-nums font-medium">{{ projectStore.stats?.verts ?? 0 }}</span></span>
         <span class="text-ui-textMuted">Faces <span class="text-ui-textPrimary font-mono tabular-nums font-medium">{{ projectStore.stats?.faces ?? 0 }}</span></span>
@@ -154,13 +154,13 @@ const contextualHints = computed(() => {
       </div>
 
       <!-- Objects count -->
-      <div class="flex items-center space-x-1 border-r border-ui-borderSubtle pr-2.5">
+      <div class="hidden min-[1100px]:flex items-center space-x-1 border-r border-ui-borderSubtle pr-2.5">
         <BlenderIcon name="layers" :size="12" />
         <span class="text-ui-textMuted"><span class="text-ui-textPrimary font-mono tabular-nums font-medium">{{ projectStore.meshes.length }}</span> Obj</span>
       </div>
 
       <!-- Grid Snap Status -->
-      <div class="flex items-center space-x-1 border-r border-ui-borderSubtle pr-2.5">
+      <div class="hidden min-[1200px]:flex items-center space-x-1 border-r border-ui-borderSubtle pr-2.5">
         <BlenderIcon name="grid" :size="12" :color="toolStore.snapping.grid ? 'var(--ui-accent)' : 'currentColor'" />
         <span :class="toolStore.snapping.grid ? 'text-ui-textSecondary font-medium font-mono tabular-nums' : 'text-ui-textMuted font-mono'">
           {{ toolStore.snapping.grid ? `Snap: ${toolStore.snapping.gridSize}m` : 'Snap: Off' }}
@@ -168,7 +168,7 @@ const contextualHints = computed(() => {
       </div>
 
       <div
-        class="flex items-center px-1.5 py-0.2 bg-ui-input border border-ui-borderSubtle rounded-xs text-[9px] font-medium text-ui-textSecondary uppercase"
+        class="hidden min-[1280px]:flex items-center px-1.5 py-0.2 bg-ui-input border border-ui-borderSubtle rounded-xs text-[9px] font-medium text-ui-textSecondary uppercase"
         :title="isDesktopApp() ? 'Running as a desktop window' : 'Running in a browser tab'"
       >
         {{ isDesktopApp() ? 'Desktop' : 'Web' }}

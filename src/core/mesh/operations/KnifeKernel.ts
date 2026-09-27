@@ -43,19 +43,69 @@ export class KnifeKernel {
 
     for (const points of chains) {
       if (points.length < 2) continue
-      const resolved = points.map(point => point.background ? -1 : this.resolvePointsToVertices(mesh, [point])[0])
-
+      this.embedInteriorChains(mesh, points)
+      const resolved = this.resolvePointsToVertices(mesh, points, options)
       this.cutThroughPolyline(mesh, points, resolved, options)
     }
 
     mesh.recalculateNormals()
   }
 
-  private static resolvePointsToVertices(mesh: EditableMesh, points: KnifePoint[]): number[] {
+  private static strokeDirection(points: KnifePoint[], index: number): THREE.Vector3 | undefined {
+    const here = points[index]?.world
+    const other = points[index + 1]?.world ?? points[index - 1]?.world
+    if (!here || !other) return undefined
+    const dir = other.clone().sub(here)
+    return dir.lengthSq() > 1e-12 ? dir : undefined
+  }
+
+  /**
+   * Where the stroke leaves this point's face, found on screen like the edge crossings in
+   * `cutThroughPolyline`. A chord aimed there meets the crossing vertex exactly.
+   * The 3D direction to a click on another face dips into the mesh and misses it.
+   */
+  private static crossingDirection(
+    mesh: EditableMesh,
+    points: KnifePoint[],
+    index: number,
+    options: KnifeCutOptions
+  ): THREE.Vector3 | undefined {
+    const here = points[index]!
+    const face = here.faceId !== undefined ? mesh.faces.get(here.faceId) : undefined
+    if (!face) return undefined
+    const matrix = options.objectMatrix ?? new THREE.Matrix4()
+    const project = (p: THREE.Vector3) =>
+      ScreenGeometry.worldToScreen(p.clone().applyMatrix4(matrix), options.camera, options.viewportRect, options.quadrant)
+    for (const other of [points[index + 1], points[index - 1]]) {
+      if (!other || (other.targetType === 'FACE' && !other.background && other.faceId === here.faceId)) continue
+      let best: { along: number; point: THREE.Vector3 } | null = null
+      const n = face.vertexIds.length
+      for (let i = 0; i < n; i++) {
+        const p = mesh.vertices.get(face.vertexIds[i]!)!.position
+        const q = mesh.vertices.get(face.vertexIds[(i + 1) % n]!)!.position
+        const hit = ScreenGeometry.intersectSegments2D(here.screen, other.screen, project(p), project(q))
+        if (!hit.hit || hit.tA < 1e-6 || hit.tA > 1 + 1e-6) continue
+        if (best && hit.tA >= best.along) continue
+        const t = perspectiveEdgeParameter(hit.tB, p.clone().applyMatrix4(matrix), q.clone().applyMatrix4(matrix), options.camera)
+        if (Number.isFinite(t)) best = { along: hit.tA, point: p.clone().lerp(q, t) }
+      }
+      if (!best) continue
+      const dir = best.point.sub(here.world)
+      if (dir.lengthSq() > 1e-12) return dir
+    }
+    return undefined
+  }
+
+  private static resolvePointsToVertices(mesh: EditableMesh, points: KnifePoint[], options?: KnifeCutOptions): number[] {
     const byEdge = new Map<number, { t: number; index: number }[]>()
     const resolved: Array<number | null> = points.map(() => null)
+    const surface: number[] = []
 
     points.forEach((pt, index) => {
+      if (pt.background) {
+        resolved[index] = -1
+        return
+      }
       if (pt.targetType === 'VERTEX' && pt.vertexId !== undefined && mesh.vertices.has(pt.vertexId)) {
         resolved[index] = pt.vertexId
         return
@@ -67,8 +117,14 @@ export class KnifeKernel {
         byEdge.set(pt.edgeId, list)
         return
       }
-      resolved[index] = this.insertSurfaceVertex(mesh, pt.world, pt.faceId)
+      surface.push(index)
     })
+
+    // Face directions are measured on the untouched face, before edge snaps split it.
+    const directions = new Map(surface.map(index => [
+      index,
+      (options && this.crossingDirection(mesh, points, index, options)) ?? this.strokeDirection(points, index),
+    ]))
 
     const jobs: { v1: number; v2: number; hits: { t: number; index: number }[] }[] = []
     for (const [edgeId, hits] of byEdge) {
@@ -86,16 +142,88 @@ export class KnifeKernel {
       }
     }
 
+    // After edge snaps, so a chord that ends on a snap reuses that vertex.
+    for (const index of surface) {
+      const pt = points[index]!
+      resolved[index] = this.insertSurfaceVertex(mesh, pt.world, pt.faceId, directions.get(index))
+    }
+
     return resolved.map((id, i) => {
-      if (id !== null) return id
-      return this.insertSurfaceVertex(mesh, points[i]!.world, points[i]!.faceId)
+      const pt = points[i]!
+      if (pt.background) return -1
+      if (id !== null && id >= 0) return id
+      if (pt.targetType === 'FACE') return -1
+      return this.insertSurfaceVertex(mesh, pt.world, pt.faceId, this.strokeDirection(points, i)) ?? -1
     })
+  }
+
+  /**
+   * Several clicks inside one face become one chord, with every point on that edge.
+   * Two separate chords would meet sideways and leave a triangle.
+   */
+  private static embedInteriorChains(mesh: EditableMesh, points: KnifePoint[]) {
+    let i = 0
+    while (i < points.length) {
+      const faceId = points[i]?.faceId
+      const interior = (point: KnifePoint | undefined) =>
+        !!point && point.targetType === 'FACE' && !point.background && point.faceId === faceId && faceId !== undefined
+      if (!interior(points[i])) { i++; continue }
+      let j = i + 1
+      while (interior(points[j])) j++
+      if (j - i >= 2 && faceId !== undefined) {
+        const ids = this.embedPointsOnOneChord(mesh, faceId, points.slice(i, j).map(point => point.world))
+        if (ids) {
+          ids.forEach((id, k) => {
+            points[i + k]!.targetType = 'VERTEX'
+            points[i + k]!.vertexId = id
+          })
+        }
+      }
+      i = j
+    }
+  }
+
+  private static embedPointsOnOneChord(mesh: EditableMesh, faceId: number, worlds: THREE.Vector3[]): number[] | null {
+    const face = mesh.faces.get(faceId)
+    if (!face || worlds.length < 2 || face.vertexIds.length < 4) return null
+    const dir = worlds[worlds.length - 1]!.clone().sub(worlds[0]!)
+    if (dir.lengthSq() < 1e-12) return null
+    const verts = [...face.vertexIds]
+    const positions = verts.map(id => mesh.vertices.get(id)!.position)
+    const chord = this.chordAcrossFace(positions, face.normal, worlds[0]!, dir)
+    if (!chord) return null
+    const boundaryVertex = (hit: { edge: number; edgeT: number }) => {
+      const a = verts[hit.edge]!
+      const b = verts[(hit.edge + 1) % verts.length]!
+      if (hit.edgeT <= 1e-4) return a
+      if (hit.edgeT >= 1 - 1e-4) return b
+      const edgeId = this.findEdgeId(mesh, a, b)
+      if (edgeId === null) return null
+      const edge = mesh.edges.get(edgeId)!
+      const t = edge.v1 === a ? hit.edgeT : 1 - hit.edgeT
+      return this.splitEdgeAtParameters(mesh, edgeId, [t]).get(this.tKey(t)) ?? null
+    }
+    const endA = boundaryVertex(chord.neg)
+    const endB = boundaryVertex(chord.pos)
+    if (endA == null || endB == null || endA === endB) return null
+    if (!TopologyOps.splitFaceUnchecked(mesh, faceId, endA, endB)) return null
+    // The chord's ends are the new corners. Extra clicks stay on that edge and are not inserted,
+    // or each click would turn the two quads into n-gons.
+    const along = dir.dot(worlds[worlds.length - 1]!.clone().sub(worlds[0]!))
+    const startId = along >= 0 ? endA : endB
+    const endId = along >= 0 ? endB : endA
+    return worlds.map((_, index) => index === 0 ? startId : endId)
   }
 
   /**
    * Put a cut vertex on the surface: reuse a nearby vert, split an edge, or poke the face.
    */
-  static insertSurfaceVertex(mesh: EditableMesh, position: THREE.Vector3, preferredFaceId?: number): number {
+  static insertSurfaceVertex(
+    mesh: EditableMesh,
+    position: THREE.Vector3,
+    preferredFaceId?: number,
+    direction?: THREE.Vector3
+  ): number | null {
     const snapEps = 1e-8
     for (const [id, v] of mesh.vertices) {
       if (v.position.distanceToSquared(position) <= snapEps) return id
@@ -110,8 +238,11 @@ export class KnifeKernel {
         const id = created.get(this.tKey(t))
         if (id !== undefined) return id
       }
-      const poked = this.pokeFaceAt(mesh, onFace.faceId, onFace.point)
+      const poked = this.pokeFaceAt(mesh, onFace.faceId, onFace.point, direction)
       if (poked !== null) return poked
+      const face = mesh.faces.get(onFace.faceId)
+      // A quad or n-gon that cannot take one chord stays intact. Fanning it writes the fill diagonals as edges.
+      if (face && face.vertexIds.length > 3) return null
     }
 
     return mesh.addVertex(position.clone()).id
@@ -125,7 +256,7 @@ export class KnifeKernel {
     const tri = new THREE.Triangle()
     const closest = new THREE.Vector3()
     let bestFaceId = -1
-    const bestPoint = new THREE.Vector3()
+    let bestPoint = new THREE.Vector3()
     let bestDist = Infinity
 
     const consider = (faceId: number) => {
@@ -181,9 +312,135 @@ export class KnifeKernel {
     return best
   }
 
-  private static pokeFaceAt(mesh: EditableMesh, faceId: number, position: THREE.Vector3): number | null {
+  /**
+   * Drop a point on a face. A quad (or larger face) is split by one chord through
+   * the point, so the rest of the face stays intact. A triangle has to become three triangles.
+   */
+  private static pokeFaceAt(
+    mesh: EditableMesh,
+    faceId: number,
+    position: THREE.Vector3,
+    direction?: THREE.Vector3
+  ): number | null {
     const face = mesh.faces.get(faceId)
     if (!face || face.vertexIds.length < 3) return null
+    if (face.vertexIds.length === 3) return this.fanPointIntoTriangles(mesh, faceId, position)
+    return this.embedPointOnChord(mesh, faceId, position, direction)
+  }
+
+  /** One chord through the point. A quad becomes two quads instead of four triangles. */
+  private static embedPointOnChord(
+    mesh: EditableMesh,
+    faceId: number,
+    position: THREE.Vector3,
+    preferred?: THREE.Vector3
+  ): number | null {
+    const face = mesh.faces.get(faceId)
+    if (!face) return null
+    const verts = [...face.vertexIds]
+    const positions = verts.map(id => mesh.vertices.get(id)!.position)
+    const chord = this.chordAcrossFace(positions, face.normal, position, preferred)
+    if (!chord) return null
+
+    const boundaryVertex = (hit: { edge: number; edgeT: number }) => {
+      const a = verts[hit.edge]
+      const b = verts[(hit.edge + 1) % verts.length]
+      if (hit.edgeT <= 1e-4) return a
+      if (hit.edgeT >= 1 - 1e-4) return b
+      const edgeId = this.findEdgeId(mesh, a, b)
+      if (edgeId === null) return null
+      const edge = mesh.edges.get(edgeId)!
+      const t = edge.v1 === a ? hit.edgeT : 1 - hit.edgeT
+      return this.splitEdgeAtParameters(mesh, edgeId, [t]).get(this.tKey(t)) ?? null
+    }
+    const endA = boundaryVertex(chord.neg)
+    const endB = boundaryVertex(chord.pos)
+    if (endA == null || endB == null || endA === endB) return null
+    if (!TopologyOps.splitFaceUnchecked(mesh, faceId, endA, endB)) return null
+    // In a stroke the chord is the cut: return the end the stroke heads toward, so the next
+    // segment starts from that crossing. A vertex at the click would turn both halves into n-gons.
+    if (preferred) return endB
+    // A quad's chord is the whole edge, for the same reason.
+    if (verts.length === 4) return endA
+
+    // A lone point (Knife Project) needs a vertex where it was placed.
+    const edgeId = this.findEdgeId(mesh, endA, endB)
+    if (edgeId === null) return endA
+    const edge = mesh.edges.get(edgeId)!
+    const pA = mesh.vertices.get(edge.v1)!.position
+    const pB = mesh.vertices.get(edge.v2)!.position
+    const ab = pB.clone().sub(pA)
+    const denom = ab.lengthSq()
+    if (denom < 1e-12) return edge.v1
+    const t = THREE.MathUtils.clamp(position.clone().sub(pA).dot(ab) / denom, 0, 1)
+    if (t <= 1e-4) return edge.v1
+    if (t >= 1 - 1e-4) return edge.v2
+    return this.splitEdgeAtParameters(mesh, edgeId, [t]).get(this.tKey(t)) ?? null
+  }
+
+  private static chordAcrossFace(
+    positions: THREE.Vector3[],
+    normal: THREE.Vector3,
+    origin: THREE.Vector3,
+    preferred?: THREE.Vector3
+  ): { neg: { edge: number; edgeT: number }; pos: { edge: number; edgeT: number } } | null {
+    const n = positions.length
+    const dirs: THREE.Vector3[] = []
+    if (preferred && preferred.lengthSq() > 1e-12) dirs.push(preferred.clone().normalize())
+    else {
+      for (let i = 0; i < n; i++) {
+        const dir = positions[(i + 1) % n].clone().sub(positions[i])
+        if (dir.lengthSq() > 1e-12) dirs.push(dir.normalize())
+      }
+      if (dirs[0]) dirs.push(normal.clone().cross(dirs[0]).normalize())
+    }
+
+    let best: { neg: { edge: number; edgeT: number }; pos: { edge: number; edgeT: number }; score: number } | null = null
+    for (const dir of dirs) {
+      if (dir.lengthSq() < 1e-12) continue
+      const hits = this.lineHits(positions, origin, dir, normal)
+      const pos = hits.filter(hit => hit.lineT > 1e-5).sort((a, b) => a.lineT - b.lineT)[0]
+      const neg = hits.filter(hit => hit.lineT < -1e-5).sort((a, b) => b.lineT - a.lineT)[0]
+      if (!pos || !neg || pos.edge === neg.edge) continue
+      const adjacent = (pos.edge + 1) % n === neg.edge || (neg.edge + 1) % n === pos.edge
+      const offCentre = Math.abs(pos.lineT + neg.lineT) / (pos.lineT - neg.lineT)
+      const score = (n === 4 && adjacent ? 0 : 2) - offCentre
+      if (!best || score > best.score) best = { neg, pos, score }
+    }
+    if (!best || (!preferred && n === 4 && best.score < 1)) return null
+    return { neg: best.neg, pos: best.pos }
+  }
+
+  private static lineHits(
+    positions: THREE.Vector3[],
+    origin: THREE.Vector3,
+    dir: THREE.Vector3,
+    normal: THREE.Vector3
+  ): { edge: number; edgeT: number; lineT: number }[] {
+    const axisU = dir.clone().normalize()
+    const axisV = normal.clone().cross(axisU)
+    if (axisV.lengthSq() < 1e-12) return []
+    axisV.normalize()
+    const flat = (p: THREE.Vector3) => new THREE.Vector2(p.clone().sub(origin).dot(axisU), p.clone().sub(origin).dot(axisV))
+    const hits: { edge: number; edgeT: number; lineT: number }[] = []
+    for (let i = 0; i < positions.length; i++) {
+      const a = flat(positions[i])
+      const b = flat(positions[(i + 1) % positions.length])
+      const dy = b.y - a.y
+      if (Math.abs(dy) < 1e-8) continue
+      const rawT = -a.y / dy
+      if (rawT < -1e-5 || rawT > 1 + 1e-5) continue
+      const edgeT = THREE.MathUtils.clamp(rawT, 0, 1)
+      if (Math.abs(a.y + dy * edgeT) > 1e-4) continue
+      hits.push({ edge: i, edgeT, lineT: a.x + (b.x - a.x) * edgeT })
+    }
+    return hits
+  }
+
+  /** A triangle cannot hold an interior point as a quad. */
+  private static fanPointIntoTriangles(mesh: EditableMesh, faceId: number, position: THREE.Vector3): number | null {
+    const face = mesh.faces.get(faceId)
+    if (!face) return null
     const verts = [...face.vertexIds]
     const uvs = face.uvs.map((uv) => uv.clone())
     const matIdx = face.materialIndex
@@ -202,26 +459,11 @@ export class KnifeKernel {
     }
     const cId = mesh.addVertex(position.clone()).id
     mesh.removeFace(faceId)
-    const normal = face.normal
-    const fanIsInside = positions.every((p, i) => p.clone().sub(position).cross(positions[(i + 1) % positions.length].clone().sub(position)).dot(normal) > 1e-12)
     const addWedge = (a: number, b: number) => {
       if (positions[a].clone().sub(position).cross(positions[b].clone().sub(position)).lengthSq() < 1e-20) return
       mesh.addFace([verts[a], verts[b], cId], [uvs[a], uvs[b], uvC.clone()], matIdx, color)
     }
-    if (fanIsInside) {
-      for (let i = 0; i < verts.length; i++) addWedge(i, (i + 1) % verts.length)
-    } else {
-      // Preserve regions outside the containing triangle on concave polygons.
-      for (const indices of triangles) {
-        const [a] = indices
-        let [, b, c] = indices
-        if (positions[b].clone().sub(positions[a]).cross(positions[c].clone().sub(positions[a])).dot(normal) < 0) [b, c] = [c, b]
-        triangle.set(positions[a], positions[b], positions[c])
-        if (triangle.containsPoint(position)) {
-          addWedge(a, b); addWedge(b, c); addWedge(c, a)
-        } else mesh.addFace([verts[a], verts[b], verts[c]], [uvs[a], uvs[b], uvs[c]], matIdx, color)
-      }
-    }
+    for (let i = 0; i < verts.length; i++) addWedge(i, (i + 1) % verts.length)
     return cId
   }
 
@@ -343,7 +585,10 @@ export class KnifeKernel {
           return hit && ray.origin.distanceTo(hit) < distance - Math.max(1e-6, distance * 1e-6)
         })
       }
+      const ends = new Set([resolved[i], resolved[i + 1]])
       const jobs = [...mesh.edges.values()].flatMap(edge => {
+        // An edge out of this segment's own end vertex (a chord just laid through a click) is not a crossing.
+        if (ends.has(edge.v1) || ends.has(edge.v2)) return []
         const p = mesh.vertices.get(edge.v1)!.position, q = mesh.vertices.get(edge.v2)!.position
         const hit = ScreenGeometry.intersectSegments2D(a.screen, b.screen, project(p), project(q))
         if (!hit.hit || hit.tA < -1e-7 || hit.tA > 1 + 1e-7) return []
@@ -352,7 +597,8 @@ export class KnifeKernel {
         return [{ a: edge.v1, b: edge.v2, t, along: hit.tA, faces: [...edge.faceIds] }]
       })
       for (const job of jobs) {
-        let id: number | undefined = job.t < 1e-5 ? job.a : job.t > 1 - 1e-5 ? job.b : undefined
+        // A crossing on a vertex the chord or a snap already made reuses it instead of adding a sliver.
+        let id: number | undefined = job.t < 1e-4 ? job.a : job.t > 1 - 1e-4 ? job.b : undefined
         if (id === undefined) {
           const edge = this.findEdgeId(mesh, job.a, job.b)
           if (edge === null) continue

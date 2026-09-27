@@ -65,7 +65,9 @@ describe('mesh integrity', () => {
   it('splits an edge in all adjacent faces and interpolates separate UV corners', () => {
     const mesh = cube(), edge = mesh.edges.values().next().value!
     const faces = edge.faceIds.map(id => mesh.faces.get(id)!)
-    faces.forEach((face, i) => { face.uvs = face.vertexIds.map((_, j) => new Vector2(j + i * 10, i)) })
+    faces.forEach((face, i) => {
+      mesh.setFaceUvs(face.id, face.vertexIds.map((_, j) => new Vector2(j + i * 10, i)))
+    })
     const expected = faces.map(f => f.uvs[f.vertexIds.indexOf(edge.v1)].clone().lerp(f.uvs[f.vertexIds.indexOf(edge.v2)], 0.25))
     const result = TopologyOps.splitEdge(mesh, edge.id, 0.25)!
     expect(result).not.toBeNull()

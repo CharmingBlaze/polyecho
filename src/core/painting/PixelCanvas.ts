@@ -621,7 +621,7 @@ export class PixelBuffer {
   /**
    * Fast Uint32Array Scanline Flood Fill
    */
-  floodFill(startX: number, startY: number, fillHex: string) {
+  floodFill(startX: number, startY: number, fillHex: string, mask?: Uint8Array | null) {
     const x0 = Math.floor(startX)
     const y0 = Math.floor(startY)
     if (x0 < 0 || x0 >= this.width || y0 < 0 || y0 >= this.height) return
@@ -634,23 +634,27 @@ export class PixelBuffer {
     // Little endian ABGR
     const fillColor32 = (255 << 24) | (fillRgb.b << 16) | (fillRgb.g << 8) | fillRgb.r
     const targetColor32 = data32[y0 * this.width + x0]
-
-    if (targetColor32 === fillColor32) return
-
-    const stack: [number, number][] = [[x0, y0]]
     const w = this.width
     const h = this.height
+    const allowed = (x: number, y: number) => {
+      if (!mask) return true
+      return mask[y * w + x] === 1
+    }
+
+    if (!allowed(x0, y0) || targetColor32 === fillColor32) return
+
+    const stack: [number, number][] = [[x0, y0]]
 
     while (stack.length > 0) {
       const [x, y] = stack.pop()!
       let lx = x
-      while (lx >= 0 && data32[y * w + lx] === targetColor32) {
+      while (lx >= 0 && data32[y * w + lx] === targetColor32 && allowed(lx, y)) {
         lx--
       }
       lx++
 
       let rx = x
-      while (rx < w && data32[y * w + rx] === targetColor32) {
+      while (rx < w && data32[y * w + rx] === targetColor32 && allowed(rx, y)) {
         rx++
       }
       rx--
@@ -661,26 +665,22 @@ export class PixelBuffer {
       for (let i = lx; i <= rx; i++) {
         data32[y * w + i] = fillColor32
 
-        if (y > 0) {
-          if (data32[(y - 1) * w + i] === targetColor32) {
-            if (!spanAbove) {
-              stack.push([i, y - 1])
-              spanAbove = true
-            }
-          } else {
-            spanAbove = false
+        if (y > 0 && data32[(y - 1) * w + i] === targetColor32 && allowed(i, y - 1)) {
+          if (!spanAbove) {
+            stack.push([i, y - 1])
+            spanAbove = true
           }
+        } else {
+          spanAbove = false
         }
 
-        if (y < h - 1) {
-          if (data32[(y + 1) * w + i] === targetColor32) {
-            if (!spanBelow) {
-              stack.push([i, y + 1])
-              spanBelow = true
-            }
-          } else {
-            spanBelow = false
+        if (y < h - 1 && data32[(y + 1) * w + i] === targetColor32 && allowed(i, y + 1)) {
+          if (!spanBelow) {
+            stack.push([i, y + 1])
+            spanBelow = true
           }
+        } else {
+          spanBelow = false
         }
       }
     }

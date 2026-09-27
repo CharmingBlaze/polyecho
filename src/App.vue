@@ -19,6 +19,7 @@ import BoneHierarchyPopout from './components/rigging/BoneHierarchyPopout.vue'
 import RigFitPopout from './components/rigging/RigFitPopout.vue'
 import HumanoidRigWizard from './components/rigging/HumanoidRigWizard.vue'
 import PosePopout from './components/animation/PosePopout.vue'
+import HelpModal from './components/modals/HelpModal.vue'
 import BlenderIcon from './components/icons/BlenderIcon.vue'
 
 import { useToolStore } from './stores/toolStore'
@@ -102,6 +103,31 @@ function isMeshWorkspace() {
 const showExportModal = ref(false)
 const showHotkeyModal = ref(false)
 const showPreferencesModal = ref(false)
+type PrefTab = 'themes' | 'keymap' | 'interface' | 'viewport' | 'input' | 'system'
+const preferencesInitialTab = ref<PrefTab>('themes')
+
+function openPreferences(tab?: PrefTab) {
+  if (tab) preferencesInitialTab.value = tab
+  showPreferencesModal.value = true
+}
+
+function handleOpenPreferencesEvent(e: Event) {
+  const tab = (e as CustomEvent)?.detail?.tab as PrefTab | undefined
+  openPreferences(tab)
+}
+
+const showHelpModal = ref(false)
+const activeHelpTopic = ref('overview')
+
+function openHelp(topic?: string) {
+  activeHelpTopic.value = topic || 'overview'
+  showHelpModal.value = true
+}
+
+function handleOpenHelpEvent(e: Event) {
+  const topic = (e as CustomEvent)?.detail?.topic as string | undefined
+  openHelp(topic)
+}
 
 watch(
   () => toolStore.appMode,
@@ -110,6 +136,14 @@ watch(
     layoutStore.applySidebarForMode(mode)
     if (mode === 'uvpaint') projectStore.syncPaintTargetFromMesh()
   }
+)
+
+watch(
+  () => toolStore.uvWorkspaceTab,
+  () => {
+    if (toolStore.appMode === 'uvpaint') layoutStore.showRightSidebar = false
+  },
+  { immediate: true }
 )
 
 watch(
@@ -171,7 +205,7 @@ function ensureMeshContext() {
 }
 
 const UV_SAFE_ACTIONS = new Set([
-  'undo', 'redo', 'save_project', 'export_model', 'open_preferences',
+  'undo', 'redo', 'save_project', 'export_model', 'open_preferences', 'open_help',
   'command_palette', 'toggle_left_toolbar', 'toggle_right_sidebar',
   'restore_autosave', 'toggle_xray', 'toggle_snap', 'toggle_quad_view',
   'view_top', 'view_front', 'view_right', 'view_camera',
@@ -234,7 +268,10 @@ function runKeymapAction(id: string) {
       showExportModal.value = true
       return
     case 'open_preferences':
-      showPreferencesModal.value = true
+      openPreferences()
+      return
+    case 'open_help':
+      openHelp('overview')
       return
     case 'command_palette':
       window.dispatchEvent(new CustomEvent('open-command-palette'))
@@ -274,6 +311,19 @@ function runKeymapAction(id: string) {
     case 'deselect_all':
       if (toolStore.appMode === 'uvpaint') return
       projectStore.deselectAll()
+      return
+    case 'select_invert':
+      if (toolStore.appMode === 'uvpaint') return
+      projectStore.selectInverse(toolStore.selectMode)
+      return
+    case 'select_more':
+      if (isMeshWorkspace()) projectStore.growSelection(toolStore.selectMode)
+      return
+    case 'select_less':
+      if (isMeshWorkspace()) projectStore.shrinkSelection(toolStore.selectMode)
+      return
+    case 'select_linked':
+      if (isMeshWorkspace()) projectStore.selectConnected(toolStore.selectMode)
       return
     case 'box_select':
       if (isMeshWorkspace()) toolStore.toggleBoxSelect()
@@ -385,7 +435,7 @@ function runKeymapAction(id: string) {
       }
       return
     case 'bridge_edges':
-      if (isMeshWorkspace()) projectStore.performBridgeEdges()
+      if (isMeshWorkspace()) requestModalTool('bridge')
       return
     case 'grid_fill':
       if (isMeshWorkspace()) projectStore.performGridFill()
@@ -465,6 +515,9 @@ function runKeymapAction(id: string) {
       return
     case 'paint_shade':
       if (toolStore.appMode === 'uvpaint') toolStore.setPaintTool('shade')
+      return
+    case 'paint_wand':
+      if (toolStore.appMode === 'uvpaint') toolStore.setPaintTool('wand')
       return
     case 'paint_uv_overlay':
       if (toolStore.appMode === 'uvpaint') requestToggleUvOverlay()
@@ -716,12 +769,32 @@ async function openExternalProject(filePath: string) {
 let stopCloseListen: (() => void) | undefined
 let stopOpenExternal: (() => void) | undefined
 
+function isNativeTextField(target: EventTarget | null): boolean {
+  return target instanceof Element && !!target.closest('input, textarea, select, [contenteditable="true"]')
+}
+
+/** Block the browser menu (Back, Refresh, Inspect) so right-click stays on our menus. */
+function suppressBrowserContextMenu(event: MouseEvent) {
+  if (isNativeTextField(event.target)) return
+  event.preventDefault()
+}
+
+/** Middle-click is view drag. Cancel the browser autoscroll cursor. */
+function suppressMiddleClickAutoscroll(event: MouseEvent) {
+  if (event.button === 1) event.preventDefault()
+}
+
 onMounted(async () => {
   themeStore.initTheme()
   keymapStore.initKeymaps()
   layoutStore.showRightSidebar = true
+  window.addEventListener('contextmenu', suppressBrowserContextMenu, true)
+  window.addEventListener('mousedown', suppressMiddleClickAutoscroll, true)
+  window.addEventListener('auxclick', suppressMiddleClickAutoscroll, true)
   window.addEventListener('keydown', handleKeyDown)
   window.addEventListener(EDITOR_EVENTS.openExport, handleOpenExportCommand)
+  window.addEventListener('open-help', handleOpenHelpEvent)
+  window.addEventListener('open-preferences', handleOpenPreferencesEvent)
   window.addEventListener('beforeunload', onBrowserUnload)
   if (isDesktopApp()) {
     stopCloseListen = onDesktopCloseRequest(() => { void handleDesktopCloseRequest() })
@@ -741,8 +814,13 @@ watch(
 )
 
 onUnmounted(() => {
+  window.removeEventListener('contextmenu', suppressBrowserContextMenu, true)
+  window.removeEventListener('mousedown', suppressMiddleClickAutoscroll, true)
+  window.removeEventListener('auxclick', suppressMiddleClickAutoscroll, true)
   window.removeEventListener('keydown', handleKeyDown)
   window.removeEventListener(EDITOR_EVENTS.openExport, handleOpenExportCommand)
+  window.removeEventListener('open-help', handleOpenHelpEvent)
+  window.removeEventListener('open-preferences', handleOpenPreferencesEvent)
   window.removeEventListener('beforeunload', onBrowserUnload)
   stopCloseListen?.()
   stopOpenExternal?.()
@@ -755,7 +833,8 @@ onUnmounted(() => {
     <HeaderMenu 
       @open-export="showExportModal = true"
       @open-hotkeys="showHotkeyModal = true"
-      @open-preferences="showPreferencesModal = true"
+      @open-preferences="openPreferences"
+      @open-help="openHelp"
       @new-project="startBlankProject"
     />
 
@@ -806,6 +885,12 @@ onUnmounted(() => {
               :style="{ width: toolStore.appMode === 'uvpaint' ? uvSplitRatio + '%' : '100%' }"
             >
               <Viewport3D />
+              <div
+                v-if="toolStore.appMode === 'uvpaint'"
+                id="uvpaint-viewport-tools"
+                class="absolute inset-0 z-30 overflow-hidden pointer-events-none"
+                aria-live="polite"
+              ></div>
             </div>
 
             <div 
@@ -868,9 +953,10 @@ onUnmounted(() => {
     <StatusBar v-if="layoutStore.showStatusBar" />
 
     <!-- Modals & Overlays -->
+    <HelpModal v-if="showHelpModal" :initial-topic="activeHelpTopic" @close="showHelpModal = false" />
     <ExportModal v-if="showExportModal" @close="showExportModal = false" />
     <HotkeyModal v-if="showHotkeyModal" @close="showHotkeyModal = false" />
-    <PreferencesModal v-if="showPreferencesModal" @close="showPreferencesModal = false" />
+    <PreferencesModal v-if="showPreferencesModal" :initial-tab="preferencesInitialTab" @close="showPreferencesModal = false" />
     <AddPrimitivePopout />
     <BlenderPieMenu />
     <CommandPaletteModal />

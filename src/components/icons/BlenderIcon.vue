@@ -18,6 +18,7 @@ const props = withDefaults(defineProps<{
     | 'tool-move' 
     | 'tool-rotate' 
     | 'tool-scale'
+    | 'tool-proportional'
     | 'gizmo-combined'
     // Modeling tools
     | 'tool-shape-draw'
@@ -213,6 +214,12 @@ const sizePx = computed(() => typeof props.size === 'number' ? `${props.size}px`
       <line x1="12" y1="17" x2="12" y2="22" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
       <line x1="2" y1="12" x2="7" y2="12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
       <line x1="17" y1="12" x2="22" y2="12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+    </g>
+
+    <g v-else-if="name === 'tool-proportional'">
+      <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.5" />
+      <circle cx="12" cy="12" r="3.5" stroke="currentColor" stroke-width="1.5" />
+      <circle cx="12" cy="12" r="1.3" fill="currentColor" />
     </g>
 
     <!-- TRANSFORM MOVE (Blender Translate Gizmo Arrows) -->

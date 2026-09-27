@@ -1,8 +1,11 @@
 import { serializePaintLayers, restorePaintLayers } from '../core/painting/PaintLayerStorage'
 import { defineStore } from 'pinia'
-import { ref, computed, markRaw, onScopeDispose } from 'vue'
+import { ref, computed, markRaw, onScopeDispose, watch } from 'vue'
+import * as THREE from 'three'
 import { MeshObject, Vertex, Face, MeshShadeMode } from '../types/mesh'
-import { Material, Palette, TextureMap, TextureApplyPolicy } from '../types/texture'
+import { Material, MaterialFill, Palette, TextureMap, TextureApplyPolicy } from '../types/texture'
+import { defaultGradient } from '../core/materials/MaterialFill'
+import { normalizeTextureTile, resolveTextureTiling } from '../core/materials/TextureTiling'
 import { SelectMode } from '../types/tools'
 import { createCube } from '../core/geometry/Primitives'
 import { 
@@ -10,9 +13,14 @@ import {
   insetFaces, 
   bevelFaces, 
   subdivideFaces,
+  catmullClarkSubdivide,
+  spherizeVertices,
+  snapVertices,
   pokeFaces,
   triangulateFaces,
   mergeVerticesAdvanced,
+  splitEdges,
+  type MergeMode,
   fillFaceFromVertices,
   flattenVerticesOnAxis,
   dissolveElements,
@@ -24,6 +32,7 @@ import {
   deleteOnlyFaces,
   deleteOnlyEdges,
   setSeamEdges,
+  setSharpEdges,
   clearAllSeamEdges,
   flipEdges,
   recalculateOutside,
@@ -38,15 +47,25 @@ import {
   vertexBevel,
   bridgeEdgeLoopsAdvanced,
   solidifySelectedFaces,
+  latheProfile,
+  shellMesh,
   symmetrizeMesh,
   smoothMeshVertices,
+  circleMeshVertices,
+  circleFaceOutline,
+  straightenVertices,
   randomizeMeshVertices,
   unsubdivideMesh,
   decimateMesh,
   booleanMeshes,
   type BooleanOp
 } from '../core/geometry/Operations'
-import { getMeshEdges, getEdgeLoop, getEdgeRing, boundaryEdgeIdsForFaces } from '../core/geometry/EdgeUtils'
+import { getMeshEdges, getEdgeLoop, getEdgeRing, boundaryEdgeIdsForFaces, undirectedEdgeId } from '../core/geometry/EdgeUtils'
+import type { ComponentMode } from '../core/geometry/SelectionConversion'
+import {
+  pruneSelection, selectEverything, selectInverse as selectInverseOp, selectLess, selectLinked, selectMore,
+  type ComponentSelection
+} from '../core/geometry/SelectionOps'
 import { DEFAULT_PALETTES, loadCustomPalettes, saveCustomPalettes } from '../utils/color'
 import { PixelBuffer } from '../core/painting/PixelCanvas'
 import {
@@ -61,14 +80,21 @@ import { PrimitiveType, PrimitiveParameters } from '../core/primitives/Primitive
 import { PrimitiveBuilder } from '../core/primitives/PrimitiveBuilder'
 import { MeshBridge } from '../core/mesh/MeshBridge'
 import { EditableMesh } from '../core/mesh/MeshKernel'
-import { MeshRepository, type MeshBridgeData } from '../core/mesh/MeshRepository'
+import { MeshRepository, type MeshBridgeData, type ResidentMeshSnapshot } from '../core/mesh/MeshRepository'
 import { editMesh, type MeshEditResult, type MeshChange } from '../core/mesh/MeshTransaction'
 import { MeshValidator } from '../core/mesh/MeshValidator'
 import type { OperationResult } from '../core/geometry/Operations'
 import { placeOriginAtBoundsCenter } from '../core/geometry/MeshOrigin'
+import { meshObjectWorldMatrix } from '../core/geometry/MeshTransform'
 import { joinMeshObjects, separateMeshFaces } from '../core/geometry/MeshJoin'
 import { MeshEditOps } from '../core/mesh/operations/MeshEditOps'
 import { addObjectRotation, flipMeshGeometry, type SymmetryAxis } from '../core/geometry/ObjectSymmetry'
+import { offsetObjectAlong, reflectMeshAcrossPlane, rotateObjectAround, snapObjectPosition, type SnapTarget } from '../core/geometry/DuplicateTools'
+import {
+  alignObjects, alignVertices, applyRotationAndScaleToEditableMesh, hasObjectRotationOrScale,
+  makeUniqueMesh, type AlignAxis, type AlignMode,
+} from '../core/geometry/ObjectEditTools'
+import { boundaryEdgeIds, nonManifoldEdgeIds, sharpEdgeIds } from '../core/geometry/EdgeQueries'
 import { SeamUnwrapper } from '../core/uv/SeamUnwrapper'
 import { AtlasBaker } from '../core/uv/AtlasBaker'
 import { clampAtlasGrid, mapFacesToAtlasCell, sliceBufferIntoTiles } from '../core/uv/AtlasCells'
@@ -82,9 +108,13 @@ import {
   gridifyQuadIslands,
   packUVIslands,
   planarUnwrap,
+  projectFromView,
+  restorePinnedUvs,
+  seamEdgesFromUvIslands,
   smartUvProject,
   sphereUnwrap,
-  type SmartUvProjectOptions
+  type SmartUvProjectOptions,
+  type ViewProjection
 } from '../core/geometry/UVUnwrap'
 import {
   applyModifier,
@@ -94,12 +124,29 @@ import {
 } from '../core/geometry/Modifiers'
 import { computeCentroid } from '../utils/math'
 import { Vector3D, PrimitiveTransform } from '../types/mesh'
+import { createImagePlane, imageCardMaterialSettings, type ImageCardKind } from '../core/geometry/ImagePlane'
 import { ReferenceImage, ReferencePlane } from '../types/reference'
 import { useHistoryStore } from './historyStore'
 import { useAnimationStore } from './animationStore'
 import { SpringPhysicsSolver } from '../core/animation/SpringPhysics'
 import { useToolStore } from './toolStore'
 import { ProjectStorage, type ProjectStorageData } from '../core/storage/ProjectStorage'
+
+export interface DroppedImageSource {
+  name: string
+  width: number
+  height: number
+  dataUrl: string
+}
+
+export interface CreateImageCardOptions extends DroppedImageSource {
+  kind: ImageCardKind
+  cardHeight?: number
+  position?: Vector3D
+  rotationY?: number
+  opacity?: number
+  alphaTest?: number
+}
 
 export const useProjectStore = defineStore('project', () => {
   const historyStore = useHistoryStore()
@@ -207,6 +254,8 @@ export const useProjectStore = defineStore('project', () => {
       id: 'default_material',
       name: 'Default_Material',
       textureId: 'tex_default',
+      tileX: 1,
+      tileY: 1,
       color: '#ffffff',
       shading: 'textured', // Standard clean textured shading by default
       psxJitter: false,
@@ -232,6 +281,42 @@ export const useProjectStore = defineStore('project', () => {
   function selectTexture(textureId: string) {
     if (!textures.value.some(t => t.id === textureId)) return
     activeTextureId.value = textureId
+  }
+
+  function setMaterialFill(matId: string, fill: MaterialFill) {
+    const mat = materials.value.find(m => m.id === matId)
+    if (!mat || mat.fill === fill) return
+    recordState(`Material Fill (${fill})`)
+    mat.fill = fill
+    if (fill === 'gradient' && !mat.gradient) {
+      mat.gradient = defaultGradient(mat.color)
+    }
+    if (fill === 'image' && !mat.textureId) {
+      const fallback = textures.value[0]?.id
+      if (fallback) {
+        mat.textureId = fallback
+        selectTexture(fallback)
+      }
+    }
+    markGeometryUpdated()
+  }
+
+  function setMaterialTextureTiling(
+    matId: string,
+    tileX: number,
+    tileY: number,
+    options?: { record?: boolean },
+  ) {
+    const mat = materials.value.find(m => m.id === matId)
+    if (!mat) return
+    const nextX = normalizeTextureTile(tileX)
+    const nextY = normalizeTextureTile(tileY)
+    const current = resolveTextureTiling(mat)
+    if (current.tileX === nextX && current.tileY === nextY) return
+    if (options?.record !== false) recordState(`Texture Tiling (${nextX}×${nextY})`)
+    mat.tileX = nextX
+    mat.tileY = nextY
+    markGeometryUpdated()
   }
 
   function selectMaterial(materialId: string) {
@@ -397,6 +482,72 @@ export const useProjectStore = defineStore('project', () => {
     return newMesh
   }
 
+  function createImageCard(options: CreateImageCardOptions): MeshObject {
+    const label = options.kind === 'vegetation'
+      ? 'Add Crossed Vegetation'
+      : options.kind === 'reference'
+        ? 'Add Reference Card'
+        : 'Add Image Card'
+    recordState(label, { includeTextures: true })
+
+    const texture = createTexture(
+      options.name,
+      options.width,
+      options.height,
+      options.dataUrl,
+      undefined,
+      { record: false, select: true }
+    )
+    const material = createMaterial(
+      `${options.name || 'Image'} Material`,
+      '#ffffff',
+      texture.id,
+      { record: false, select: true }
+    )
+    Object.assign(material, imageCardMaterialSettings(options.kind))
+    if (options.opacity !== undefined) material.opacity = Math.max(0, Math.min(1, options.opacity))
+    if (options.alphaTest !== undefined) material.alphaTest = Math.max(0, Math.min(1, options.alphaTest))
+
+    const mesh = createImagePlane({
+      name: options.kind === 'vegetation'
+        ? `${options.name || 'Image'} Cross`
+        : options.kind === 'reference'
+          ? `${options.name || 'Image'} Reference`
+          : `${options.name || 'Image'} Card`,
+      imageWidth: options.width,
+      imageHeight: options.height,
+      height: options.cardHeight,
+      crossed: options.kind === 'vegetation',
+      materialId: material.id,
+      transform: {
+        position: options.position || { x: 0, y: 0, z: 0 },
+        rotation: { x: 0, y: options.rotationY ?? 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+    })
+
+    meshes.value.push(mesh)
+    selectMesh(mesh.id)
+    clearSubSelections()
+    markGeometryUpdated()
+    return mesh
+  }
+
+  function applyDroppedImageToMesh(meshId: string, source: DroppedImageSource): TextureMap | null {
+    if (!meshes.value.some(mesh => mesh.id === meshId)) return null
+    recordState(`Apply Dropped Image (${source.name || 'untitled'})`, { includeTextures: true })
+    const texture = createTexture(
+      source.name,
+      source.width,
+      source.height,
+      source.dataUrl,
+      undefined,
+      { record: false, select: true }
+    )
+    applyTextureToMesh(meshId, texture.id, 'this_object', { record: false })
+    return texture
+  }
+
   /** @deprecated Use createMesh — same behavior, kept for compatibility */
   function addPrimitive(
     type: PrimitiveType | 'cube' | 'plane' | 'cylinder' | 'cone' | 'sphere' = 'BOX',
@@ -523,10 +674,19 @@ export const useProjectStore = defineStore('project', () => {
     if (options?.record !== false) recordState(description)
     resident.mesh.restoreSnapshot(staged.mesh.createSnapshot())
     staged.mesh = resident.mesh
-    if (options?.applySelection !== false) {
-      selectedFaceIds.value = result.value.selectedFaceIds
-      selectedVertexIds.value = result.value.selectedVertexIds
-      selectedEdgeIds.value = result.value.selectedEdgeIds ?? []
+    const nextSelection: ComponentSelection = options?.applySelection !== false
+      ? { vertices: result.value.selectedVertexIds, edges: result.value.selectedEdgeIds ?? [], faces: result.value.selectedFaceIds }
+      : currentComponentSelection()
+    // An edit that keeps the old selection can still delete or re-id its elements.
+    if (document.id === activeMeshId.value && result.change.topologyChanged) {
+      const pruned = pruneSelection(result.value.mesh, nextSelection)
+      selectedVertexIds.value = pruned.vertices
+      selectedEdgeIds.value = pruned.edges
+      selectedFaceIds.value = pruned.faces
+    } else if (options?.applySelection !== false) {
+      selectedVertexIds.value = nextSelection.vertices
+      selectedEdgeIds.value = nextSelection.edges
+      selectedFaceIds.value = nextSelection.faces
     }
     publishEditableMesh(result.value.mesh, staged, false, result.change)
     return result
@@ -556,9 +716,11 @@ export const useProjectStore = defineStore('project', () => {
     return result
   }
 
-  function performSubdivide(mode?: 'object' | 'vertex' | 'edge' | 'face') {
+  function performSubdivide(mode?: 'object' | 'vertex' | 'edge' | 'face', options?: { smoothness?: number; label?: string }) {
     if (!activeMesh.value || activeMesh.value.locked) return
     const toolStore = useToolStore()
+    const smoothness = options?.smoothness ?? toolStore.subdivideSmoothness
+    const label = options?.label ?? 'Subdivide'
     const resolved = mode ?? (
       toolStore.selectMode === 'object' || toolStore.selectMode === 'vertex'
         || toolStore.selectMode === 'edge' || toolStore.selectMode === 'face'
@@ -573,11 +735,11 @@ export const useProjectStore = defineStore('project', () => {
         : (activeMeshId.value ? [activeMeshId.value] : [])
       const targets = meshes.value.filter(m => ids.includes(m.id) && !m.locked && m.faces.length > 0)
       if (targets.length === 0) return
-      recordState('Subdivide')
+      recordState(label)
       for (const mesh of targets) {
-        runKernelOperation('Subdivide', (document, bridge) => subdivideFaces(document, document.faces.map(f => f.id), {
+        runKernelOperation(label, (document, bridge) => subdivideFaces(document, document.faces.map(f => f.id), {
           cuts: toolStore.subdivideCuts,
-          smoothness: toolStore.subdivideSmoothness
+          smoothness
         }, bridge), { record: false, mesh, applySelection: false })
       }
       clearSubSelections()
@@ -605,11 +767,41 @@ export const useProjectStore = defineStore('project', () => {
 
     if (targetFaceIds.length === 0 && edgeIds.length === 0) return
 
-    return runKernelOperation('Subdivide', (document, bridge) => subdivideFaces(document, targetFaceIds, {
+    return runKernelOperation(label, (document, bridge) => subdivideFaces(document, targetFaceIds, {
       cuts: toolStore.subdivideCuts,
-      smoothness: toolStore.subdivideSmoothness,
+      smoothness,
       edgeIds
     }, bridge))
+  }
+
+  function performSimpleSubdivide(mode?: 'object' | 'vertex' | 'edge' | 'face') {
+    return performSubdivide(mode, { smoothness: 0, label: 'Simple Subdivide' })
+  }
+
+  function performCatmullClark(level?: number) {
+    if (!activeMesh.value || activeMesh.value.locked) return
+    const tools = useToolStore()
+    const steps = level ?? tools.catmullLevels
+    const selected = meshes.value.filter(mesh => selectedMeshIds.value.includes(mesh.id) && !mesh.locked && mesh.faces.length > 0)
+    const targets = tools.selectMode === 'object' && selected.length > 0 ? selected : [activeMesh.value]
+    const run = (mesh: MeshObject, record: boolean) => runKernelOperation('Catmull-Clark Subdivide', (document, bridge) =>
+      catmullClarkSubdivide(document, steps, bridge), { record, mesh, applySelection: false })
+    if (targets.length > 1) {
+      recordState('Catmull-Clark Subdivide')
+      for (const mesh of targets) run(mesh, false)
+      clearSubSelections()
+      return
+    }
+    return run(targets[0], true)
+  }
+
+  function performSpherize(factor?: number) {
+    if (!activeMesh.value || activeMesh.value.locked) return
+    const ids = selectionVertexIds()
+    if (ids.length < 2) return
+    const tools = useToolStore()
+    return runKernelOperation('Spherize', (document, bridge) =>
+      spherizeVertices(document, ids, factor ?? tools.spherizeFactor, bridge), { applySelection: false })
   }
 
   function performPokeFaces() {
@@ -632,22 +824,82 @@ export const useProjectStore = defineStore('project', () => {
       triangulateFaces(document, selectedFaceIds.value, bridge))
   }
 
-  function performMerge(type: 'center' | 'first' | 'last' | 'distance' = 'center', threshold = 0.05) {
-    if (!activeMesh.value || activeMesh.value.locked) return
+  function selectionVertexIdsForMerge(): string[] {
+    if (!activeMesh.value) return []
     let targetVertIds = [...selectedVertexIds.value]
     if (targetVertIds.length < 2 && selectedEdgeIds.value.length > 0) {
       const selectedEdges = getMeshEdges(activeMesh.value).filter(e => selectedEdgeIds.value.includes(e.id))
       targetVertIds = Array.from(new Set(selectedEdges.flatMap(edge => [edge.v1, edge.v2])))
     }
-    if (targetVertIds.length < 2 && selectedFaceIds.value.length) targetVertIds = [...new Set(activeMesh.value.faces.filter(f => selectedFaceIds.value.includes(f.id)).flatMap(f => f.vertexIds))]
+    if (targetVertIds.length < 2 && selectedFaceIds.value.length) {
+      targetVertIds = [...new Set(activeMesh.value.faces.filter(f => selectedFaceIds.value.includes(f.id)).flatMap(f => f.vertexIds))]
+    }
+    return targetVertIds
+  }
+
+  function performMerge(type: MergeMode = 'center', threshold?: number) {
+    if (!activeMesh.value || activeMesh.value.locked) return
+    const tools = useToolStore()
+    const weldDistance = threshold ?? tools.weldDistance
+    let targetVertIds = selectionVertexIdsForMerge()
+
+    if (type === 'distance') {
+      if (targetVertIds.length < 2) targetVertIds = activeMesh.value.vertices.map(v => v.id)
+      if (targetVertIds.length < 2) return
+      const result = runKernelOperation('Weld by Distance', (document, bridge) =>
+        mergeVerticesAdvanced(document, targetVertIds, 'distance', weldDistance, bridge))
+      if (result?.success) {
+        selectedFaceIds.value = []
+        selectedEdgeIds.value = []
+      }
+      return result
+    }
+
+    if (type === 'vertex') {
+      const keepId = tools.mergeTargetVertexId
+      if (!keepId || !activeMesh.value.vertices.some(v => v.id === keepId)) return
+      if (!targetVertIds.includes(keepId)) targetVertIds.push(keepId)
+    }
+
     if (targetVertIds.length < 2) return
-    const result = runKernelOperation(`Merge Vertices (${type})`, (document, bridge) =>
-      mergeVerticesAdvanced(document, targetVertIds, type, threshold, bridge))
+
+    let target: { position: { x: number; y: number; z: number }; keepId?: string } | undefined
+    if (type === 'cursor') {
+      const local = new THREE.Vector3(tools.cursor3D.x, tools.cursor3D.y, tools.cursor3D.z)
+      local.applyMatrix4(meshObjectWorldMatrix(activeMesh.value).invert())
+      target = { position: { x: local.x, y: local.y, z: local.z } }
+    } else if (type === 'vertex' && tools.mergeTargetVertexId) {
+      const kept = activeMesh.value.vertices.find(v => v.id === tools.mergeTargetVertexId)
+      if (!kept) return
+      target = { position: { ...kept.position }, keepId: kept.id }
+    }
+
+    const label = type === 'cursor' ? 'Merge at Cursor'
+      : type === 'vertex' ? 'Merge at Vertex'
+      : `Merge Vertices (${type})`
+    const result = runKernelOperation(label, (document, bridge) =>
+      mergeVerticesAdvanced(document, targetVertIds, type, weldDistance, bridge, target))
     if (result?.success) {
       selectedFaceIds.value = []
       selectedEdgeIds.value = []
+      if (type === 'vertex') tools.mergeTargetVertexId = result.value.selectedVertexIds[0] ?? tools.mergeTargetVertexId
     }
     return result
+  }
+
+  function performSplitEdges(t?: number) {
+    if (!activeMesh.value || activeMesh.value.locked) return
+    const tools = useToolStore()
+    let edgeIds = [...selectedEdgeIds.value]
+    if (edgeIds.length === 0 && selectedVertexIds.value.length >= 2) {
+      const selected = new Set(selectedVertexIds.value)
+      edgeIds = getMeshEdges(activeMesh.value)
+        .filter(edge => selected.has(edge.v1) && selected.has(edge.v2))
+        .map(edge => undirectedEdgeId(edge.v1, edge.v2))
+    }
+    if (edgeIds.length === 0) return
+    return runKernelOperation('Split Edge', (document, bridge) =>
+      splitEdges(document, edgeIds, t ?? tools.splitEdgeFactor, bridge))
   }
 
   function performFillFace(viewDirection?: { x: number; y: number; z: number }) {
@@ -679,6 +931,28 @@ export const useProjectStore = defineStore('project', () => {
     if (targetVertIds.length === 0) return
     return runKernelOperation(`Flatten on ${axis.toUpperCase()}`, (document, bridge) =>
       flattenVerticesOnAxis(document, targetVertIds, axis, bridge), { applySelection: false })
+  }
+
+  function selectionForStraighten(): string[] {
+    const mesh = activeMesh.value
+    if (!mesh) return []
+    if (selectedVertexIds.value.length >= 2) return [...selectedVertexIds.value]
+    if (selectedEdgeIds.value.length) {
+      const edges = getMeshEdges(mesh).filter(edge => selectedEdgeIds.value.includes(edge.id))
+      return [...new Set(edges.flatMap(edge => [edge.v1, edge.v2]))]
+    }
+    if (selectedFaceIds.value.length) {
+      return [...new Set(mesh.faces.filter(face => selectedFaceIds.value.includes(face.id)).flatMap(face => face.vertexIds))]
+    }
+    return []
+  }
+
+  function performStraighten(direction: 'horizontal' | 'vertical') {
+    const verts = selectionForStraighten()
+    if (verts.length < 2) return
+    const label = direction === 'horizontal' ? 'Straighten Horizontal' : 'Straighten Vertical'
+    return runKernelOperation(label, (document, bridge) =>
+      straightenVertices(document, verts, direction, bridge), { applySelection: false })
   }
 
   function performSeparateMesh() {
@@ -773,6 +1047,7 @@ export const useProjectStore = defineStore('project', () => {
   function deleteMesh(id: string) {
     recordState('Delete Mesh')
     meshes.value = meshes.value.filter(m => m.id !== id)
+    meshRepository.retain(meshes.value.map(mesh => mesh.id))
     if (activeMeshId.value === id) {
       activeMeshId.value = meshes.value[0]?.id || ''
     }
@@ -790,6 +1065,7 @@ export const useProjectStore = defineStore('project', () => {
     if (toDelete.length === 0) return
     recordState('Delete Selected Meshes')
     meshes.value = meshes.value.filter(m => !toDelete.includes(m.id))
+    meshRepository.retain(meshes.value.map(mesh => mesh.id))
     activeMeshId.value = meshes.value[0]?.id || ''
     selectedMeshIds.value = activeMeshId.value ? [activeMeshId.value] : []
     clearSubSelections()
@@ -924,22 +1200,46 @@ export const useProjectStore = defineStore('project', () => {
   function performSplit() {
     const ids = incidentFacesFromSelection()
     if (!ids.length) return
-    return runKernelOperation('Split', (document, bridge) =>
+    return runKernelOperation('Detach', (document, bridge) =>
       splitSelectedFaces(document, ids, bridge))
   }
 
-  function performVertexBevel(width = 0.1) {
+  function performVertexBevel(width?: number, segments?: number) {
     const verts = selectionVertexIds()
     if (verts.length === 0) return
+    const tools = useToolStore()
     return runKernelOperation('Vertex Bevel', (document, bridge) =>
-      vertexBevel(document, verts, width, bridge))
+      vertexBevel(document, verts, width ?? tools.vertexBevelWidth, bridge, segments ?? tools.vertexBevelSegments))
   }
 
-  function performSolidifyFaces(thickness = 0.1) {
+  function performSolidifyFaces(thickness?: number) {
     const ids = incidentFacesFromSelection()
     if (!ids.length) return
-    return runKernelOperation('Solidify Faces', (document, bridge) =>
-      solidifySelectedFaces(document, ids, thickness, bridge), { applySelection: false })
+    const tools = useToolStore()
+    return runKernelOperation('Solidify', (document, bridge) =>
+      solidifySelectedFaces(document, ids, thickness ?? tools.solidifyThickness, bridge), { applySelection: false })
+  }
+
+  function performLathe() {
+    if (!activeMesh.value || activeMesh.value.locked) return
+    const tools = useToolStore()
+    let vertexIds = [...selectedVertexIds.value]
+    if (vertexIds.length < 2 && selectedEdgeIds.value.length > 0) {
+      const edges = getMeshEdges(activeMesh.value).filter(edge => selectedEdgeIds.value.includes(edge.id))
+      vertexIds = [...new Set(edges.flatMap(edge => [edge.v1, edge.v2]))]
+    }
+    if (vertexIds.length < 2) return
+    return runKernelOperation('Lathe', (document, bridge) =>
+      latheProfile(document, vertexIds, tools.latheAxis, tools.latheSteps, bridge), { applySelection: false })
+  }
+
+  function performShell(thickness?: number) {
+    if (!activeMesh.value || activeMesh.value.locked || activeMesh.value.faces.length === 0) return
+    const tools = useToolStore()
+    const selected = selectedFaceIds.value.filter(id => activeMesh.value!.faces.some(face => face.id === id))
+    const openings = selected.length > 0 && selected.length < activeMesh.value.faces.length ? selected : []
+    return runKernelOperation('Shell', (document, bridge) =>
+      shellMesh(document, openings, thickness ?? tools.shellThickness, bridge), { applySelection: false })
   }
 
   function performSymmetrize(axis: 'x' | 'y' | 'z' = 'x') {
@@ -953,6 +1253,26 @@ export const useProjectStore = defineStore('project', () => {
     if (!verts.length) return
     return runKernelOperation('Smooth Vertices', (document, bridge) =>
       smoothMeshVertices(document, verts, factor, bridge), { applySelection: false })
+  }
+
+  function performCircle() {
+    const mesh = activeMesh.value
+    if (!mesh) return
+    if (selectedVertexIds.value.length >= 3) {
+      return runKernelOperation('Circle', (document, bridge) =>
+        circleMeshVertices(document, [...selectedVertexIds.value], bridge), { applySelection: false })
+    }
+    if (selectedEdgeIds.value.length) {
+      const edges = getMeshEdges(mesh).filter(edge => selectedEdgeIds.value.includes(edge.id))
+      const verts = [...new Set(edges.flatMap(edge => [edge.v1, edge.v2]))]
+      if (verts.length < 3) return
+      return runKernelOperation('Circle', (document, bridge) =>
+        circleMeshVertices(document, verts, bridge), { applySelection: false })
+    }
+    if (selectedFaceIds.value.length) {
+      return runKernelOperation('Circle', (document, bridge) =>
+        circleFaceOutline(document, [...selectedFaceIds.value], bridge), { applySelection: false })
+    }
   }
 
   function performRandomizeVertices(amount = 0.05) {
@@ -1090,9 +1410,34 @@ export const useProjectStore = defineStore('project', () => {
 
   function applyMeshModifier(type: GenerateModifier | 'all') {
     if (!activeMesh.value) return
-    recordState(type === 'all' ? 'Apply All Modifiers' : `Apply ${type} Modifier`)
-    applyModifier(activeMesh.value, type)
-    markGeometryUpdated()
+    const label = type === 'all' ? 'Apply All Modifiers' : `Apply ${type} Modifier`
+    let evaluated: MeshObject | undefined
+    const result = runKernelOperation(label, (document, bridge) => {
+      evaluated = JSON.parse(JSON.stringify(document)) as MeshObject
+      applyModifier(evaluated, type, meshes.value)
+      const rebuilt = MeshBridge.meshObjectToEditableMesh(evaluated, bridge)
+      bridge.mesh.restoreSnapshot(rebuilt.mesh.createSnapshot())
+      bridge.strToNumVertId = rebuilt.strToNumVertId
+      bridge.numToStrVertId = rebuilt.numToStrVertId
+      bridge.strToNumFaceId = rebuilt.strToNumFaceId
+      bridge.numToStrFaceId = rebuilt.numToStrFaceId
+      return {
+        mesh: MeshBridge.editableMeshToMeshObject(
+          bridge.mesh, evaluated, bridge.numToStrVertId, bridge.numToStrFaceId,
+        ),
+        selectedVertexIds: [],
+        selectedEdgeIds: [],
+        selectedFaceIds: [],
+      }
+    }, { applySelection: false })
+    if (result?.success && !result.change.topologyChanged && !result.change.positionsChanged
+      && !result.change.attributesChanged && evaluated) {
+      // Applying a modifier can be geometry-neutral (for example, mirroring a centered cube)
+      // while still disabling the stack entry. Commit that metadata change explicitly.
+      recordState(label)
+      replaceMesh(evaluated, ATTRIBUTE_ONLY_CHANGE)
+    }
+    return result
   }
 
   function removeMeshModifier(type: GenerateModifier) {
@@ -1120,6 +1465,19 @@ export const useProjectStore = defineStore('project', () => {
     meshRepository.release(objectId)
   }
 
+  function captureResidentMeshes(): ResidentMeshSnapshot[] {
+    return meshRepository.capture()
+  }
+
+  function restoreResidentMeshes(snapshots: ResidentMeshSnapshot[]) {
+    meshRepository.restore(snapshots, meshes.value)
+  }
+
+  function clearResidentMeshes() {
+    meshRepository.clear()
+    meshRevisions.clear()
+  }
+
   function validateEditableMesh(mesh: EditableMesh): boolean {
     mesh.recalculateNormals()
     const validation = MeshValidator.validate(mesh)
@@ -1133,6 +1491,7 @@ export const useProjectStore = defineStore('project', () => {
     const idx = meshes.value.findIndex(mesh => mesh.id === document.id)
     if (idx === -1) return
     meshRepository.publish(document, bridge)
+    meshRepository.assertPublished(document, bridge)
     meshes.value[idx] = document
     bumpMeshCounters(document.id, change)
     if (!preview) triggerAutosave()
@@ -1190,20 +1549,43 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   // Selection Helpers
+  const isComponentMode = (mode: SelectMode): mode is ComponentMode => mode === 'vertex' || mode === 'edge' || mode === 'face'
+
+  /** Replace the whole component selection. Arrays for other modes are cleared, never left stale. */
+  function setComponentSelection(next: ComponentSelection) {
+    selectedVertexIds.value = next.vertices
+    selectedEdgeIds.value = next.edges
+    selectedFaceIds.value = next.faces
+    const mesh = activeMesh.value
+    if (!mesh) return
+    const verts = new Set(next.vertices), faces = new Set(next.faces)
+    mesh.vertices.forEach(v => (v.selected = verts.has(v.id)))
+    mesh.faces.forEach(f => (f.selected = faces.has(f.id)))
+  }
+
+  function currentComponentSelection(): ComponentSelection {
+    return { vertices: selectedVertexIds.value, edges: selectedEdgeIds.value, faces: selectedFaceIds.value }
+  }
+
   function selectAll(mode: SelectMode = 'object') {
     if (mode === 'object') {
       selectedMeshIds.value = meshes.value.map(m => m.id)
       if (!activeMeshId.value && meshes.value.length > 0) {
         activeMeshId.value = meshes.value[0].id
       }
-    } else if (mode === 'vertex' && activeMesh.value) {
-      selectedVertexIds.value = activeMesh.value.vertices.map(v => v.id)
-      activeMesh.value.vertices.forEach(v => (v.selected = true))
-    } else if (mode === 'edge' && activeMesh.value) {
-      selectedEdgeIds.value = getMeshEdges(activeMesh.value).map(e => e.id)
-    } else if (mode === 'face' && activeMesh.value) {
-      selectedFaceIds.value = activeMesh.value.faces.map(f => f.id)
-      activeMesh.value.faces.forEach(f => (f.selected = true))
+    } else if (isComponentMode(mode) && activeMesh.value) {
+      setComponentSelection(selectEverything(activeMesh.value, mode))
+    }
+  }
+
+  /** Ctrl+I. Object mode inverts which objects are selected. */
+  function selectInverse(mode: SelectMode) {
+    if (mode === 'object') {
+      const picked = new Set(selectedMeshIds.value)
+      selectedMeshIds.value = meshes.value.filter(m => !picked.has(m.id) && m.visible !== false).map(m => m.id)
+      if (selectedMeshIds.value.length && !selectedMeshIds.value.includes(activeMeshId.value)) activeMeshId.value = selectedMeshIds.value[0]
+    } else if (isComponentMode(mode) && activeMesh.value) {
+      setComponentSelection(selectInverseOp(activeMesh.value, mode, currentComponentSelection()))
     }
   }
 
@@ -1219,129 +1601,22 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
+  /** Ctrl+Numpad+ (Blender Select More, face step). */
   function growSelection(mode: SelectMode) {
-    if (!activeMesh.value) return
-    if (mode === 'vertex') {
-      const neighborVerts = new Set<string>(selectedVertexIds.value)
-      for (const face of activeMesh.value.faces) {
-        if (face.vertexIds.some(v => selectedVertexIds.value.includes(v))) {
-          face.vertexIds.forEach(v => neighborVerts.add(v))
-        }
-      }
-      selectedVertexIds.value = Array.from(neighborVerts)
-    } else if (mode === 'face') {
-      const neighborFaces = new Set<string>(selectedFaceIds.value)
-      const selectedVerts = new Set<string>()
-      for (const face of activeMesh.value.faces) {
-        if (selectedFaceIds.value.includes(face.id)) {
-          face.vertexIds.forEach(v => selectedVerts.add(v))
-        }
-      }
-      for (const face of activeMesh.value.faces) {
-        if (face.vertexIds.some(v => selectedVerts.has(v))) {
-          neighborFaces.add(face.id)
-        }
-      }
-      selectedFaceIds.value = Array.from(neighborFaces)
-    }
+    if (!activeMesh.value || !isComponentMode(mode)) return
+    setComponentSelection(selectMore(activeMesh.value, mode, currentComponentSelection()))
   }
 
+  /** Ctrl+Numpad- (Blender Select Less). */
   function shrinkSelection(mode: SelectMode) {
-    if (!activeMesh.value) return
-    if (mode === 'vertex') {
-      const boundaryVerts = new Set<string>()
-      for (const face of activeMesh.value.faces) {
-        const containsSelected = face.vertexIds.some(v => selectedVertexIds.value.includes(v))
-        const containsUnselected = face.vertexIds.some(v => !selectedVertexIds.value.includes(v))
-        if (containsSelected && containsUnselected) {
-          face.vertexIds.forEach(v => {
-            if (selectedVertexIds.value.includes(v)) boundaryVerts.add(v)
-          })
-        }
-      }
-      selectedVertexIds.value = selectedVertexIds.value.filter(v => !boundaryVerts.has(v))
-    } else if (mode === 'face') {
-      const boundaryFaces = new Set<string>()
-      for (const face of activeMesh.value.faces) {
-        if (!selectedFaceIds.value.includes(face.id)) continue
-        for (const other of activeMesh.value.faces) {
-          if (!selectedFaceIds.value.includes(other.id)) {
-            if (other.vertexIds.some(v => face.vertexIds.includes(v))) {
-              boundaryFaces.add(face.id)
-              break
-            }
-          }
-        }
-      }
-      selectedFaceIds.value = selectedFaceIds.value.filter(f => !boundaryFaces.has(f))
-    }
+    if (!activeMesh.value || !isComponentMode(mode)) return
+    setComponentSelection(selectLess(activeMesh.value, mode, currentComponentSelection()))
   }
 
+  /** Ctrl+L: select everything linked to the current selection. Faces link through shared edges. */
   function selectConnected(mode: SelectMode) {
-    if (!activeMesh.value) return
-    if (mode === 'vertex' && selectedVertexIds.value.length > 0) {
-      const visited = new Set<string>(selectedVertexIds.value)
-      const queue = [...selectedVertexIds.value]
-      while (queue.length > 0) {
-        const curr = queue.shift()!
-        for (const face of activeMesh.value.faces) {
-          if (face.vertexIds.includes(curr)) {
-            for (const v of face.vertexIds) {
-              if (!visited.has(v)) {
-                visited.add(v)
-                queue.push(v)
-              }
-            }
-          }
-        }
-      }
-      selectedVertexIds.value = Array.from(visited)
-    } else if (mode === 'edge' && selectedEdgeIds.value.length > 0) {
-      const allEdges = getMeshEdges(activeMesh.value)
-      const edgeMap = new Map<string, { v1: string; v2: string }>()
-      for (const e of allEdges) edgeMap.set(e.id, { v1: e.v1, v2: e.v2 })
-      
-      const visitedVerts = new Set<string>()
-      for (const eId of selectedEdgeIds.value) {
-        const e = edgeMap.get(eId)
-        if (e) {
-          visitedVerts.add(e.v1)
-          visitedVerts.add(e.v2)
-        }
-      }
-      const queue = Array.from(visitedVerts)
-      while (queue.length > 0) {
-        const curr = queue.shift()!
-        for (const face of activeMesh.value.faces) {
-          if (face.vertexIds.includes(curr)) {
-            for (const v of face.vertexIds) {
-              if (!visitedVerts.has(v)) {
-                visitedVerts.add(v)
-                queue.push(v)
-              }
-            }
-          }
-        }
-      }
-      selectedEdgeIds.value = allEdges
-        .filter(e => visitedVerts.has(e.v1) && visitedVerts.has(e.v2))
-        .map(e => e.id)
-    } else if (mode === 'face' && selectedFaceIds.value.length > 0) {
-      const visitedFaces = new Set<string>(selectedFaceIds.value)
-      const queue = [...selectedFaceIds.value]
-      while (queue.length > 0) {
-        const currFId = queue.shift()!
-        const currFace = activeMesh.value.faces.find(f => f.id === currFId)
-        if (!currFace) continue
-        for (const other of activeMesh.value.faces) {
-          if (!visitedFaces.has(other.id) && other.vertexIds.some(v => currFace.vertexIds.includes(v))) {
-            visitedFaces.add(other.id)
-            queue.push(other.id)
-          }
-        }
-      }
-      selectedFaceIds.value = Array.from(visitedFaces)
-    }
+    if (!activeMesh.value || !isComponentMode(mode)) return
+    setComponentSelection(selectLinked(activeMesh.value, mode, currentComponentSelection()))
   }
 
   function selectEdgeLoop(edgeId: string, addToSelection = false) {
@@ -1364,6 +1639,29 @@ export const useProjectStore = defineStore('project', () => {
     } else {
       selectedEdgeIds.value = ringIds
     }
+  }
+
+  function selectQueriedEdges(ids: string[]) {
+    if (!activeMesh.value) return
+    useToolStore().setSelectMode('edge')
+    selectedVertexIds.value = []
+    selectedFaceIds.value = []
+    selectedEdgeIds.value = ids
+  }
+
+  function selectBoundaryEdges() {
+    if (!activeMesh.value) return
+    selectQueriedEdges(boundaryEdgeIds(activeMesh.value))
+  }
+
+  function selectNonManifoldEdges() {
+    if (!activeMesh.value) return
+    selectQueriedEdges(nonManifoldEdgeIds(activeMesh.value))
+  }
+
+  function selectSharpEdges() {
+    if (!activeMesh.value) return
+    selectQueriedEdges(sharpEdgeIds(activeMesh.value))
   }
 
   function performAutoMerge(meshId: string, threshold = 0.01) {
@@ -1524,6 +1822,7 @@ export const useProjectStore = defineStore('project', () => {
       f.id = `f_${newId}_${idx}`
       f.vertexIds = f.vertexIds.map(vId => vertIdMap.get(vId) || vId)
     })
+    delete mesh.instanceOf
     return mesh
   }
 
@@ -1532,8 +1831,21 @@ export const useProjectStore = defineStore('project', () => {
     if (targets.length === 0) return
     const label = axis === 'x' ? 'H / X' : axis === 'y' ? 'V / Y' : 'Z'
     recordState(`Flip ${label}`)
-    for (const mesh of targets) flipMeshGeometry(mesh, axis)
-    markGeometryUpdated()
+    for (const mesh of targets) {
+      const scale = { x: 1, y: 1, z: 1 }
+      scale[axis] = -1
+      runKernelOperation(`Flip ${label}`, (document, bridge) => {
+        applyRotationAndScaleToEditableMesh(bridge.mesh, { x: 0, y: 0, z: 0 }, scale)
+        return {
+          mesh: MeshBridge.editableMeshToMeshObject(
+            bridge.mesh, document, bridge.numToStrVertId, bridge.numToStrFaceId,
+          ),
+          selectedVertexIds: [],
+          selectedEdgeIds: [],
+          selectedFaceIds: [],
+        }
+      }, { record: false, mesh, applySelection: false })
+    }
   }
 
   function performRotateObject(axis: SymmetryAxis, degrees: number) {
@@ -1541,9 +1853,32 @@ export const useProjectStore = defineStore('project', () => {
     if (targets.length === 0 || !degrees) return
     recordState(`Rotate ${axis.toUpperCase()} ${degrees}°`)
     for (const mesh of targets) addObjectRotation(mesh, axis, degrees)
-    // TRS-only: an object transform does not move mesh data, so no per-object counter bump.
-    geometryRevision.value++
-    triggerAutosave()
+    // Object TRS is editor state, not a kernel mutation. Baking is an explicit action.
+    markObjectTransformUpdated()
+  }
+
+  /** Bake rotation and scale through each resident kernel without adding a history step. */
+  function bakeObjectRotationScale(targets = objectMeshesForEdit()) {
+    if (useToolStore().appMode === 'animate') return
+    const lookup = (id: string) => meshes.value.find(mesh => mesh.id === id)
+    for (const mesh of targets) {
+      if (mesh.locked || !hasObjectRotationOrScale(mesh)) continue
+      if (mesh.instanceOf) makeUniqueMesh(mesh, lookup)
+      runKernelOperation('Apply Rotation & Scale', (document, bridge) => {
+        applyRotationAndScaleToEditableMesh(bridge.mesh, document.rotation, document.scale)
+        const projected = MeshBridge.editableMeshToMeshObject(
+          bridge.mesh, document, bridge.numToStrVertId, bridge.numToStrFaceId,
+        )
+        projected.rotation = { x: 0, y: 0, z: 0 }
+        projected.scale = { x: 1, y: 1, z: 1 }
+        return {
+          mesh: projected,
+          selectedVertexIds: [...selectedVertexIds.value],
+          selectedEdgeIds: [...selectedEdgeIds.value],
+          selectedFaceIds: [...selectedFaceIds.value],
+        }
+      }, { record: false, mesh, applySelection: false })
+    }
   }
 
   function performDuplicateMirror(axis: SymmetryAxis) {
@@ -1561,6 +1896,151 @@ export const useProjectStore = defineStore('project', () => {
     clearSubSelections()
     markGeometryUpdated()
   }
+
+  function performApplyRotationScale() {
+    const targets = objectMeshesForEdit().filter(mesh => !mesh.locked && hasObjectRotationOrScale(mesh))
+    if (targets.length === 0) return
+    recordState('Apply Rotation & Scale')
+    bakeObjectRotationScale(targets)
+  }
+
+  function performMakeUnique() {
+    const targets = objectMeshesForEdit().filter(mesh => mesh.instanceOf)
+    if (targets.length === 0) return
+    recordState('Make Unique')
+    const lookup = (id: string) => meshes.value.find(mesh => mesh.id === id)
+    for (const mesh of targets) makeUniqueMesh(mesh, lookup)
+    markGeometryUpdated()
+  }
+
+  function performAlign(axis: AlignAxis, mode: AlignMode) {
+    const tools = useToolStore()
+    if (tools.selectMode === 'object') {
+      const targets = objectMeshesForEdit()
+      if (targets.length === 0) return
+      recordState(`Align ${axis.toUpperCase()} ${mode}`)
+      alignObjects(targets, axis, mode, tools.cursor3D, id => meshes.value.find(mesh => mesh.id === id))
+      geometryRevision.value++
+      triggerAutosave()
+      return
+    }
+    if (!activeMesh.value || activeMesh.value.locked) return
+    const ids = selectionVertexIds()
+    if (ids.length === 0) return
+    recordState(`Align ${axis.toUpperCase()} ${mode}`)
+    let cursor = tools.cursor3D[axis]
+    if (mode === 'cursor') {
+      const local = new THREE.Vector3(tools.cursor3D.x, tools.cursor3D.y, tools.cursor3D.z)
+      local.applyMatrix4(meshObjectWorldMatrix(activeMesh.value).invert())
+      cursor = local[axis]
+    }
+    alignVertices(activeMesh.value, ids, axis, mode, cursor)
+    markGeometryUpdated()
+  }
+
+  function performMirror(axis: SymmetryAxis = 'x') {
+    const sources = objectMeshesForEdit()
+    if (sources.length === 0) return
+    const offset = useToolStore().mirrorOffset
+    recordState(`Mirror ${axis.toUpperCase()}`)
+    const copies = sources.map(src => {
+      const copy = cloneMeshObject(src, `_M${axis.toUpperCase()}`)
+      reflectMeshAcrossPlane(copy, axis, offset)
+      return copy
+    })
+    meshes.value.push(...copies)
+    selectedMeshIds.value = copies.map(mesh => mesh.id)
+    activeMeshId.value = copies[0]?.id || ''
+    clearSubSelections()
+    markGeometryUpdated()
+  }
+
+  function performLinearArray() {
+    const sources = objectMeshesForEdit()
+    if (sources.length === 0) return
+    const tools = useToolStore()
+    const count = Math.max(2, Math.min(24, Math.round(tools.arrayCount) || 2))
+    const axis = tools.arrayAxis
+    recordState('Linear Array')
+    const copies = sources.flatMap(src => Array.from({ length: count - 1 }, (_, index) => {
+      const copy = cloneMeshObject(src, `_A${index + 1}`)
+      offsetObjectAlong(copy, axis, tools.arrayOffset, index + 1)
+      return copy
+    }))
+    meshes.value.push(...copies)
+    selectedMeshIds.value = copies.map(mesh => mesh.id)
+    activeMeshId.value = copies[0]?.id || activeMeshId.value
+    clearSubSelections()
+    markGeometryUpdated()
+  }
+
+  function performRadialArray() {
+    const sources = objectMeshesForEdit()
+    if (sources.length === 0) return
+    const tools = useToolStore()
+    const count = Math.max(2, Math.min(24, Math.round(tools.arrayCount) || 2))
+    const axis = tools.arrayAxis
+    recordState('Radial Array')
+    const copies = sources.flatMap(src => Array.from({ length: count - 1 }, (_, index) => {
+      const copy = cloneMeshObject(src, `_R${index + 1}`)
+      rotateObjectAround(copy, axis, index + 1, count)
+      return copy
+    }))
+    meshes.value.push(...copies)
+    selectedMeshIds.value = copies.map(mesh => mesh.id)
+    activeMeshId.value = copies[0]?.id || activeMeshId.value
+    clearSubSelections()
+    markGeometryUpdated()
+  }
+
+  function performInstanceDuplicate() {
+    const sources = objectMeshesForEdit()
+    if (sources.length === 0) return
+    recordState('Instance Duplicate')
+    const copies = sources.map(src => {
+      const copy = cloneMeshObject(src, '_Inst')
+      copy.instanceOf = src.instanceOf || src.id
+      copy.vertices = []
+      copy.faces = []
+      copy.position = { ...copy.position, x: copy.position.x + 1 }
+      return copy
+    })
+    meshes.value.push(...copies)
+    selectedMeshIds.value = copies.map(mesh => mesh.id)
+    activeMeshId.value = copies[0]?.id || ''
+    clearSubSelections()
+    markGeometryUpdated()
+  }
+
+  function performSnap(mode: SnapTarget) {
+    const tools = useToolStore()
+    if (tools.selectMode === 'object') {
+      const targets = objectMeshesForEdit()
+      if (targets.length === 0) return
+      const others = meshes.value.filter(mesh => !targets.some(target => target.id === mesh.id))
+      const lookup = (id: string) => meshes.value.find(mesh => mesh.id === id)
+      recordState(`Snap to ${mode}`)
+      for (const mesh of targets) snapObjectPosition(mesh, others, mode, tools.snapping.gridSize, lookup)
+      geometryRevision.value++
+      triggerAutosave()
+      return
+    }
+    if (!activeMesh.value || activeMesh.value.locked) return
+    const ids = selectionVertexIds()
+    if (ids.length === 0) return
+    return runKernelOperation(`Snap to ${mode}`, (document, bridge) =>
+      snapVertices(document, ids, mode, tools.snapping.gridSize, bridge), { applySelection: false })
+  }
+
+  watch(() => useToolStore().selectMode, (mode) => {
+    if (mode !== 'vertex' && mode !== 'edge' && mode !== 'face') return
+    const mesh = meshes.value.find(item => item.id === activeMeshId.value)
+    const sourceId = mesh?.instanceOf
+    if (!sourceId || !meshes.value.some(item => item.id === sourceId)) return
+    activeMeshId.value = sourceId
+    selectedMeshIds.value = [sourceId]
+    clearSubSelections()
+  })
 
   const hasAutosaveSession = ref<boolean>(false)
   const autosaveRecord = ref<ProjectStorageData | null>(null)
@@ -1666,6 +2146,7 @@ export const useProjectStore = defineStore('project', () => {
     isRestoringSession.value = true
     try {
       projectName.value = data.name || 'Restored_Project'
+      clearResidentMeshes()
       meshes.value = data.meshes
       activeMeshId.value = data.meshes[0]?.id || ''
       selectedMeshIds.value = [data.meshes[0]?.id || '']
@@ -1768,6 +2249,12 @@ export const useProjectStore = defineStore('project', () => {
       c.attribute++
       meshRevisions.set(id, c)
     }
+    geometryRevision.value++
+    triggerAutosave()
+  }
+
+  /** Object TRS redraw/autosave without invalidating resident mesh data. */
+  function markObjectTransformUpdated() {
     geometryRevision.value++
     triggerAutosave()
   }
@@ -1970,8 +2457,11 @@ export const useProjectStore = defineStore('project', () => {
     if (options?.record !== false) recordState(`Apply Texture to Material (${mat.name})`)
     mat.textureId = textureId
     if (textureId) {
+      mat.fill = 'image'
       selectTexture(textureId)
       markTextureUpdated(textureId)
+    } else if (mat.fill === 'image') {
+      mat.fill = 'solid'
     }
     markGeometryUpdated()
   }
@@ -1995,6 +2485,7 @@ export const useProjectStore = defineStore('project', () => {
     if (!mat) return
     recordState(`Unbind Texture from Material (${mat.name})`)
     mat.textureId = null
+    if (mat.fill === 'image') mat.fill = 'solid'
     markGeometryUpdated()
   }
 
@@ -2037,6 +2528,9 @@ export const useProjectStore = defineStore('project', () => {
       name: name || `Material_${materials.value.length + 1}`,
       color,
       textureId: texId ?? null,
+      tileX: 1,
+      tileY: 1,
+      fill: texId ? 'image' : 'solid',
       shading: 'textured',
       psxJitter: false,
       psxJitterResolution: 240,
@@ -2218,12 +2712,14 @@ export const useProjectStore = defineStore('project', () => {
         id: `mat_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         name: `${mesh.name}_Mat`,
         color: '#ffffff',
+        fill: 'image',
         textureId
       }
       materials.value.push(newMat)
       mesh.materialId = newMat.id
     } else if (currentMat) {
       currentMat.textureId = textureId
+      currentMat.fill = 'image'
       currentMat.color = '#ffffff'
     } else {
       const newMat = addMaterial(`${mesh.name}_Mat`, '#ffffff', textureId)
@@ -2388,6 +2884,7 @@ export const useProjectStore = defineStore('project', () => {
     const starterTex = makeStarterTexture()
 
     projectName.value = 'New Project'
+    clearResidentMeshes()
     const defaultCube = createCube('Cube_1', 2)
     defaultCube.materialId = 'default_material'
     meshes.value = [defaultCube]
@@ -2495,6 +2992,30 @@ export const useProjectStore = defineStore('project', () => {
       setSeamEdges(document, remove, false, bridge), { applySelection: false })
   }
 
+  function markSelectedEdgesSharp() {
+    if (!activeMesh.value) return
+    const targets = seamTargetEdgeIds()
+    if (targets.length === 0) return
+    const existing = new Set(activeMesh.value.sharpEdgeIds || [])
+    const toAdd = targets.filter(id => !existing.has(id))
+    if (toAdd.length === 0) return
+    const promote = (activeMesh.value.shadeMode || 'flat') === 'flat'
+    return runKernelOperation('Mark Sharp', (document, bridge) => {
+      if (promote) document.shadeMode = 'auto'
+      return setSharpEdges(document, toAdd, true, bridge)
+    }, { applySelection: false })
+  }
+
+  function clearSelectedEdgesSharp() {
+    if (!activeMesh.value || !activeMesh.value.sharpEdgeIds?.length) return
+    const targets = seamTargetEdgeIds()
+    if (targets.length === 0) return
+    const remove = targets.filter(id => activeMesh.value!.sharpEdgeIds!.includes(id))
+    if (remove.length === 0) return
+    return runKernelOperation('Clear Sharp', (document, bridge) =>
+      setSharpEdges(document, remove, false, bridge), { applySelection: false })
+  }
+
   function clearAllSeams() {
     if (!activeMesh.value || !activeMesh.value.seamEdgeIds?.length) return
     return runKernelOperation('Clear All Seams', (document, bridge) =>
@@ -2510,10 +3031,6 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   function performSmartUvProject(options: SmartUvProjectOptions = {}) {
-    if (!activeMesh.value) return
-    const faces = options.onlyFaceIndices && options.onlyFaceIndices.length > 0
-      ? options.onlyFaceIndices
-      : selectedFaceIndices()
     const tools = useToolStore()
     const angle = Number.isFinite(Number(options.angleLimitDegrees))
       ? Number(options.angleLimitDegrees)
@@ -2521,25 +3038,67 @@ export const useProjectStore = defineStore('project', () => {
     const margin = Number.isFinite(Number(options.marginPixels))
       ? Number(options.marginPixels)
       : tools.smartUvMargin
-    recordState(`Smart UV Project (${faces && faces.length > 0 ? 'Selection' : 'Mesh'}, ${angle}°)`)
-    replaceMesh(smartUvProject(activeMesh.value, {
-      angleLimitDegrees: angle,
-      marginPixels: margin,
-      textureSize: options.textureSize ?? pixelBuffer.value.width,
-      textureHeight: options.textureHeight ?? pixelBuffer.value.height,
-      onlyFaceIndices: faces
-    }), ATTRIBUTE_ONLY_CHANGE)
+    const jobs = unwrapJobs(options.onlyFaceIndices)
+    if (jobs.length === 0) return
+    const selection = jobs.some(job => (job.faces?.length ?? 0) > 0)
+    const scope = selection ? 'Selection' : jobs.length > 1 ? 'Objects' : 'Mesh'
+    recordState(`Smart UV Project (${scope}, ${angle}°)`)
+    for (const job of jobs) {
+      const next = restorePinnedUvs(job.mesh, smartUvProject(job.mesh, {
+        angleLimitDegrees: angle,
+        marginPixels: margin,
+        textureSize: options.textureSize ?? pixelBuffer.value.width,
+        textureHeight: options.textureHeight ?? pixelBuffer.value.height,
+        onlyFaceIndices: job.faces
+      }))
+      // Chart borders become seams so a later seam unwrap keeps these islands.
+      next.seamEdgeIds = seamEdgesFromUvIslands(next, job.faces)
+      replaceMesh(next, ATTRIBUTE_ONLY_CHANGE)
+    }
   }
 
   function performSeamUnwrap(onlyFaceIndices?: number[]) {
-    if (!activeMesh.value) return
-    const faces = onlyFaceIndices && onlyFaceIndices.length > 0
-      ? onlyFaceIndices
-      : selectedFaceIndices()
-    recordState(`Unwrap Along Seams (${faces && faces.length > 0 ? 'Selection' : 'Mesh'})`)
-    const next: MeshObject = JSON.parse(JSON.stringify(activeMesh.value))
-    SeamUnwrapper.unwrapMesh(next, faces, pixelBuffer.value.width || 64, 2)
-    replaceMesh(next, ATTRIBUTE_ONLY_CHANGE)
+    applyUnwrap(
+      onlyFaceIndices,
+      scope => `Unwrap Along Seams (${scope === 'selection' ? 'Selection' : scope === 'objects' ? 'Objects' : 'Mesh'})`,
+      (mesh, faces) => {
+        const next: MeshObject = JSON.parse(JSON.stringify(mesh))
+        SeamUnwrapper.unwrapMesh(next, faces, pixelBuffer.value.width || 64, 2, pixelBuffer.value.height || pixelBuffer.value.width || 64)
+        return next
+      }
+    )
+  }
+
+  function performProjectFromView(view: ViewProjection, onlyFaceIndices?: number[]) {
+    applyUnwrap(
+      onlyFaceIndices,
+      scope => scope === 'selection' ? 'Project From View (Selection)' : scope === 'objects' ? 'Project From View (Objects)' : 'Project From View',
+      (mesh, faces) => projectFromView(mesh, view, faces, pixelBuffer.value.width || 64, pixelBuffer.value.height || pixelBuffer.value.width || 64)
+    )
+  }
+
+  /** Mark every UV island border (in the selection, or the whole mesh) as a seam. */
+  function performSeamsFromIslands(onlyFaceIndices?: number[]) {
+    if (!activeMesh.value || activeMesh.value.locked) return
+    const faces = onlyFaceIndices && onlyFaceIndices.length > 0 ? onlyFaceIndices : selectedFaceIndices()
+    const existing = new Set(activeMesh.value.seamEdgeIds || [])
+    const toAdd = seamEdgesFromUvIslands(activeMesh.value, faces).filter(id => !existing.has(id))
+    if (toAdd.length === 0) return
+    return runKernelOperation('Seams from Islands', (document, bridge) =>
+      setSeamEdges(document, toAdd, true, bridge), { applySelection: false })
+  }
+
+  /** Replace the active mesh's pinned UV corners (`faceId:vertexId`). */
+  function setUvPins(keys: string[], label = 'Pin UVs') {
+    const mesh = activeMesh.value
+    if (!mesh) return
+    const next = Array.from(new Set(keys))
+    const current = mesh.uvPinKeys || []
+    if (next.length === current.length && next.every(k => current.includes(k))) return
+    recordState(label)
+    if (next.length > 0) mesh.uvPinKeys = next
+    else delete mesh.uvPinKeys
+    triggerAutosave()
   }
 
   function performPackUVIslands(padding = 0.02, onlyFaceIndices?: number[]) {
@@ -2578,16 +3137,55 @@ export const useProjectStore = defineStore('project', () => {
     replaceMesh(updated, ATTRIBUTE_ONLY_CHANGE)
   }
 
-  function unwrapFaceScope(onlyFaceIndices?: number[]): number[] | undefined {
-    if (onlyFaceIndices && onlyFaceIndices.length > 0) return onlyFaceIndices
-    return selectedFaceIndices()
+  /**
+   * Explicit face indices unwrap just those faces on the active mesh.
+   * An empty array unwraps every face of the active mesh.
+   * Omitted: selected faces, edges, or vertices; in object mode, every selected object.
+   */
+  function unwrapJobs(onlyFaceIndices?: number[]): { mesh: MeshObject; faces?: number[] }[] {
+    const explicit = Array.isArray(onlyFaceIndices)
+    if (explicit) {
+      if (!activeMesh.value || activeMesh.value.locked) return []
+      return onlyFaceIndices.length > 0
+        ? [{ mesh: activeMesh.value, faces: onlyFaceIndices }]
+        : [{ mesh: activeMesh.value }]
+    }
+
+    const tools = useToolStore()
+    if (tools.selectMode === 'object' && tools.appMode !== 'uvpaint') {
+      const ids = selectedMeshIds.value.length > 0 ? selectedMeshIds.value : [activeMeshId.value]
+      const list = meshes.value.filter(mesh => ids.includes(mesh.id) && !mesh.locked && mesh.faces.length > 0)
+      if (list.length > 0) return list.map(mesh => ({ mesh }))
+    }
+
+    if (!activeMesh.value || activeMesh.value.locked) return []
+    const faceIds = incidentFacesFromSelection()
+    if (faceIds.length === 0) return [{ mesh: activeMesh.value }]
+    const faces = faceIds
+      .map(id => activeMesh.value!.faces.findIndex(face => face.id === id))
+      .filter(index => index >= 0)
+    return faces.length > 0 ? [{ mesh: activeMesh.value, faces }] : [{ mesh: activeMesh.value }]
+  }
+
+  function applyUnwrap(
+    onlyFaceIndices: number[] | undefined,
+    label: (scope: 'selection' | 'mesh' | 'objects') => string,
+    op: (mesh: MeshObject, faces?: number[]) => MeshObject
+  ) {
+    const jobs = unwrapJobs(onlyFaceIndices)
+    if (jobs.length === 0) return
+    const selection = jobs.some(job => (job.faces?.length ?? 0) > 0)
+    const scope = selection ? 'selection' : jobs.length > 1 ? 'objects' : 'mesh'
+    recordState(label(scope))
+    for (const job of jobs) replaceMesh(restorePinnedUvs(job.mesh, op(job.mesh, job.faces)), ATTRIBUTE_ONLY_CHANGE)
   }
 
   function performBoxUnwrap(onlyFaceIndices?: number[]) {
-    if (!activeMesh.value) return
-    const faces = unwrapFaceScope(onlyFaceIndices)
-    recordState(faces && faces.length > 0 ? 'Box Unwrap (Selection)' : 'Box UV Projection')
-    replaceMesh(boxUnwrap(activeMesh.value, faces), ATTRIBUTE_ONLY_CHANGE)
+    applyUnwrap(
+      onlyFaceIndices,
+      scope => scope === 'selection' ? 'Box Unwrap (Selection)' : scope === 'objects' ? 'Box UV Projection (Objects)' : 'Box UV Projection',
+      (mesh, faces) => boxUnwrap(mesh, faces)
+    )
   }
 
   function generateBoxUVs() {
@@ -2595,45 +3193,31 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   function performPlanarUnwrap(axis: 'x' | 'y' | 'z' = 'z', onlyFaceIndices?: number[]) {
-    if (!activeMesh.value) return
-    const faces = unwrapFaceScope(onlyFaceIndices)
-    recordState(`Planar Unwrap (${axis.toUpperCase()})`)
-    replaceMesh(planarUnwrap(activeMesh.value, axis, faces), ATTRIBUTE_ONLY_CHANGE)
+    applyUnwrap(
+      onlyFaceIndices,
+      scope => `Planar Unwrap (${axis.toUpperCase()}${scope === 'selection' ? ', Selection' : scope === 'objects' ? ', Objects' : ''})`,
+      (mesh, faces) => planarUnwrap(mesh, axis, faces)
+    )
   }
 
   function performCylinderUnwrap(onlyFaceIndices?: number[]) {
-    if (!activeMesh.value) return
-    const faces = unwrapFaceScope(onlyFaceIndices)
-    recordState('Cylindrical Unwrap')
-    replaceMesh(cylinderUnwrap(activeMesh.value, faces), ATTRIBUTE_ONLY_CHANGE)
+    applyUnwrap(onlyFaceIndices, scope => scope === 'selection' ? 'Cylindrical Unwrap (Selection)' : scope === 'objects' ? 'Cylindrical Unwrap (Objects)' : 'Cylindrical Unwrap', (mesh, faces) => cylinderUnwrap(mesh, faces))
   }
 
   function performSphereUnwrap(onlyFaceIndices?: number[]) {
-    if (!activeMesh.value) return
-    const faces = unwrapFaceScope(onlyFaceIndices)
-    recordState('Spherical Unwrap')
-    replaceMesh(sphereUnwrap(activeMesh.value, faces), ATTRIBUTE_ONLY_CHANGE)
+    applyUnwrap(onlyFaceIndices, scope => scope === 'selection' ? 'Spherical Unwrap (Selection)' : scope === 'objects' ? 'Spherical Unwrap (Objects)' : 'Spherical Unwrap', (mesh, faces) => sphereUnwrap(mesh, faces))
   }
 
   function performConeUnwrap(onlyFaceIndices?: number[]) {
-    if (!activeMesh.value) return
-    const faces = unwrapFaceScope(onlyFaceIndices)
-    recordState('Conical Fan Unwrap')
-    replaceMesh(coneUnwrap(activeMesh.value, faces), ATTRIBUTE_ONLY_CHANGE)
+    applyUnwrap(onlyFaceIndices, scope => scope === 'selection' ? 'Conical Fan Unwrap (Selection)' : scope === 'objects' ? 'Conical Fan Unwrap (Objects)' : 'Conical Fan Unwrap', (mesh, faces) => coneUnwrap(mesh, faces))
   }
 
   function performCubemapCrossUnwrap(onlyFaceIndices?: number[]) {
-    if (!activeMesh.value) return
-    const faces = unwrapFaceScope(onlyFaceIndices)
-    recordState('Cubemap Cross Unwrap')
-    replaceMesh(cubemapCrossUnwrap(activeMesh.value, faces), ATTRIBUTE_ONLY_CHANGE)
+    applyUnwrap(onlyFaceIndices, scope => scope === 'selection' ? 'Cubemap Cross Unwrap (Selection)' : scope === 'objects' ? 'Cubemap Cross Unwrap (Objects)' : 'Cubemap Cross Unwrap', (mesh, faces) => cubemapCrossUnwrap(mesh, faces))
   }
 
   function performGridifyUvQuads(onlyFaceIndices?: number[]) {
-    if (!activeMesh.value) return
-    const faces = unwrapFaceScope(onlyFaceIndices)
-    recordState('Gridify Quad Loops')
-    replaceMesh(gridifyQuadIslands(activeMesh.value, faces), ATTRIBUTE_ONLY_CHANGE)
+    applyUnwrap(onlyFaceIndices, scope => scope === 'selection' ? 'Gridify Quad Loops (Selection)' : scope === 'objects' ? 'Gridify Quad Loops (Objects)' : 'Gridify Quad Loops', (mesh, faces) => gridifyQuadIslands(mesh, faces))
   }
 
   function bakeSceneAtlas(padding = 2) {
@@ -2825,6 +3409,8 @@ export const useProjectStore = defineStore('project', () => {
     selectMesh,
     selectMeshes,
     createMesh,
+    createImageCard,
+    applyDroppedImageToMesh,
     addPrimitive,
     addEditableMesh,
     referenceImages,
@@ -2848,17 +3434,31 @@ export const useProjectStore = defineStore('project', () => {
     pasteClipboard,
     duplicateSelection,
     performFlipAxis,
+    performApplyRotationScale,
+    bakeObjectRotationScale,
+    performMakeUnique,
+    performAlign,
     performRotateObject,
     performDuplicateMirror,
+    performMirror,
+    performLinearArray,
+    performRadialArray,
+    performInstanceDuplicate,
+    performSnap,
     performExtrude,
     performInset,
     performBevel,
     performSubdivide,
+    performSimpleSubdivide,
+    performCatmullClark,
+    performSpherize,
     performPokeFaces,
     performTriangulate,
     performMerge,
+    performSplitEdges,
     performFillFace,
     performFlatten,
+    performStraighten,
     performSeparateMesh,
     performJoinMeshes,
     performFlipNormals,
@@ -2882,8 +3482,11 @@ export const useProjectStore = defineStore('project', () => {
     performSplit,
     performVertexBevel,
     performSolidifyFaces,
+    performLathe,
+    performShell,
     performSymmetrize,
     performSmoothVertices,
+    performCircle,
     performRandomizeVertices,
     performUnsubdivide,
     performDecimate,
@@ -2895,6 +3498,7 @@ export const useProjectStore = defineStore('project', () => {
     applyMeshModifier,
     removeMeshModifier,
     growSelection,
+    selectInverse,
     shrinkSelection,
     selectConnected,
     replaceMesh,
@@ -2909,13 +3513,19 @@ export const useProjectStore = defineStore('project', () => {
     toggleShadeMode,
     geometryRevision,
     markGeometryUpdated,
+    markObjectTransformUpdated,
     meshRevision,
     invalidateAllGeometryRevisions,
+    captureResidentMeshes,
+    restoreResidentMeshes,
+    clearResidentMeshes,
     markTexturePreview,
     markTextureUpdated,
     selectTexture,
     ensureTextureBuffer,
     selectMaterial,
+    setMaterialFill,
+    setMaterialTextureTiling,
     syncPaintTargetFromMesh,
     countMeshesUsingMaterial,
     isMaterialShared,
@@ -2955,9 +3565,14 @@ export const useProjectStore = defineStore('project', () => {
     resetToDefaultProject,
     markSelectedEdgesAsSeam,
     clearSelectedEdgesSeam,
+    markSelectedEdgesSharp,
+    clearSelectedEdgesSharp,
     clearAllSeams,
     performSmartUvProject,
     performSeamUnwrap,
+    performProjectFromView,
+    performSeamsFromIslands,
+    setUvPins,
     performPackUVIslands,
     performApplyTexelDensity,
     performEqualizeTexelDensity,
@@ -2976,6 +3591,9 @@ export const useProjectStore = defineStore('project', () => {
     setGeometryToOrigin,
     selectEdgeLoop,
     selectEdgeRing,
+    selectBoundaryEdges,
+    selectNonManifoldEdges,
+    selectSharpEdges,
     performAutoMerge,
     recordState,
     recordPixels,

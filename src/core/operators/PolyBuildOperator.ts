@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { ModalOperator } from './ModalOperator'
 import { ScreenGeometry, type ViewQuadrant } from '../geometry/ScreenGeometry'
+import { surfaceTriangles } from '../geometry/SurfaceGeometry'
 import { PolyDrawKernel, DrawPlane, DrawViewKind } from '../mesh/operations/PolyDrawKernel'
 
 interface BuildPoint {
@@ -831,11 +832,9 @@ export class PolyBuildOperator extends ModalOperator {
       const loops = plan.loops.map(loop => loop.map(id => ids.indexOf(id)))
       const tri: number[] = []
       for (const loop of loops) {
-        for (let i = 1; i < loop.length - 1; i++) {
-          const a = fillPts[loop[0]]
-          const b = fillPts[loop[i]]
-          const c = fillPts[loop[i + 1]]
-          tri.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z)
+        const points = loop.map(i => fillPts[i])
+        for (const corners of surfaceTriangles(points)) {
+          for (const i of corners) tri.push(points[i].x, points[i].y, points[i].z)
         }
       }
       if (tri.length > 0) {

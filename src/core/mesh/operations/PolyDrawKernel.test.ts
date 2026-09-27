@@ -42,12 +42,9 @@ describe('game asset topology', () => {
     }
   })
 
-  it('uses triangles for a bent quad without moving its corners', () => {
+  it('keeps a bent quad as one face without moving its corners', () => {
     const points = polygon([[0, 0], [2, 0], [2, 2, 1], [0, 2]])
-    const loops = PolyDrawKernel.tessellateLoopIndices(points)
-    expect(loops).toHaveLength(2)
-    expect(loops.every(loop => loop.length === 3)).toBe(true)
-    expect(new Set(loops.flat()).size).toBe(4)
+    expect(PolyDrawKernel.tessellateLoopIndices(points)).toEqual([[0, 1, 2, 3]])
   })
 
   it('handles small models and collinear boundary subdivisions', () => {

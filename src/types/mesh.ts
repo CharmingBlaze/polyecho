@@ -45,16 +45,40 @@ export interface Edge {
 }
 
 export interface MirrorModifier {
+  /** Show the mirrored result in the viewport (Blender display icon). */
   enabled: boolean
+  /** Show the mirrored result while editing components. Default on. */
+  showEdit?: boolean
+  /** Include the mirrored result in export. Default on. */
+  showRender?: boolean
   axisX: boolean
   axisY: boolean
   axisZ: boolean
+  /** Cut on this local axis before mirroring it. Independent of the mirror axis. */
+  bisectX?: boolean
+  bisectY?: boolean
+  bisectZ?: boolean
+  /** Keep the negative side of a bisect instead of the positive side. */
+  flipX?: boolean
+  flipY?: boolean
+  flipZ?: boolean
+  /** Object whose origin and axes define the mirror planes. Empty uses this object's origin. */
+  mirrorObjectId?: string
   clipping: boolean
   merge: boolean
   mergeThreshold: number
+  /** Vertices closer than this to a bisect plane stay on the plane. Default 0.001. */
+  bisectDistance?: number
+  /** Mirror U texture coordinates on generated faces (Data → Mirror U). */
   flipU: boolean
+  /** Mirror V texture coordinates on generated faces (Data → Mirror V). */
   flipV: boolean
-  /** Cut and keep the + side of each enabled axis before mirroring. */
+  offsetU?: number
+  offsetV?: number
+  /**
+   * Legacy single bisect switch. When the per-axis flags are absent and this is
+   * true, each enabled mirror axis is bisected.
+   */
   bisect?: boolean
 }
 
@@ -104,4 +128,10 @@ export interface MeshObject {
   /** Degrees. Edges sharper than this stay flat when `shadeMode` is `auto`. Default 30. */
   autoSmoothAngle?: number
   seamEdgeIds?: string[]
+  /** `faceId:vertexId` UV corners that unwraps and projections keep in place. */
+  uvPinKeys?: string[]
+  /** Undirected edge ids whose normals stay split in Smooth and Auto shading. */
+  sharpEdgeIds?: string[]
+  /** When set, this object draws and exports the source mesh's vertices. Transform stays local. */
+  instanceOf?: string
 }

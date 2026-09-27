@@ -1,7 +1,9 @@
+import type { DitherPattern } from '../types/texture'
+
 export interface DitherPreset {
   id: string
   name: string
-  pattern: 'bayer4x4' | 'bayer8x8' | 'bayer2x2' | 'bayer16x16' | 'bluenoise' | 'halftone' | 'crosshatch' | 'horizontal_lines' | 'vertical_lines' | 'ordered' | 'noise' | 'checker'
+  pattern: DitherPattern
   ditherLevel: number // 4 to 64
   colorDepth: number // 0 (24-bit), 32 (15-bit PSX), 16 (12-bit), 8 (8-bit), 4 (4-bit), 2 (1-bit)
   scale: number // 1 to 4
@@ -11,17 +13,111 @@ export interface DitherPreset {
   description: string
 }
 
+export interface DitherLookGroup {
+  id: string
+  label: string
+  presetIds: string[]
+}
+
 export const DITHER_PRESETS: DitherPreset[] = [
   {
     id: 'psx-15bit',
-    name: 'PSX 15-Bit Retro',
+    name: 'PS1 15-bit',
     pattern: 'bayer4x4',
     ditherLevel: 32,
     colorDepth: 32,
     scale: 1,
     space: 'screen',
     channel: 'rgb',
-    description: 'PlayStation 1 authentic 15-bit RGB555 dither matrix'
+    description: 'PlayStation 1 RGB555 ordered dither'
+  },
+  {
+    id: 'saturn-mesh',
+    name: 'Saturn mesh',
+    pattern: 'saturn_mesh',
+    ditherLevel: 48,
+    colorDepth: 32,
+    scale: 1,
+    space: 'screen',
+    channel: 'rgb',
+    description: 'Saturn VDP1 checker stipple, the mesh-transparency weave'
+  },
+  {
+    id: 'saturn-15bit',
+    name: 'Saturn 15-bit',
+    pattern: 'bayer4x4',
+    ditherLevel: 28,
+    colorDepth: 32,
+    scale: 1,
+    space: 'screen',
+    channel: 'rgb',
+    description: 'Saturn high-color ordered dither without the mesh dropout'
+  },
+  {
+    id: 'dreamcast-16',
+    name: 'Dreamcast 16-bit',
+    pattern: 'dreamcast',
+    ditherLevel: 16,
+    colorDepth: 32,
+    scale: 1,
+    space: 'screen',
+    channel: 'luma',
+    description: 'PowerVR fine ordered dither for 16-bit framebuffer modes'
+  },
+  {
+    id: 'genesis-12bit',
+    name: 'Mega Drive',
+    pattern: 'bayer4x4',
+    ditherLevel: 32,
+    colorDepth: 16,
+    scale: 1,
+    space: 'screen',
+    channel: 'rgb',
+    description: 'Genesis 9-bit color stepped with a 4×4 matrix'
+  },
+  {
+    id: 'snes-15bit',
+    name: 'SNES',
+    pattern: 'snes',
+    ditherLevel: 36,
+    colorDepth: 32,
+    scale: 1,
+    space: 'screen',
+    channel: 'rgb',
+    description: 'Chunky 15-bit Bayer, the Super Nintendo gradient weave'
+  },
+  {
+    id: 'n64-coverage',
+    name: 'N64',
+    pattern: 'bluenoise',
+    ditherLevel: 24,
+    colorDepth: 16,
+    scale: 1,
+    space: 'screen',
+    channel: 'rgb',
+    description: 'Coverage-style noise for N64 16-bit framebuffers'
+  },
+  {
+    id: 'gba-lcd',
+    name: 'GBA',
+    pattern: 'gba',
+    ditherLevel: 40,
+    colorDepth: 32,
+    scale: 2,
+    space: 'screen',
+    channel: 'rgb',
+    description: 'Game Boy Advance LCD, coarse 15-bit blocks'
+  },
+  {
+    id: 'rgb-shift',
+    name: 'RGB phase',
+    pattern: 'rgb_shift',
+    ditherLevel: 32,
+    colorDepth: 32,
+    scale: 1,
+    space: 'screen',
+    channel: 'rgb',
+    description: 'Per-channel Bayer phase, the chromatic console gradient'
   },
   {
     id: 'smooth-halftone-8x8',
@@ -101,17 +197,6 @@ export const DITHER_PRESETS: DitherPreset[] = [
     description: 'Organic high-frequency blue noise without grid repetition'
   },
   {
-    id: 'genesis-12bit',
-    name: 'Sega 12-Bit MegaDrive',
-    pattern: 'bayer4x4',
-    ditherLevel: 32,
-    colorDepth: 16,
-    scale: 1,
-    space: 'screen',
-    channel: 'rgb',
-    description: '512 color palette stepping with classic 4x4 matrix'
-  },
-  {
     id: 'crt-interlaced',
     name: 'CRT Interlaced Scan',
     pattern: 'horizontal_lines',
@@ -124,27 +209,78 @@ export const DITHER_PRESETS: DitherPreset[] = [
   },
   {
     id: 'screen-door-alpha',
-    name: 'Screen Door Alpha',
+    name: 'Screen door',
     pattern: 'bayer4x4',
     ditherLevel: 64,
     colorDepth: 0,
     scale: 1,
     space: 'screen',
     channel: 'alpha',
-    description: 'Hardware stipple transparency for retro rendering'
+    description: 'Hardware stipple transparency'
   },
   {
     id: 'checker-50',
-    name: 'Checkerboard 50%',
+    name: 'Checker',
     pattern: 'checker',
     ditherLevel: 36,
     colorDepth: 8,
     scale: 2,
     space: 'screen',
     channel: 'luma',
-    description: 'Alternating 2x2 checkerboard pixel weave'
+    description: 'Alternating checker weave'
+  },
+  {
+    id: 'diagonal-bands',
+    name: 'Diagonal',
+    pattern: 'diagonal',
+    ditherLevel: 36,
+    colorDepth: 16,
+    scale: 1,
+    space: 'screen',
+    channel: 'luma',
+    description: 'Diagonal bands used for stippled gradients'
+  },
+  {
+    id: 'dot-screen',
+    name: 'Dot screen',
+    pattern: 'dots',
+    ditherLevel: 40,
+    colorDepth: 8,
+    scale: 1,
+    space: 'screen',
+    channel: 'luma',
+    description: 'Clustered halftone dots, larger than the print screen'
   }
 ]
+
+export const DITHER_LOOK_GROUPS: DitherLookGroup[] = [
+  { id: 'sega', label: 'Sega', presetIds: ['saturn-mesh', 'saturn-15bit', 'dreamcast-16', 'genesis-12bit'] },
+  { id: 'nintendo', label: 'Nintendo', presetIds: ['snes-15bit', 'n64-coverage', 'gba-lcd', 'gameboy-2bit'] },
+  { id: 'sony', label: 'Sony', presetIds: ['psx-15bit', 'rgb-shift'] },
+  {
+    id: 'more',
+    label: 'More',
+    presetIds: [
+      'smooth-halftone-8x8',
+      'manga-halftone-dots',
+      'dot-screen',
+      'comic-crosshatch',
+      'diagonal-bands',
+      'blue-noise-film',
+      'crt-interlaced',
+      'checker-50',
+      'macintosh-1bit',
+      'coarse-micro-2x2',
+      'screen-door-alpha'
+    ]
+  }
+]
+
+export function ditherPresetsInGroup(group: DitherLookGroup): DitherPreset[] {
+  return group.presetIds
+    .map(id => DITHER_PRESETS.find(preset => preset.id === id))
+    .filter((preset): preset is DitherPreset => !!preset)
+}
 
 // ----------------------------------------------------------------------------
 // BAYER & PATTERN MATRICES
@@ -190,12 +326,12 @@ export function getDitherMatrixValue(x: number, y: number, pattern: string): num
     return (v / 4.0) - 0.5
   }
 
-  if (pattern === 'bayer8x8') {
+  if (pattern === 'bayer8x8' || pattern === 'ordered') {
     const pX = ((px % 8) + 8) % 8
     const pY = ((py % 8) + 8) % 8
     const m4 = BAYER_4X4[pY % 4][pX % 4]
     const m2 = BAYER_2X2[Math.floor(pY / 4)][Math.floor(pX / 4)]
-    return ((m4 * 16.0 + m2) / 64.0) - 0.5
+    return ((4 * m4 + m2) / 64.0) - 0.5
   }
 
   if (pattern === 'bayer16x16') {
@@ -205,9 +341,9 @@ export function getDitherMatrixValue(x: number, y: number, pattern: string): num
     const pY8 = pY % 8
     const m4 = BAYER_4X4[pY8 % 4][pX8 % 4]
     const m2 = BAYER_2X2[Math.floor(pY8 / 4)][Math.floor(pX8 / 4)]
-    const b8 = (m4 * 16.0 + m2)
+    const b8 = 4 * m4 + m2
     const m2x2 = BAYER_2X2[Math.floor(pY / 8)][Math.floor(pX / 8)]
-    return ((b8 * 4.0 + m2x2) / 256.0) - 0.5
+    return ((4 * b8 + m2x2) / 256.0) - 0.5
   }
 
   if (pattern === 'bluenoise') {
@@ -248,6 +384,36 @@ export function getDitherMatrixValue(x: number, y: number, pattern: string): num
   if (pattern === 'noise') {
     const n = Math.sin(px * 12.9898 + py * 78.233) * 43758.5453
     return (n - Math.floor(n)) - 0.5
+  }
+
+  if (pattern === 'snes') {
+    return getDitherMatrixValue(Math.floor(px / 2), Math.floor(py / 2), 'bayer4x4')
+  }
+
+  if (pattern === 'saturn_mesh') {
+    return (px + py) % 2 === 0 ? 0.5 : -0.5
+  }
+
+  if (pattern === 'dreamcast') {
+    const bayer = getDitherMatrixValue(px, py, 'bayer8x8')
+    const noise = getDitherMatrixValue(px, py, 'bluenoise')
+    return bayer * 0.65 + noise * 0.35
+  }
+
+  if (pattern === 'gba') {
+    return getDitherMatrixValue(Math.floor(px / 2), Math.floor(py / 2), 'bayer2x2')
+  }
+
+  if (pattern === 'diagonal') {
+    return (Math.floor(px + py) % 4) / 4 - 0.5
+  }
+
+  if (pattern === 'dots') {
+    return getDitherMatrixValue(Math.floor(px / 2), Math.floor(py / 2), 'halftone')
+  }
+
+  if (pattern === 'rgb_shift') {
+    return getDitherMatrixValue(px, py, 'bayer4x4')
   }
 
   // Default bayer4x4
@@ -320,8 +486,15 @@ export function renderDitherCanvasPreview(
         light = x / w
       }
 
-      const ditherMatrixVal = getDitherMatrixValue(Math.floor(x / ditherScale), Math.floor(y / ditherScale), pattern)
-      const ditherOffset = (ditherMatrixVal * intensity) / Math.max(1, quant)
+      const sx = Math.floor(x / ditherScale)
+      const sy = Math.floor(y / ditherScale)
+      const shift = pattern === 'rgb_shift' && channel === 'rgb'
+      const ditherR = getDitherMatrixValue(sx, sy, shift ? 'bayer4x4' : pattern)
+      const ditherG = shift ? getDitherMatrixValue(sx + 1, sy, 'bayer4x4') : ditherR
+      const ditherB = shift ? getDitherMatrixValue(sx, sy + 1, 'bayer4x4') : ditherR
+      const offsetR = (ditherR * intensity) / Math.max(1, quant)
+      const offsetG = (ditherG * intensity) / Math.max(1, quant)
+      const offsetB = (ditherB * intensity) / Math.max(1, quant)
 
       let r = (baseR / 255) * light
       let g = (baseG / 255) * light
@@ -329,13 +502,11 @@ export function renderDitherCanvasPreview(
       let a = 1.0
 
       if (channel === 'alpha' && !isAlphaRegion) {
-        // Alpha stipple dither test
         const alphaThreshold = light
-        a = (ditherMatrixVal + 0.5) < alphaThreshold ? 1.0 : 0.0
+        a = (ditherR + 0.5) < alphaThreshold ? 1.0 : 0.0
       } else if (channel === 'luma') {
-        // Luminance only dither
         const luma = 0.299 * r + 0.587 * g + 0.114 * b
-        const ditheredLuma = Math.max(0, Math.min(1, luma + ditherOffset))
+        const ditheredLuma = Math.max(0, Math.min(1, luma + offsetG))
         const lumaRatio = luma > 0.001 ? (ditheredLuma / luma) : 1.0
         r = Math.max(0, Math.min(1, r * lumaRatio))
         g = Math.max(0, Math.min(1, g * lumaRatio))
@@ -347,10 +518,9 @@ export function renderDitherCanvasPreview(
           b = Math.floor(b * quant + 0.5) / quant
         }
       } else {
-        // Full RGB dither
-        r = Math.max(0, Math.min(1, r + ditherOffset))
-        g = Math.max(0, Math.min(1, g + ditherOffset))
-        b = Math.max(0, Math.min(1, b + ditherOffset))
+        r = Math.max(0, Math.min(1, r + offsetR))
+        g = Math.max(0, Math.min(1, g + offsetG))
+        b = Math.max(0, Math.min(1, b + offsetB))
 
         if (colorDepth > 0) {
           r = Math.floor(r * quant + 0.5) / quant

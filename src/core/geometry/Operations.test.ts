@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createCube } from './Primitives'
-import { bevelFaces, bridgeEdgeLoops, cleanupMeshGeometry, clearAllSeamEdges, connectTwoVertices, deleteElements, dissolveElements, extrudeFaces, fillFaceFromVertices, flattenVerticesOnAxis, flipNormals, gridFill, insetFaces, mergeVertices, mergeVerticesAdvanced, pokeFaces, setSeamEdges, subdivideFaces, triangulateFaces } from './Operations'
+import { bevelFaces, bridgeEdgeLoops, catmullClarkSubdivide, cleanupMeshGeometry, clearAllSeamEdges, connectTwoVertices, deleteElements, dissolveElements, extrudeFaces, fillFaceFromVertices, flattenVerticesOnAxis, flipNormals, gridFill, insetFaces, mergeVertices, mergeVerticesAdvanced, pokeFaces, setSeamEdges, spherizeVertices, splitEdges, subdivideFaces, triangulateFaces } from './Operations'
 import { MeshBridge } from '../mesh/MeshBridge'
 import type { MeshObject } from '../../types/mesh'
 import { undirectedEdgeId } from './EdgeUtils'
@@ -40,6 +40,39 @@ describe('Operations', () => {
     expect(bridge.mesh).toBe(kernel)
   })
 
+  it('splitEdges inserts a vertex on the selected edge', () => {
+    const cube = createCube('Cube', 2)
+    const a = cube.faces[0].vertexIds[0]
+    const b = cube.faces[0].vertexIds[1]
+    const result = splitEdges(cube, [undirectedEdgeId(a, b)], 0.5)
+    expect(result.mesh.vertices.length).toBe(cube.vertices.length + 1)
+    expect(result.selectedVertexIds).toHaveLength(1)
+    const grown = result.mesh.faces.filter(face => face.vertexIds.length === 5)
+    expect(grown.length).toBeGreaterThan(0)
+    for (const face of result.mesh.faces) {
+      expect(face.uvs.length).toBe(face.vertexIds.length)
+    }
+  })
+
+  it('merge at cursor and at a chosen vertex keep one survivor', () => {
+    const cube = createCube('Cube', 2)
+    const a = cube.vertices[0]
+    const b = cube.vertices[1]
+    const atCursor = mergeVerticesAdvanced(cube, [a.id, b.id], 'cursor', 0.05, undefined, {
+      position: { x: 3, y: 4, z: 5 }
+    })
+    const survivor = atCursor.mesh.vertices.find(v => v.id === a.id)
+    expect(atCursor.mesh.vertices.length).toBe(cube.vertices.length - 1)
+    expect(survivor?.position).toEqual({ x: 3, y: 4, z: 5 })
+
+    const atVertex = mergeVerticesAdvanced(cube, [a.id, b.id], 'vertex', 0.05, undefined, {
+      position: { ...b.position },
+      keepId: b.id
+    })
+    expect(atVertex.selectedVertexIds).toEqual([b.id])
+    expect(atVertex.mesh.vertices.some(v => v.id === a.id)).toBe(false)
+  })
+
   it('merge by distance welds coincident verts through MergeKernel', () => {
     const cube = createCube('Cube', 2)
     const a = cube.vertices[0]
@@ -62,6 +95,7 @@ describe('Operations', () => {
     expect(result.selectedFaceIds).toHaveLength(1)
     for (const face of result.mesh.faces) {
       expect(face.uvs.length).toBe(face.vertexIds.length)
+      expect(face.vertexIds.length).toBe(4)
     }
   })
 
@@ -73,6 +107,7 @@ describe('Operations', () => {
     expect(result.mesh.faces.length).toBeGreaterThan(6)
     for (const face of result.mesh.faces) {
       expect(face.uvs.length).toBe(face.vertexIds.length)
+      expect(face.vertexIds.length).toBe(4)
     }
   })
 
@@ -84,6 +119,7 @@ describe('Operations', () => {
     expect(result.mesh.faces.length).toBeGreaterThan(6)
     for (const face of result.mesh.faces) {
       expect(face.uvs.length).toBe(face.vertexIds.length)
+      expect(face.vertexIds.length).toBe(4)
     }
   })
 
@@ -129,14 +165,12 @@ describe('Operations', () => {
     const result = subdivideFaces(cube, [cube.faces[0].id])
     expect(result.selectedFaceIds).toHaveLength(4)
     expect(cube.faces).toHaveLength(6)
-    // 4 new quads + 4 neighbors tessellated (tri+quad) + 1 untouched back face
-    expect(result.mesh.faces.length).toBe(13)
+    // 4 new quads + 4 neighbours kept as 5-gons (Blender) + 1 untouched back face
+    expect(result.mesh.faces.length).toBe(9)
     expect(result.mesh.vertices.length).toBe(13)
-    for (const face of result.mesh.faces) {
-      expect(face.uvs.length).toBe(face.vertexIds.length)
-      expect(face.vertexIds.length).toBeGreaterThanOrEqual(3)
-      expect(face.vertexIds.length).toBeLessThanOrEqual(4)
-    }
+    const sizes = result.mesh.faces.map(face => face.vertexIds.length).sort()
+    expect(sizes).toEqual([4, 4, 4, 4, 4, 5, 5, 5, 5])
+    for (const face of result.mesh.faces) expect(face.uvs.length).toBe(face.vertexIds.length)
   })
 
   it('subdivideFaces with 2 cuts makes a 3x3 grid on a selected quad', () => {
@@ -155,10 +189,44 @@ describe('Operations', () => {
     expect(result.selectedFaceIds).toHaveLength(8)
     expect(result.mesh.vertices.length).toBeGreaterThan(cube.vertices.length)
     expect(result.mesh.vertices.length).toBeLessThan(cube.vertices.length + 16)
-    for (const face of result.mesh.faces) {
-      expect(face.vertexIds.length).toBeGreaterThanOrEqual(3)
-      expect(face.vertexIds.length).toBeLessThanOrEqual(4)
-    }
+    for (const face of result.mesh.faces) expect(face.vertexIds.length).toBeGreaterThanOrEqual(4)
+  })
+
+  it('simple subdivide keeps the original corner positions', () => {
+    const cube = createCube('Cube', 2)
+    const corner = { ...cube.vertices[0].position }
+    const result = subdivideFaces(cube, cube.faces.map(face => face.id), { cuts: 1, smoothness: 0 })
+    expect(result.mesh.vertices.find(vertex => vertex.id === cube.vertices[0].id)?.position).toEqual(corner)
+  })
+
+  it('catmullClark rounds a cube into 24 quads', () => {
+    const cube = createCube('Cube', 2)
+    const before = { ...cube.vertices[0].position }
+    const result = catmullClarkSubdivide(cube, 1)
+    expect(result.mesh.faces).toHaveLength(24)
+    expect(result.mesh.vertices.find(vertex => vertex.id === cube.vertices[0].id)?.position).not.toEqual(before)
+    for (const face of result.mesh.faces) expect(face.uvs.length).toBe(face.vertexIds.length)
+  })
+
+  it('spherize moves vertices onto one radius', () => {
+    const cube = createCube('Cube', 2)
+    cube.vertices[0].position = { ...cube.vertices[0].position, x: cube.vertices[0].position.x + 0.8 }
+    const ids = cube.vertices.map(vertex => vertex.id)
+    const count = ids.length
+    const center = cube.vertices.reduce(
+      (sum, vertex) => ({ x: sum.x + vertex.position.x, y: sum.y + vertex.position.y, z: sum.z + vertex.position.z }),
+      { x: 0, y: 0, z: 0 }
+    )
+    center.x /= count
+    center.y /= count
+    center.z /= count
+    const result = spherizeVertices(cube, ids, 1)
+    const distances = result.mesh.vertices.map(vertex => Math.hypot(
+      vertex.position.x - center.x,
+      vertex.position.y - center.y,
+      vertex.position.z - center.z
+    ))
+    expect(Math.max(...distances) - Math.min(...distances)).toBeLessThan(1e-4)
   })
 
   it('subdivideFaces on every cube face makes 24 quads', () => {

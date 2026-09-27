@@ -16,6 +16,32 @@ Mesh.materialId  →  Material (Shading, PSX, Dither, Tint)  →  Material.textu
 
 `projectStore.activeMaterial` is a computed helper for the currently inspected material.
 
+## Fill
+
+Each material has one surface fill. Shading (PBR, PS1, dither) still applies on top.
+
+| Fill | What you see | Stored on |
+| :--- | :--- | :--- |
+| **Color** | Flat `color` | `fill: 'solid'` |
+| **Gradient** | UV ramp. The Materials bar matches Illustrator: drag stops, drag the diamond midpoint, click the ramp to insert a stop, drag a stop down to delete it. Linear ramps also have a direction compass and an angle (0° is left to right). | `fill: 'gradient'` and `gradient` (`kind`, `angle`, `stops[].offset`, `stops[].midpoint`, `stops[].opacity`) |
+| **Image** | Library texture, multiplied by `color` as a tint | `fill: 'image'` and `textureId` |
+
+Older files omit `fill`: a bound `textureId` means Image, otherwise Color. Switching fill does not delete the other source, so Color → Image brings the previous texture back.
+
+`setMaterialFill(id, fill)` is the mode switch (one undo step). Stop edits write `material.gradient` directly, same as tint and roughness. Viewport, glTF, OBJ, and sprite export all read `resolveMaterialSurface` in `src/core/materials/MaterialFill.ts`.
+
+### Image tiling
+
+Image fills have independent **Tile X** / **Tile Y** repeats (`material.tileX`, `material.tileY`). Missing legacy values resolve to `1 × 1`; accepted values are clamped to `0.01–64`. `setMaterialTextureTiling` is the undoable store verb. It updates material state and `geometryRevision` only—mesh UVs and image pixels remain unchanged.
+
+Repeat transforms are material-local. Two materials may share one texture image while using different tiling. Standard and retro viewport shaders match; GLB preserves the transform and OBJ writes MTL texture scale metadata.
+
+## Dither
+
+The Dither tab is a live ordered-dither pass on the shaded pixel. It stays on top of PBR, flat, Gouraud, and unlit. Console shading (PS1, Saturn, Dreamcast, N64) keeps its own shader and uses the same pattern list.
+
+Looks are grouped: Saturn mesh and 15-bit, Dreamcast 16-bit, Mega Drive, SNES, N64, GBA, PS1, plus print and display patterns. Strength, pixel size, color depth, screen / UV / world space, and RGB / luma / alpha are the fine controls. Turning a look on does not change the shading model.
+
 ---
 
 ## The three verbs

@@ -1,10 +1,18 @@
 <script lang="ts">
-/** Survives Paint-tab unmount so first-open framing is not reapplied. */
+/** Survives Paint-tab switches. Cleared when UV/Paint closes so the next open frames again. */
 const uvViewSession = { fitted: false, zoom: 5, panX: 0, panY: 0 }
+
+export function forgetUvViewForNextOpen() {
+  uvViewSession.fitted = false
+}
 </script>
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
+import CanvasLightwaveNav from './CanvasLightwaveNav.vue'
+import FloatingToolShelf from './FloatingToolShelf.vue'
+import { CANVAS_BUTTON_ZOOM, useCanvasLightwaveNav } from '../../composables/useCanvasLightwaveNav'
+import { CANVAS_WHEEL_ZOOM_GAIN, classifyWheel, wheelPanDelta, wheelZoomFactor } from '../../core/view/wheelGesture'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import { 
@@ -13,11 +21,11 @@ import {
   generateUVCheckerboardDataURL,
   ensureMeshUVs
 } from '../../core/geometry/UVUnwrap'
-import { selectedUvCorners, uvBounds, transformUvCorners, relaxUvCorners, uvInspectAfterSelection, uvInspectToggled, type UvCorner, type UvTransform } from '../../core/uv/UVEditing'
+import { clickSelection, extendSelection, selectedUvCorners, uvBounds, transformUvCorners, relaxUvCorners, straightenUvCorners, mirrorUvCorners, uvInspectAfterSelection, uvInspectToggled, type UvCorner, type UvTransform } from '../../core/uv/UVEditing'
 import BlenderIcon from '../icons/BlenderIcon.vue'
 import { expandFacesToIslands, expandWeldedUvEdges, findUvIslands, stitchUvEdge } from '../../core/uv/UVIslands'
 import { undirectedEdgeId } from '../../core/geometry/EdgeUtils'
-import { EDITOR_EVENTS } from '../../core/commands/editorCommands'
+import { EDITOR_EVENTS, requestProjectFromView } from '../../core/commands/editorCommands'
 import TextureSharePrompt from '../modals/TextureSharePrompt.vue'
 import ImportTextureModal from '../modals/ImportTextureModal.vue'
 import NewTextureModal from '../modals/NewTextureModal.vue'
@@ -65,6 +73,7 @@ const uvSelectMode = computed<'vertex' | 'edge' | 'face' | 'island'>({
     else if (val === 'edge') toolStore.selectMode = 'edge'
     else if (val === 'vertex') toolStore.selectMode = 'vertex'
     else toolStore.selectMode = 'face'
+    if (toolStore.uvWorkspaceTab === 'paint') toolStore.setPaintTool('select')
   }
 })
 
@@ -115,11 +124,21 @@ const atlasMenuCells = computed(() => {
   }
   return cells
 })
-const pinnedUvKeys = ref<Set<string>>(new Set())
+const pinnedUvKeys = computed(() => new Set(activeMesh.value?.uvPinKeys ?? []))
 const hoveredIslandFaceIndices = ref<number[]>([])
 
 const zoom = ref<number>(5)
 const panOffset = ref<{ x: number; y: number }>({ x: 0, y: 0 })
+const onViewGesture = ref<(() => void) | null>(null)
+const viewNav = useCanvasLightwaveNav({
+  zoom,
+  panOffset,
+  viewSize: () => ({ w: containerRef.value?.clientWidth ?? 0, h: containerRef.value?.clientHeight ?? 0 }),
+  viewRect: () => containerRef.value?.getBoundingClientRect() ?? null,
+  minZoom: 0.005,
+  maxZoom: 64,
+  onGesture: () => onViewGesture.value?.()
+})
 const showPixelGrid = ref<boolean>(true)
 const snapToPixels = ref<boolean>(true)
 const showCheckerboard = ref<boolean>(false)
@@ -203,18 +222,18 @@ let hoveredFaceIndex: number | null = null
 
 const activeMesh = computed(() => projectStore.activeMesh)
 
-// Sync selected face from 3D viewport
-watch(() => projectStore.selectedFaceIds, (newVal) => {
+function faceIndicesForStoreSelection(): number[] {
+  const mesh = activeMesh.value
+  if (!mesh) return []
+  const ids = new Set(projectStore.selectedFaceIds)
+  return mesh.faces.flatMap((face, index) => ids.has(face.id) ? [index] : [])
+}
+
+// Sync selected faces from the 3D viewport. Highlight the island and leave the
+// 2D camera where it is. Frame (F) still zooms to the selection on purpose.
+watch(() => projectStore.selectedFaceIds.join('\0'), () => {
   if (!activeMesh.value) return
-  if (newVal.length > 0) {
-    const indices: number[] = []
-    activeMesh.value.faces.forEach((f, idx) => {
-      if (newVal.includes(f.id)) indices.push(idx)
-    })
-    selectedFaceIndices.value = indices
-  } else {
-    selectedFaceIndices.value = []
-  }
+  selectedFaceIndices.value = faceIndicesForStoreSelection()
   renderCanvas()
 }, { immediate: true })
 
@@ -277,25 +296,6 @@ function isPinned(faceIndex: number, vertIndex: number): boolean {
   return pinnedUvKeys.value.has(pinKey(faceIndex, vertIndex))
 }
 
-function commitUvEdgeSelection(edges: { faceIndex: number; edgeIndex: number }[], additive: boolean) {
-  if (!activeMesh.value) return
-  const expanded = expandWeldedUvEdges(activeMesh.value, edges)
-  if (additive) {
-    const merged = [...selectedUvEdges.value]
-    const seen = new Set(merged.map(e => `${e.faceIndex}:${e.edgeIndex}`))
-    for (const e of expanded) {
-      const key = `${e.faceIndex}:${e.edgeIndex}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      merged.push(e)
-    }
-    selectedUvEdges.value = merged
-  } else {
-    selectedUvEdges.value = expanded
-  }
-  syncEdgesTo3D()
-}
-
 function publishUvHover(faceIndex: number | null) {
   if (faceIndex === null || !activeMesh.value) {
     hoveredIslandFaceIndices.value = []
@@ -305,17 +305,6 @@ function publishUvHover(faceIndex: number | null) {
   const faces = expandFacesToIslands(activeMesh.value, [faceIndex])
   hoveredIslandFaceIndices.value = faces
   toolStore.setUvHoverFaceIds(faces.map(i => activeMesh.value!.faces[i]?.id).filter(Boolean))
-}
-
-function selectIslandFromFace(faceIndex: number, additive: boolean) {
-  if (!activeMesh.value) return
-  const island = expandFacesToIslands(activeMesh.value, [faceIndex])
-  if (additive) {
-    selectedFaceIndices.value = Array.from(new Set([...selectedFaceIndices.value, ...island]))
-  } else {
-    selectedFaceIndices.value = island
-  }
-  syncFacesTo3D()
 }
 
 // Compute Bounding Box of Active Selection (Supports unconstrained / negative UV space)
@@ -391,6 +380,16 @@ function snapSelectionPixels() {
 function relaxSelection() {
   if (!activeMesh.value) return
   commitCornerEdits('Relax UV interiors', relaxUvCorners(activeMesh.value, targetCorners.value, 20, c => isPinned(c.faceIndex, c.vertIndex)))
+}
+
+function straightenSelection() {
+  if (!activeMesh.value) return
+  commitCornerEdits('Straighten UVs', straightenUvCorners(activeMesh.value, targetCorners.value, c => isPinned(c.faceIndex, c.vertIndex)))
+}
+
+function mirrorUvSelection(axis: 'u' | 'v') {
+  if (!activeMesh.value) return
+  commitCornerEdits(axis === 'u' ? 'Mirror UVs U' : 'Mirror UVs V', mirrorUvCorners(activeMesh.value, targetCorners.value, axis, c => isPinned(c.faceIndex, c.vertIndex)))
 }
 function selectDiagnostic(faces: number[]) {
   uvSelectMode.value = 'face'
@@ -602,10 +601,14 @@ function renderCanvas() {
     })
   })
 
-  // 4. Draw Active Mesh UV Faces & Edges & Vertices
+  // 4. Draw Active Mesh UV Faces & Edges & Vertices.
+  // Selected faces draw last so a stacked twin cannot cover the face chosen in the 3D view.
   if (activeMesh.value) {
-    activeMesh.value.faces.forEach((face, fIdx) => {
-      if (face.uvs.length < 3) return
+    const uvFaces = activeMesh.value.faces
+      .map((face, fIdx) => ({ face, fIdx }))
+      .sort((a, b) => Number(selectedFaceIndices.value.includes(a.fIdx)) - Number(selectedFaceIndices.value.includes(b.fIdx)))
+    for (const { face, fIdx } of uvFaces) {
+      if (face.uvs.length < 3) continue
 
       const isFaceSelected = selectedFaceIndices.value.includes(fIdx)
       const isHovered = hoveredIslandFaceIndices.value.includes(fIdx)
@@ -625,9 +628,9 @@ function renderCanvas() {
         ctx.strokeStyle = isFaceSelected ? '#f59e0b' : '#38bdf8'
         ctx.lineWidth = isFaceSelected ? 2 : 1
       } else if (isFaceSelected) {
-        ctx.fillStyle = 'rgba(245, 158, 11, 0.12)'
-        ctx.strokeStyle = '#f59e0b'
-        ctx.lineWidth = 1.5
+        ctx.fillStyle = 'rgba(245, 158, 11, 0.34)'
+        ctx.strokeStyle = '#fbbf24'
+        ctx.lineWidth = 2.5
       } else if (isHovered) {
         ctx.fillStyle = 'rgba(254, 240, 138, 0.08)'
         ctx.strokeStyle = '#fbbf24'
@@ -705,7 +708,7 @@ function renderCanvas() {
         ctx.fill()
         ctx.stroke()
       })
-    })
+    }
 
     const seamSet = new Set(activeMesh.value.seamEdgeIds || [])
     if (seamSet.size > 0) {
@@ -869,26 +872,40 @@ function checkGizmoHit(screenX: number, screenY: number): any {
 
 function findClickedFace(u: number, v: number): number | null {
   if (!activeMesh.value) return null
+  let topmost: number | null = null
   for (let fIdx = activeMesh.value.faces.length - 1; fIdx >= 0; fIdx--) {
     const face = activeMesh.value.faces[fIdx]
     if (face.uvs.length < 3) continue
-    if (pointInPolygon(u, v, face.uvs)) return fIdx
+    if (!pointInPolygon(u, v, face.uvs)) continue
+    // Keep the face already chosen on the model when several islands share this point.
+    if (selectedFaceIndices.value.includes(fIdx)) return fIdx
+    if (topmost === null) topmost = fIdx
   }
-  return null
+  return topmost
+}
+
+function findClickedVertices(screenX: number, screenY: number): { faceIndex: number; vertIndex: number }[] {
+  if (!activeMesh.value) return []
+  let best: { faceIndex: number; vertIndex: number; dist: number; u: number; v: number } | null = null
+  const near: { faceIndex: number; vertIndex: number; u: number; v: number }[] = []
+  activeMesh.value.faces.forEach((face, faceIndex) => {
+    face.uvs.forEach((uv, vertIndex) => {
+      const pt = uvToScreen(uv.u, uv.v)
+      const dist = Math.hypot(screenX - pt.x, screenY - pt.y)
+      if (dist > 8) return
+      near.push({ faceIndex, vertIndex, u: uv.u, v: uv.v })
+      if (!best || dist < best.dist) best = { faceIndex, vertIndex, dist, u: uv.u, v: uv.v }
+    })
+  })
+  if (!best) return []
+  const picked = best as { u: number; v: number }
+  return near
+    .filter(hit => Math.abs(hit.u - picked.u) < 1e-4 && Math.abs(hit.v - picked.v) < 1e-4)
+    .map(({ faceIndex, vertIndex }) => ({ faceIndex, vertIndex }))
 }
 
 function findClickedVertex(screenX: number, screenY: number): { faceIndex: number; vertIndex: number } | null {
-  if (!activeMesh.value) return null
-  for (let fIdx = 0; fIdx < activeMesh.value.faces.length; fIdx++) {
-    const face = activeMesh.value.faces[fIdx]
-    for (let vIdx = 0; vIdx < face.uvs.length; vIdx++) {
-      const pt = uvToScreen(face.uvs[vIdx].u, face.uvs[vIdx].v)
-      if (Math.hypot(screenX - pt.x, screenY - pt.y) <= 8) {
-        return { faceIndex: fIdx, vertIndex: vIdx }
-      }
-    }
-  }
-  return null
+  return findClickedVertices(screenX, screenY)[0] ?? null
 }
 
 function findClickedEdge(screenX: number, screenY: number): { faceIndex: number; edgeIndex: number } | null {
@@ -928,7 +945,27 @@ function pointInPolygon(u: number, v: number, uvs: { u: number; v: number }[]): 
 // ----------------------------------------------------
 // POINTER & TOUCH GESTURE HANDLERS (Desktop, Laptop, Tablet, Stylus)
 // ----------------------------------------------------
+function pointerAdds(e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) {
+  return e.shiftKey || e.ctrlKey || e.metaKey
+}
+
+function cornerKey(corner: { faceIndex: number; vertIndex: number }) {
+  return `${corner.faceIndex}:${corner.vertIndex}`
+}
+
+function edgeKey(edge: { faceIndex: number; edgeIndex: number }) {
+  return `${edge.faceIndex}:${edge.edgeIndex}`
+}
+
+function selectFaces(faces: number[], additive: boolean) {
+  selectedFaceIndices.value = clickSelection(selectedFaceIndices.value, faces, additive, index => String(index))
+  selectedUvVerts.value = []
+  selectedUvEdges.value = []
+  syncFacesTo3D()
+}
+
 function onPointerDown(e: PointerEvent) {
+  if (viewNav.consumeCanvasPointer(e)) return
   (e.target as HTMLElement)?.setPointerCapture?.(e.pointerId)
   activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
 
@@ -944,6 +981,7 @@ function onPointerDown(e: PointerEvent) {
 
   // Middle-Click, Right-Click, Space/Alt+Click -> Pan
   if (e.button === 1 || e.button === 2 || e.altKey || spaceHeld) {
+    if (!uvViewReady.value) lockOpenFrame()
     isPanning.value = true
     panStart = { x: e.clientX - panOffset.value.x, y: e.clientY - panOffset.value.y }
     return
@@ -967,21 +1005,18 @@ function onPointerDown(e: PointerEvent) {
   dragStartMouse = { u: uv.u, v: uv.v, screenX: sx, screenY: sy }
   uvDragRecorded = false
 
-  // 1. Vertex Mode Selection
+  // 1. Vertex Mode Selection — every stacked corner at the click, Shift/Ctrl adds more
   if (uvSelectMode.value === 'vertex') {
-    const vert = findClickedVertex(sx, sy)
-    if (vert) {
-      if (e.shiftKey) {
-        const existIdx = selectedUvVerts.value.findIndex(v => v.faceIndex === vert.faceIndex && v.vertIndex === vert.vertIndex)
-        if (existIdx >= 0) selectedUvVerts.value.splice(existIdx, 1)
-        else selectedUvVerts.value.push(vert)
-      } else {
-        const isAlreadySelected = selectedUvVerts.value.some(v => v.faceIndex === vert.faceIndex && v.vertIndex === vert.vertIndex)
-        if (!isAlreadySelected) selectedUvVerts.value = [vert]
-      }
+    const verts = findClickedVertices(sx, sy)
+    if (verts.length > 0) {
+      selectedUvVerts.value = clickSelection(selectedUvVerts.value, verts, pointerAdds(e), cornerKey)
+      selectedUvEdges.value = []
+      selectedFaceIndices.value = []
       syncVerticesTo3D()
-      activeDrag = 'drag_vert'
-      recordDragStartUVs()
+      if (selectedUvVerts.value.length > 0) {
+        activeDrag = 'drag_vert'
+        recordDragStartUVs()
+      }
       renderCanvas()
       return
     }
@@ -990,19 +1025,13 @@ function onPointerDown(e: PointerEvent) {
   // 2. Edge Mode Selection
   if (uvSelectMode.value === 'edge') {
     const edge = findClickedEdge(sx, sy)
-    if (edge) {
-      if (e.shiftKey) {
-        const existIdx = selectedUvEdges.value.findIndex(se => se.faceIndex === edge.faceIndex && se.edgeIndex === edge.edgeIndex)
-        if (existIdx >= 0) {
-          selectedUvEdges.value.splice(existIdx, 1)
-          syncEdgesTo3D()
-        } else {
-          commitUvEdgeSelection([edge], true)
-        }
-      } else {
-        commitUvEdgeSelection([edge], false)
-      }
-      if (!e.shiftKey || selectedUvEdges.value.length > 0) {
+    if (edge && activeMesh.value) {
+      const edges = expandWeldedUvEdges(activeMesh.value, [edge])
+      selectedUvEdges.value = clickSelection(selectedUvEdges.value, edges, pointerAdds(e), edgeKey)
+      selectedUvVerts.value = []
+      selectedFaceIndices.value = []
+      syncEdgesTo3D()
+      if (selectedUvEdges.value.length > 0) {
         activeDrag = 'drag_edge'
         recordDragStartUVs()
       }
@@ -1011,14 +1040,17 @@ function onPointerDown(e: PointerEvent) {
     }
   }
 
-  // 3. Face / Island Gizmo Hit Check
+  // 3. Face / island. Handles always transform. Shift/Ctrl adds faces, including inside the selection box.
   if (uvSelectMode.value === 'face' || uvSelectMode.value === 'island') {
+    const additive = pointerAdds(e)
+    const clickedFace = findClickedFace(uv.u, uv.v)
     const hit = checkGizmoHit(sx, sy)
-    if (hit !== null) {
-      recordDragStartUVs()
-      const b = selectionBounds.value!
-      dragStartBounds = { ...b }
+    const handle = hit !== null && hit !== 'body'
 
+    if (handle && selectionBounds.value) {
+      recordDragStartUVs()
+      const b = selectionBounds.value
+      dragStartBounds = { ...b }
       if (hit === 'rotate') {
         activeDrag = 'rotate'
         const center = uvToScreen(b.cU, b.cV)
@@ -1029,37 +1061,42 @@ function onPointerDown(e: PointerEvent) {
       } else if (typeof hit === 'string' && hit.startsWith('edge-')) {
         activeDrag = 'scale_edge'
         activeEdgeHandle = hit.replace('edge-', '') as any
-      } else if (hit === 'body') {
+      }
+      return
+    }
+
+    // Clicking the face selected in the 3D view drags that island, even if another face shares its UVs.
+    if (!additive && hit === 'body' && selectedFaceIndices.value.length > 0 && selectionBounds.value) {
+      recordDragStartUVs()
+      dragStartBounds = { ...selectionBounds.value }
+      activeDrag = 'move'
+      return
+    }
+
+    if (clickedFace !== null) {
+      const faces = uvSelectMode.value === 'island' && activeMesh.value
+        ? expandFacesToIslands(activeMesh.value, [clickedFace])
+        : [clickedFace]
+      selectFaces(faces, additive)
+      if (selectedFaceIndices.value.length > 0) {
+        recordDragStartUVs()
+        const b = selectionBounds.value
+        if (b) dragStartBounds = { ...b }
         activeDrag = 'move'
       }
+      renderCanvas()
+      return
+    }
+
+    if (hit === 'body') {
+      recordDragStartUVs()
+      dragStartBounds = { ...selectionBounds.value! }
+      activeDrag = 'move'
       return
     }
   }
 
-  // 4. Face / island click
-  const clickedFace = findClickedFace(uv.u, uv.v)
-  if (clickedFace !== null && !e.ctrlKey && (uvSelectMode.value === 'face' || uvSelectMode.value === 'island')) {
-    if (uvSelectMode.value === 'island') {
-      selectIslandFromFace(clickedFace, e.shiftKey)
-    } else if (e.shiftKey) {
-      const idx = selectedFaceIndices.value.indexOf(clickedFace)
-      if (idx >= 0) selectedFaceIndices.value.splice(idx, 1)
-      else selectedFaceIndices.value.push(clickedFace)
-      syncFacesTo3D()
-    } else {
-      selectedFaceIndices.value = [clickedFace]
-      syncFacesTo3D()
-    }
-
-    recordDragStartUVs()
-    const b = selectionBounds.value
-    if (b) dragStartBounds = { ...b }
-    activeDrag = 'move'
-    renderCanvas()
-    return
-  }
-
-  // 5. Empty Canvas or Ctrl+LMB Drag -> Marquee Box Selection
+  // 4. Empty canvas drag -> marquee box selection
   if (e.button === 0) {
     isMarqueeSelecting.value = true
     marqueeStart.value = { x: sx, y: sy }
@@ -1335,7 +1372,7 @@ function onPointerMove(e: PointerEvent) {
   else if (activeDrag === 'rotate') {
     const b = dragStartBounds
     const center = uvToScreen(b.cU, b.cV)
-    const curAngle = Math.atan2(sy - center.y, sx - center.x)
+    let curAngle = Math.atan2(sy - center.y, sx - center.x)
     let deltaAngle = curAngle - dragStartAngle
 
     if (e.shiftKey) {
@@ -1383,27 +1420,20 @@ function onPointerUp(e: PointerEvent) {
     const isInsideBox = (x: number, y: number) => x >= minX && x <= maxX && y >= minY && y <= maxY
 
     if (maxX - minX > 4 && maxY - minY > 4 && activeMesh.value) {
-      // UV VERTEX MODE
+      const additive = pointerAdds(e)
       if (uvSelectMode.value === 'vertex') {
         const newVerts: { faceIndex: number; vertIndex: number }[] = []
         activeMesh.value.faces.forEach((face, fIdx) => {
           face.uvs.forEach((uvCoord, vIdx) => {
             const pt = uvToScreen(uvCoord.u, uvCoord.v)
-            if (isInsideBox(pt.x, pt.y)) {
-              newVerts.push({ faceIndex: fIdx, vertIndex: vIdx })
-            }
+            if (isInsideBox(pt.x, pt.y)) newVerts.push({ faceIndex: fIdx, vertIndex: vIdx })
           })
         })
-        if (e.shiftKey) {
-          selectedUvVerts.value = [...selectedUvVerts.value, ...newVerts]
-        } else {
-          selectedUvVerts.value = newVerts
-        }
+        selectedUvVerts.value = extendSelection(selectedUvVerts.value, newVerts, additive, cornerKey)
+        selectedUvEdges.value = []
+        selectedFaceIndices.value = []
         syncVerticesTo3D()
-      }
-
-      // UV EDGE MODE
-      else if (uvSelectMode.value === 'edge') {
+      } else if (uvSelectMode.value === 'edge') {
         const newEdges: { faceIndex: number; edgeIndex: number }[] = []
         activeMesh.value.faces.forEach((face, fIdx) => {
           for (let eIdx = 0; eIdx < face.uvs.length; eIdx++) {
@@ -1415,37 +1445,29 @@ function onPointerUp(e: PointerEvent) {
             }
           }
         })
-        commitUvEdgeSelection(newEdges, e.shiftKey)
-      }
-
-      // UV FACE / ISLAND MODE
-      else {
+        const expanded = expandWeldedUvEdges(activeMesh.value, newEdges)
+        selectedUvEdges.value = extendSelection(selectedUvEdges.value, expanded, additive, edgeKey)
+        selectedUvVerts.value = []
+        selectedFaceIndices.value = []
+        syncEdgesTo3D()
+      } else {
         const newFaces: number[] = []
         activeMesh.value.faces.forEach((face, fIdx) => {
-          let anyIn = false
-          for (const uvCoord of face.uvs) {
+          const anyIn = face.uvs.some(uvCoord => {
             const pt = uvToScreen(uvCoord.u, uvCoord.v)
-            if (isInsideBox(pt.x, pt.y)) {
-              anyIn = true
-              break
-            }
-          }
-          if (anyIn) {
-            newFaces.push(fIdx)
-          }
+            return isInsideBox(pt.x, pt.y)
+          })
+          if (anyIn) newFaces.push(fIdx)
         })
-        let faces = newFaces
-        if (uvSelectMode.value === 'island' && activeMesh.value) {
-          faces = expandFacesToIslands(activeMesh.value, newFaces)
-        }
-        if (e.shiftKey) {
-          selectedFaceIndices.value = Array.from(new Set([...selectedFaceIndices.value, ...faces]))
-        } else {
-          selectedFaceIndices.value = faces
-        }
+        const faces = uvSelectMode.value === 'island'
+          ? expandFacesToIslands(activeMesh.value, newFaces)
+          : newFaces
+        selectedFaceIndices.value = extendSelection(selectedFaceIndices.value, faces, additive, index => String(index))
+        selectedUvVerts.value = []
+        selectedUvEdges.value = []
         syncFacesTo3D()
       }
-    } else if (!e.shiftKey) {
+    } else if (!pointerAdds(e)) {
       selectedFaceIndices.value = []
       selectedUvVerts.value = []
       selectedUvEdges.value = []
@@ -1467,65 +1489,46 @@ function onPointerUp(e: PointerEvent) {
 
 function onWheel(e: WheelEvent) {
   e.preventDefault()
+  if (!uvViewReady.value) lockOpenFrame()
 
-  // Trackpad 2-finger scroll / Shift+wheel horizontal pan
-  if (e.shiftKey) {
-    panOffset.value.x -= e.deltaY * 0.8
-    renderCanvas()
-    return
+  const sample = {
+    deltaX: e.deltaX,
+    deltaY: e.deltaY,
+    deltaMode: e.deltaMode,
+    ctrlKey: e.ctrlKey,
+    shiftKey: e.shiftKey
   }
-
-  // Laptop Trackpad 2-finger pan (deltaX + deltaY with no ctrlKey pinch)
-  if (Math.abs(e.deltaX) > 0 && !e.ctrlKey) {
-    panOffset.value.x -= e.deltaX
-    panOffset.value.y -= e.deltaY
-    renderCanvas()
+  if (classifyWheel(sample) === 'pan') {
+    const delta = wheelPanDelta(sample)
+    panOffset.value = {
+      x: panOffset.value.x - delta.x,
+      y: panOffset.value.y - delta.y
+    }
+    scheduleRender()
     return
   }
 
   const rect = canvasRef.value?.getBoundingClientRect()
   const mouseX = rect ? e.clientX - rect.left : panOffset.value.x
   const mouseY = rect ? e.clientY - rect.top : panOffset.value.y
-
-  const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85
-  const oldZoom = zoom.value
-  let newZoom = oldZoom * zoomFactor
-  if (newZoom < 1) {
-    newZoom = Math.max(0.005, Math.round(newZoom * 1000) / 1000)
-  } else {
-    newZoom = Math.min(64, Math.round(newZoom * 10) / 10)
+  const factor = wheelZoomFactor(e.deltaY, e.deltaMode, toolStore.viewport.invertZoom, CANVAS_WHEEL_ZOOM_GAIN)
+  const next = Math.max(0.005, Math.min(64, zoom.value * factor))
+  if (next === zoom.value) return
+  const ratio = next / zoom.value
+  panOffset.value = {
+    x: mouseX - (mouseX - panOffset.value.x) * ratio,
+    y: mouseY - (mouseY - panOffset.value.y) * ratio
   }
-
-  if (newZoom !== oldZoom) {
-    panOffset.value.x = mouseX - (mouseX - panOffset.value.x) * (newZoom / oldZoom)
-    panOffset.value.y = mouseY - (mouseY - panOffset.value.y) * (newZoom / oldZoom)
-    zoom.value = newZoom
-  }
-  renderCanvas()
+  zoom.value = next
+  scheduleRender()
 }
 
 function zoomOut() {
-  const oldZoom = zoom.value
-  let newZoom = oldZoom * 0.8
-  if (newZoom < 1) {
-    newZoom = Math.max(0.005, Math.round(newZoom * 1000) / 1000)
-  } else {
-    newZoom = Math.max(0.005, Math.round(newZoom * 10) / 10)
-  }
-  zoom.value = newZoom
-  scheduleRender()
+  viewNav.nudgeZoom(1 / CANVAS_BUTTON_ZOOM)
 }
 
 function zoomIn() {
-  const oldZoom = zoom.value
-  let newZoom = oldZoom * 1.25
-  if (newZoom < 1) {
-    newZoom = Math.round(newZoom * 1000) / 1000
-  } else {
-    newZoom = Math.min(64, Math.round(newZoom * 10) / 10)
-  }
-  zoom.value = newZoom
-  scheduleRender()
+  viewNav.nudgeZoom(CANVAS_BUTTON_ZOOM)
 }
 
 function resetPanZoom() {
@@ -1558,7 +1561,8 @@ function resetPanZoom() {
 // ----------------------------------------------------
 function syncFacesTo3D() {
   if (!activeMesh.value) return
-  projectStore.selectedFaceIds = selectedFaceIndices.value.map(idx => activeMesh.value!.faces[idx]?.id).filter(Boolean)
+  const ids = selectedFaceIndices.value.map(idx => activeMesh.value!.faces[idx]?.id).filter(Boolean)
+  projectStore.selectedFaceIds = ids
 }
 
 function syncVerticesTo3D() {
@@ -1782,26 +1786,24 @@ function applyBulkTransform(fn: (u: number, v: number) => { u: number; v: number
 // ----------------------------------------------------
 function handleSeamUnwrap() {
   if (!activeMesh.value) return
-  const selected = getTargetFaces()
-  projectStore.performSeamUnwrap(selected.length > 0 ? selected : undefined)
+  projectStore.performSeamUnwrap(unwrapSelection())
   nextTick(frameSelection)
 }
 
 function handleSmartUvProject() {
   if (!activeMesh.value) return
-  const selected = getTargetFaces()
   projectStore.performSmartUvProject({
     angleLimitDegrees: smartUvAngle.value,
     marginPixels: smartUvMargin.value,
     textureSize: displayPixels().width,
-    onlyFaceIndices: selected.length > 0 ? selected : undefined
+    textureHeight: displayPixels().height,
+    onlyFaceIndices: unwrapSelection()
   })
   nextTick(frameSelection)
 }
 
-function unwrapSelection(): number[] | undefined {
-  const selected = getTargetFaces()
-  return selected.length > 0 ? selected : undefined
+function unwrapSelection(): number[] {
+  return getTargetFaces()
 }
 
 function handleBoxUnwrap() {
@@ -1840,6 +1842,12 @@ function handleCubemapCross() {
   nextTick(frameSelection)
 }
 
+function handleProjectFromView() {
+  if (!activeMesh.value) return
+  requestProjectFromView(unwrapSelection())
+  nextTick(frameSelection)
+}
+
 function handlePackIslands(marginPx = 2) {
   if (!activeMesh.value) return
   const selected = getTargetFaces()
@@ -1875,12 +1883,12 @@ function togglePinSelected() {
     if (allPinned) next.delete(key)
     else next.add(key)
   }
-  pinnedUvKeys.value = next
+  projectStore.setUvPins([...next], allPinned ? 'Unpin UVs' : 'Pin UVs')
   scheduleRender()
 }
 
 function clearUvPins() {
-  pinnedUvKeys.value = new Set()
+  projectStore.setUvPins([], 'Clear UV Pins')
   scheduleRender()
 }
 
@@ -1928,13 +1936,13 @@ function weldSelectedUVs() {
   scheduleRender()
 }
 
-function frameSelection() {
+function frameSelection(scope: 'selection' | 'all' = 'selection') {
   const mesh = activeMesh.value
   const canvas = canvasRef.value
   const container = containerRef.value
   if (!mesh || !canvas || !container) return
 
-  const faces = getTargetFaces()
+  const faces = scope === 'all' ? [] : getTargetFaces()
   const indices = faces.length > 0 ? faces : mesh.faces.map((_, i) => i)
   let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity
   for (const fIdx of indices) {
@@ -2022,14 +2030,14 @@ watch(() => {
 }, () => nextTick(scheduleRender))
 watch(() => projectStore.geometryRevision, syncUvFromDocument, { flush: 'sync' })
 watch(zoom, scheduleRender)
+watch(panOffset, scheduleRender)
 watch(showPixelGrid, scheduleRender)
 watch(() => projectStore.activeMeshId, () => {
   publishedUvVertexIds = null
-  selectedFaceIndices.value = []
   selectedUvVerts.value = []
   selectedUvEdges.value = []
-  pinnedUvKeys.value = new Set()
   publishUvHover(null)
+  selectedFaceIndices.value = faceIndicesForStoreSelection()
   nextTick(() => {
     scheduleRender()
   })
@@ -2055,23 +2063,38 @@ watch(() => targetCorners.value.length, (count) => {
 
 let resizeObserver: ResizeObserver | null = null
 const uvViewReady = ref(false)
+/** Layout may refit the whole map. A face selection must not become that fit. */
+let autoFitIgnoresSelection = false
+
+function lockOpenFrame() {
+  uvViewSession.fitted = true
+  uvViewSession.zoom = zoom.value
+  uvViewSession.panX = panOffset.value.x
+  uvViewSession.panY = panOffset.value.y
+  uvViewReady.value = true
+}
+onViewGesture.value = () => {
+  if (!uvViewReady.value) lockOpenFrame()
+  scheduleRender()
+}
 
 function restoreOrFitImage() {
-  if (uvViewReady.value) return
   const el = containerRef.value
   if (!el || el.clientWidth < 8 || el.clientHeight < 8) return
   if (uvViewSession.fitted) {
+    if (uvViewReady.value) return
     zoom.value = uvViewSession.zoom
     panOffset.value = { x: uvViewSession.panX, y: uvViewSession.panY }
-  } else {
-    resetPanZoom()
-    uvViewSession.fitted = true
-    uvViewSession.zoom = zoom.value
-    uvViewSession.panX = panOffset.value.x
-    uvViewSession.panY = panOffset.value.y
+    uvViewReady.value = true
+    scheduleRender()
+    return
   }
-  uvViewReady.value = true
-  scheduleRender()
+  // Keep matching the whole map while the split pane finishes laying out.
+  // Once that fit has happened, a selected face (and the inspector it opens)
+  // must not pull the 2D camera in.
+  if (autoFitIgnoresSelection && getTargetFaces().length > 0) return
+  frameSelection('all')
+  autoFitIgnoresSelection = true
 }
 
 function onUvKeyDown(e: KeyboardEvent) {
@@ -2090,6 +2113,10 @@ function onUvKeyDown(e: KeyboardEvent) {
     }
     if (e.key.toLowerCase() === 'l') { e.preventDefault(); selectLinked(); return }
     if (e.key === 'Home') { e.preventDefault(); resetPanZoom(); return }
+  }
+  if (e.key === 'Escape' && viewNav.clearArmed()) {
+    e.preventDefault()
+    return
   }
   if (e.key === 'Escape' && activeDropdown.value) {
     e.preventDefault()
@@ -2164,10 +2191,13 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  if (uvViewReady.value) {
+  if (toolStore.appMode === 'uvpaint') {
+    uvViewSession.fitted = true
     uvViewSession.zoom = zoom.value
     uvViewSession.panX = panOffset.value.x
     uvViewSession.panY = panOffset.value.y
+  } else {
+    uvViewSession.fitted = false
   }
   window.removeEventListener('click', closeDropdowns)
   window.removeEventListener('keydown', onUvKeyDown)
@@ -2216,7 +2246,7 @@ defineExpose({
 
 <template>
   <div class="uv-editor h-full w-full bg-ui-panel flex flex-col select-none overflow-hidden relative font-mono text-xs touch-none">
-    <input ref="fileInputRef" type="file" accept="image/*" class="hidden" @change="handleImageImport">
+    <input ref="fileInputRef" type="file" accept="image/*" @change="handleImageImport" class="hidden" />
 
     <div class="uv-header-row bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center gap-2 shrink-0 z-30 select-none">
       <div class="asset-pipeline flex items-center gap-1.5 min-w-0">
@@ -2240,9 +2270,9 @@ defineExpose({
           <span class="text-ui-textMuted font-bold text-[8.5px]">TEX:</span>
           <select 
             :value="projectStore.activeTextureId" 
+            @change="handleTextureBindingChange(($event.target as HTMLSelectElement).value)"
             class="bg-transparent text-ui-textPrimary font-bold font-mono focus:outline-none cursor-pointer max-w-[125px] truncate"
             title="Paint target — the image this UV editor shows"
-            @change="handleTextureBindingChange(($event.target as HTMLSelectElement).value)"
           >
             <option v-for="t in projectStore.textures" :key="t.id" :value="t.id" class="bg-ui-panel text-ui-textPrimary">
               {{ t.name }} ({{ t.width }}x{{ t.height }})
@@ -2257,49 +2287,50 @@ defineExpose({
             Apply
           </button>
           <button 
+            @click="showNewTextureModal = true"
             class="p-0.5 hover:bg-ui-hover text-ui-textMuted rounded-xs transition cursor-pointer"
             title="New image — pick any size"
-            @click="showNewTextureModal = true"
           >
             <BlenderIcon name="plus" :size="12" />
           </button>
         </div>
+
       </div>
-      <div class="uv-header-divider" aria-hidden="true" />
+      <div class="uv-header-divider" aria-hidden="true"></div>
       <div class="uv-workflow-bar uv-header-actions" aria-label="UV selection and quick actions">
         <button :disabled="!activeMesh" @click="handleSmartUvProject">Unwrap</button>
         <button :disabled="!activeMesh" @click="handlePackIslands(smartUvMargin)">Pack</button>
-        <button class="uv-panel-toggle" :aria-pressed="showPrecision" title="Toggle UV inspector" @click="toggleInspect">Inspect {{ showPrecision ? '−' : '+' }}</button>
+        <button class="uv-panel-toggle" :aria-pressed="showPrecision" @click="toggleInspect" title="Toggle UV inspector">Inspect {{ showPrecision ? '−' : '+' }}</button>
         <button :disabled="!projectStore.activeTexture" title="Browse, edit, and stamp atlas tiles" @click="projectStore.activeTexture && openTileset(projectStore.activeTexture.id)">Tileset</button>
       </div>
     </div>
     <Teleport defer to="#uv-paint-command-slot">
-      <div class="uv-command-strip flex items-center gap-1">
+      <div v-if="toolStore.uvWorkspaceTab === 'uv'" class="uv-command-strip flex items-center gap-1">
         <!-- Texture Menu Dropdown -->
         <div class="relative" @click.stop>
           <button 
+            @click="toggleDropdown('texture')"
             class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0"
             :class="activeDropdown === 'texture' ? 'bg-ui-hover text-ui-textPrimary' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-            @click="toggleDropdown('texture')"
           >
             <span>Texture</span>
             <span class="text-[8px] opacity-70">▼</span>
           </button>
 
           <div v-if="activeDropdown === 'texture'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-56 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="fileInputRef?.click(); closeDropdowns()">
+            <button @click="fileInputRef?.click(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Import Image...</span>
               <BlenderIcon name="import" :size="12" />
             </button>
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="exportTexturePng(); closeDropdowns()">
+            <button @click="exportTexturePng(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Export Texture PNG</span>
               <BlenderIcon name="export" :size="12" />
             </button>
-            <div class="h-px bg-ui-borderSubtle my-1" />
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="showNewTextureModal = true; closeDropdowns()">
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="showNewTextureModal = true; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>New Image...</span>
             </button>
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="projectStore.bakeSceneAtlas(2); closeDropdowns()">
+            <button @click="projectStore.bakeSceneAtlas(2); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Bake Scene Atlas</span>
             </button>
           </div>
@@ -2309,25 +2340,23 @@ defineExpose({
         <div class="relative" @click.stop>
           <div class="inspector-seg">
             <button
+              @click="handleSmartUvProject"
               class="inspector-seg-btn"
               title="Automatically cut, project, and pack the selected faces or whole mesh (U)"
-              @click="handleSmartUvProject"
             >
               <BlenderIcon name="uv-smart" :size="12" />
               <span>Smart UV</span>
             </button>
             <button
+              @click="toggleDropdown('uv')"
               class="inspector-seg-btn"
               :class="{ 'is-active': activeDropdown === 'uv' }"
               title="UV projection options"
-              @click="toggleDropdown('uv')"
-            >
-              ▼
-            </button>
+            >▼</button>
           </div>
 
           <div v-if="activeDropdown === 'uv'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-64 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
-            <button class="w-full text-left px-3 py-2 hover:bg-ui-hover flex items-center justify-between font-semibold" @click="handleSmartUvProject(); closeDropdowns()">
+            <button @click="handleSmartUvProject(); closeDropdowns()" class="w-full text-left px-3 py-2 hover:bg-ui-hover flex items-center justify-between font-semibold">
               <span class="flex items-center gap-2"><BlenderIcon name="uv-smart" :size="14" /> Smart UV Project</span>
               <span class="text-[10px] text-ui-textMuted font-mono font-normal">U</span>
             </button>
@@ -2335,52 +2364,56 @@ defineExpose({
               <label class="flex items-center justify-between gap-3 text-[10px] text-ui-textSecondary">
                 <span title="Lower values create more islands; higher values keep more faces together">Cut angle</span>
                 <span class="flex items-center gap-1">
-                  <input v-model.number="smartUvAngle" type="range" min="15" max="120" step="1" class="w-24 inspector-range">
-                  <input v-model.number="smartUvAngle" type="number" min="1" max="179" step="1" class="w-11 h-5 bg-ui-panel border border-ui-borderDefault rounded-xs px-1 text-right font-mono">
+                  <input v-model.number="smartUvAngle" type="range" min="15" max="120" step="1" class="w-24 inspector-range" />
+                  <input v-model.number="smartUvAngle" type="number" min="1" max="179" step="1" class="w-11 h-5 bg-ui-panel border border-ui-borderDefault rounded-xs px-1 text-right font-mono" />
                   <span>°</span>
                 </span>
               </label>
               <label class="flex items-center justify-between gap-3 text-[10px] text-ui-textSecondary">
                 <span>Island margin</span>
                 <span class="flex items-center gap-1">
-                  <input v-model.number="smartUvMargin" type="number" min="0" max="32" step="1" class="w-11 h-5 bg-ui-panel border border-ui-borderDefault rounded-xs px-1 text-right font-mono">
+                  <input v-model.number="smartUvMargin" type="number" min="0" max="32" step="1" class="w-11 h-5 bg-ui-panel border border-ui-borderDefault rounded-xs px-1 text-right font-mono" />
                   <span>px</span>
                 </span>
               </label>
-              <p class="text-[9px] leading-tight text-ui-textMuted">Works on the selection, or the whole mesh when nothing is selected.</p>
+              <p class="text-[9px] leading-tight text-ui-textMuted">Shift or Ctrl adds faces, vertices, or edges. Drag a box to select many. Projections use every selected face, or the whole mesh when nothing is selected.</p>
             </div>
-            <div class="h-px bg-ui-borderSubtle my-1" />
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="handleSeamUnwrap(); closeDropdowns()">
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="handleSeamUnwrap(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span class="flex items-center gap-2"><BlenderIcon name="edge-select" :size="13" /> Unwrap Using Marked Seams</span>
               <span class="text-[9px] text-ui-textMuted">manual</span>
             </button>
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="handleBoxUnwrap(); closeDropdowns()">
+            <button @click="handleBoxUnwrap(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span class="flex items-center gap-2"><BlenderIcon name="mesh-cube" :size="13" /> Box Projection</span>
               <span class="text-[9px] text-ui-textMuted">sel or all</span>
             </button>
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="handleCubemapCross(); closeDropdowns()">
+            <button @click="handleCubemapCross(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span class="flex items-center gap-2"><BlenderIcon name="mesh-cube" :size="13" /> Cubemap Cross (Blockbench)</span>
             </button>
-            <div class="h-px bg-ui-borderSubtle my-1" />
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2" @click="handleCylinderUnwrap(); closeDropdowns()">
+            <button @click="handleProjectFromView(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" title="Project the faces as the 3D viewport camera sees them">
+              <span>Project From View</span>
+              <span class="text-[9px] text-ui-textMuted">3D camera</span>
+            </button>
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="handleCylinderUnwrap(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
               <BlenderIcon name="mesh-cylinder" :size="13" />
               <span>Cylinder (Tube + Caps)</span>
             </button>
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2" @click="handleSphereUnwrap(); closeDropdowns()">
+            <button @click="handleSphereUnwrap(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
               <BlenderIcon name="mesh-sphere" :size="13" />
               <span>Sphere (Equirectangular)</span>
             </button>
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2" @click="handleConeUnwrap(); closeDropdowns()">
+            <button @click="handleConeUnwrap(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center gap-2">
               <BlenderIcon name="mesh-cone" :size="13" />
               <span>Cone / Pyramid (Radial Fan)</span>
             </button>
-            <div class="h-px bg-ui-borderSubtle my-1" />
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
             <div class="px-3 py-0.5 text-[9px] font-bold text-ui-textMuted uppercase">Planar Projections</div>
-            <button class="w-full text-left px-3 py-1 hover:bg-ui-hover text-xs" @click="handlePlanarUnwrap('z'); closeDropdowns()">Planar Z-Axis (Front)</button>
-            <button class="w-full text-left px-3 py-1 hover:bg-ui-hover text-xs" @click="handlePlanarUnwrap('x'); closeDropdowns()">Planar X-Axis (Side)</button>
-            <button class="w-full text-left px-3 py-1 hover:bg-ui-hover text-xs" @click="handlePlanarUnwrap('y'); closeDropdowns()">Planar Y-Axis (Top)</button>
-            <div class="h-px bg-ui-borderSubtle my-1" />
-            <button class="w-full text-left px-3 py-1.5 hover:bg-rose-950/60 hover:text-rose-300 text-rose-400" @click="snapToFull(); closeDropdowns()">
+            <button @click="handlePlanarUnwrap('z'); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover text-xs">Planar Z-Axis (Front)</button>
+            <button @click="handlePlanarUnwrap('x'); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover text-xs">Planar X-Axis (Side)</button>
+            <button @click="handlePlanarUnwrap('y'); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover text-xs">Planar Y-Axis (Top)</button>
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="snapToFull(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-rose-950/60 hover:text-rose-300 text-rose-400">
               Reset UVs (0..1 Full)
             </button>
           </div>
@@ -2389,61 +2422,67 @@ defineExpose({
         <!-- Islands Menu Dropdown -->
         <div class="relative" @click.stop>
           <button 
+            @click="toggleDropdown('islands')"
             class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0"
             :class="activeDropdown === 'islands' ? 'bg-ui-hover text-ui-textPrimary' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-            @click="toggleDropdown('islands')"
           >
             <span>Islands</span>
             <span class="text-[8px] opacity-70">▼</span>
           </button>
 
           <div v-if="activeDropdown === 'islands'" class="header-dropdown-menu absolute left-0 top-full mt-1 w-60 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="handlePackIslands(2); closeDropdowns()">
+            <button @click="handlePackIslands(2); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span class="flex items-center gap-2"><BlenderIcon name="pack-islands" :size="13" /> Auto-Pack Islands (2px Margin)</span>
             </button>
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="handlePackIslands(0); closeDropdowns()">
+            <button @click="handlePackIslands(0); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Auto-Pack Islands (0px Tight)</span>
             </button>
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="handlePackIslands(4); closeDropdowns()">
+            <button @click="handlePackIslands(4); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Auto-Pack Islands (4px Margin)</span>
             </button>
-            <div class="h-px bg-ui-borderSubtle my-1" />
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="projectStore.bakeSceneAtlas(2); closeDropdowns()">
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="projectStore.bakeSceneAtlas(2); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
               <span>Bake Scene Atlas (All Meshes)</span>
             </button>
-            <div class="h-px bg-ui-borderSubtle my-1" />
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="handleGridify(); closeDropdowns()">
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="handleGridify(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
               <span>Gridify Quad Loops</span>
             </button>
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" @click="handleEqualizeTexels(); closeDropdowns()">
+            <button @click="handleEqualizeTexels(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">
               <span>Equalize Texel Density</span>
             </button>
-            <div class="h-px bg-ui-borderSubtle my-1" />
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="projectStore.markSelectedEdgesAsSeam(); closeDropdowns()">
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="projectStore.performSeamsFromIslands(unwrapSelection()); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover" title="Mark every UV island border as a seam">
+              <span>Seams from Islands</span>
+            </button>
+            <button @click="projectStore.markSelectedEdgesAsSeam(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Mark Seams (edges or island border)</span>
               <span class="text-[10px] text-ui-textMuted font-mono">Ctrl+Shift+E</span>
             </button>
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="projectStore.clearSelectedEdgesSeam(); closeDropdowns()">
+            <button @click="projectStore.clearSelectedEdgesSeam(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Clear Seams (edges or island border)</span>
               <span class="text-[10px] text-ui-textMuted font-mono">Ctrl+Alt+E</span>
             </button>
-            <div class="h-px bg-ui-borderSubtle my-1" />
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="stitchSelectedEdges(); closeDropdowns()">
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="stitchSelectedEdges(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Stitch Selected Edge</span>
               <span class="text-[10px] text-ui-textMuted font-mono">V</span>
             </button>
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="weldSelectedUVs(); closeDropdowns()">
+            <button @click="straightenSelection(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Straighten Selection</button>
+            <button @click="mirrorUvSelection('u'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Mirror UVs Across U</button>
+            <button @click="mirrorUvSelection('v'); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover">Mirror UVs Across V</button>
+            <button @click="weldSelectedUVs(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Weld UVs (same 3D verts)</span>
             </button>
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="togglePinSelected(); closeDropdowns()">
+            <button @click="togglePinSelected(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Pin / Unpin Selected</span>
               <span class="text-[10px] text-ui-textMuted font-mono">P</span>
             </button>
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="clearUvPins(); closeDropdowns()">
+            <button @click="clearUvPins(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Clear Pins</span>
               <span class="text-[10px] text-ui-textMuted font-mono">Alt+P</span>
             </button>
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="frameSelection(); closeDropdowns()">
+            <button @click="frameSelection(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Frame Selection</span>
               <span class="text-[10px] text-ui-textMuted font-mono">F</span>
             </button>
@@ -2453,9 +2492,9 @@ defineExpose({
         <!-- Align & Snap Menu Dropdown -->
         <div class="relative" @click.stop>
           <button 
+            @click="toggleDropdown('align')"
             class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0"
             :class="activeDropdown === 'align' ? 'bg-ui-hover text-ui-textPrimary' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-            @click="toggleDropdown('align')"
           >
             <span class="whitespace-nowrap">Align & Snap</span>
             <span class="text-[8px] opacity-70">▼</span>
@@ -2464,16 +2503,16 @@ defineExpose({
           <div v-if="activeDropdown === 'align'" class="header-dropdown-menu absolute right-0 top-full mt-1 w-56 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
             <div class="px-3 py-0.5 text-[9px] font-bold text-ui-textMuted uppercase">Align Island / Vertices</div>
             <div class="grid grid-cols-2 gap-1 px-2 py-1">
-              <button class="px-2 py-1 bg-ui-input hover:bg-ui-hover text-center rounded-xs text-[11px]" @click="alignSelection('left'); closeDropdowns()">Left</button>
-              <button class="px-2 py-1 bg-ui-input hover:bg-ui-hover text-center rounded-xs text-[11px]" @click="alignSelection('right'); closeDropdowns()">Right</button>
-              <button class="px-2 py-1 bg-ui-input hover:bg-ui-hover text-center rounded-xs text-[11px]" @click="alignSelection('top'); closeDropdowns()">Top</button>
-              <button class="px-2 py-1 bg-ui-input hover:bg-ui-hover text-center rounded-xs text-[11px]" @click="alignSelection('bottom'); closeDropdowns()">Bottom</button>
-              <button class="px-2 py-1 bg-ui-input hover:bg-ui-hover text-center rounded-xs text-[11px]" @click="alignSelection('center_h'); closeDropdowns()">Center H</button>
-              <button class="px-2 py-1 bg-ui-input hover:bg-ui-hover text-center rounded-xs text-[11px]" @click="alignSelection('center_v'); closeDropdowns()">Center V</button>
+              <button @click="alignSelection('left'); closeDropdowns()" class="px-2 py-1 bg-ui-input hover:bg-ui-hover text-center rounded-xs text-[11px]">Left</button>
+              <button @click="alignSelection('right'); closeDropdowns()" class="px-2 py-1 bg-ui-input hover:bg-ui-hover text-center rounded-xs text-[11px]">Right</button>
+              <button @click="alignSelection('top'); closeDropdowns()" class="px-2 py-1 bg-ui-input hover:bg-ui-hover text-center rounded-xs text-[11px]">Top</button>
+              <button @click="alignSelection('bottom'); closeDropdowns()" class="px-2 py-1 bg-ui-input hover:bg-ui-hover text-center rounded-xs text-[11px]">Bottom</button>
+              <button @click="alignSelection('center_h'); closeDropdowns()" class="px-2 py-1 bg-ui-input hover:bg-ui-hover text-center rounded-xs text-[11px]">Center H</button>
+              <button @click="alignSelection('center_v'); closeDropdowns()" class="px-2 py-1 bg-ui-input hover:bg-ui-hover text-center rounded-xs text-[11px]">Center V</button>
             </div>
-            <div class="h-px bg-ui-borderSubtle my-1" />
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
             <div class="px-3 py-0.5 text-[9px] font-bold text-ui-textMuted uppercase">Atlas cells</div>
-            <button class="w-full text-left px-3 py-1 hover:bg-ui-hover" @click="snapToFull(); closeDropdowns()">Fit to Full (0..1)</button>
+            <button @click="snapToFull(); closeDropdowns()" class="w-full text-left px-3 py-1 hover:bg-ui-hover">Fit to Full (0..1)</button>
             <div class="grid gap-0.5 px-2 py-1" :style="{ gridTemplateColumns: `repeat(${paintAtlas?.cols || 2}, minmax(0, 1fr))` }">
               <button
                 v-for="cell in atlasMenuCells"
@@ -2491,9 +2530,9 @@ defineExpose({
         <!-- Texel Density Menu Dropdown -->
         <div class="relative" @click.stop>
           <button 
+            @click="toggleDropdown('texel')"
             class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0"
             :class="activeDropdown === 'texel' ? 'bg-ui-hover text-ui-textPrimary' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-            @click="toggleDropdown('texel')"
           >
             <span class="whitespace-nowrap">Texel</span>
             <span class="text-[8px] opacity-70">▼</span>
@@ -2508,16 +2547,16 @@ defineExpose({
             <div class="flex items-center gap-1.5">
               <label class="text-[10px] text-ui-textMuted font-mono">Target:</label>
               <input 
-                v-model.number="targetTexelDensity" 
                 type="number" 
                 min="1" 
                 max="256" 
+                v-model.number="targetTexelDensity" 
                 class="flex-1 bg-ui-input border border-ui-borderSubtle rounded-xs px-2 py-0.5 text-xs font-mono text-ui-textPrimary focus:outline-none focus:border-ui-accent"
-              >
+              />
               <button 
+                @click="handleSampleTexelDensity"
                 class="px-2 py-0.5 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle rounded-xs text-[10px] font-mono text-ui-textSecondary hover:text-white"
                 title="Sample density from active face"
-                @click="handleSampleTexelDensity"
               >
                 Sample
               </button>
@@ -2525,14 +2564,14 @@ defineExpose({
 
             <div class="grid grid-cols-2 gap-1 pt-1 border-t border-ui-borderSubtle/60">
               <button 
-                class="px-2 py-1 bg-ui-accent hover:bg-ui-accentHover text-[color:var(--ui-on-accent)] font-semibold rounded-xs text-[10px] transition text-center" 
-                @click="handleApplyTexelDensity(); closeDropdowns()"
+                @click="handleApplyTexelDensity(); closeDropdowns()" 
+                class="px-2 py-1 bg-ui-accent hover:bg-ui-accentHover text-[color:var(--ui-on-accent)] font-semibold rounded-xs text-[10px] transition text-center"
               >
                 Apply Density
               </button>
               <button 
-                class="px-2 py-1 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textPrimary rounded-xs text-[10px] transition text-center" 
-                @click="handleEqualizeTexelDensity(); closeDropdowns()"
+                @click="handleEqualizeTexelDensity(); closeDropdowns()" 
+                class="px-2 py-1 bg-ui-input hover:bg-ui-hover border border-ui-borderSubtle text-ui-textPrimary rounded-xs text-[10px] transition text-center"
               >
                 Equalize All
               </button>
@@ -2543,43 +2582,44 @@ defineExpose({
         <!-- View Menu Dropdown -->
         <div class="relative" @click.stop>
           <button 
+            @click="toggleDropdown('view')"
             class="px-2 py-1 text-xs font-semibold rounded-xs transition cursor-pointer flex items-center gap-1 whitespace-nowrap shrink-0"
             :class="activeDropdown === 'view' ? 'bg-ui-hover text-ui-textPrimary shadow-xs' : 'text-ui-textSecondary hover:text-ui-textPrimary hover:bg-ui-hover'"
-            @click="toggleDropdown('view')"
           >
             <span>View</span>
             <span class="text-[8px] opacity-70">▼</span>
           </button>
 
           <div v-if="activeDropdown === 'view'" class="header-dropdown-menu absolute right-0 top-full mt-1 w-52 bg-ui-panel text-ui-textPrimary border border-ui-borderStrong rounded-xs shadow-2xl py-1 z-50 text-xs">
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="showCheckerboard = !showCheckerboard; closeDropdowns()">
+            <button @click="showCheckerboard = !showCheckerboard; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Checkerboard Grid</span>
               <span :class="showCheckerboard ? 'inspector-value' : 'text-ui-textMuted'">{{ showCheckerboard ? 'On' : 'Off' }}</span>
             </button>
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="showHeatmap = !showHeatmap; closeDropdowns()">
+            <button @click="showHeatmap = !showHeatmap; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>UV Stretch Heatmap</span>
               <span :class="showHeatmap ? 'inspector-value' : 'text-ui-textMuted'">{{ showHeatmap ? 'On' : 'Off' }}</span>
             </button>
-            <div class="h-px bg-ui-borderSubtle my-1" />
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="showPixelGrid = !showPixelGrid; closeDropdowns()">
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="showPixelGrid = !showPixelGrid; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Pixel Grid Lines</span>
               <span :class="showPixelGrid ? 'inspector-value' : 'text-ui-textMuted'">{{ showPixelGrid ? 'On' : 'Off' }}</span>
             </button>
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="snapToPixels = !snapToPixels; closeDropdowns()">
+            <button @click="snapToPixels = !snapToPixels; closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Snap to Pixels</span>
               <span :class="snapToPixels ? 'inspector-value' : 'text-ui-textMuted'">{{ snapToPixels ? 'On' : 'Off' }}</span>
             </button>
-            <div class="h-px bg-ui-borderSubtle my-1" />
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="resetPanZoom(); closeDropdowns()">
+            <div class="h-px bg-ui-borderSubtle my-1"></div>
+            <button @click="resetPanZoom(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Frame UV Canvas</span>
               <span class="text-[10px] text-ui-textMuted font-mono">Home</span>
             </button>
-            <button class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between" @click="frameSelection(); closeDropdowns()">
+            <button @click="frameSelection(); closeDropdowns()" class="w-full text-left px-3 py-1.5 hover:bg-ui-hover flex items-center justify-between">
               <span>Frame Selection / Islands</span>
               <span class="text-[10px] text-ui-textMuted font-mono">F</span>
             </button>
           </div>
         </div>
+
       </div>
     </Teleport>
 
@@ -2591,192 +2631,218 @@ defineExpose({
     />
 
     <div class="uv-workbench-body">
-      <!-- 3. INFINITE STAGING CANVAS VIEWPORT -->
-      <div 
-        ref="containerRef" 
-        class="uv-canvas-viewport relative flex-1 min-h-0 overflow-hidden"
-        @wheel="onWheel"
-        @contextmenu.prevent
-      >
-        <div v-if="!activeMesh" class="uv-empty-state">
-          <BlenderIcon name="uv" :size="28" />
-          <strong>Select an object to edit its UVs</strong>
-          <span>Choose a mesh in the 3D view, then unwrap or arrange its islands here.</span>
-        </div>
-        <!-- Vertical Selection & Quick Actions Toolbar (Docked Inside Canvas Left) -->
-        <div class="uv-vertical-toolbar" aria-label="UV Selection & Quick Tools">
-          <!-- UV Selection Modes -->
-          <div class="uv-vert-tool-group">
-            <button 
-              class="uv-vert-tool-btn"
-              :aria-pressed="uvSelectMode === 'face'"
-              :class="{ 'is-active': uvSelectMode === 'face' }"
-              title="Face Select (3)"
-              @click="uvSelectMode = 'face'"
-            >
-              <BlenderIcon name="face-select" :size="15" />
-            </button>
-            <button 
-              class="uv-vert-tool-btn"
-              :aria-pressed="uvSelectMode === 'vertex'"
-              :class="{ 'is-active': uvSelectMode === 'vertex' }"
-              title="Vertex Select (1)"
-              @click="uvSelectMode = 'vertex'"
-            >
-              <BlenderIcon name="vertex-select" :size="15" />
-            </button>
-            <button 
-              class="uv-vert-tool-btn"
-              :aria-pressed="uvSelectMode === 'edge'"
-              :class="{ 'is-active': uvSelectMode === 'edge' }"
-              title="Edge Select (2)"
-              @click="uvSelectMode = 'edge'"
-            >
-              <BlenderIcon name="edge-select" :size="15" />
-            </button>
-            <button 
-              class="uv-vert-tool-btn"
-              :aria-pressed="uvSelectMode === 'island'"
-              :class="{ 'is-active': uvSelectMode === 'island' }"
-              title="Island Select (4)"
-              @click="uvSelectMode = 'island'"
-            >
-              <BlenderIcon name="object-mode" :size="15" />
-            </button>
-          </div>
-
-          <div class="uv-vert-divider" />
-
-          <!-- Quick Transform & UV Operations -->
-          <div class="uv-vert-tool-group">
-            <button :disabled="!selectionBounds" class="uv-vert-tool-btn" title="Rotate 90° CCW" @click="rotateUVs(-90)">
-              <BlenderIcon name="rotate-ccw" :size="15" /><span class="uv-tool-label">−90°</span>
-            </button>
-            <button :disabled="!selectionBounds" class="uv-vert-tool-btn" title="Rotate 90° CW" @click="rotateUVs(90)">
-              <BlenderIcon name="rotate-cw" :size="15" /><span class="uv-tool-label">+90°</span>
-            </button>
-            <button :disabled="!selectionBounds" class="uv-vert-tool-btn" title="Flip Horizontal" @click="flipUVs('u')">
-              <BlenderIcon name="flip-horizontal" :size="15" /><span class="uv-tool-label">Flip U</span>
-            </button>
-            <button :disabled="!selectionBounds" class="uv-vert-tool-btn" title="Flip Vertical" @click="flipUVs('v')">
-              <BlenderIcon name="flip-vertical" :size="15" /><span class="uv-tool-label">Flip V</span>
-            </button>
-            <button class="uv-vert-tool-btn" :title="`Pack islands (${smartUvMargin}px margin)`" @click="handlePackIslands(smartUvMargin)">
-              <BlenderIcon name="pack-islands" :size="15" /><span class="uv-tool-label">Pack</span>
-            </button>
-            <button class="uv-vert-tool-btn" title="Smart UV Project: cut, project, and pack (U)" @click="handleSmartUvProject">
-              <BlenderIcon name="uv-smart" :size="15" /><span class="uv-tool-label">Smart UV</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- Top Right Floating View Controls -->
-        <div class="uv-view-group" aria-label="UV canvas view controls">
-          <button class="uv-view-toggle" title="Frame selected UVs, or all islands (F)" @click="frameSelection"><BlenderIcon name="view-fit" :size="14" /><span>Frame</span></button>
-          <button
-            class="uv-view-icon"
-            :class="{ 'is-active': showHeatmap }"
-            title="Toggle distortion heatmap"
-            @click="showHeatmap = !showHeatmap"
-          >
-            <BlenderIcon name="xray" :size="14" />
-          </button>
-          <button
-            class="uv-view-toggle"
-            :class="{ 'is-active': snapToPixels }"
-            title="Snap to pixel grid"
-            @click="snapToPixels = !snapToPixels"
-          >
-            <BlenderIcon name="snap" :size="14" /><span>Snap</span>
-          </button>
-          <button
-            class="uv-view-icon"
-            :class="{ 'is-active': showPixelGrid }"
-            title="Toggle pixel grid"
-            @click="showPixelGrid = !showPixelGrid"
-          >
-            <BlenderIcon name="grid" :size="14" />
-          </button>
-          <div class="uv-zoom-control">
-            <button title="Zoom out" @click="zoomOut"><BlenderIcon name="zoom-out" :size="14" /></button>
-            <span title="Double-click to fit view" @dblclick="resetPanZoom">{{ Math.round(zoom * 100) }}%</span>
-            <button title="Zoom in" @click="zoomIn"><BlenderIcon name="zoom-in" :size="14" /></button>
-          </div>
-          <button class="uv-view-icon" title="Fit UV canvas to view" @click="resetPanZoom">
-            <BlenderIcon name="view-fit" :size="14" />
-          </button>
-        </div>
-        <canvas 
-          ref="canvasRef" 
-          class="w-full h-full block touch-none" 
-          @pointerdown="onPointerDown" 
-          @pointermove="onPointerMove" 
-          @pointerup="onPointerUp"
-          @pointerleave="onPointerLeave"
-          @pointercancel="onPointerUp"
-          @contextmenu.prevent
-        />
-
-        <!-- Quick Info HUD at Bottom Left -->
-        <div class="uv-status-hud">
-          <span class="flex items-center gap-1">Mode: <strong class="inspector-value uppercase font-bold">{{ uvSelectMode }}</strong></span>
-          <span>Islands: <strong class="text-ui-textPrimary font-bold">{{ uvIslandCount }}</strong></span>
-          <span v-if="seamCount">Seams: <strong class="text-red-400 font-bold">{{ seamCount }}</strong></span>
-          <span v-if="selectedFaceCount">Sel: <strong class="inspector-value">{{ selectedFaceCount }}f</strong></span>
-          <span v-if="pinnedUvKeys.size">Pins: <strong class="inspector-value">{{ pinnedUvKeys.size }}</strong></span>
-          <span v-if="!selectionBounds" class="text-ui-textMuted">Select UVs to transform</span>
-          <span v-if="selectionBounds" class="inspector-value font-bold">
-            Bounds: {{ Math.round(selectionBounds.width * 100) }}% × {{ Math.round(selectionBounds.height * 100) }}%
-          </span>
-          <span class="text-ui-textMuted hidden md:inline">RMB / Space-drag pan · F frame · V stitch · P pin</span>
-        </div>
+    <!-- 3. INFINITE STAGING CANVAS VIEWPORT -->
+    <div 
+      ref="containerRef" 
+      class="uv-canvas-viewport relative flex-1 min-h-0 overflow-hidden"
+      :style="viewNav.cursor.value ? { cursor: viewNav.cursor.value } : undefined"
+      @wheel="onWheel"
+      @contextmenu.prevent
+    >
+      <div v-if="!activeMesh" class="uv-empty-state">
+        <BlenderIcon name="uv" :size="28" />
+        <strong>Select an object to edit its UVs</strong>
+        <span>Choose a mesh in the 3D view, then unwrap or arrange its islands here.</span>
       </div>
-      <aside v-if="showPrecision" class="uv-precision-panel" aria-label="UV precision tools">
-        <nav class="inspector-seg is-stretch uv-inspector-tabs" aria-label="UV inspector sections"><button v-for="tab in (['selection', 'transform', 'tools'] as const)" :key="tab" type="button" class="inspector-seg-btn" :class="{ 'is-active': precisionTab === tab }" :aria-pressed="precisionTab === tab" @click="precisionTab = tab">{{ tab.charAt(0).toUpperCase() + tab.slice(1) }}</button></nav>
-        <div class="uv-panel-heading"><strong>Selection</strong><span>{{ targetCorners.length }} {{ targetCorners.length === 1 ? 'corner' : 'corners' }}</span></div>
-        <div class="inspector-seg is-stretch uv-units" role="group" aria-label="Coordinate units"><button type="button" class="inspector-seg-btn" :class="{ 'is-active': coordinateUnits === 'pixels' }" :aria-pressed="coordinateUnits === 'pixels'" @click="coordinateUnits = 'pixels'">Pixels</button><button type="button" class="inspector-seg-btn" :class="{ 'is-active': coordinateUnits === 'uv' }" :aria-pressed="coordinateUnits === 'uv'" @click="coordinateUnits = 'uv'">UV units</button></div>
-        <p class="uv-panel-hint">{{ textureSize.width }} × {{ textureSize.height }} texture · U right, V up</p>
-        <fieldset v-show="precisionTab === 'selection'" :disabled="!targetCorners.length" class="uv-panel-section">
-          <div class="uv-field-pair">
-            <label>U position<input aria-label="UV U position" type="number" step="any" :value="selectionBounds ? +(selectionBounds.minU * unitU).toFixed(4) : ''" @change="setSelectionCoordinate('u', $event)"></label>
-            <label>V position<input aria-label="UV V position" type="number" step="any" :value="selectionBounds ? +(selectionBounds.minV * unitV).toFixed(4) : ''" @change="setSelectionCoordinate('v', $event)"></label>
-          </div>
-          <div class="uv-field-pair">
-            <label>Width<input aria-label="UV selection width" type="number" min="0" step="any" :value="selectionBounds ? +(selectionBounds.width * unitU).toFixed(4) : ''" @change="setSelectionSize('u', $event)"></label>
-            <label>Height<input aria-label="UV selection height" type="number" min="0" step="any" :value="selectionBounds ? +(selectionBounds.height * unitV).toFixed(4) : ''" @change="setSelectionSize('v', $event)"></label>
-          </div>
-          <label class="uv-checkbox"><input v-model="lockScale" type="checkbox"> Keep proportions</label>
-          <label>Transform pivot<select v-model="pivotMode"><option value="selection">Selection center</option><option value="islands">Individual islands</option><option value="tile">Texture center</option></select></label>
-        </fieldset>
-        <fieldset v-show="precisionTab === 'transform'" :disabled="!targetCorners.length" class="uv-panel-section">
-          <legend>Transform</legend>
-          <form @submit.prevent="moveSelection">
-            <div class="uv-field-pair"><label>Move U<input v-model.number="moveU" aria-label="Move UV U" type="number" step="any"></label><label>Move V<input v-model.number="moveV" aria-label="Move UV V" type="number" step="any"></label></div>
-            <button type="submit" class="uv-wide-action">Move selection</button>
-          </form>
-          <form class="uv-inline-action" @submit.prevent="rotateUVs(Number(rotateAngle))"><label>Angle °<input v-model.number="rotateAngle" aria-label="UV rotation angle" type="number" step="any"></label><button type="submit">Rotate</button></form>
-          <form @submit.prevent="resizeSelection">
-            <div class="uv-field-pair"><label>Scale U<input v-model.number="scaleU" aria-label="UV scale U" type="number" step="any"></label><label>Scale V<input v-model.number="scaleV" aria-label="UV scale V" :disabled="lockScale" type="number" step="any"></label></div>
-            <button type="submit" class="uv-wide-action">Scale selection</button>
-          </form>
-          <div class="uv-field-pair"><button @click="flipUVs('u')">Flip U</button><button @click="flipUVs('v')">Flip V</button></div>
-        </fieldset>
-        <fieldset v-show="precisionTab === 'tools'" :disabled="!targetCorners.length" class="uv-panel-section">
-          <legend>Pixel &amp; topology tools</legend>
-          <button class="uv-wide-action" @click="snapSelectionPixels">Snap corners to pixels</button>
-          <div class="uv-field-pair"><button title="Align selected corners to the same U coordinate" @click="alignSelection('center_h')">Align U</button><button title="Align selected corners to the same V coordinate" @click="alignSelection('center_v')">Align V</button></div>
-          <button class="uv-wide-action" title="Smooth selected interior UVs while preserving island boundaries and pins" @click="relaxSelection">Relax interiors</button>
-          <p class="uv-panel-hint">Relax preserves borders and pins. Arrow keys nudge 1 pixel; Shift nudges 10.</p>
-        </fieldset>
-        <div v-show="precisionTab === 'tools'" class="uv-panel-section">
-          <div class="uv-panel-heading"><strong>Inspect</strong><span>{{ uvIslandCount }} islands</span></div>
-          <button class="uv-diagnostic" :disabled="!outsideFaces.length" @click="selectDiagnostic(outsideFaces)"><span>Outside texture</span><b>{{ outsideFaces.length }}</b></button>
-          <button class="uv-diagnostic" :disabled="!degenerateFaces.length" @click="selectDiagnostic(degenerateFaces)"><span>Zero-area faces</span><b>{{ degenerateFaces.length }}</b></button>
-          <div class="uv-field-pair"><button :aria-pressed="showCheckerboard" @click="showCheckerboard = !showCheckerboard">Checker</button><button :aria-pressed="showHeatmap" @click="showHeatmap = !showHeatmap">Stretch</button></div>
-          <button class="uv-wide-action" :disabled="!activeMesh" @click="exportUvLayout">Export UV layout</button>
+      <FloatingToolShelf shelf-id="uv" title="UV" icon="uv" teleport-to="#uvpaint-viewport-tools">
+      <div class="uv-vertical-toolbar" aria-label="UV Selection & Quick Tools">
+        <!-- UV Selection Modes -->
+        <div class="uv-vert-tool-group">
+          <button 
+            @click="uvSelectMode = 'face'"
+            class="uv-vert-tool-btn"
+            :aria-pressed="uvSelectMode === 'face'"
+            :class="{ 'is-active': uvSelectMode === 'face' }"
+            title="Face Select (3). Shift or Ctrl adds. Drag a box to select many. Unwrap uses every selected face."
+          >
+            <BlenderIcon name="face-select" :size="15" />
+          </button>
+          <button 
+            @click="uvSelectMode = 'vertex'"
+            class="uv-vert-tool-btn"
+            :aria-pressed="uvSelectMode === 'vertex'"
+            :class="{ 'is-active': uvSelectMode === 'vertex' }"
+            title="Vertex Select (1). Shift or Ctrl adds. Drag a box to select many."
+          >
+            <BlenderIcon name="vertex-select" :size="15" />
+          </button>
+          <button 
+            @click="uvSelectMode = 'edge'"
+            class="uv-vert-tool-btn"
+            :aria-pressed="uvSelectMode === 'edge'"
+            :class="{ 'is-active': uvSelectMode === 'edge' }"
+            title="Edge Select (2). Shift or Ctrl adds. Drag a box to select many."
+          >
+            <BlenderIcon name="edge-select" :size="15" />
+          </button>
+          <button 
+            @click="uvSelectMode = 'island'"
+            class="uv-vert-tool-btn"
+            :aria-pressed="uvSelectMode === 'island'"
+            :class="{ 'is-active': uvSelectMode === 'island' }"
+            title="Island Select (4)"
+          >
+            <BlenderIcon name="object-mode" :size="15" />
+          </button>
         </div>
-        <p class="uv-panel-feedback" role="status" aria-live="polite">{{ uvFeedback || 'Select corners, edges, faces or islands to begin.' }}</p>
-      </aside>
+
+        <div class="uv-vert-divider"></div>
+
+        <!-- Quick Transform & UV Operations -->
+        <div class="uv-vert-tool-group">
+          <button @click="rotateUVs(-90)" :disabled="!selectionBounds" class="uv-vert-tool-btn" title="Rotate 90° CCW">
+            <BlenderIcon name="rotate-ccw" :size="15" /><span class="uv-tool-label">−90°</span>
+          </button>
+          <button @click="rotateUVs(90)" :disabled="!selectionBounds" class="uv-vert-tool-btn" title="Rotate 90° CW">
+            <BlenderIcon name="rotate-cw" :size="15" /><span class="uv-tool-label">+90°</span>
+          </button>
+          <button @click="flipUVs('u')" :disabled="!selectionBounds" class="uv-vert-tool-btn" title="Flip Horizontal">
+            <BlenderIcon name="flip-horizontal" :size="15" /><span class="uv-tool-label">Flip U</span>
+          </button>
+          <button @click="flipUVs('v')" :disabled="!selectionBounds" class="uv-vert-tool-btn" title="Flip Vertical">
+            <BlenderIcon name="flip-vertical" :size="15" /><span class="uv-tool-label">Flip V</span>
+          </button>
+          <button @click="handlePackIslands(smartUvMargin)" class="uv-vert-tool-btn" :title="`Pack islands (${smartUvMargin}px margin)`">
+            <BlenderIcon name="pack-islands" :size="15" /><span class="uv-tool-label">Pack</span>
+          </button>
+          <button @click="handleSmartUvProject" class="uv-vert-tool-btn" title="Smart UV Project: cut, project, and pack (U)">
+            <BlenderIcon name="uv-smart" :size="15" /><span class="uv-tool-label">Smart UV</span>
+          </button>
+        </div>
+
+        <template v-if="toolStore.uvWorkspaceTab === 'paint'">
+          <div class="uv-vert-divider"></div>
+          <div class="uv-vert-tool-group">
+            <button
+              @click="toolStore.setPaintTool('brush')"
+              class="uv-vert-tool-btn"
+              :class="{ 'is-active': toolStore.paintTool === 'brush' }"
+              :aria-pressed="toolStore.paintTool === 'brush'"
+              title="Pencil: paint directly on the 3D object (B)"
+            >
+              <BlenderIcon name="brush" :size="15" />
+              <span class="uv-tool-label">Pencil</span>
+            </button>
+          </div>
+        </template>
+      </div>
+      </FloatingToolShelf>
+
+      <!-- Top Right Floating View Controls -->
+      <div class="uv-view-group" aria-label="UV canvas view controls">
+        <button @click="frameSelection()" class="uv-view-toggle" title="Frame selected UVs, or all islands (F)"><BlenderIcon name="view-fit" :size="14" /><span>Frame</span></button>
+        <button
+          @click="showHeatmap = !showHeatmap"
+          class="uv-view-icon"
+          :class="{ 'is-active': showHeatmap }"
+          title="Toggle distortion heatmap"
+        ><BlenderIcon name="xray" :size="14" /></button>
+        <button
+          @click="snapToPixels = !snapToPixels"
+          class="uv-view-toggle"
+          :class="{ 'is-active': snapToPixels }"
+          title="Snap to pixel grid"
+        ><BlenderIcon name="snap" :size="14" /><span>Snap</span></button>
+        <button
+          @click="showPixelGrid = !showPixelGrid"
+          class="uv-view-icon"
+          :class="{ 'is-active': showPixelGrid }"
+          title="Toggle pixel grid"
+        ><BlenderIcon name="grid" :size="14" /></button>
+        <CanvasLightwaveNav
+          :armed="viewNav.armed.value"
+          :sticky="viewNav.sticky.value"
+          :sticky-title="viewNav.stickyTitle.value"
+          :pan-title="viewNav.title('pan')"
+          :zoom-title="viewNav.title('zoom')"
+          @nav="viewNav.onNavButton"
+          @toggle-sticky="viewNav.toggleSticky"
+        />
+        <div class="uv-zoom-control">
+          <button @click="zoomOut" title="Zoom out"><BlenderIcon name="zoom-out" :size="14" /></button>
+          <span @dblclick="resetPanZoom" title="Double-click to fit view">{{ Math.round(zoom * 100) }}%</span>
+          <button @click="zoomIn" title="Zoom in"><BlenderIcon name="zoom-in" :size="14" /></button>
+        </div>
+        <button @click="resetPanZoom" class="uv-view-icon" title="Fit UV canvas to view">
+          <BlenderIcon name="view-fit" :size="14" />
+        </button>
+      </div>
+      <canvas 
+        ref="canvasRef" 
+        @pointerdown="onPointerDown" 
+        @pointermove="onPointerMove" 
+        @pointerup="onPointerUp" 
+        @pointerleave="onPointerLeave"
+        @pointercancel="onPointerUp"
+        @contextmenu.prevent
+        class="w-full h-full block touch-none"
+      ></canvas>
+
+      <!-- Quick Info HUD at Bottom Left -->
+      <div class="uv-status-hud">
+        <span class="flex items-center gap-1">Mode: <strong class="inspector-value uppercase font-bold">{{ uvSelectMode }}</strong></span>
+        <span>Islands: <strong class="text-ui-textPrimary font-bold">{{ uvIslandCount }}</strong></span>
+        <span v-if="seamCount">Seams: <strong class="text-red-400 font-bold">{{ seamCount }}</strong></span>
+        <span v-if="selectedFaceCount">Sel: <strong class="inspector-value">{{ selectedFaceCount }}f</strong></span>
+        <span v-if="pinnedUvKeys.size">Pins: <strong class="inspector-value">{{ pinnedUvKeys.size }}</strong></span>
+        <span v-if="!selectionBounds" class="text-ui-textMuted">Select UVs to transform</span>
+        <span v-if="selectionBounds" class="inspector-value font-bold">
+          Bounds: {{ Math.round(selectionBounds.width * 100) }}% × {{ Math.round(selectionBounds.height * 100) }}%
+        </span>
+        <span class="text-ui-textMuted hidden md:inline">RMB / Space-drag pan · F frame · V stitch · P pin</span>
+      </div>
+    </div>
+    <aside v-if="showPrecision" class="uv-precision-panel" aria-label="UV precision tools">
+      <nav class="inspector-seg is-stretch uv-inspector-tabs" aria-label="UV inspector sections"><button v-for="tab in (['selection', 'transform', 'tools'] as const)" :key="tab" type="button" class="inspector-seg-btn" :class="{ 'is-active': precisionTab === tab }" :aria-pressed="precisionTab === tab" @click="precisionTab = tab">{{ tab.charAt(0).toUpperCase() + tab.slice(1) }}</button></nav>
+      <div class="uv-panel-heading"><strong>Selection</strong><span>{{ targetCorners.length }} {{ targetCorners.length === 1 ? 'corner' : 'corners' }}</span></div>
+      <div class="inspector-seg is-stretch uv-units" role="group" aria-label="Coordinate units"><button type="button" class="inspector-seg-btn" :class="{ 'is-active': coordinateUnits === 'pixels' }" :aria-pressed="coordinateUnits === 'pixels'" @click="coordinateUnits = 'pixels'">Pixels</button><button type="button" class="inspector-seg-btn" :class="{ 'is-active': coordinateUnits === 'uv' }" :aria-pressed="coordinateUnits === 'uv'" @click="coordinateUnits = 'uv'">UV units</button></div>
+      <p class="uv-panel-hint">{{ textureSize.width }} × {{ textureSize.height }} texture · U right, V up</p>
+      <fieldset v-show="precisionTab === 'selection'" :disabled="!targetCorners.length" class="uv-panel-section">
+        <div class="uv-field-pair">
+          <label>U position<input aria-label="UV U position" type="number" step="any" :value="selectionBounds ? +(selectionBounds.minU * unitU).toFixed(4) : ''" @change="setSelectionCoordinate('u', $event)" /></label>
+          <label>V position<input aria-label="UV V position" type="number" step="any" :value="selectionBounds ? +(selectionBounds.minV * unitV).toFixed(4) : ''" @change="setSelectionCoordinate('v', $event)" /></label>
+        </div>
+        <div class="uv-field-pair">
+          <label>Width<input aria-label="UV selection width" type="number" min="0" step="any" :value="selectionBounds ? +(selectionBounds.width * unitU).toFixed(4) : ''" @change="setSelectionSize('u', $event)" /></label>
+          <label>Height<input aria-label="UV selection height" type="number" min="0" step="any" :value="selectionBounds ? +(selectionBounds.height * unitV).toFixed(4) : ''" @change="setSelectionSize('v', $event)" /></label>
+        </div>
+        <label class="uv-checkbox"><input v-model="lockScale" type="checkbox" /> Keep proportions</label>
+        <label>Transform pivot<select v-model="pivotMode"><option value="selection">Selection center</option><option value="islands">Individual islands</option><option value="tile">Texture center</option></select></label>
+      </fieldset>
+      <fieldset v-show="precisionTab === 'transform'" :disabled="!targetCorners.length" class="uv-panel-section">
+        <legend>Transform</legend>
+        <form @submit.prevent="moveSelection">
+          <div class="uv-field-pair"><label>Move U<input v-model.number="moveU" aria-label="Move UV U" type="number" step="any" /></label><label>Move V<input v-model.number="moveV" aria-label="Move UV V" type="number" step="any" /></label></div>
+          <button type="submit" class="uv-wide-action">Move selection</button>
+        </form>
+        <form class="uv-inline-action" @submit.prevent="rotateUVs(Number(rotateAngle))"><label>Angle °<input v-model.number="rotateAngle" aria-label="UV rotation angle" type="number" step="any" /></label><button type="submit">Rotate</button></form>
+        <form @submit.prevent="resizeSelection">
+          <div class="uv-field-pair"><label>Scale U<input v-model.number="scaleU" aria-label="UV scale U" type="number" step="any" /></label><label>Scale V<input v-model.number="scaleV" aria-label="UV scale V" :disabled="lockScale" type="number" step="any" /></label></div>
+          <button type="submit" class="uv-wide-action">Scale selection</button>
+        </form>
+        <div class="uv-field-pair"><button @click="flipUVs('u')">Flip U</button><button @click="flipUVs('v')">Flip V</button></div>
+      </fieldset>
+      <fieldset v-show="precisionTab === 'tools'" :disabled="!targetCorners.length" class="uv-panel-section">
+        <legend>Pixel &amp; topology tools</legend>
+        <button class="uv-wide-action" @click="snapSelectionPixels">Snap corners to pixels</button>
+        <div class="uv-field-pair"><button @click="alignSelection('center_h')" title="Align selected corners to the same U coordinate">Align U</button><button @click="alignSelection('center_v')" title="Align selected corners to the same V coordinate">Align V</button></div>
+        <button class="uv-wide-action" @click="relaxSelection" title="Smooth selected interior UVs while preserving island boundaries and pins">Relax interiors</button>
+        <button class="uv-wide-action" @click="straightenSelection" title="Straighten the selected UV chain onto a line">Straighten</button>
+        <div class="uv-field-pair">
+          <button @click="mirrorUvSelection('u')" title="Mirror selected UVs across the middle of the texture, horizontally">Mirror U</button>
+          <button @click="mirrorUvSelection('v')" title="Mirror selected UVs across the middle of the texture, vertically">Mirror V</button>
+        </div>
+        <p class="uv-panel-hint">Relax preserves borders and pins. Arrow keys nudge 1 pixel; Shift nudges 10.</p>
+      </fieldset>
+      <div v-show="precisionTab === 'tools'" class="uv-panel-section">
+        <div class="uv-panel-heading"><strong>Inspect</strong><span>{{ uvIslandCount }} islands</span></div>
+        <button class="uv-diagnostic" :disabled="!outsideFaces.length" @click="selectDiagnostic(outsideFaces)"><span>Outside texture</span><b>{{ outsideFaces.length }}</b></button>
+        <button class="uv-diagnostic" :disabled="!degenerateFaces.length" @click="selectDiagnostic(degenerateFaces)"><span>Zero-area faces</span><b>{{ degenerateFaces.length }}</b></button>
+        <div class="uv-field-pair"><button :aria-pressed="showCheckerboard" @click="showCheckerboard = !showCheckerboard">Checker</button><button :aria-pressed="showHeatmap" @click="showHeatmap = !showHeatmap">Stretch</button></div>
+        <button class="uv-wide-action" :disabled="!activeMesh" @click="exportUvLayout">Export UV layout</button>
+      </div>
+      <p class="uv-panel-feedback" role="status" aria-live="polite">{{ uvFeedback || 'Select corners, edges, faces or islands to begin.' }}</p>
+    </aside>
     </div>
     <ImportTextureModal
       v-if="showImportModal && pendingImportFile"
@@ -2907,19 +2973,9 @@ defineExpose({
 
 /* Vertical Toolbar Inside UV Canvas Window */
 .uv-vertical-toolbar {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  z-index: 10;
   display: flex;
   flex-direction: column;
   gap: 3px;
-  padding: 4px;
-  background: color-mix(in srgb, var(--ui-bg-header) 94%, transparent);
-  border: 1px solid var(--ui-border-strong);
-  border-radius: 4px;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(8px);
 }
 
 .uv-vert-tool-group {
@@ -2972,6 +3028,7 @@ defineExpose({
   display: flex;
   align-items: center;
   gap: 4px;
+  touch-action: none;
   background: color-mix(in srgb, var(--ui-bg-header) 94%, transparent);
   border: 1px solid var(--ui-border-strong);
   border-radius: 4px;
@@ -3076,7 +3133,7 @@ defineExpose({
 .uv-vertical-toolbar > .uv-vert-tool-group:first-child { display: flex; }
 .uv-vertical-toolbar > .uv-vert-divider:nth-child(2) { display: block; }
 .uv-tool-label { display: none; } .uv-vert-tool-btn:has(.uv-tool-label) { width: 28px; justify-content: center; padding: 0; }
-.uv-vertical-toolbar { background: color-mix(in srgb, var(--ui-bg-panel) 90%, transparent); border-color: var(--ui-border-subtle); }
+.uv-vertical-toolbar { background: transparent; border: none; box-shadow: none; }
 .uv-precision-panel { width: 210px; padding: 10px; }
 .uv-panel-section { margin-top: 10px; padding-top: 10px; }
 .uv-header-row { min-height: 38px; height: 38px; }

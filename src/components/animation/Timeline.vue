@@ -9,6 +9,7 @@ import {
 } from 'lucide-vue-next'
 import { InterpolationType } from '../../types/animation'
 import { sampleTrack } from '../../core/animation/Armature'
+import { timelineHeightFor } from '../../core/desktop/workspaceFit'
 
 const animationStore = useAnimationStore()
 const projectStore = useProjectStore()
@@ -47,7 +48,7 @@ function getMarkersAtFrame(frame: number) {
 }
 
 // Timeline Resizing
-const timelineHeight = ref<number>(280)
+const timelineHeight = ref<number>(timelineHeightFor(typeof window !== 'undefined' ? window.innerHeight : 900))
 const isResizing = ref<boolean>(false)
 let startY = 0
 let startHeight = 280

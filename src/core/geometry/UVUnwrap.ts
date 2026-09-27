@@ -1,6 +1,8 @@
 import { packUvRectangles } from '../uv/UVRectPacking'
 import { MeshObject, UV, Vertex, Vector3D } from '../../types/mesh'
-import { findUvIslands } from '../uv/UVIslands'
+import { facesShareWeldedUvEdge, findUvIslands } from '../uv/UVIslands'
+import { alignToMinimumRectangle, clusterFacesByNormal, conformalUnwrapFaces, findOverlappingFaces } from '../uv/ConformalUnwrap'
+import { undirectedEdgeId } from './EdgeUtils'
 import {
   computeCentroid,
   computeFaceNormal,
@@ -113,45 +115,80 @@ function bestFitProjectionBasis(points: Vector3D[], preferredNormal: Vector3D): 
   return { tangent, bitangent }
 }
 
-function rotateIslandToPrincipalAxis(mesh: MeshObject, island: number[]) {
-  let sumU = 0
-  let sumV = 0
-  let count = 0
-  for (const faceIndex of island) {
-    for (const uv of mesh.faces[faceIndex].uvs) {
-      sumU += uv.u
-      sumV += uv.v
-      count++
+/**
+ * Project faces onto their best-fit plane, aligned to the minimum-area
+ * rectangle at the origin. Corner UVs are in the positions' units.
+ */
+export function projectFacesToBestFitPlane(
+  mesh: MeshObject,
+  faceIndices: number[],
+  positions: Map<string, Vector3D>,
+  normals: Map<number, Vector3D>
+): Map<number, UV[]> {
+  const normalSum = { x: 0, y: 0, z: 0 }
+  const unique = new Map<string, Vector3D>()
+  for (const fi of faceIndices) {
+    const n = normals.get(fi) || { x: 0, y: 1, z: 0 }
+    normalSum.x += n.x
+    normalSum.y += n.y
+    normalSum.z += n.z
+    for (const id of mesh.faces[fi].vertexIds) {
+      const p = positions.get(id)
+      if (p) unique.set(id, p)
     }
   }
-  if (count === 0) return
+  if (lengthVec3(normalSum) < 1e-9) normalSum.y = 1
+  const { tangent, bitangent } = bestFitProjectionBasis(Array.from(unique.values()), normalSum)
 
-  const centerU = sumU / count
-  const centerV = sumV / count
-  let cuu = 0
-  let cvv = 0
-  let cuv = 0
-  for (const faceIndex of island) {
-    for (const uv of mesh.faces[faceIndex].uvs) {
-      const du = uv.u - centerU
-      const dv = uv.v - centerV
-      cuu += du * du
-      cvv += dv * dv
-      cuv += du * dv
+  const flat = new Float64Array(faceIndices.reduce((n, fi) => n + mesh.faces[fi].vertexIds.length, 0) * 2)
+  let k = 0
+  for (const fi of faceIndices) {
+    for (const id of mesh.faces[fi].vertexIds) {
+      const p = positions.get(id) || { x: 0, y: 0, z: 0 }
+      flat[k++] = dotVec3(p, tangent)
+      flat[k++] = dotVec3(p, bitangent)
     }
   }
+  alignToMinimumRectangle(flat)
+  const out = new Map<number, UV[]>()
+  k = 0
+  for (const fi of faceIndices) {
+    out.set(fi, mesh.faces[fi].vertexIds.map(() => {
+      const uv = { u: flat[k], v: flat[k + 1] }
+      k += 2
+      return uv
+    }))
+  }
+  return out
+}
 
-  const angle = -0.5 * Math.atan2(2 * cuv, cuu - cvv)
-  const cos = Math.cos(angle)
-  const sin = Math.sin(angle)
-  for (const faceIndex of island) {
-    for (const uv of mesh.faces[faceIndex].uvs) {
-      const du = uv.u - centerU
-      const dv = uv.v - centerV
-      uv.u = centerU + du * cos - dv * sin
-      uv.v = centerV + du * sin + dv * cos
-    }
+function polygonArea3D(points: Vector3D[]): number {
+  let x = 0, y = 0, z = 0
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i]
+    const b = points[(i + 1) % points.length]
+    x += (a.y - b.y) * (a.z + b.z)
+    y += (a.z - b.z) * (a.x + b.x)
+    z += (a.x - b.x) * (a.y + b.y)
   }
+  return 0.5 * Math.hypot(x, y, z)
+}
+
+function polygonAreaUV(uvs: UV[]): number {
+  let sum = 0
+  for (let i = 0; i < uvs.length; i++) {
+    const a = uvs[i]
+    const b = uvs[(i + 1) % uvs.length]
+    sum += a.u * b.v - b.u * a.v
+  }
+  return 0.5 * Math.abs(sum)
+}
+
+function faceAreas(face: MeshObject['faces'][number], vertMap: Map<string, Vertex>): { world: number; uv: number } | null {
+  if (face.uvs.length < 3 || face.uvs.length !== face.vertexIds.length) return null
+  const points = face.vertexIds.map(id => vertMap.get(id)?.position).filter(Boolean) as Vector3D[]
+  if (points.length !== face.vertexIds.length) return null
+  return { world: polygonArea3D(points), uv: polygonAreaUV(face.uvs) }
 }
 
 function resolveTargetFaces(mesh: MeshObject, onlyFaceIndices?: number[]): number[] {
@@ -161,25 +198,118 @@ function resolveTargetFaces(mesh: MeshObject, onlyFaceIndices?: number[]): numbe
   return mesh.faces.map((_, i) => i)
 }
 
-function boundsOfFaces(mesh: MeshObject, vertMap: Map<string, Vertex>, faceIndices: number[]) {
+function boundsOfPoints(points: Vector3D[]) {
   let minX = Infinity, minY = Infinity, minZ = Infinity
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
-  for (const i of faceIndices) {
-    for (const id of mesh.faces[i].vertexIds) {
-      const p = vertMap.get(id)?.position
-      if (!p) continue
-      if (p.x < minX) minX = p.x
-      if (p.y < minY) minY = p.y
-      if (p.z < minZ) minZ = p.z
-      if (p.x > maxX) maxX = p.x
-      if (p.y > maxY) maxY = p.y
-      if (p.z > maxZ) maxZ = p.z
-    }
+  for (const p of points) {
+    if (p.x < minX) minX = p.x
+    if (p.y < minY) minY = p.y
+    if (p.z < minZ) minZ = p.z
+    if (p.x > maxX) maxX = p.x
+    if (p.y > maxY) maxY = p.y
+    if (p.z > maxZ) maxZ = p.z
   }
   if (!Number.isFinite(minX)) {
     return { minX: -1, maxX: 1, minY: -1, maxY: 1, minZ: -1, maxZ: 1 }
   }
   return { minX, maxX, minY, maxY, minZ, maxZ }
+}
+
+function degToRad(degrees: number): number {
+  return degrees * Math.PI / 180
+}
+
+/** Viewport pose: scale, then Euler XYZ in degrees, then translation. */
+export function meshWorldPoint(mesh: MeshObject, p: Vector3D): Vector3D {
+  const scaled = {
+    x: p.x * mesh.scale.x,
+    y: p.y * mesh.scale.y,
+    z: p.z * mesh.scale.z
+  }
+  const a = degToRad(mesh.rotation.x)
+  const b = degToRad(mesh.rotation.y)
+  const c = degToRad(mesh.rotation.z)
+  const c1 = Math.cos(a), s1 = Math.sin(a)
+  const c2 = Math.cos(b), s2 = Math.sin(b)
+  const c3 = Math.cos(c), s3 = Math.sin(c)
+  return {
+    x: mesh.position.x + (c2 * c3) * scaled.x + (-c2 * s3) * scaled.y + s2 * scaled.z,
+    y: mesh.position.y + (c1 * s3 + c3 * s1 * s2) * scaled.x + (c1 * c3 - s1 * s2 * s3) * scaled.y + (-c2 * s1) * scaled.z,
+    z: mesh.position.z + (s1 * s3 - c1 * c3 * s2) * scaled.x + (c3 * s1 + c1 * s2 * s3) * scaled.y + (c1 * c2) * scaled.z
+  }
+}
+
+function worldPositions(mesh: MeshObject): Map<string, Vector3D> {
+  const map = new Map<string, Vector3D>()
+  for (const vertex of mesh.vertices) map.set(vertex.id, meshWorldPoint(mesh, vertex.position))
+  return map
+}
+
+function faceWorldPoints(mesh: MeshObject, faceIndex: number, positions: Map<string, Vector3D>): Vector3D[] {
+  const points: Vector3D[] = []
+  for (const id of mesh.faces[faceIndex].vertexIds) {
+    const p = positions.get(id)
+    if (p) points.push(p)
+  }
+  return points
+}
+
+function pointsOfFaces(mesh: MeshObject, faceIndices: number[], positions: Map<string, Vector3D>): Vector3D[] {
+  const points: Vector3D[] = []
+  for (const faceIndex of faceIndices) points.push(...faceWorldPoints(mesh, faceIndex, positions))
+  return points
+}
+
+function objectUp(mesh: MeshObject): Vector3D {
+  const origin = meshWorldPoint(mesh, { x: 0, y: 0, z: 0 })
+  const up = meshWorldPoint(mesh, { x: 0, y: 1, z: 0 })
+  const delta = subVec3(up, origin)
+  if (lengthVec3(delta) < 1e-8) return { x: 0, y: 1, z: 0 }
+  return normalizeVec3(delta)
+}
+
+/** Tube axis follows the object's local Y, in world space, so a rotated mesh still unwraps. */
+function projectionFrame(mesh: MeshObject, points: Vector3D[]) {
+  const center = points.length > 0 ? computeCentroid(points) : meshWorldPoint(mesh, { x: 0, y: 0, z: 0 })
+  const axis = objectUp(mesh)
+  const helper = Math.abs(axis.y) < 0.9 ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 }
+  const tangent = normalizeVec3(crossVec3(helper, axis))
+  const bitangent = normalizeVec3(crossVec3(axis, tangent))
+  return { center, axis, tangent, bitangent }
+}
+
+/**
+ * Longitude around `axis`, continuous across the branch cut and stable at the
+ * pole so one face never stretches across the whole texture.
+ */
+function continuousAngles(points: Vector3D[], center: Vector3D, tangent: Vector3D, bitangent: Vector3D): number[] {
+  const polar = points.map(point => {
+    const dx = point.x - center.x
+    const dy = point.y - center.y
+    const dz = point.z - center.z
+    const x = dx * tangent.x + dy * tangent.y + dz * tangent.z
+    const y = dx * bitangent.x + dy * bitangent.y + dz * bitangent.z
+    return { angle: Math.atan2(y, x), radius: Math.hypot(x, y) }
+  })
+  const ring = polar.filter(sample => sample.radius > 1e-5)
+  let sx = 0
+  let sy = 0
+  for (const sample of ring) {
+    sx += Math.cos(sample.angle)
+    sy += Math.sin(sample.angle)
+  }
+  const mid = ring.length > 0 ? Math.atan2(sy, sx) : 0
+  return polar.map(sample => {
+    if (sample.radius <= 1e-5) return mid
+    let delta = sample.angle - mid
+    while (delta > Math.PI) delta -= Math.PI * 2
+    while (delta < -Math.PI) delta += Math.PI * 2
+    return mid + delta
+  })
+}
+
+function heightAlong(point: Vector3D, center: Vector3D, axis: Vector3D): number {
+  return (point.x - center.x) * axis.x + (point.y - center.y) * axis.y + (point.z - center.z) * axis.z
 }
 
 function norm01(value: number, min: number, max: number): number {
@@ -253,37 +383,34 @@ function assignProjectedToRect(
  */
 export function boxUnwrap(mesh: MeshObject, onlyFaceIndices?: number[]): MeshObject {
   const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
-  const vertMap = new Map<string, Vertex>()
-  for (const v of newMesh.vertices) {
-    vertMap.set(v.id, v)
-  }
+  const positions = worldPositions(newMesh)
   const targets = resolveTargetFaces(newMesh, onlyFaceIndices)
-  const b = boundsOfFaces(newMesh, vertMap, targets)
+  const b = boundsOfPoints(pointsOfFaces(newMesh, targets, positions))
 
   for (const faceIndex of targets) {
     const face = newMesh.faces[faceIndex]
-    const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
-    if (faceVerts.length < 3) continue
+    const facePoints = faceWorldPoints(newMesh, faceIndex, positions)
+    if (facePoints.length < 3) continue
 
-    const normal = face.normal || computeFaceNormal(faceVerts.map(v => v.position))
+    const normal = computeFaceNormal(facePoints)
     const absX = Math.abs(normal.x)
     const absY = Math.abs(normal.y)
     const absZ = Math.abs(normal.z)
 
     if (absX >= absY && absX >= absZ) {
-      face.uvs = faceVerts.map(v => ({
-        u: signedNorm(v.position.z, b.minZ, b.maxZ, normal.x >= 0),
-        v: norm01(v.position.y, b.minY, b.maxY)
+      face.uvs = facePoints.map(p => ({
+        u: signedNorm(p.z, b.minZ, b.maxZ, normal.x >= 0),
+        v: norm01(p.y, b.minY, b.maxY)
       }))
     } else if (absY >= absX && absY >= absZ) {
-      face.uvs = faceVerts.map(v => ({
-        u: norm01(v.position.x, b.minX, b.maxX),
-        v: signedNorm(v.position.z, b.minZ, b.maxZ, normal.y >= 0)
+      face.uvs = facePoints.map(p => ({
+        u: norm01(p.x, b.minX, b.maxX),
+        v: signedNorm(p.z, b.minZ, b.maxZ, normal.y >= 0)
       }))
     } else {
-      face.uvs = faceVerts.map(v => ({
-        u: signedNorm(v.position.x, b.minX, b.maxX, normal.z >= 0),
-        v: norm01(v.position.y, b.minY, b.maxY)
+      face.uvs = facePoints.map(p => ({
+        u: signedNorm(p.x, b.minX, b.maxX, normal.z >= 0),
+        v: norm01(p.y, b.minY, b.maxY)
       }))
     }
   }
@@ -296,30 +423,28 @@ export function boxUnwrap(mesh: MeshObject, onlyFaceIndices?: number[]): MeshObj
  */
 export function planarUnwrap(mesh: MeshObject, axis: 'x' | 'y' | 'z' = 'z', onlyFaceIndices?: number[]): MeshObject {
   const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
-  const vertMap = new Map<string, Vertex>()
-  for (const v of newMesh.vertices) {
-    vertMap.set(v.id, v)
-  }
+  const positions = worldPositions(newMesh)
   const targets = resolveTargetFaces(newMesh, onlyFaceIndices)
-  const b = boundsOfFaces(newMesh, vertMap, targets)
+  const b = boundsOfPoints(pointsOfFaces(newMesh, targets, positions))
 
   for (const faceIndex of targets) {
     const face = newMesh.faces[faceIndex]
-    const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
+    const facePoints = faceWorldPoints(newMesh, faceIndex, positions)
+    if (facePoints.length < 3) continue
     if (axis === 'x') {
-      face.uvs = faceVerts.map(v => ({
-        u: norm01(v.position.z, b.minZ, b.maxZ),
-        v: norm01(v.position.y, b.minY, b.maxY)
+      face.uvs = facePoints.map(p => ({
+        u: norm01(p.z, b.minZ, b.maxZ),
+        v: norm01(p.y, b.minY, b.maxY)
       }))
     } else if (axis === 'y') {
-      face.uvs = faceVerts.map(v => ({
-        u: norm01(v.position.x, b.minX, b.maxX),
-        v: norm01(v.position.z, b.minZ, b.maxZ)
+      face.uvs = facePoints.map(p => ({
+        u: norm01(p.x, b.minX, b.maxX),
+        v: norm01(p.z, b.minZ, b.maxZ)
       }))
     } else {
-      face.uvs = faceVerts.map(v => ({
-        u: norm01(v.position.x, b.minX, b.maxX),
-        v: norm01(v.position.y, b.minY, b.maxY)
+      face.uvs = facePoints.map(p => ({
+        u: norm01(p.x, b.minX, b.maxX),
+        v: norm01(p.y, b.minY, b.maxY)
       }))
     }
   }
@@ -332,43 +457,50 @@ export function planarUnwrap(mesh: MeshObject, axis: 'x' | 'y' | 'z' = 'z', only
  */
 export function cylinderUnwrap(mesh: MeshObject, onlyFaceIndices?: number[]): MeshObject {
   const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
-  const vertMap = new Map<string, Vertex>()
-  for (const v of newMesh.vertices) {
-    vertMap.set(v.id, v)
-  }
+  const positions = worldPositions(newMesh)
   const targets = resolveTargetFaces(newMesh, onlyFaceIndices)
-  const b = boundsOfFaces(newMesh, vertMap, targets)
-  const cx = (b.minX + b.maxX) * 0.5
-  const cz = (b.minZ + b.maxZ) * 0.5
+  const cloud = pointsOfFaces(newMesh, targets, positions)
+  const frame = projectionFrame(newMesh, cloud)
+  let minH = Infinity
+  let maxH = -Infinity
   let radius = 1e-6
-  for (const faceIndex of targets) {
-    for (const id of newMesh.faces[faceIndex].vertexIds) {
-      const p = vertMap.get(id)?.position
-      if (!p) continue
-      radius = Math.max(radius, Math.hypot(p.x - cx, p.z - cz))
-    }
+  for (const point of cloud) {
+    const h = heightAlong(point, frame.center, frame.axis)
+    if (h < minH) minH = h
+    if (h > maxH) maxH = h
+    const dx = point.x - frame.center.x - frame.axis.x * h
+    const dy = point.y - frame.center.y - frame.axis.y * h
+    const dz = point.z - frame.center.z - frame.axis.z * h
+    radius = Math.max(radius, Math.hypot(dx, dy, dz))
   }
+  if (!Number.isFinite(minH)) { minH = -1; maxH = 1 }
 
   for (const faceIndex of targets) {
     const face = newMesh.faces[faceIndex]
-    const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
-    if (faceVerts.length < 3) continue
+    const facePoints = faceWorldPoints(newMesh, faceIndex, positions)
+    if (facePoints.length < 3) continue
 
-    const normal = face.normal || computeFaceNormal(faceVerts.map(v => v.position))
-    if (Math.abs(normal.y) > 0.7) {
-      const tileV0 = normal.y > 0 ? 0.52 : 0.02
-      face.uvs = faceVerts.map(v => ({
-        u: 0.74 + ((v.position.x - cx) / radius * 0.5 + 0.5) * 0.24,
-        v: tileV0 + ((v.position.z - cz) / radius * 0.5 + 0.5) * 0.46
-      }))
-    } else {
-      face.uvs = faceVerts.map(v => {
-        const angle = Math.atan2(v.position.z - cz, v.position.x - cx)
+    const normal = computeFaceNormal(facePoints)
+    const facing = dotVec3(normal, frame.axis)
+    if (Math.abs(facing) > 0.7) {
+      const tileV0 = facing > 0 ? 0.52 : 0.02
+      face.uvs = facePoints.map(point => {
+        const dx = point.x - frame.center.x
+        const dy = point.y - frame.center.y
+        const dz = point.z - frame.center.z
+        const u = dx * frame.tangent.x + dy * frame.tangent.y + dz * frame.tangent.z
+        const v = dx * frame.bitangent.x + dy * frame.bitangent.y + dz * frame.bitangent.z
         return {
-          u: ((angle + Math.PI) / (2 * Math.PI)) * 0.7,
-          v: norm01(v.position.y, b.minY, b.maxY)
+          u: 0.74 + (u / radius * 0.5 + 0.5) * 0.24,
+          v: tileV0 + (v / radius * 0.5 + 0.5) * 0.46
         }
       })
+    } else {
+      const angles = continuousAngles(facePoints, frame.center, frame.tangent, frame.bitangent)
+      face.uvs = facePoints.map((point, index) => ({
+        u: ((angles[index] + Math.PI) / (2 * Math.PI)) * 0.7,
+        v: norm01(heightAlong(point, frame.center, frame.axis), minH, maxH)
+      }))
     }
   }
 
@@ -380,29 +512,28 @@ export function cylinderUnwrap(mesh: MeshObject, onlyFaceIndices?: number[]): Me
  */
 export function sphereUnwrap(mesh: MeshObject, onlyFaceIndices?: number[]): MeshObject {
   const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
-  const vertMap = new Map<string, Vertex>()
-  for (const v of newMesh.vertices) {
-    vertMap.set(v.id, v)
-  }
+  const positions = worldPositions(newMesh)
   const targets = resolveTargetFaces(newMesh, onlyFaceIndices)
-  const b = boundsOfFaces(newMesh, vertMap, targets)
-  const cx = (b.minX + b.maxX) * 0.5
-  const cy = (b.minY + b.maxY) * 0.5
-  const cz = (b.minZ + b.maxZ) * 0.5
+  const cloud = pointsOfFaces(newMesh, targets, positions)
+  const frame = projectionFrame(newMesh, cloud)
 
   for (const faceIndex of targets) {
     const face = newMesh.faces[faceIndex]
-    const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
-    if (faceVerts.length < 3) continue
+    const facePoints = faceWorldPoints(newMesh, faceIndex, positions)
+    if (facePoints.length < 3) continue
 
-    face.uvs = faceVerts.map(v => {
-      const dx = v.position.x - cx
-      const dy = v.position.y - cy
-      const dz = v.position.z - cz
+    const angles = continuousAngles(facePoints, frame.center, frame.tangent, frame.bitangent)
+    face.uvs = facePoints.map((point, index) => {
+      const dx = point.x - frame.center.x
+      const dy = point.y - frame.center.y
+      const dz = point.z - frame.center.z
       const len = Math.hypot(dx, dy, dz) || 1
-      const u = 0.5 + Math.atan2(dz / len, dx / len) / (2 * Math.PI)
-      const vCoord = 0.5 - Math.asin(Math.max(-1, Math.min(1, dy / len))) / Math.PI
-      return { u, v: 1 - vCoord }
+      const along = (dx * frame.axis.x + dy * frame.axis.y + dz * frame.axis.z) / len
+      const vCoord = 0.5 - Math.asin(Math.max(-1, Math.min(1, along))) / Math.PI
+      return {
+        u: 0.5 + angles[index] / (2 * Math.PI),
+        v: 1 - vCoord
+      }
     })
   }
 
@@ -414,42 +545,48 @@ export function sphereUnwrap(mesh: MeshObject, onlyFaceIndices?: number[]): Mesh
  */
 export function coneUnwrap(mesh: MeshObject, onlyFaceIndices?: number[]): MeshObject {
   const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
-  const vertMap = new Map<string, Vertex>()
-  for (const v of newMesh.vertices) {
-    vertMap.set(v.id, v)
-  }
+  const positions = worldPositions(newMesh)
   const targets = resolveTargetFaces(newMesh, onlyFaceIndices)
-  const b = boundsOfFaces(newMesh, vertMap, targets)
-  const cx = (b.minX + b.maxX) * 0.5
-  const cz = (b.minZ + b.maxZ) * 0.5
+  const cloud = pointsOfFaces(newMesh, targets, positions)
+  const frame = projectionFrame(newMesh, cloud)
+  let minH = Infinity
+  let maxH = -Infinity
   let radius = 1e-6
-  for (const faceIndex of targets) {
-    for (const id of newMesh.faces[faceIndex].vertexIds) {
-      const p = vertMap.get(id)?.position
-      if (!p) continue
-      radius = Math.max(radius, Math.hypot(p.x - cx, p.z - cz))
-    }
+  for (const point of cloud) {
+    const h = heightAlong(point, frame.center, frame.axis)
+    if (h < minH) minH = h
+    if (h > maxH) maxH = h
+    const dx = point.x - frame.center.x - frame.axis.x * h
+    const dy = point.y - frame.center.y - frame.axis.y * h
+    const dz = point.z - frame.center.z - frame.axis.z * h
+    radius = Math.max(radius, Math.hypot(dx, dy, dz))
   }
+  if (!Number.isFinite(minH)) { minH = -1; maxH = 1 }
 
   for (const faceIndex of targets) {
     const face = newMesh.faces[faceIndex]
-    const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
-    if (faceVerts.length < 3) continue
+    const facePoints = faceWorldPoints(newMesh, faceIndex, positions)
+    if (facePoints.length < 3) continue
 
-    const normal = face.normal || computeFaceNormal(faceVerts.map(v => v.position))
-    if (normal.y < -0.7) {
-      face.uvs = faceVerts.map(v => ({
-        u: 0.76 + ((v.position.x - cx) / radius * 0.5 + 0.5) * 0.22,
-        v: 0.52 + ((v.position.z - cz) / radius * 0.5 + 0.5) * 0.46
-      }))
-    } else {
-      face.uvs = faceVerts.map(v => {
-        const angle = Math.atan2(v.position.z - cz, v.position.x - cx)
+    const normal = computeFaceNormal(facePoints)
+    if (dotVec3(normal, frame.axis) < -0.7) {
+      face.uvs = facePoints.map(point => {
+        const dx = point.x - frame.center.x
+        const dy = point.y - frame.center.y
+        const dz = point.z - frame.center.z
+        const u = dx * frame.tangent.x + dy * frame.tangent.y + dz * frame.tangent.z
+        const v = dx * frame.bitangent.x + dy * frame.bitangent.y + dz * frame.bitangent.z
         return {
-          u: ((angle + Math.PI) / (2 * Math.PI)) * 0.75,
-          v: norm01(v.position.y, b.minY, b.maxY)
+          u: 0.76 + (u / radius * 0.5 + 0.5) * 0.22,
+          v: 0.52 + (v / radius * 0.5 + 0.5) * 0.46
         }
       })
+    } else {
+      const angles = continuousAngles(facePoints, frame.center, frame.tangent, frame.bitangent)
+      face.uvs = facePoints.map((point, index) => ({
+        u: ((angles[index] + Math.PI) / (2 * Math.PI)) * 0.75,
+        v: norm01(heightAlong(point, frame.center, frame.axis), minH, maxH)
+      }))
     }
   }
 
@@ -461,20 +598,17 @@ export function coneUnwrap(mesh: MeshObject, onlyFaceIndices?: number[]): MeshOb
  */
 export function cubemapCrossUnwrap(mesh: MeshObject, onlyFaceIndices?: number[]): MeshObject {
   const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
-  const vertMap = new Map<string, Vertex>()
-  for (const v of newMesh.vertices) {
-    vertMap.set(v.id, v)
-  }
+  const positions = worldPositions(newMesh)
   const targets = resolveTargetFaces(newMesh, onlyFaceIndices)
   const cellW = 0.25
   const cellH = 1 / 3
 
   for (const faceIndex of targets) {
     const face = newMesh.faces[faceIndex]
-    const faceVerts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
-    if (faceVerts.length < 3) continue
+    const facePoints = faceWorldPoints(newMesh, faceIndex, positions)
+    if (facePoints.length < 3) continue
 
-    const normal = face.normal || computeFaceNormal(faceVerts.map(v => v.position))
+    const normal = computeFaceNormal(facePoints)
     let col = 1
     let row = 1
     let axisU = { x: 1, y: 0, z: 0 }
@@ -511,10 +645,174 @@ export function cubemapCrossUnwrap(mesh: MeshObject, onlyFaceIndices?: number[])
     const u1 = (col + 1) * cellW - pad
     const v1 = 1 - row * cellH - pad
     const v0 = 1 - (row + 1) * cellH + pad
-    face.uvs = assignProjectedToRect(faceVerts.map(v => v.position), axisU, axisV, { u0, v0, u1, v1 })
+    face.uvs = assignProjectedToRect(facePoints, axisU, axisV, { u0, v0, u1, v1 })
   }
 
   return newMesh
+}
+
+const SMART_PROJECT_FLAT_DEGREES = 8
+
+export interface FlatChart {
+  uvs: Map<number, UV[]>
+  /** Placed by pins in final UV space; do not offset or pack. */
+  pinned: boolean
+}
+
+export interface FlattenContext {
+  seams: Set<string>
+  positions: Map<string, Vector3D>
+  normals: Map<number, Vector3D>
+  angleLimitDegrees: number
+  /** `curved` keeps near-flat clusters as exact planar projections. */
+  conformal: 'always' | 'curved'
+  pins?: Set<string>
+}
+
+/**
+ * Flatten normal-angle clusters into charts that never overlap themselves.
+ * Conformal first where allowed; a chart that still overlaps falls back to
+ * its best-fit plane, and faces that overlap there are split off into new
+ * clusters and flattened again.
+ */
+export function flattenClusters(mesh: MeshObject, clusters: number[][], ctx: FlattenContext): FlatChart[] {
+  const flatCos = Math.cos(SMART_PROJECT_FLAT_DEGREES * Math.PI / 180)
+  const queue = clusters.filter(c => c.length > 0)
+  const charts: FlatChart[] = []
+  while (queue.length > 0) {
+    const cluster = queue.shift()!
+    let useConformal = ctx.conformal === 'always'
+    if (!useConformal) {
+      const sum = { x: 0, y: 0, z: 0 }
+      for (const fi of cluster) {
+        const n = ctx.normals.get(fi)!
+        sum.x += n.x
+        sum.y += n.y
+        sum.z += n.z
+      }
+      const avg = normalizeVec3(sum)
+      useConformal = cluster.some(fi => dotVec3(ctx.normals.get(fi)!, avg) < flatCos)
+    }
+    if (useConformal) {
+      const result = conformalUnwrapFaces(mesh, cluster, ctx.seams, ctx.positions, { pins: ctx.pins })
+      if (result && (result.pinned || findOverlappingFaces(cluster, result.uvs).size === 0)) {
+        charts.push({ uvs: result.uvs, pinned: result.pinned })
+        continue
+      }
+    }
+    const planar = projectFacesToBestFitPlane(mesh, cluster, ctx.positions, ctx.normals)
+    const rejected = findOverlappingFaces(cluster, planar)
+    if (rejected.size > 0) {
+      for (const fi of rejected) planar.delete(fi)
+      queue.push(...clusterFacesByNormal(mesh, cluster.filter(fi => rejected.has(fi)), ctx.normals, ctx.seams, ctx.angleLimitDegrees))
+    }
+    charts.push({ uvs: planar, pinned: false })
+  }
+  return charts
+}
+
+/**
+ * Seam list with every UV island border in scope added: edges whose two
+ * faces are not welded in UV, and edges on the border of the scope.
+ * Existing seams are kept.
+ */
+export function seamEdgesFromUvIslands(mesh: MeshObject, onlyFaceIndices?: number[]): string[] {
+  const scope = onlyFaceIndices && onlyFaceIndices.length > 0 ? new Set(onlyFaceIndices) : null
+  const edgeFaces = new Map<string, number[]>()
+  mesh.faces.forEach((face, fi) => {
+    const ids = face.vertexIds
+    for (let i = 0; i < ids.length; i++) {
+      const key = undirectedEdgeId(ids[i], ids[(i + 1) % ids.length])
+      const list = edgeFaces.get(key)
+      if (list) list.push(fi)
+      else edgeFaces.set(key, [fi])
+    }
+  })
+  const seams = new Set(mesh.seamEdgeIds || [])
+  for (const [key, faces] of edgeFaces) {
+    if (faces.length !== 2) continue
+    const [a, b] = faces
+    const inA = !scope || scope.has(a)
+    const inB = !scope || scope.has(b)
+    if (!inA && !inB) continue
+    if (!inA || !inB || !facesShareWeldedUvEdge(mesh, a, b)) seams.add(key)
+  }
+  return Array.from(seams)
+}
+
+export interface ViewProjection {
+  /** World-space camera position, right, up, and forward (into the scene) vectors. */
+  position: Vector3D
+  right: Vector3D
+  up: Vector3D
+  forward: Vector3D
+  perspective: boolean
+}
+
+/**
+ * Project From View: UVs are the faces as the camera sees them, fitted into
+ * the tile without distorting texture pixels.
+ */
+export function projectFromView(
+  mesh: MeshObject,
+  view: ViewProjection,
+  onlyFaceIndices?: number[],
+  textureWidth = 64,
+  textureHeight = textureWidth
+): MeshObject {
+  const newMesh: MeshObject = JSON.parse(JSON.stringify(mesh))
+  const positions = worldPositions(newMesh)
+  const targets = resolveTargetFaces(newMesh, onlyFaceIndices)
+  const screen = (p: Vector3D) => {
+    const d = subVec3(p, view.position)
+    const x = dotVec3(d, view.right)
+    const y = dotVec3(d, view.up)
+    if (!view.perspective) return { x, y }
+    const z = Math.max(1e-4, dotVec3(d, view.forward))
+    return { x: x / z, y: y / z }
+  }
+  const projected = new Map<number, Array<{ x: number; y: number }>>()
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const fi of targets) {
+    const pts = newMesh.faces[fi].vertexIds.map(id => screen(positions.get(id) ?? view.position))
+    projected.set(fi, pts)
+    for (const p of pts) {
+      if (p.x < minX) minX = p.x
+      if (p.x > maxX) maxX = p.x
+      if (p.y < minY) minY = p.y
+      if (p.y > maxY) maxY = p.y
+    }
+  }
+  if (!Number.isFinite(minX)) return newMesh
+  const w = Math.max(1, textureWidth)
+  const h = Math.max(1, textureHeight)
+  const spanX = Math.max(maxX - minX, 1e-9)
+  const spanY = Math.max(maxY - minY, 1e-9)
+  const pixelsPerUnit = Math.min(w / spanX, h / spanY)
+  const offU = (1 - spanX * pixelsPerUnit / w) / 2
+  const offV = (1 - spanY * pixelsPerUnit / h) / 2
+  for (const [fi, pts] of projected) {
+    newMesh.faces[fi].uvs = pts.map(p => ({
+      u: offU + (p.x - minX) * pixelsPerUnit / w,
+      v: offV + (p.y - minY) * pixelsPerUnit / h
+    }))
+  }
+  return newMesh
+}
+
+/** Copy pinned corner UVs from `before` onto `after` (same faces, same order). */
+export function restorePinnedUvs(before: MeshObject, after: MeshObject): MeshObject {
+  const pins = new Set(before.uvPinKeys || [])
+  if (pins.size === 0) return after
+  after.faces.forEach((face, fi) => {
+    const prev = before.faces[fi]
+    if (!prev || prev.id !== face.id) return
+    face.vertexIds.forEach((id, c) => {
+      const uv = prev.uvs[c]
+      if (uv && pins.has(`${face.id}:${id}`)) face.uvs[c] = { u: uv.u, v: uv.v }
+    })
+  })
+  return after
 }
 
 export interface SmartUvProjectOptions {
@@ -537,112 +835,28 @@ export function smartUvProject(mesh: MeshObject, options: SmartUvProjectOptions 
 
   const requestedAngle = Number(options.angleLimitDegrees ?? 66)
   const angleLimit = Number.isFinite(requestedAngle) ? Math.max(1, Math.min(179, requestedAngle)) : 66
-  const cosLimit = Math.cos(angleLimit * Math.PI / 180)
   const requestedFaces = options.onlyFaceIndices?.filter(i => i >= 0 && i < projected.faces.length)
   const targetFaces = requestedFaces && requestedFaces.length > 0
     ? Array.from(new Set(requestedFaces))
     : projected.faces.map((_, i) => i)
-  const targetSet = new Set(targetFaces)
-  const vertexMap = new Map(projected.vertices.map(v => [v.id, v]))
   const seamSet = new Set(projected.seamEdgeIds || [])
-  const edgeKey = (a: string, b: string) => a < b ? `${a}_${b}` : `${b}_${a}`
+  const positions = new Map(projected.vertices.map(v => [v.id, v.position]))
 
   const normals = new Map<number, Vector3D>()
   for (const faceIndex of targetFaces) {
-    const face = projected.faces[faceIndex]
-    const points = face.vertexIds.map(id => vertexMap.get(id)?.position).filter(Boolean) as Vector3D[]
+    const points = projected.faces[faceIndex].vertexIds.map(id => positions.get(id)).filter(Boolean) as Vector3D[]
     normals.set(faceIndex, computeFaceNormal(points))
   }
 
-  const edgeFaces = new Map<string, number[]>()
-  for (const faceIndex of targetFaces) {
-    const ids = projected.faces[faceIndex].vertexIds
-    for (let i = 0; i < ids.length; i++) {
-      const key = edgeKey(ids[i], ids[(i + 1) % ids.length])
-      const linked = edgeFaces.get(key) || []
-      linked.push(faceIndex)
-      edgeFaces.set(key, linked)
+  const clusters = clusterFacesByNormal(projected, targetFaces, normals, seamSet, angleLimit)
+  const charts = flattenClusters(projected, clusters, { seams: seamSet, positions, normals, angleLimitDegrees: angleLimit, conformal: 'curved' })
+  charts.forEach((chart, islandIndex) => {
+    for (const [fi, uvs] of chart.uvs) {
+      // Separate projection spaces before packing so two cut islands whose
+      // local coordinates happen to match cannot be mistaken for welded UVs.
+      projected.faces[fi].uvs = uvs.map(uv => ({ u: uv.u + islandIndex * 10000, v: uv.v }))
     }
-  }
-
-  const neighbors = new Map<number, Array<{ face: number; edge: string }>>()
-  for (const faceIndex of targetFaces) neighbors.set(faceIndex, [])
-  for (const [edge, faces] of edgeFaces) {
-    for (let i = 0; i < faces.length; i++) {
-      for (let j = i + 1; j < faces.length; j++) {
-        neighbors.get(faces[i])?.push({ face: faces[j], edge })
-        neighbors.get(faces[j])?.push({ face: faces[i], edge })
-      }
-    }
-  }
-
-  const visited = new Set<number>()
-  const islands: number[][] = []
-  for (const seed of targetFaces) {
-    if (visited.has(seed)) continue
-    const island: number[] = []
-    const queue = [seed]
-    const seedNormal = normals.get(seed) || { x: 0, y: 1, z: 0 }
-    let normalSum = { ...seedNormal }
-    visited.add(seed)
-
-    while (queue.length > 0) {
-      const current = queue.shift()!
-      island.push(current)
-      const averageNormal = normalizeVec3(normalSum)
-      for (const link of neighbors.get(current) || []) {
-        if (!targetSet.has(link.face) || visited.has(link.face) || seamSet.has(link.edge)) continue
-        const candidateNormal = normals.get(link.face) || seedNormal
-        const localNormal = normals.get(current) || seedNormal
-        if (dotVec3(localNormal, candidateNormal) < cosLimit) continue
-        // Prevent a chain of gentle bends from wrapping an island all the way
-        // around a sphere or tube and overlapping its planar projection.
-        if (dotVec3(averageNormal, candidateNormal) < cosLimit) continue
-        visited.add(link.face)
-        queue.push(link.face)
-        normalSum = {
-          x: normalSum.x + candidateNormal.x,
-          y: normalSum.y + candidateNormal.y,
-          z: normalSum.z + candidateNormal.z
-        }
-      }
-    }
-    islands.push(island)
-  }
-
-  for (let islandIndex = 0; islandIndex < islands.length; islandIndex++) {
-    const island = islands[islandIndex]
-    const normalSum = { x: 0, y: 0, z: 0 }
-    const uniquePoints = new Map<string, Vector3D>()
-    for (const faceIndex of island) {
-      const normal = normals.get(faceIndex) || { x: 0, y: 1, z: 0 }
-      normalSum.x += normal.x
-      normalSum.y += normal.y
-      normalSum.z += normal.z
-      for (const id of projected.faces[faceIndex].vertexIds) {
-        const position = vertexMap.get(id)?.position
-        if (position) uniquePoints.set(id, position)
-      }
-    }
-    const { tangent, bitangent } = bestFitProjectionBasis(
-      Array.from(uniquePoints.values()),
-      normalSum
-    )
-
-    for (const faceIndex of island) {
-      const face = projected.faces[faceIndex]
-      face.uvs = face.vertexIds.map(id => {
-        const position = vertexMap.get(id)?.position || { x: 0, y: 0, z: 0 }
-        // Separate projection spaces before packing so two cut islands whose
-        // local coordinates happen to match cannot be mistaken for welded UVs.
-        return {
-          u: dotVec3(position, tangent) + islandIndex * 10000,
-          v: dotVec3(position, bitangent)
-        }
-      })
-    }
-    rotateIslandToPrincipalAxis(projected, island)
-  }
+  })
 
   // The projection is in geometric units; convert it to texture aspect before packing.
   const texW = Math.max(1, Number(options.textureSize) || 64)
@@ -823,19 +1037,10 @@ export function equalizeTexelDensity(mesh: MeshObject): MeshObject {
     let corners = 0
     for (const faceIndex of island) {
       const face = newMesh.faces[faceIndex]
-      if (face.uvs.length < 3) continue
-      const verts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
-      if (verts.length < 3) continue
-      const p0 = verts[0].position, p1 = verts[1].position, p2 = verts[2].position
-      const e1 = { x: p1.x - p0.x, y: p1.y - p0.y, z: p1.z - p0.z }
-      const e2 = { x: p2.x - p0.x, y: p2.y - p0.y, z: p2.z - p0.z }
-      worldArea += 0.5 * Math.hypot(
-        e1.y * e2.z - e1.z * e2.y,
-        e1.z * e2.x - e1.x * e2.z,
-        e1.x * e2.y - e1.y * e2.x
-      )
-      const u0 = face.uvs[0], u1 = face.uvs[1], u2 = face.uvs[2]
-      uvArea += 0.5 * Math.abs((u1.u - u0.u) * (u2.v - u0.v) - (u2.u - u0.u) * (u1.v - u0.v))
+      const areas = faceAreas(face, vertMap)
+      if (!areas) continue
+      worldArea += areas.world
+      uvArea += areas.uv
       for (const uv of face.uvs) {
         centerU += uv.u
         centerV += uv.v
@@ -876,19 +1081,10 @@ export function sampleFaceTexelDensity(mesh: MeshObject, faceIndex: number, text
 
   const vertMap = new Map<string, Vertex>()
   for (const v of mesh.vertices) vertMap.set(v.id, v)
-  const verts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
-  if (verts.length < 3) return 16
-
-  const p0 = verts[0].position, p1 = verts[1].position, p2 = verts[2].position
-  const e1 = { x: p1.x - p0.x, y: p1.y - p0.y, z: p1.z - p0.z }
-  const e2 = { x: p2.x - p0.x, y: p2.y - p0.y, z: p2.z - p0.z }
-  const crossX = e1.y * e2.z - e1.z * e2.y
-  const crossY = e1.z * e2.x - e1.x * e2.z
-  const crossZ = e1.x * e2.y - e1.y * e2.x
-  const wArea = 0.5 * Math.hypot(crossX, crossY, crossZ)
-
-  const u0 = face.uvs[0], u1 = face.uvs[1], u2 = face.uvs[2]
-  const uvArea = 0.5 * Math.abs((u1.u - u0.u) * (u2.v - u0.v) - (u2.u - u0.u) * (u1.v - u0.v))
+  const areas = faceAreas(face, vertMap)
+  if (!areas) return 16
+  const wArea = areas.world
+  const uvArea = areas.uv
 
   if (wArea <= 0.00001 || uvArea <= 0.0000001) return 16
 
@@ -925,23 +1121,10 @@ export function applyTargetTexelDensity(
 
     for (const fIdx of island) {
       const face = newMesh.faces[fIdx]
-      if (face.uvs.length < 3) continue
-      const verts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
-      if (verts.length < 3) continue
-
-      const p0 = verts[0].position, p1 = verts[1].position, p2 = verts[2].position
-      const e1 = { x: p1.x - p0.x, y: p1.y - p0.y, z: p1.z - p0.z }
-      const e2 = { x: p2.x - p0.x, y: p2.y - p0.y, z: p2.z - p0.z }
-      const crossX = e1.y * e2.z - e1.z * e2.y
-      const crossY = e1.z * e2.x - e1.x * e2.z
-      const crossZ = e1.x * e2.y - e1.y * e2.x
-      const wArea = 0.5 * Math.hypot(crossX, crossY, crossZ)
-
-      const u0 = face.uvs[0], u1 = face.uvs[1], u2 = face.uvs[2]
-      const uvArea = 0.5 * Math.abs((u1.u - u0.u) * (u2.v - u0.v) - (u2.u - u0.u) * (u1.v - u0.v))
-
-      islandWorldArea += wArea
-      islandUvArea += uvArea
+      const areas = faceAreas(face, vertMap)
+      if (!areas) continue
+      islandWorldArea += areas.world
+      islandUvArea += areas.uv
 
       for (const uv of face.uvs) {
         cU += uv.u; cV += uv.v
@@ -986,21 +1169,10 @@ export function calculateUVDistortion(mesh: MeshObject): Map<string, { ratio: nu
   const faceData: { id: string; wArea: number; uvArea: number }[] = []
 
   for (const face of mesh.faces) {
-    if (face.uvs.length < 3) continue
-    const verts = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
-    if (verts.length < 3) continue
-
-    const p0 = verts[0].position, p1 = verts[1].position, p2 = verts[2].position
-    const e1 = { x: p1.x - p0.x, y: p1.y - p0.y, z: p1.z - p0.z }
-    const e2 = { x: p2.x - p0.x, y: p2.y - p0.y, z: p2.z - p0.z }
-    const wArea = 0.5 * Math.hypot(
-      e1.y * e2.z - e1.z * e2.y,
-      e1.z * e2.x - e1.x * e2.z,
-      e1.x * e2.y - e1.y * e2.x
-    )
-
-    const u0 = face.uvs[0], u1 = face.uvs[1], u2 = face.uvs[2]
-    const uvArea = 0.5 * Math.abs((u1.u - u0.u) * (u2.v - u0.v) - (u2.u - u0.u) * (u1.v - u0.v))
+    const areas = faceAreas(face, vertMap)
+    if (!areas) continue
+    const wArea = areas.world
+    const uvArea = areas.uv
 
     totalWorldArea += wArea
     totalUvArea += uvArea

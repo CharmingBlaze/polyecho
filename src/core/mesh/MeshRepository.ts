@@ -1,7 +1,16 @@
 import type { MeshObject } from '../../types/mesh'
 import { MeshBridge } from './MeshBridge'
+import type { MeshSnapshot } from './MeshKernel'
 
 export type MeshBridgeData = ReturnType<typeof MeshBridge.meshObjectToEditableMesh>
+export interface ResidentMeshSnapshot {
+  objectId: string
+  mesh: MeshSnapshot
+  strToNumVertId: [string, number][]
+  numToStrVertId: [number, string][]
+  strToNumFaceId: [string, number][]
+  numToStrFaceId: [number, string][]
+}
 
 type RepoEntry = { bridge: MeshBridgeData; signature: string; held: boolean }
 
@@ -56,6 +65,51 @@ export class MeshRepository {
     for (const [id, value] of bridge.numToStrFaceId) bridge.strToNumFaceId.set(value, id)
     const held = this.entries.get(document.id)?.held === true
     this.entries.set(document.id, { bridge, signature: signature(document), held })
+  }
+
+  /** Development guard: an editor commit must register the exact resident projection. */
+  assertPublished(document: MeshObject, bridge: MeshBridgeData): void {
+    if (typeof process !== 'undefined' && process.env.NODE_ENV === 'production') return
+    const entry = this.entries.get(document.id)
+    if (!entry || entry.bridge !== bridge || entry.signature !== signature(document)) {
+      throw new Error(`Resident mesh commit was not published for ${document.id}`)
+    }
+  }
+
+  /** In-memory history payload; never serialized into a project file. */
+  capture(): ResidentMeshSnapshot[] {
+    return [...this.entries].map(([objectId, entry]) => ({
+      objectId,
+      mesh: entry.bridge.mesh.createSnapshot(),
+      strToNumVertId: [...entry.bridge.strToNumVertId],
+      numToStrVertId: [...entry.bridge.numToStrVertId],
+      strToNumFaceId: [...entry.bridge.strToNumFaceId],
+      numToStrFaceId: [...entry.bridge.numToStrFaceId],
+    }))
+  }
+
+  /** Restore resident identity before the next acquire can reconcile from the document. */
+  restore(snapshots: ResidentMeshSnapshot[], documents: readonly MeshObject[]): void {
+    const docs = new Map(documents.map(document => [document.id, document]))
+    const keep = new Set<string>()
+    for (const snapshot of snapshots) {
+      const document = docs.get(snapshot.objectId)
+      if (!document) continue
+      keep.add(snapshot.objectId)
+      const existing = this.entries.get(snapshot.objectId)
+      const bridge = existing?.bridge ?? MeshBridge.meshObjectToEditableMesh(document)
+      bridge.mesh.restoreSnapshot(snapshot.mesh)
+      bridge.strToNumVertId = new Map(snapshot.strToNumVertId)
+      bridge.numToStrVertId = new Map(snapshot.numToStrVertId)
+      bridge.strToNumFaceId = new Map(snapshot.strToNumFaceId)
+      bridge.numToStrFaceId = new Map(snapshot.numToStrFaceId)
+      this.entries.set(snapshot.objectId, {
+        bridge,
+        signature: signature(document),
+        held: existing?.held === true,
+      })
+    }
+    for (const [id, entry] of this.entries) if (!keep.has(id) && !entry.held) this.entries.delete(id)
   }
 
   retain(objectIds: Iterable<string>): void {

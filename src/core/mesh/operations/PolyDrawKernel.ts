@@ -361,7 +361,8 @@ export class PolyDrawKernel {
     const span = new THREE.Box3().setFromPoints(points).getSize(new THREE.Vector3()).length()
     points = points.map(p => p.clone().sub(points[0]).divideScalar(span))
     if (n === 3) return [[0, 1, 2]]
-    if (n === 4 && this.goodQuad(points)) return [[0, 1, 2, 3]]
+    // A convex quad is one face, even when bent. The fill diagonal is not an edge.
+    if (n === 4 && this.isConvexLoop(points) && this.openCorners(points)) return [[0, 1, 2, 3]]
 
     const nrm = this.newellNormal(points)
     const up = Math.abs(nrm.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0)
@@ -407,14 +408,18 @@ export class PolyDrawKernel {
     return 2 * Math.sqrt(3) * area2 / (a.distanceToSquared(b) + b.distanceToSquared(c) + c.distanceToSquared(a))
   }
 
-  private static goodQuad(points: THREE.Vector3[]): boolean {
-    if (!this.isConvexLoop(points) || this.maxPlaneDeviation(points) > 1e-5) return false
-    // Avoid nearly straight corners: these produce slivers when exported as triangles.
+  /** Nearly straight corners collapse into slivers. Those stay split. */
+  private static openCorners(points: THREE.Vector3[]): boolean {
     return points.every((p, i) => {
-      const a = points[(i + 3) % 4].clone().sub(p).normalize()
-      const b = points[(i + 1) % 4].clone().sub(p).normalize()
-      return Math.abs(a.dot(b)) < 0.98
+      const prev = points[(i + points.length - 1) % points.length].clone().sub(p)
+      const next = points[(i + 1) % points.length].clone().sub(p)
+      if (prev.lengthSq() < 1e-12 || next.lengthSq() < 1e-12) return false
+      return Math.abs(prev.normalize().dot(next.normalize())) < 0.98
     })
+  }
+
+  private static goodQuad(points: THREE.Vector3[]): boolean {
+    return this.isConvexLoop(points) && this.maxPlaneDeviation(points) <= 1e-5 && this.openCorners(points)
   }
 
   private static isEar2d(
@@ -533,11 +538,11 @@ export class PolyDrawKernel {
       const ay = Math.abs(n.y)
       const az = Math.abs(n.z)
       if (ax >= ay && ax >= az) {
-        face.uvs = pts.map(p => new THREE.Vector2(snx(p.z, minZ, maxZ, n.x >= 0), nx(p.y, minY, maxY)))
+        mesh.setFaceUvs(face.id, pts.map(p => new THREE.Vector2(snx(p.z, minZ, maxZ, n.x >= 0), nx(p.y, minY, maxY))))
       } else if (ay >= ax && ay >= az) {
-        face.uvs = pts.map(p => new THREE.Vector2(nx(p.x, minX, maxX), snx(p.z, minZ, maxZ, n.y >= 0)))
+        mesh.setFaceUvs(face.id, pts.map(p => new THREE.Vector2(nx(p.x, minX, maxX), snx(p.z, minZ, maxZ, n.y >= 0))))
       } else {
-        face.uvs = pts.map(p => new THREE.Vector2(snx(p.x, minX, maxX, n.z >= 0), nx(p.y, minY, maxY)))
+        mesh.setFaceUvs(face.id, pts.map(p => new THREE.Vector2(snx(p.x, minX, maxX, n.z >= 0), nx(p.y, minY, maxY))))
       }
     }
   }

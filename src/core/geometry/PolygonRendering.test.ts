@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { Triangle, Vector3 } from 'three'
 import { createCube } from './Primitives'
-import { faceTriIndexSets, meshToThreeGeometry, updateThreeGeometryAttributes } from './Converters'
+import {
+  buildSelectionOverlayGeometries, faceTriIndexSets, meshCornerNormals,
+  meshToThreeGeometry, resolveMeshShadeMode, updateThreeGeometryAttributes,
+} from './Converters'
+import { getMeshEdges } from './EdgeUtils'
 import { MeshBridge } from '../mesh/MeshBridge'
 
 function polygon(points: number[][]) {
@@ -56,8 +60,36 @@ describe('polygon rendering', () => {
   })
 
   it('draws each real cube edge once, without triangle diagonals', () => {
-    const bundle = meshToThreeGeometry(createCube('Cube',2))
+    const cube = createCube('Cube',2)
+    const bundle = meshToThreeGeometry(cube)
     expect(bundle.wireframeGeometry.getAttribute('position').count).toBe(24)
+    expect(bundle.vertexIndexMap).toEqual(cube.vertices.map(vertex => vertex.id))
+    expect(bundle.faceIndexMap).toHaveLength(12)
+  })
+
+  it('builds selection overlays from polygon boundaries and parent faces', () => {
+    const cube = createCube('Cube', 2)
+    const face = cube.faces[0]!
+    const edgeId = getMeshEdges(cube).find(edge =>
+      face.vertexIds.includes(edge.v1) && face.vertexIds.includes(edge.v2))!.id
+    const overlays = buildSelectionOverlayGeometries(cube, [face.id], [edgeId])
+    expect(overlays.selectedFacesGeometry.getAttribute('position').count).toBe(6)
+    expect(overlays.selectedEdgesGeometry.getAttribute('position').count).toBe(2)
+  })
+
+  it('resolves object shade mode and emits normalized smooth corner normals', () => {
+    const cube = createCube('Cube', 2)
+    cube.shadeMode = 'flat'
+    expect(resolveMeshShadeMode(cube, 'smooth')).toBe('flat')
+    expect(meshCornerNormals(cube.faces, cube.vertices, 'flat')).toBeNull()
+    const normals = meshCornerNormals(cube.faces, cube.vertices, 'smooth')!
+    for (const face of cube.faces) {
+      for (const vertexId of face.vertexIds) {
+        const normal = normals.get(`${face.id}:${vertexId}`)
+        expect(normal).toBeTruthy()
+        expect(normal!.length()).toBeCloseTo(1)
+      }
+    }
   })
 
   it('updates flat polygon normals and bounds after positions move', () => {

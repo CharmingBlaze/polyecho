@@ -2,9 +2,11 @@ import * as THREE from 'three'
 import { MeshObject, Vertex, Face } from '../../types/mesh'
 import { Armature, Bone, AnimationClip, AnimationTrack, AnimationMarker } from '../../types/animation'
 import { Material, TextureMap } from '../../types/texture'
+import { normalizeTextureTile } from '../materials/TextureTiling'
 import { computeFaceNormal } from '../../utils/math'
 import { ensureMeshUVs, boxUnwrap } from '../geometry/UVUnwrap'
 import { DEFAULT_AUTO_SMOOTH_ANGLE, readImportedShade } from '../geometry/MeshShading'
+import { weldImportedMesh } from './ImportWeld'
 
 export interface GltfImportResult {
   meshes: MeshObject[]
@@ -190,7 +192,7 @@ export class GltfImport {
             ? boneIdMap.get(threeMesh.parent.uuid)
             : undefined
           const shade = readImportedShade(threeMesh, geom)
-          const gltfMesh: MeshObject = {
+          const gltfMesh: MeshObject = weldImportedMesh({
             id: `mesh_gltf_${meshes.length + 1}_${Math.random().toString(36).slice(2, 8)}`,
             name: threeMesh.name || `${fileName}_Mesh_${meshes.length + 1}`,
             visible: threeMesh.visible,
@@ -208,10 +210,10 @@ export class GltfImport {
             parentBoneId: parentBone,
             vertices: meshVertices,
             faces: meshFaces
-          }
+          })
 
           // Check if UVs exist or need Smart Box Unwrap
-          const hasValidUVs = meshFaces.some(f => f.uvs && f.uvs.some(u => u.u !== 0 || u.v !== 0))
+          const hasValidUVs = gltfMesh.faces.some(f => f.uvs && f.uvs.some(u => u.u !== 0 || u.v !== 0))
           if (!hasValidUVs) {
             const unwrapped = boxUnwrap(gltfMesh)
             gltfMesh.faces = unwrapped.faces
@@ -373,18 +375,25 @@ function bindImportedMaterial(
     ? `#${(threeMat as THREE.MeshStandardMaterial).color.getHexString()}`
     : '#ffffff'
   const std = threeMat as THREE.MeshStandardMaterial
+  const alphaTest = typeof std.alphaTest === 'number' ? std.alphaTest : 0
+  const isUnlit = threeMat instanceof THREE.MeshBasicMaterial
+  const tilingExtras = threeMat?.userData?.polyechoTextureTiling as
+    | { tileX?: unknown; tileY?: unknown }
+    | undefined
   const matId = `mat_gltf_${materials.length + 1}`
   materials.push({
     id: matId,
     name: threeMat?.name || `Imported_${materials.length + 1}`,
     textureId,
+    tileX: normalizeTextureTile(tilingExtras?.tileX ?? map?.repeat.x),
+    tileY: normalizeTextureTile(tilingExtras?.tileY ?? map?.repeat.y),
     color,
-    shading: 'textured',
+    shading: isUnlit ? 'unlit' : 'textured',
     roughness: typeof std.roughness === 'number' ? std.roughness : undefined,
     metalness: typeof std.metalness === 'number' ? std.metalness : undefined,
     opacity: typeof std.opacity === 'number' ? std.opacity : undefined,
-    alphaTest: typeof std.alphaTest === 'number' ? std.alphaTest : undefined,
-    blendMode: std?.transparent ? ((std.alphaTest ?? 0) > 0 ? 'mask' : 'blend') : 'opaque',
+    alphaTest,
+    blendMode: alphaTest > 0 ? 'mask' : std?.transparent ? 'blend' : 'opaque',
     doubleSided: std?.side === THREE.DoubleSide,
     psxJitter: false,
     psxJitterResolution: 240,

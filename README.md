@@ -4,6 +4,8 @@ A focused desktop low-poly 3D modeling, UV pixel painting, and skeletal animatio
 
 Designed from the ground up for indie game developers, retro game creators (PS1/DS/N64 styles), and technical artists who want a fast, no-nonsense workflow without the overhead of massive DCC packages.
 
+Complete documentation is available in the [Official User Manual (MANUAL.md)](MANUAL.md).
+
 ## Core Workflow
 
 PolyEcho combines five integrated workspaces:
@@ -64,7 +66,8 @@ PolyEcho combines five integrated workspaces:
 ### 5. Import & Export Pipeline
 - **GLTF / GLB (.glb)**: Multi-animation skeletal export with bone hierarchies, rigid limb assignments, smooth skins, materials, and marker event metadata in `extras`.
 - **Wavefront OBJ / MTL (.obj)**: Compatible with Blender, Godot, Unity, Unreal Engine, and custom game engines.
-- **Project Files (.psxproj)**: Self-contained JSON project format with full undo/redo state history.
+- **Project Files (.psxproj)**: Self-contained JSON project format for meshes, materials, textures, armatures, clips, viewport settings, and references. Undo/redo is session-only.
+- **Reliability Gates**: Deterministic topology edit fuzzing, strict project/autosave validation, GLB validation, large-mesh performance budgets, and Windows/Linux/macOS packaging checks run in the automated suite.
 
 ---
 
@@ -131,11 +134,11 @@ npm run typecheck
 npm test
 ```
 
-Ship bar and remaining 1.0 gaps: [docs/PRODUCTION.md](docs/PRODUCTION.md). Godot/Unity/Blender check: [docs/ENGINE_HANDOFF.md](docs/ENGINE_HANDOFF.md).
+`npm test` includes topology fuzz sequences, project/recovery lifecycle checks, GLB validation, and 5k/20k/50k mesh budgets. Ship bar and remaining 1.0 gaps: [docs/PRODUCTION.md](docs/PRODUCTION.md). Godot/Unity/Blender check: [docs/ENGINE_HANDOFF.md](docs/ENGINE_HANDOFF.md).
 
 ## Working on the codebase
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Use [docs/CODEMAP.md](docs/CODEMAP.md) to find modules, [docs/TEXTURES.md](docs/TEXTURES.md) for images/materials/paint target, [docs/ICONS.md](docs/ICONS.md) for `BlenderIcon`, [docs/INPUT.md](docs/INPUT.md) for RMB-pan, and [docs/INVARIANTS.md](docs/INVARIANTS.md) before changing mesh IDs, history, or exporters.
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Use [docs/CODEMAP.md](docs/CODEMAP.md) to find modules, [docs/TOPOLOGY.md](docs/TOPOLOGY.md) for the half-edge and corner model, [docs/TEXTURES.md](docs/TEXTURES.md) for images/materials/paint target, [docs/ICONS.md](docs/ICONS.md) for `BlenderIcon`, [docs/INPUT.md](docs/INPUT.md) for RMB-pan, and [docs/INVARIANTS.md](docs/INVARIANTS.md) before changing mesh IDs, history, or exporters.
 
 ---
 

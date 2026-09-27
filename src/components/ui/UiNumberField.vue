@@ -25,6 +25,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: 'update:modelValue', value: number): void
   (e: 'change', value: number): void
+  (e: 'commit', value: number): void
   (e: 'beforeChange'): void
 }>()
 
@@ -32,6 +33,7 @@ const isDragging = ref(false)
 let startX = 0
 let startVal = 0
 let emittedBeforeChange = false
+let activePointerId: number | null = null
 
 function emitBeforeChangeOnce() {
   if (emittedBeforeChange) return
@@ -39,21 +41,24 @@ function emitBeforeChangeOnce() {
   emit('beforeChange')
 }
 
-function handleMouseDown(e: MouseEvent) {
+function handlePointerDown(e: PointerEvent) {
   if (props.disabled) return
   if (e.button !== 0) return // Left click only
   
-  // If clicking directly on text input, allow focus
+  // Keep direct input entry available for keyboard and on-screen keyboards.
   if ((e.target as HTMLElement).tagName === 'INPUT') return
 
+  e.preventDefault()
   isDragging.value = true
   emittedBeforeChange = false
+  activePointerId = e.pointerId
   startX = e.clientX
   startVal = props.modelValue
   document.body.style.cursor = 'ew-resize'
 
-  const onMouseMove = (moveEvent: MouseEvent) => {
-    if (!isDragging.value) return
+  const onPointerMove = (moveEvent: PointerEvent) => {
+    if (!isDragging.value || moveEvent.pointerId !== activePointerId) return
+    moveEvent.preventDefault()
     const dx = moveEvent.clientX - startX
     const delta = dx * (props.step || 0.1)
     let newVal = Number((startVal + delta).toFixed(props.precision))
@@ -65,16 +70,21 @@ function handleMouseDown(e: MouseEvent) {
     emit('change', newVal)
   }
 
-  const onMouseUp = () => {
+  const finishPointer = (upEvent: PointerEvent) => {
+    if (upEvent.pointerId !== activePointerId) return
+    if (emittedBeforeChange) emit('commit', props.modelValue)
     isDragging.value = false
     emittedBeforeChange = false
+    activePointerId = null
     document.body.style.cursor = ''
-    window.removeEventListener('mousemove', onMouseMove)
-    window.removeEventListener('mouseup', onMouseUp)
+    window.removeEventListener('pointermove', onPointerMove)
+    window.removeEventListener('pointerup', finishPointer)
+    window.removeEventListener('pointercancel', finishPointer)
   }
 
-  window.addEventListener('mousemove', onMouseMove)
-  window.addEventListener('mouseup', onMouseUp)
+  window.addEventListener('pointermove', onPointerMove, { passive: false })
+  window.addEventListener('pointerup', finishPointer)
+  window.addEventListener('pointercancel', finishPointer)
 }
 
 function handleInput(event: Event) {
@@ -86,15 +96,16 @@ function handleInput(event: Event) {
     emitBeforeChangeOnce()
     emit('update:modelValue', clamped)
     emit('change', clamped)
+    emit('commit', clamped)
   }
 }
 </script>
 
 <template>
   <div 
-    class="flex items-center h-6 bg-ui-input border border-ui-borderSubtle hover:border-ui-borderDefault focus-within:border-ui-accent rounded-xs px-1.5 text-xs font-mono transition select-none group"
+    class="flex items-center h-6 bg-ui-input border border-ui-borderSubtle hover:border-ui-borderDefault focus-within:border-ui-accent rounded-xs px-1.5 text-xs font-mono transition select-none touch-none group"
     :class="{ 'opacity-40 pointer-events-none': disabled, 'cursor-ew-resize': !disabled }"
-    @mousedown="handleMouseDown"
+    @pointerdown="handlePointerDown"
   >
     <span 
       v-if="label" 

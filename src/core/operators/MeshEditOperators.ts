@@ -12,6 +12,7 @@ import {
 } from '../mesh/operations/SlideKernel'
 import { TransformSolver } from '../transform/TransformSolver'
 import { ScreenGeometry } from '../geometry/ScreenGeometry'
+import { CurveChain } from '../mesh/operations/CurveChain'
 
 function mouseDelta(startX: number, curX: number, shift: boolean, numeric: number | null): number {
   if (numeric !== null) return numeric
@@ -215,7 +216,7 @@ export class ShearOperator extends ModalOperator {
 }
 
 export class ToSphereOperator extends ModalOperator {
-  readonly name = 'To Sphere'
+  readonly name = 'Spherize'
   private factor = 0
 
   evaluate() {
@@ -225,6 +226,28 @@ export class ToSphereOperator extends ModalOperator {
   }
 
   updateStatus() {
-    this.statusText = `To Sphere ${this.factor.toFixed(3)}  (Enter confirm · Esc cancel)`
+    this.statusText = `Spherize ${this.factor.toFixed(3)}  (Enter confirm · Esc cancel)`
+  }
+}
+
+export class CurveOperator extends ModalOperator {
+  readonly name = 'Curve'
+  private amount = 0
+
+  evaluate() {
+    this.restoreSnapshot()
+    this.amount = mouseDelta(this.startMouse.x, this.currentMouse.x, this.isShiftHeld, this.numericInput.getValue())
+    const right = new THREE.Vector3().setFromMatrixColumn(this.ctx.camera.matrixWorld, 0)
+    const up = new THREE.Vector3().setFromMatrixColumn(this.ctx.camera.matrixWorld, 1)
+    CurveChain.apply(this.ctx.mesh, [...this.collectTargetVertIds()], this.amount, right, up)
+  }
+
+  confirm() {
+    if (this.collectTargetVertIds().size < 3) { this.cancel(); return }
+    super.confirm()
+  }
+
+  updateStatus() {
+    this.statusText = `Curve ${this.amount.toFixed(3)}  (drag to round · Shift slow · Enter confirm · Esc cancel)`
   }
 }

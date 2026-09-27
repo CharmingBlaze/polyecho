@@ -4,7 +4,7 @@ import { MeshObject, Vertex, Face, MeshShadeMode } from '../../types/mesh'
 import { Bone } from '../../types/animation'
 import { computeFaceNormal } from '../../utils/math'
 import { getMeshEdges } from './EdgeUtils'
-import { evaluateModifiers } from './Modifiers'
+import { evaluateModifiers, type ModifierEvalOptions } from './Modifiers'
 import { DEFAULT_AUTO_SMOOTH_ANGLE } from './MeshShading'
 import { ensureMeshUVs } from './UVUnwrap'
 import { surfaceTriangles } from './SurfaceGeometry'
@@ -139,6 +139,14 @@ export function buildBoneSkinMatrices(
 
 export function faceTriIndexSets(verts: Array<{ position: { x: number; y: number; z: number } }>): number[][] {
   return surfaceTriangles(verts.map(({ position: p }) => new THREE.Vector3(p.x, p.y, p.z)))
+}
+
+/** Which face loops and corners the fill triangles came from; a vertex drag can reuse the buffers while this is unchanged. */
+interface RenderTopology {
+  faceIds: string[]
+  /** Every drawn face's vertexIds, concatenated in draw order. */
+  loopVertexIds: string[]
+  corners: Int32Array
 }
 
 export function meshHasSkinWeights(mesh: MeshObject): boolean {
@@ -285,7 +293,8 @@ function addAngleWeightedNormal(
 function buildAutoSmoothCornerNormals(
   evalFaces: Face[],
   vertMap: Map<string, Vertex>,
-  angleDeg: number
+  angleDeg: number,
+  forcedSharp?: Iterable<string>
 ): Map<string, THREE.Vector3> {
   const faceNormals: THREE.Vector3[] = []
   const faceVertLists: Vertex[][] = []
@@ -318,6 +327,7 @@ function buildAutoSmoothCornerNormals(
     const dot = Math.max(-1, Math.min(1, faceNormals[fis[0]].dot(faceNormals[fis[1]])))
     if (dot < cosLimit) sharp.add(key)
   }
+  if (forcedSharp) for (const key of forcedSharp) sharp.add(key)
 
   const result = new Map<string, THREE.Vector3>()
   for (let fi = 0; fi < evalFaces.length; fi++) {
@@ -367,12 +377,13 @@ export function meshCornerNormals(
   faces: Face[],
   vertices: Vertex[],
   shade: MeshShadeMode,
-  autoSmoothAngle: number = DEFAULT_AUTO_SMOOTH_ANGLE
+  autoSmoothAngle: number = DEFAULT_AUTO_SMOOTH_ANGLE,
+  forcedSharp?: Iterable<string>
 ): Map<string, THREE.Vector3> | null {
   if (shade === 'flat') return null
   const vertMap = new Map<string, Vertex>()
   for (const v of vertices) vertMap.set(v.id, v)
-  return buildAutoSmoothCornerNormals(faces, vertMap, shade === 'smooth' ? 180 : autoSmoothAngle)
+  return buildAutoSmoothCornerNormals(faces, vertMap, shade === 'smooth' ? 180 : autoSmoothAngle, forcedSharp)
 }
 
 export function meshToThreeGeometry(
@@ -382,10 +393,11 @@ export function meshToThreeGeometry(
   globalShadeMode: 'flat' | 'smooth' = 'flat',
   skeletalDeformContext?: { isPoseMode: boolean; bones: Bone[] },
   weightPaintContext?: { isWeightPaint: boolean; activeBoneId?: string },
-  selectedVertexIds: string[] = []
+  selectedVertexIds: string[] = [],
+  modifier?: ModifierEvalOptions
 ): GeometryBundle {
   ensureMeshUVs(mesh)
-  const { vertices: evalVertices, faces: evalFaces } = evaluateModifiers(mesh)
+  let { vertices: evalVertices, faces: evalFaces } = evaluateModifiers(mesh, modifier)
 
   const posedPos = new Map<string, { x: number; y: number; z: number }>()
   if (skeletalDeformContext && skeletalDeformContext.isPoseMode && skeletalDeformContext.bones.length > 0) {
@@ -409,7 +421,7 @@ export function meshToThreeGeometry(
 
   const normalVertices = new Map([...vertMap].map(([id, v]) => [id, { ...v, position: posOf(v) }]))
   const autoCornerNormals = shade !== 'flat'
-    ? buildAutoSmoothCornerNormals(evalFaces, normalVertices, shade === 'smooth' ? 180 : mesh.autoSmoothAngle ?? DEFAULT_AUTO_SMOOTH_ANGLE)
+    ? buildAutoSmoothCornerNormals(evalFaces, normalVertices, shade === 'smooth' ? 180 : mesh.autoSmoothAngle ?? DEFAULT_AUTO_SMOOTH_ANGLE, mesh.sharpEdgeIds)
     : null
 
   const positions: number[] = []
@@ -417,7 +429,9 @@ export function meshToThreeGeometry(
   const uvs: number[] = []
   const colors: number[] = []
   const faceIndexMap: number[] = []
-  const renderCornerKeys: string[] = []
+  const renderFaceIds: string[] = []
+  const renderLoopVertexIds: string[] = []
+  const renderCorners: number[] = []
   const paintFaceMap: GeometryBundle['paintFaceMap'] = []
 
   const wireframePositions: number[] = []
@@ -446,6 +460,10 @@ export function meshToThreeGeometry(
     }
 
     const triIndexSets = faceTriIndexSets(faceVerts)
+    if (triIndexSets.length) {
+      renderFaceIds.push(face.id)
+      for (const id of face.vertexIds) renderLoopVertexIds.push(id)
+    }
 
     for (const tri of triIndexSets) {
       const v0 = faceVerts[tri[0]]
@@ -461,7 +479,7 @@ export function meshToThreeGeometry(
       const triUVs = [uv0, uv1, uv2]
 
       for (let j = 0; j < 3; j++) {
-        renderCornerKeys.push(JSON.stringify([face.id, tri[j], face.vertexIds[tri[j]]]))
+        renderCorners.push(tri[j])
         const v = triVerts[j]
         const uv = triUVs[j]
 
@@ -537,7 +555,9 @@ export function meshToThreeGeometry(
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
 
-  geometry.userData.renderCornerKeys = renderCornerKeys
+  geometry.userData.renderTopology = {
+    faceIds: renderFaceIds, loopVertexIds: renderLoopVertexIds, corners: Int32Array.from(renderCorners)
+  } satisfies RenderTopology
 
   // Wireframe lines
   const wireframeGeometry = new THREE.BufferGeometry()
@@ -590,9 +610,10 @@ export function meshToThreeGeometry(
 export function buildSelectionOverlayGeometries(
   mesh: MeshObject,
   selectedFaceIds: string[],
-  selectedEdgeIds: string[]
+  selectedEdgeIds: string[],
+  modifier?: ModifierEvalOptions
 ): { selectedFacesGeometry: THREE.BufferGeometry; selectedEdgesGeometry: THREE.BufferGeometry } {
-  const { vertices: evalVertices, faces: evalFaces } = evaluateModifiers(mesh)
+  const { vertices: evalVertices, faces: evalFaces } = evaluateModifiers(mesh, modifier)
   const vertMap = new Map<string, Vertex>()
   for (const v of evalVertices) vertMap.set(v.id, v)
 
@@ -651,14 +672,15 @@ export function updateThreeGeometryAttributes(
   geometry: THREE.BufferGeometry,
   skeletalContext?: { isPoseMode?: boolean; bones?: Bone[]; skinMatrices?: Map<string, THREE.Matrix4> },
   weightPaintContext?: { isWeightPaint?: boolean; activeBoneId?: string },
-  shadeMode: MeshShadeMode = 'flat'
+  shadeMode: MeshShadeMode = 'flat',
+  modifier?: ModifierEvalOptions
 ): boolean {
   const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute
   const colAttr = geometry.getAttribute('color') as THREE.BufferAttribute | undefined
   const nrmAttr = geometry.getAttribute('normal') as THREE.BufferAttribute | undefined
   if (!posAttr) return false
 
-  const { vertices: evalVertices, faces: evalFaces } = evaluateModifiers(meshObj)
+  const { vertices: evalVertices, faces: evalFaces } = evaluateModifiers(meshObj, modifier)
   const skinMatrices =
     skeletalContext?.skinMatrices
     ?? (skeletalContext?.isPoseMode && skeletalContext.bones && skeletalContext.bones.length > 0
@@ -673,33 +695,43 @@ export function updateThreeGeometryAttributes(
     vertMap.set(v.id, v)
   }
 
-  const triangles = evalFaces.map(face => {
-    const vertices = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
-    return { face, vertices, triangles: faceTriIndexSets(vertices) }
-  })
-  const keys = triangles.flatMap(({ face, triangles }) => triangles.flatMap(tri =>
-    tri.map(i => JSON.stringify([face.id, i, face.vertexIds[i]]))))
-  const previousKeys: string[] | undefined = geometry.userData.renderCornerKeys
+  const topology: RenderTopology | undefined = geometry.userData.renderTopology
+  if (!topology || topology.corners.length !== posAttr.count) return false
   // A changed triangulation requires rebuilding UVs and pick maps as well as positions.
-  if (keys.length !== posAttr.count || !previousKeys || keys.some((key, i) => key !== previousKeys[i])) return false
-
-  const posed = new Map<string, Vertex>()
-  for (const [id, vertex] of vertMap) {
-    let position = vertex.position
-    if (skinMatrices && skinVertexInto(_skinMeshMatrix, vertex, skinMatrices, _skinOut)) {
-      position = { x: _skinOut.x, y: _skinOut.y, z: _skinOut.z }
-    }
-    posed.set(id, { ...vertex, position })
+  const triangles: { face: Face; vertices: Vertex[]; triangles: number[][] }[] = []
+  let faceCursor = 0, loopCursor = 0, cornerCursor = 0
+  for (const face of evalFaces) {
+    const vertices = face.vertexIds.map(id => vertMap.get(id)!).filter(Boolean)
+    if (vertices.length < 3) continue
+    const tris = faceTriIndexSets(vertices)
+    if (!tris.length) continue
+    if (topology.faceIds[faceCursor++] !== face.id) return false
+    for (const id of face.vertexIds) if (topology.loopVertexIds[loopCursor++] !== id) return false
+    for (const tri of tris) for (const corner of tri) if (topology.corners[cornerCursor++] !== corner) return false
+    triangles.push({ face, vertices, triangles: tris })
   }
-  const cornerNormals = shadeMode === 'flat' ? null : buildAutoSmoothCornerNormals(
-    evalFaces, posed, shadeMode === 'smooth' ? 180 : meshObj.autoSmoothAngle ?? DEFAULT_AUTO_SMOOTH_ANGLE)
+  if (faceCursor !== topology.faceIds.length || loopCursor !== topology.loopVertexIds.length || cornerCursor !== posAttr.count) return false
+
+  const posedPositions = new Map<string, { x: number; y: number; z: number }>()
+  for (const [id, vertex] of vertMap) {
+    posedPositions.set(id, skinMatrices && skinVertexInto(_skinMeshMatrix, vertex, skinMatrices, _skinOut)
+      ? { x: _skinOut.x, y: _skinOut.y, z: _skinOut.z }
+      : vertex.position)
+  }
+  let cornerNormals: Map<string, THREE.Vector3> | null = null
+  if (shadeMode !== 'flat') {
+    const posed = new Map<string, Vertex>()
+    for (const [id, vertex] of vertMap) posed.set(id, { ...vertex, position: posedPositions.get(id)! })
+    cornerNormals = buildAutoSmoothCornerNormals(
+      evalFaces, posed, shadeMode === 'smooth' ? 180 : meshObj.autoSmoothAngle ?? DEFAULT_AUTO_SMOOTH_ANGLE, meshObj.sharpEdgeIds)
+  }
   let index = 0
   for (const { face, vertices, triangles: tris } of triangles) {
-    const normal = computeFaceNormal(vertices.map(v => posed.get(v.id)!.position))
+    const normal = computeFaceNormal(vertices.map(v => posedPositions.get(v.id)!))
     for (const tri of tris) {
       for (const corner of tri) {
-        const vertex = posed.get(vertices[corner].id)!
-        const p = vertex.position
+        const vertex = vertices[corner]
+        const p = posedPositions.get(vertex.id)!
         posAttr.setXYZ(index, p.x, p.y, p.z)
         const n = cornerNormals?.get(`${face.id}:${vertex.id}`) ?? normal
         nrmAttr?.setXYZ(index, n.x, n.y, n.z)

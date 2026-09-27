@@ -44,6 +44,7 @@ describe('theme engine', () => {
     expect(root.style.getPropertyValue('--ui-danger')).toBe(colors.danger)
     expect(root.style.getPropertyValue('--ui-vertex')).toBe(colors.vertexColor)
     expect(root.style.getPropertyValue('--ui-scale-factor')).toBe('1.1')
+    expect(root.style.fontSize).toBe('17.6px')
     expect(root.style.getPropertyValue('--ui-on-accent')).toMatch(/^#/)
   })
 

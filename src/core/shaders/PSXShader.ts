@@ -1,8 +1,11 @@
 import * as THREE from 'three'
+import { DITHER_FUNCTION_GLSL } from '../materials/RealtimeDither'
+import { applyPsxLightingUniforms, DEFAULT_VIEWPORT_LIGHTING, VIEWPORT_KEY_LIGHT_POSITION } from '../render/ViewportLighting'
 
 export interface PSXShaderUniforms {
   [uniform: string]: THREE.IUniform
   uTexture: { value: THREE.Texture | null }
+  uTextureRepeat: { value: THREE.Vector2 }
   uHasTexture: { value: boolean }
   uColor: { value: THREE.Color }
   uResolution: { value: THREE.Vector2 }
@@ -22,6 +25,8 @@ export interface PSXShaderUniforms {
   uDreamcastSpecular: { value: boolean }
   uDreamcastCelOutline: { value: boolean }
   uLightDirection: { value: THREE.Vector3 }
+  uLightColor: { value: THREE.Color }
+  uKeyIntensity: { value: number }
   uAmbientLight: { value: THREE.Color }
   uOpacity: { value: number }
   uAlphaTest: { value: number }
@@ -30,15 +35,18 @@ export interface PSXShaderUniforms {
 const vertexShader = /* glsl */ `
   varying vec2 vUv;
   varying vec3 vColor;
-  varying float vLightIntensity;
+  varying vec3 vLightColor;
   varying vec4 vAffineUv;
   varying vec3 vWorldPos;
   varying vec3 vNormal;
   varying vec3 vViewDir;
+  varying float vFogDepth;
 
   uniform vec2 uResolution;
   uniform float uJitterAmount;
   uniform vec3 uLightDirection;
+  uniform vec3 uLightColor;
+  uniform float uKeyIntensity;
   uniform vec3 uAmbientLight;
   uniform bool uAffineEnabled;
   uniform int uConsoleMode; // 0: PSX, 1: Saturn, 2: Dreamcast, 3: N64
@@ -50,14 +58,22 @@ const vertexShader = /* glsl */ `
     vWorldPos = worldPosition.xyz;
     vNormal = normalize(normalMatrix * normal);
 
-    // Gouraud shading calculation in world/view space
+    // Gouraud shading. Dreamcast uses half-Lambert plus a cool fill so
+    // low-poly forms stay readable, the way PowerVR arcade lighting did.
     vec3 lightDir = normalize(uLightDirection);
-    float diff = max(dot(vNormal, lightDir), 0.0);
-    vLightIntensity = min(1.0, 0.30 + diff * 0.75);
-
-    // View direction for specular highlights (Dreamcast)
+    float ndotl = dot(vNormal, lightDir);
+    float diff = max(ndotl, 0.0);
     vec4 viewPos = modelViewMatrix * vec4(position, 1.0);
     vViewDir = normalize(-viewPos.xyz);
+    vFogDepth = -viewPos.z;
+
+    if (uConsoleMode == 2) {
+      float wrap = diff * 0.62 + 0.38;
+      vec3 fill = vec3(0.28, 0.42, 0.62) * clamp(0.55 - ndotl, 0.0, 1.0);
+      vLightColor = min(uAmbientLight * 0.72 + uLightColor * wrap * uKeyIntensity + fill, vec3(1.55));
+    } else {
+      vLightColor = min(uAmbientLight + uLightColor * diff * uKeyIntensity, vec3(1.35));
+    }
 
     // Standard projection
     vec4 clipPos = projectionMatrix * viewPos;
@@ -82,6 +98,7 @@ const vertexShader = /* glsl */ `
 
 const fragmentShader = /* glsl */ `
   uniform sampler2D uTexture;
+  uniform vec2 uTextureRepeat;
   uniform bool uHasTexture;
   uniform vec3 uColor;
   uniform bool uAffineEnabled;
@@ -104,141 +121,17 @@ const fragmentShader = /* glsl */ `
 
   varying vec2 vUv;
   varying vec3 vColor;
-  varying float vLightIntensity;
+  varying vec3 vLightColor;
   varying vec4 vAffineUv;
   varying vec3 vWorldPos;
   varying vec3 vNormal;
   varying vec3 vViewDir;
+  varying float vFogDepth;
 
-  float bayer2x2(vec2 uv) {
-    vec2 p = mod(floor(uv), 2.0);
-    if (p.y == 0.0) {
-      return p.x == 0.0 ? 0.0 / 4.0 : 2.0 / 4.0;
-    } else {
-      return p.x == 0.0 ? 3.0 / 4.0 : 1.0 / 4.0;
-    }
-  }
-
-  // 4x4 Bayer Matrix
-  float bayer4x4(vec2 uv) {
-    vec2 p = mod(floor(uv), 4.0);
-    int x = int(p.x);
-    int y = int(p.y);
-    
-    if (y == 0) {
-      if (x == 0) return 0.0 / 16.0;
-      if (x == 1) return 8.0 / 16.0;
-      if (x == 2) return 2.0 / 16.0;
-      return 10.0 / 16.0;
-    } else if (y == 1) {
-      if (x == 0) return 12.0 / 16.0;
-      if (x == 1) return 4.0 / 16.0;
-      if (x == 2) return 14.0 / 16.0;
-      return 6.0 / 16.0;
-    } else if (y == 2) {
-      if (x == 0) return 3.0 / 16.0;
-      if (x == 1) return 11.0 / 16.0;
-      if (x == 2) return 1.0 / 16.0;
-      return 9.0 / 16.0;
-    } else {
-      if (x == 0) return 15.0 / 16.0;
-      if (x == 1) return 7.0 / 16.0;
-      if (x == 2) return 13.0 / 16.0;
-      return 5.0 / 16.0;
-    }
-  }
-
-  float bayer8x8(vec2 uv) {
-    vec2 p = mod(floor(uv), 8.0);
-    vec2 p4 = mod(p, 4.0);
-    float m4 = bayer4x4(p4);
-    vec2 p2 = floor(p / 4.0);
-    float m2 = bayer2x2(p2);
-    return (m4 * 16.0 + m2) / 64.0;
-  }
-
-  float bayer16x16(vec2 uv) {
-    vec2 p = mod(floor(uv), 16.0);
-    vec2 p8 = mod(p, 8.0);
-    float m8 = bayer8x8(p8);
-    vec2 p2 = floor(p / 8.0);
-    float m2 = bayer2x2(p2);
-    return (m8 * 64.0 + m2) / 256.0;
-  }
-
-  // Clustered Dot Halftone Matrix 4x4
-  float halftone4x4(vec2 uv) {
-    vec2 p = mod(floor(uv), 4.0);
-    int x = int(p.x);
-    int y = int(p.y);
-    if (y == 0) {
-      if (x == 0) return 11.0 / 16.0;
-      if (x == 1) return 4.0 / 16.0;
-      if (x == 2) return 6.0 / 16.0;
-      return 12.0 / 16.0;
-    } else if (y == 1) {
-      if (x == 0) return 3.0 / 16.0;
-      if (x == 1) return 0.0 / 16.0;
-      if (x == 2) return 1.0 / 16.0;
-      return 7.0 / 16.0;
-    } else if (y == 2) {
-      if (x == 0) return 9.0 / 16.0;
-      if (x == 1) return 2.0 / 16.0;
-      if (x == 2) return 5.0 / 16.0;
-      return 10.0 / 16.0;
-    } else {
-      if (x == 0) return 15.0 / 16.0;
-      if (x == 1) return 8.0 / 16.0;
-      if (x == 2) return 14.0 / 16.0;
-      return 13.0 / 16.0;
-    }
-  }
-
-  // Blue Noise pseudo-hash
-  float blueNoise(vec2 uv) {
-    vec2 p = mod(floor(uv), 8.0);
-    float n = fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-    float b = bayer8x8(p);
-    return mix(b, n, 0.45);
-  }
-
-  float crosshatch(vec2 uv) {
-    vec2 p = floor(uv);
-    float l1 = mod(p.x + p.y, 4.0) == 0.0 ? 0.35 : -0.15;
-    float l2 = mod(p.x - p.y + 4000.0, 4.0) == 0.0 ? 0.35 : -0.15;
-    return (l1 + l2) * 0.5;
-  }
-
-  float horizontalLines(vec2 uv) {
-    return mod(floor(uv.y), 2.0) == 0.0 ? 0.35 : -0.35;
-  }
-
-  float verticalLines(vec2 uv) {
-    return mod(floor(uv.x), 2.0) == 0.0 ? 0.35 : -0.35;
-  }
-
-  float checker2x2(vec2 uv) {
-    vec2 p = mod(floor(uv), 2.0);
-    return (p.x == p.y) ? 0.35 : -0.35;
-  }
-
-  float randomNoise(vec2 uv) {
-    return fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
-  }
+  ${DITHER_FUNCTION_GLSL}
 
   float getDitherValue(vec2 uv) {
-    vec2 scaledUv = floor(uv / max(uDitherScale, 1.0));
-    if (uDitherPatternType == 1) return bayer8x8(scaledUv) - 0.5;
-    if (uDitherPatternType == 2) return bayer2x2(scaledUv) - 0.5;
-    if (uDitherPatternType == 3) return bayer16x16(scaledUv) - 0.5;
-    if (uDitherPatternType == 4) return blueNoise(scaledUv) - 0.5;
-    if (uDitherPatternType == 5) return halftone4x4(scaledUv) - 0.5;
-    if (uDitherPatternType == 6) return crosshatch(scaledUv);
-    if (uDitherPatternType == 7) return horizontalLines(scaledUv);
-    if (uDitherPatternType == 8) return verticalLines(scaledUv);
-    if (uDitherPatternType == 9) return checker2x2(scaledUv);
-    if (uDitherPatternType == 10) return randomNoise(scaledUv);
-    return bayer4x4(scaledUv) - 0.5;
+    return peDitherScalar(uv, uDitherPatternType, uDitherScale);
   }
 
   void main() {
@@ -272,6 +165,7 @@ const fragmentShader = /* glsl */ `
     } else {
       finalUv = vUv;
     }
+    finalUv *= uTextureRepeat;
 
     vec4 texColor = vec4(1.0);
     if (uHasTexture) {
@@ -282,20 +176,36 @@ const fragmentShader = /* glsl */ `
     // ----------------------------------------------------
     // 4. LIGHTING & BASE COLOR
     // ----------------------------------------------------
-    vec3 baseCol = texColor.rgb * uColor * vColor * vLightIntensity;
+    vec3 baseCol = texColor.rgb * uColor * vColor * vLightColor;
 
-    // Sega Dreamcast PowerVR Arcade Specular Highlights
-    if (uConsoleMode == 2 && uDreamcastSpecular) {
-      vec3 lightDir = normalize(uLightDirection);
-      vec3 halfDir = normalize(lightDir + vViewDir);
-      float spec = pow(max(dot(vNormal, halfDir), 0.0), 16.0);
-      baseCol += vec3(0.6, 0.65, 0.7) * spec * 0.75;
-    }
+    // Sega Dreamcast / PowerVR2: glossy gouraud, env-map rim, saturated color.
+    if (uConsoleMode == 2) {
+      vec3 n = normalize(vNormal);
+      vec3 viewDir = normalize(vViewDir);
+      if (uDreamcastSpecular) {
+        vec3 lightDir = normalize(uLightDirection);
+        vec3 halfDir = normalize(lightDir + viewDir);
+        float spec = pow(max(dot(n, halfDir), 0.0), 28.0);
+        baseCol += vec3(1.0, 0.98, 0.94) * spec * 0.85;
+      }
+      float fresnel = pow(1.0 - clamp(dot(n, viewDir), 0.0, 1.0), 2.6);
+      baseCol += vec3(0.42, 0.70, 1.0) * fresnel * 0.28;
 
-    // Dreamcast VQ Vector Quantization Arcade Color Boost
-    if (uConsoleMode == 2 && uDreamcastVQ) {
-      // 16-bit RGB565 / VQ Punchy Contrast
-      baseCol = pow(baseCol, vec3(0.95)) * 1.08;
+      if (uDreamcastVQ) {
+        float luma = dot(baseCol, vec3(0.299, 0.587, 0.114));
+        baseCol = mix(vec3(luma), baseCol, 1.22);
+        baseCol = pow(max(baseCol, vec3(0.0)), vec3(0.9));
+      }
+
+      // Distance haze used by late-90s Sega games (sky matches the viewport fog).
+      float fog = smoothstep(7.0, 34.0, vFogDepth);
+      baseCol = mix(baseCol, vec3(0.494, 0.784, 0.918), fog * 0.62);
+
+      // PowerVR wrote a 16-bit RGB565 framebuffer with ordered dither.
+      float dither = getDitherValue(gl_FragCoord.xy) - 0.5;
+      vec3 steps = vec3(31.0, 63.0, 31.0);
+      baseCol = clamp(baseCol, 0.0, 1.0) + dither / steps;
+      baseCol = floor(clamp(baseCol, 0.0, 1.0) * steps + 0.5) / steps;
     }
 
     // ----------------------------------------------------
@@ -308,7 +218,7 @@ const fragmentShader = /* glsl */ `
       ditherCoords = vWorldPos.xy * 64.0;
     }
 
-    if (uDitherEnabled) {
+    if (uDitherEnabled && uConsoleMode != 2) {
       float ditherVal = getDitherValue(ditherCoords);
       float quantSteps = uColorDepth > 0.0 ? uColorDepth : 32.0;
       float ditherOffset = (ditherVal * uDitherIntensity) / max(quantSteps, 1.0);
@@ -322,14 +232,14 @@ const fragmentShader = /* glsl */ `
         float lumaRatio = luma > 0.001 ? (ditheredLuma / luma) : 1.0;
         baseCol = clamp(baseCol * lumaRatio, 0.0, 1.0);
       } else {
-        baseCol = clamp(baseCol + vec3(ditherOffset), 0.0, 1.0);
+        baseCol = clamp(baseCol + peDitherDelta(ditherCoords, uDitherPatternType, uDitherScale, uDitherIntensity, uColorDepth), 0.0, 1.0);
       }
     }
 
     // ----------------------------------------------------
-    // 6. COLOR QUANTIZATION (PSX/Saturn 15-bit RGB555 vs DC 16/24-bit)
+    // 6. COLOR QUANTIZATION (PSX/Saturn 15-bit RGB555). Dreamcast uses RGB565 above.
     // ----------------------------------------------------
-    if (uColorDepth > 0.0) {
+    if (uColorDepth > 0.0 && uConsoleMode != 2) {
       baseCol = floor(baseCol * uColorDepth + 0.5) / uColorDepth;
     }
 
@@ -337,15 +247,29 @@ const fragmentShader = /* glsl */ `
   }
 `
 
-export function createPSXMaterial(texture: THREE.Texture | null = null, resolution = new THREE.Vector2(320, 240)): THREE.ShaderMaterial {
-  if (texture) {
+/** PS1/Saturn/N64 stay nearest. Dreamcast (mode 2) is bilinear with mipmaps. */
+export function applyConsoleTextureFiltering(texture: THREE.Texture | null, consoleMode: number) {
+  if (!texture) return
+  if (consoleMode === 2) {
+    texture.magFilter = THREE.LinearFilter
+    texture.minFilter = THREE.LinearMipmapLinearFilter
+    texture.generateMipmaps = true
+    texture.anisotropy = 8
+  } else {
     texture.magFilter = THREE.NearestFilter
     texture.minFilter = THREE.NearestFilter
     texture.generateMipmaps = false
+    texture.anisotropy = 1
   }
+  texture.needsUpdate = true
+}
+
+export function createPSXMaterial(texture: THREE.Texture | null = null, resolution = new THREE.Vector2(320, 240)): THREE.ShaderMaterial {
+  applyConsoleTextureFiltering(texture, 0)
 
   const uniforms: PSXShaderUniforms = {
     uTexture: { value: texture },
+    uTextureRepeat: { value: new THREE.Vector2(1, 1) },
     uHasTexture: { value: texture !== null },
     uColor: { value: new THREE.Color(1, 1, 1) },
     uResolution: { value: resolution },
@@ -364,13 +288,15 @@ export function createPSXMaterial(texture: THREE.Texture | null = null, resoluti
     uDreamcastVQ: { value: false },
     uDreamcastSpecular: { value: false },
     uDreamcastCelOutline: { value: false },
-    uLightDirection: { value: new THREE.Vector3(0.5, 1.0, 0.8).normalize() },
-    uAmbientLight: { value: new THREE.Color(0.2, 0.2, 0.25) },
+    uLightDirection: { value: VIEWPORT_KEY_LIGHT_POSITION.clone().normalize() },
+    uLightColor: { value: new THREE.Color(DEFAULT_VIEWPORT_LIGHTING.keyColor) },
+    uKeyIntensity: { value: 0.95 },
+    uAmbientLight: { value: new THREE.Color(0.5, 0.55, 0.58) },
     uOpacity: { value: 1.0 },
     uAlphaTest: { value: 0.05 }
   }
 
-  return new THREE.ShaderMaterial({
+  const material = new THREE.ShaderMaterial({
     uniforms,
     vertexShader,
     fragmentShader,
@@ -378,4 +304,6 @@ export function createPSXMaterial(texture: THREE.Texture | null = null, resoluti
     side: THREE.DoubleSide,
     transparent: true
   })
+  applyPsxLightingUniforms(material.uniforms, DEFAULT_VIEWPORT_LIGHTING)
+  return material
 }

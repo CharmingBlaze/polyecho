@@ -1,4 +1,5 @@
 import type { MeshObject } from '../../types/mesh'
+import { getMeshEdges } from '../geometry/EdgeUtils'
 
 /** Mesh + selection fields history restores (textures stay on PixelBuffer.clone). */
 export interface MeshDocumentSlice {
@@ -37,10 +38,12 @@ export function selectionExistsOnMeshes(slice: MeshDocumentSlice): boolean {
   if (slice.selectedMeshIds.some(id => !meshIds.has(id))) return false
   const mesh = slice.meshes.find(m => m.id === slice.activeMeshId)
   if (!mesh) {
-    return slice.selectedVertexIds.length === 0 && slice.selectedFaceIds.length === 0
+    return slice.selectedVertexIds.length === 0 && slice.selectedEdgeIds.length === 0 && slice.selectedFaceIds.length === 0
   }
   const verts = new Set(mesh.vertices.map(v => v.id))
   const faces = new Set(mesh.faces.map(f => f.id))
+  const edges = slice.selectedEdgeIds.length ? new Set(getMeshEdges(mesh).map(e => e.id)) : new Set<string>()
   return slice.selectedVertexIds.every(id => verts.has(id))
+    && slice.selectedEdgeIds.every(id => edges.has(id))
     && slice.selectedFaceIds.every(id => faces.has(id))
 }

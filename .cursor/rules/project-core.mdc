@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Project core
 
-PolyEcho is a Vue 3 + Pinia + Three.js DCC hosted in Electron. Product docs: `README.md`. Layout and data flow: `docs/ARCHITECTURE.md`. File finder: `docs/CODEMAP.md`. Do-not-break list: `docs/INVARIANTS.md`. Workflow: `CONTRIBUTING.md`. Desktop IPC lives in `electron/`; renderer file I/O goes through `src/core/desktop/desktopApi.ts`. Do not put mesh math in the Electron main process.
+PolyEcho is a Vue 3 + Pinia + Three.js DCC hosted in Electron. Product docs: `README.md`. Whole-system design and retire list: `docs/SYSTEM.md`. Layout and data flow: `docs/ARCHITECTURE.md`. File finder: `docs/CODEMAP.md`. Do-not-break list: `docs/INVARIANTS.md`. Workflow: `CONTRIBUTING.md`. Desktop IPC lives in `electron/`; renderer file I/O goes through `src/core/desktop/desktopApi.ts`. Do not put mesh math in the Electron main process.
 
 - Keep topology and math in `src/core/`. Vue components call stores or `editorCommands`; they do not implement extrude/unwrap/skinning.
 - Pinia holds serializable editor state. The Three.js scene lives in `Viewport3D.vue`.

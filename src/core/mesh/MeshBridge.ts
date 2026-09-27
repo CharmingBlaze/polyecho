@@ -72,8 +72,11 @@ export class MeshBridge {
     }
 
     const seams = new Set(meshObj.seamEdgeIds ?? [])
+    const sharps = new Set(meshObj.sharpEdgeIds ?? [])
     for (const edge of mesh.edges.values()) {
-      if (seams.has(undirectedEdgeId(numToStrVertId.get(edge.v1)!, numToStrVertId.get(edge.v2)!))) edge.seam = true
+      const key = undirectedEdgeId(numToStrVertId.get(edge.v1)!, numToStrVertId.get(edge.v2)!)
+      if (seams.has(key)) edge.seam = true
+      if (sharps.has(key)) edge.sharp = true
     }
 
     mesh.recalculateNormals()
@@ -117,6 +120,7 @@ export class MeshBridge {
     for (const v of mesh.vertices.values()) if (v.documentId && !vertMap.has(v.id)) vertMap.set(v.id, v.documentId)
     for (const f of mesh.faces.values()) if (f.documentId && !faceMap.has(f.id)) faceMap.set(f.id, f.documentId)
 
+    mesh.syncLoops()
     const vertexIdMap = new Map<number, string>()
     // Kernel ids are rebuilt on import; surviving document ids are not.
     // Reserve all existing strings so a later operation cannot create a second
@@ -187,8 +191,12 @@ export class MeshBridge {
 
     const seamEdgeIds = [...mesh.edges.values()].filter(e => e.seam)
       .map(e => undirectedEdgeId(vertexIdMap.get(e.v1)!, vertexIdMap.get(e.v2)!))
+    const sharpEdgeIds = [...mesh.edges.values()].filter(e => e.sharp)
+      .map(e => undirectedEdgeId(vertexIdMap.get(e.v1)!, vertexIdMap.get(e.v2)!))
     const seamData = seamEdgeIds.length || (typeof baseMeshObjOrName !== 'string' && baseMeshObjOrName.seamEdgeIds)
       ? { seamEdgeIds } : {}
+    const sharpData = sharpEdgeIds.length || (typeof baseMeshObjOrName !== 'string' && baseMeshObjOrName.sharpEdgeIds)
+      ? { sharpEdgeIds } : {}
 
     if (typeof baseMeshObjOrName === 'string') {
       const meshId = (typeof idOrVertMap === 'string') ? idOrVertMap : `mesh_${Date.now()}_${Math.floor(Math.random() * 1000)}`
@@ -204,7 +212,8 @@ export class MeshBridge {
         shadeMode: 'flat',
         vertices,
         faces,
-        ...seamData
+        ...seamData,
+        ...sharpData
       }
     }
 
@@ -212,7 +221,8 @@ export class MeshBridge {
       ...baseMeshObjOrName,
       vertices,
       faces,
-      ...seamData
+      ...seamData,
+      ...sharpData
     }
   }
 

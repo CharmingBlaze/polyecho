@@ -1,4 +1,11 @@
 import * as THREE from 'three'
+import {
+  DEFAULT_VIEWPORT_LIGHTING,
+  sanitizeViewportLighting,
+  VIEWPORT_FILL_LIGHT_POSITION,
+  VIEWPORT_KEY_LIGHT_POSITION,
+  type ViewportLightingSettings,
+} from './ViewportLighting'
 
 export interface ViewportShadowSettings {
   enabled: boolean
@@ -23,23 +30,33 @@ export class EditorEnvironment {
   }
 
   // Fixed world-space shadow direction to prevent shimmering during orbit
-  public static readonly FIXED_LIGHT_POS = new THREE.Vector3(-8, 14, 8)
+  public static readonly FIXED_LIGHT_POS = VIEWPORT_KEY_LIGHT_POSITION
 
   constructor(scene: THREE.Scene, shadowParent?: THREE.Group) {
     this.scene = scene
 
     // 1. Broad Neutral Environment Fill (Sky/Ground)
     // Ensures model surfaces are clearly visible and never pitch-black from any angle
-    this.ambientLight = new THREE.HemisphereLight(0xffffff, 0x334155, 0.95)
+    this.ambientLight = new THREE.HemisphereLight(
+      DEFAULT_VIEWPORT_LIGHTING.skyColor,
+      DEFAULT_VIEWPORT_LIGHTING.groundColor,
+      DEFAULT_VIEWPORT_LIGHTING.ambientIntensity,
+    )
     this.scene.add(this.ambientLight)
 
     // 2. Secondary Soft Rim/Fill Light
-    this.fillLight = new THREE.DirectionalLight(0x94a3b8, 0.35)
-    this.fillLight.position.set(8, -4, -8)
+    this.fillLight = new THREE.DirectionalLight(
+      DEFAULT_VIEWPORT_LIGHTING.fillColor,
+      DEFAULT_VIEWPORT_LIGHTING.fillIntensity,
+    )
+    this.fillLight.position.copy(VIEWPORT_FILL_LIGHT_POSITION)
     this.scene.add(this.fillLight)
 
     // 3. Editor Shadow Light (Fixed world-space key light)
-    this.shadowLight = new THREE.DirectionalLight(0xfffbeb, 0.85)
+    this.shadowLight = new THREE.DirectionalLight(
+      DEFAULT_VIEWPORT_LIGHTING.keyColor,
+      DEFAULT_VIEWPORT_LIGHTING.keyIntensity,
+    )
     this.shadowLight.position.copy(EditorEnvironment.FIXED_LIGHT_POS)
     this.shadowLight.castShadow = true
 
@@ -61,9 +78,10 @@ export class EditorEnvironment {
     // 4. Editor Invisible Shadow Receiver Ground Plane (Contact / Drop Shadows at Y=0)
     const groundGeometry = new THREE.PlaneGeometry(80, 80)
     this.shadowMaterial = new THREE.ShadowMaterial({
-      opacity: this.settings.strength,
+      opacity: DEFAULT_VIEWPORT_LIGHTING.shadowStrength,
       depthWrite: false
     })
+    this.settings.strength = DEFAULT_VIEWPORT_LIGHTING.shadowStrength
     this.shadowReceiver = new THREE.Mesh(groundGeometry, this.shadowMaterial)
     this.shadowReceiver.rotation.x = -Math.PI / 2
     this.shadowReceiver.position.y = -0.002
@@ -120,6 +138,18 @@ export class EditorEnvironment {
   setStrength(opacity: number) {
     this.settings.strength = opacity
     this.shadowMaterial.opacity = opacity
+  }
+
+  applyLighting(settings: ViewportLightingSettings) {
+    const s = sanitizeViewportLighting(settings)
+    this.ambientLight.color.set(s.skyColor)
+    this.ambientLight.groundColor.set(s.groundColor)
+    this.ambientLight.intensity = s.ambientIntensity
+    this.fillLight.color.set(s.fillColor)
+    this.fillLight.intensity = s.fillIntensity
+    this.shadowLight.color.set(s.keyColor)
+    this.shadowLight.intensity = s.keyIntensity
+    this.setStrength(s.shadowStrength)
   }
 
   dispose() {

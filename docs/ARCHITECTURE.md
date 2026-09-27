@@ -2,7 +2,7 @@
 
 PolyEcho is a desktop DCC (Electron + Chromium) whose editor is a Vue 3 + TypeScript + Pinia + Three.js + Vite SPA. The product name is PolyEcho; some project-file and default-name strings still say `PSXModeller` / `PSX_LowPoly_Model`. Keep those identifiers stable unless you are intentionally changing the `.psxproj` format. File dialogs go through `src/core/desktop/desktopApi.ts` when `window.polyechoDesktop` is present. See `docs/DESKTOP.md`.
 
-This document is the source of truth for layout and data flow. `README.md` is the product overview.
+This document is the source of truth for today's layout and data flow. `SYSTEM.md` is the whole-system design and the target this layout moves toward, including the list of old paths being retired. `docs/TOPOLOGY.md` is how the mesh is stored. `README.md` is the product overview.
 
 ## Layers
 
@@ -32,13 +32,13 @@ UI (Vue SFC)
 Kernel unification is being migrated in place; see `docs/KERNEL_UNIFICATION.md` for the current boundary and remaining work, and `docs/ARCHITECTURE_IMPROVEMENT_PLAN.md` for the sequencing, the write contract, and the verified list of mutation paths that still bypass the resident kernel.
 
 1. **`MeshObject`** (`src/types/mesh.ts`) — document model. String IDs, JSON-friendly. Stored in `projectStore.meshes`. Used by one-shot ops in `src/core/geometry/Operations.ts`, converters, serializers, exporters.
-2. **`EditableMesh`** (`src/core/mesh/MeshKernel.ts`) — edit kernel. Numeric IDs, `Map`s, half-edges. Used by modal operators and kernels under `src/core/mesh/operations/`.
+2. **`EditableMesh`** (`src/core/mesh/MeshKernel.ts`) — edit kernel. Numeric IDs, `Map`s, half-edges, and one corner per loop slot. The corner owns the UV. `face.vertexIds` and `face.uvs` are a cache of the half-edge walk (`walkFace`). Used by modal operators and kernels under `src/core/mesh/operations/`. Programmer guide: `docs/TOPOLOGY.md`.
 
-`MeshRepository` owns non-reactive, per-project resident kernels. Modal tools acquire the resident kernel through `projectStore.acquireEditableMesh` and publish its document projection through `publishEditableMesh`. Extrude and Inset menu operations stage a clone of that kernel, validate, record history, then update the resident instance. Remaining legacy document edits are synchronized when the kernel is next acquired. This compatibility boundary is deliberate; the full application is not yet kernel-authoritative.
+`MeshRepository` owns non-reactive, per-project resident kernels. Modal tools acquire the resident kernel through `projectStore.acquireEditableMesh` and publish its document projection through `publishEditableMesh`. Extrude and Inset menu operations stage a clone of that kernel, validate, record history, then update the resident instance. Remaining legacy document edits are synchronized when the kernel is next acquired. Deleted objects are removed immediately; Open Project, autosave recovery, and New Project clear the repository before installing the replacement document. This compatibility boundary is deliberate; the full application is not yet kernel-authoritative.
 
 `MeshBridge` converts at that boundary. Vertex and face document IDs are retained in kernel snapshots as well as the bridge maps. Selection still crosses ID spaces through those maps. Vertex colors, skin weights, UVs, face materials and seam flags survive projection. No persisted file shape has changed.
 
-The same tool can exist on **both** paths. Example: `E` in the viewport is `ExtrudeOperator` + `ExtrudeKernel`; a menu/`performExtrude()` call still uses `Operations.ts`. Changing only one path makes the menu and the hotkey disagree. Prefer kernel-first for topology, then keep or bridge the store path. Full operator rules: `docs/MODELING_OPERATORS.md`.
+The same tool can have modal and menu entry points, but they must converge on the same kernel. Example: `E` in the viewport is `ExtrudeOperator` + `ExtrudeKernel`; menu `performExtrude()` goes through `runKernelOperation` → `extrudeSelection` → `ExtrudeKernel` on the resident mesh. `Operations.ts` is the bridge-facing facade, not a second document-only extrusion algorithm. Full operator rules: `docs/MODELING_OPERATORS.md`.
 
 `geometryRevision` / `textureRevision` on the project store tell the viewport to rebuild buffers. After committing mesh or pixel changes, bump the matching revision.
 
@@ -71,16 +71,16 @@ Entry paths:
 4. **Modal operators** — subclass `ModalOperator`, start via `operatorManager.start` from the viewport. Confirm writes through `onCommit`; Escape restores the `EditableMesh` snapshot. Undo is blocked while an operator is active.
 5. **Command palette / menus** — query `actionRegistry.getAll()` or call `projectStore.perform*` directly.
 
-Interactive topology (extrude / inset / bevel / loop cut / knife) belongs in a kernel + operator. Instant menu actions (merge, fill, dissolve, join) belong in `Operations.ts` + `projectStore.perform*`, and must call `recordState` **before** mutating. Gizmo attach, snap flags, Fill (F), and Blockbench `js/modeling` (what we copied vs skipped) are in `docs/MODELING_OPERATORS.md`. See `docs/SYSTEMS.md` for Action Registry, Texel Density, Transform Spaces, Seam Bleed, and Hardware Profiles.
+Interactive topology (extrude / inset / bevel / loop cut / knife) belongs in a kernel + operator. Instant topology actions (merge, fill, dissolve, join) use a bridge-facing function in `Operations.ts` or a kernel directly, wrapped by `projectStore.perform*` and `runKernelOperation`. A resident commit stages and validates first, then records history before publishing the mutation. Legacy non-kernel writers still record before mutating. Gizmo attach, snap flags, Fill (F), and Blockbench `js/modeling` (what we copied vs skipped) are in `docs/MODELING_OPERATORS.md`. See `docs/SYSTEMS.md` for Action Registry, Texel Density, Transform Spaces, Seam Bleed, and Hardware Profiles.
 
 ## History
 
-`historyStore.recordState(description)` snapshots meshes (JSON clone), selection, materials, palette, textures (`PixelBuffer.clone()`), and armature.
+`historyStore.recordState(description)` snapshots meshes (JSON clone), resident kernel topology, selection, materials, palette, and armature. Project mesh edits normally omit texture clones; `recordPixels` includes cloned `PixelBuffer`s for paint history.
 
-- Call `recordState` / `projectStore.recordState` **before** the mutation.
+- Legacy/document writers call `recordState` before mutation. `runKernelOperation` stages and validates a clone first, then records immediately before publishing the validated resident/document change.
 - Do not snapshot on every pointer-move of a modal tool; snapshot on commit (or before start if the operator mutates in place and cancel restores the kernel snapshot).
 - Skip recording while `historyStore` is applying undo/redo.
-- Stack is capped (currently 50). A new action clears redo.
+- Stack is capped by `HISTORY_STACK_LIMIT` (currently 50). The oldest action is evicted and a new action clears redo.
 
 ## Rendering
 
@@ -90,7 +90,8 @@ Interactive topology (extrude / inset / bevel / loop cut / knife) belongs in a k
 
 ## Persistence
 
-- `.psxproj` — `ProjectSerializer` + `ProjectStorage` (autosave).
+- `.psxproj` — `ProjectSerializer`; strict load validation rejects invalid/duplicate ids, non-finite positions or UVs, dangling/repeated face corners, unknown versions, and malformed topology. Missing legacy face UV arrays migrate to zero UVs.
+- Autosave — `ProjectStorage`, using the same mesh validation gate as `.psxproj` before recovery is offered.
 - Export — `GltfExport.ts` (GLB via Three `GLTFExporter`), `ObjExport.ts`, `BlockbenchExport.ts`, `SpriteSheet.ts`, `TurntableRecorder.ts`.
 - Import — `GltfImport.ts`, `ObjImport.ts`, `BlockbenchImport.ts`, `ImageImport.ts`.
 

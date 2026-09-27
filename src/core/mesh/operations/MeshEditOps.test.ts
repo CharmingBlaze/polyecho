@@ -7,6 +7,7 @@ import { MeshTopologyService } from '../MeshTopologyService'
 import { MeshEditOps } from './MeshEditOps'
 import { BooleanKernel } from './BooleanKernel'
 import { LoopCutKernel } from './LoopCutKernel'
+import { EditableMesh } from '../MeshKernel'
 import {
   flipEdges,
   recalculateOutside,
@@ -119,6 +120,29 @@ describe('MeshEditOps', () => {
     expect(MeshValidator.validate(mesh).valid).toBe(true)
   })
 
+  it('revolves an open profile into a closed surface', () => {
+    const mesh = new EditableMesh()
+    const a = mesh.addVertex(new THREE.Vector3(1, 0, 0)).id
+    const b = mesh.addVertex(new THREE.Vector3(1, 1, 0)).id
+    MeshEditOps.lathe(mesh, [a, b], new THREE.Vector3(), new THREE.Vector3(0, 1, 0), 4)
+    expect(mesh.faces.size).toBe(4)
+    expect(MeshValidator.validate(mesh).valid).toBe(true)
+  })
+
+  it('shells a closed cube inward and opens a selected face', () => {
+    const closed = cubeKernel()
+    MeshEditOps.shell(closed, [], 0.2)
+    expect(closed.faces.size).toBe(12)
+    expect(MeshValidator.validate(closed).valid).toBe(true)
+
+    const opened = cubeKernel()
+    const opening = [...opened.faces.values()][0]!.id
+    MeshEditOps.shell(opened, [opening], 0.2)
+    expect(opened.faces.has(opening)).toBe(false)
+    expect(opened.faces.size).toBeGreaterThan(6)
+    expect(MeshValidator.validate(opened).valid).toBe(true)
+  })
+
   it('bisects a cube and can fill the cut', () => {
     const mesh = cubeKernel()
     const plane = new THREE.Plane(new THREE.Vector3(1, 0, 0), 0)
@@ -156,6 +180,7 @@ describe('LoopCut even n-gons', () => {
     const result = LoopCutKernel.cutLoop(mesh, edge.id, 0.5)
     expect(result.newVertexIds.length).toBeGreaterThan(0)
     expect(MeshValidator.validate(mesh).valid).toBe(true)
+    for (const face of mesh.faces.values()) expect(face.vertexIds.length).toBe(4)
   })
 })
 
@@ -166,6 +191,15 @@ describe('BooleanKernel', () => {
     for (const v of b.vertices.values()) v.position.x += 1
     expect(BooleanKernel.operate(a, b, 'union')).toBe(true)
     expect(a.faces.size).toBeGreaterThan(0)
+  })
+
+  it('unions separated cubes back into quads', () => {
+    const a = cubeKernel()
+    const b = cubeKernel()
+    for (const v of b.vertices.values()) v.position.x += 4
+    expect(BooleanKernel.operate(a, b, 'union')).toBe(true)
+    expect(a.faces.size).toBe(12)
+    for (const face of a.faces.values()) expect(face.vertexIds.length).toBe(4)
   })
 })
 

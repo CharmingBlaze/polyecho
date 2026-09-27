@@ -242,51 +242,12 @@ export class MeshTopologyService {
   // =========================================================================
 
   /**
-   * Splits an edge at parameter t [0..1] and returns the newly created vertex ID.
+   * Splits an edge at parameter t (0 < t < 1) and returns the new vertex id.
+   * The cut itself is `TopologyOps.splitEdge`: one implementation, corners rebuilt
+   * by `replaceFace`, seam and sharp copied onto both new edges.
    */
   static splitEdge(mesh: EditableMesh, edgeId: number, t = 0.5): number {
-    const edge = mesh.edges.get(edgeId)
-    if (!edge) return -1
-
-    const v1 = mesh.vertices.get(edge.v1)
-    const v2 = mesh.vertices.get(edge.v2)
-    if (!v1 || !v2) return -1
-
-    const newPos = v1.position.clone().lerp(v2.position, t)
-    const newVert = mesh.addVertex(newPos)
-
-    for (const fId of edge.faceIds) {
-      const face = mesh.faces.get(fId)
-      if (!face) continue
-
-      const idx1 = face.vertexIds.indexOf(edge.v1)
-      const idx2 = face.vertexIds.indexOf(edge.v2)
-
-      if (idx1 !== -1 && idx2 !== -1) {
-        const insertIdx = (idx1 === 0 && idx2 === face.vertexIds.length - 1) 
-          ? face.vertexIds.length 
-          : (idx2 === 0 && idx1 === face.vertexIds.length - 1)
-          ? face.vertexIds.length
-          : Math.max(idx1, idx2)
-
-        face.vertexIds.splice(insertIdx, 0, newVert.id)
-
-        if (face.uvs.length >= 2) {
-          const uv1 = face.uvs[idx1] || new THREE.Vector2(0, 0)
-          const uv2 = face.uvs[idx2] || new THREE.Vector2(1, 1)
-          const newUV = new THREE.Vector2(
-            uv1.x + (uv2.x - uv1.x) * t,
-            uv1.y + (uv2.y - uv1.y) * t
-          )
-          face.uvs.splice(insertIdx, 0, newUV)
-        }
-      }
-    }
-
-    mesh.removeEdge(edgeId)
-    mesh.getOrCreateEdge(edge.v1, newVert.id)
-    mesh.getOrCreateEdge(newVert.id, edge.v2)
-    return newVert.id
+    return TopologyOps.splitEdge(mesh, edgeId, t)?.newVertexId ?? -1
   }
 
   /**
@@ -519,10 +480,22 @@ export class MeshTopologyService {
       center.multiplyScalar(1 / n)
       uvC.multiplyScalar(1 / n)
       const cId = mesh.addVertex(center).id
-      for (let i = 0; i < n; i++) {
+      const uvAt = (i: number) => uvs[i] ?? new THREE.Vector2()
+      // Two boundary steps make a quad into the center. An odd remainder is the only triangle.
+      for (let i = 0; i + 2 <= n; i += 2) {
+        const i2 = i + 2 === n ? 0 : i + 2
         pushFace(
-          [verts[i], verts[(i + 1) % n], cId],
-          [uvs[i], uvs[(i + 1) % n], uvC.clone()],
+          [verts[i], verts[i + 1], verts[i2], cId],
+          [uvAt(i), uvAt(i + 1), uvAt(i2), uvC.clone()],
+          matIdx,
+          color,
+          into
+        )
+      }
+      if (n % 2 === 1) {
+        pushFace(
+          [verts[n - 1], verts[0], cId],
+          [uvAt(n - 1), uvAt(0), uvC.clone()],
           matIdx,
           color,
           into
@@ -675,9 +648,9 @@ export class MeshTopologyService {
         buildTriGrid(snap, into)
       } else {
         const expanded = expandLoop(snap.vertexIds, snap.uvs)
-        if (faceIds.length === 0) {
-          // Edge splitting inserts shared boundary vertices without adding
-          // unrelated face-centre vertices or a triangle fan.
+        if (!selectedSet.has(snap.id)) {
+          // A neighbour only gains the shared boundary vertices and stays one n-gon,
+          // as in Blender. Re-tessellating it would invent triangles nobody asked for.
           const face = mesh.addFace(expanded.verts, expanded.uvs, snap.materialIndex, snap.color, snap.id)
           if (face) into.push(face.id)
         } else tessellateNgon(expanded.verts, expanded.uvs, snap.materialIndex, snap.color, into)
@@ -783,6 +756,24 @@ export class MeshTopologyService {
   /**
    * Creates a new polygon face from a closed boundary loop of vertices.
    */
+  /** True when some existing face already runs `a→b` along a consecutive pair of `loop`. */
+  static runsWithNeighbour(mesh: EditableMesh, loop: number[]): boolean {
+    let same = 0, opposite = 0
+    for (let i = 0; i < loop.length; i++) {
+      const a = loop[i], b = loop[(i + 1) % loop.length]
+      const edge = mesh.findEdge(a, b)
+      for (const fId of edge?.faceIds ?? []) {
+        const ids = mesh.faces.get(fId)?.vertexIds
+        if (!ids) continue
+        const k = ids.indexOf(a)
+        if (k < 0) continue
+        if (ids[(k + 1) % ids.length] === b) same++
+        else if (ids[(k + ids.length - 1) % ids.length] === b) opposite++
+      }
+    }
+    return same > opposite
+  }
+
   static fillBoundary(mesh: EditableMesh, vertexIds: number[], uvs?: THREE.Vector2[]): number | null {
     if (vertexIds.length < 3) return null
 
@@ -794,6 +785,14 @@ export class MeshTopologyService {
       if (face.vertexIds.length === vertexIds.length && [...face.vertexIds].sort((a, b) => a - b).join(',') === sorted) {
         return null
       }
+    }
+
+    // Boundary walks start at an arbitrary edge direction. The cap must run each rim edge
+    // opposite to the face already on it, or the fill faces into the mesh.
+    if (this.runsWithNeighbour(mesh, vertexIds)) {
+      vertexIds = [...vertexIds].reverse()
+      positions.reverse()
+      if (uvs) uvs = [...uvs].reverse()
     }
 
     const normal = new THREE.Vector3()
@@ -848,6 +847,7 @@ export class MeshTopologyService {
     const distNormal = pa1.distanceTo(pb1) + pa2.distanceTo(pb2)
     const distCross = pa1.distanceTo(pb2) + pa2.distanceTo(pb1)
     const verts = distNormal <= distCross ? [a1, a2, b2, b1] : [a1, a2, b1, b2]
+    if (this.runsWithNeighbour(mesh, verts)) verts.reverse()
     const uvs = [
       new THREE.Vector2(0, 0),
       new THREE.Vector2(1, 0),
@@ -985,11 +985,13 @@ export class MeshTopologyService {
     const initialFaces = mesh.faces.size
 
     for (const [fId, face] of Array.from(mesh.faces.entries())) {
-      const uniqueVerts = Array.from(new Set(face.vertexIds))
+      const keep = face.vertexIds.map((id, i) => face.vertexIds.indexOf(id) === i)
+      const uniqueVerts = face.vertexIds.filter((_, i) => keep[i])
       if (uniqueVerts.length < 3) {
         mesh.removeFace(fId)
-      } else {
-        face.vertexIds = uniqueVerts
+      } else if (uniqueVerts.length !== face.vertexIds.length) {
+        const uvs = face.vertexIds.map((_, i) => face.uvs[i] ?? new THREE.Vector2()).filter((_, i) => keep[i])
+        mesh.replaceFace(fId, uniqueVerts, uvs)
       }
     }
 

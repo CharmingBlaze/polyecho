@@ -4,6 +4,7 @@ import { EditableMesh, MeshSnapshot } from '../mesh/MeshKernel'
 import { NumericInput } from '../transform/NumericInput'
 import { SnapManager } from '../transform/SnapManager'
 import { applyLiveSymmetry } from '../transform/LiveSymmetry'
+import { connectedFalloffWeights } from '../transform/ProportionalFalloff'
 import { AxisConstraint, TransformOrientation, PivotMode } from '../transform/TransformTypes'
 import { PivotManager } from '../transform/PivotManager'
 import type { ViewQuadrant } from '../geometry/ScreenGeometry'
@@ -31,6 +32,10 @@ export interface OperatorContext {
   snapVertex?: boolean
   snapEdge?: boolean
   snapFace?: boolean
+  /** Armed for Grab / Rotate / Scale. O toggles it during the modal. */
+  proportional?: boolean
+  proportionalRadius?: number
+  onProportionalChange?: (enabled: boolean, radius: number) => void
   symmetryX?: boolean
   symmetryY?: boolean
   symmetryZ?: boolean
@@ -79,6 +84,15 @@ export abstract class ModalOperator {
   protected isShiftHeld = false
   protected isCtrlHeld = false
 
+  /** Grab, rotate, and scale opt in. Other modals leave this false. */
+  protected usesProportional = false
+  protected proportionalEnabled = false
+  protected proportionalRadius = 1
+  private proportionalNeighbors = new Map<number, number[]>()
+  private falloffCache: Map<number, number> | null = null
+  private falloffCacheRadius = -1
+  private proportionalGuide: THREE.Line | null = null
+
   public statusText = ''
 
   begin(ctx: OperatorContext, startPointer: { x: number; y: number }) {
@@ -103,7 +117,15 @@ export abstract class ModalOperator {
     this.captureObjectStarts()
     this.initPivot()
     this.numericInput.reset()
+    if (this.usesProportional) {
+      this.proportionalEnabled = !!ctx.proportional
+      this.proportionalRadius = ctx.proportionalRadius && ctx.proportionalRadius > 0 ? ctx.proportionalRadius : 1
+      this.falloffCache = null
+      this.falloffCacheRadius = -1
+      this.buildProportionalNeighbors()
+    }
     this.updateStatus()
+    this.syncProportionalGuide()
   }
 
   protected objectTargetIds(): string[] {
@@ -277,6 +299,7 @@ export abstract class ModalOperator {
     this.evaluate()
     this.ctx.onUpdatePreview()
     this.updateStatus()
+    this.syncProportionalGuide()
   }
 
   keyDown(event: KeyboardEvent): boolean {
@@ -292,6 +315,18 @@ export abstract class ModalOperator {
     }
 
     const lowerKey = key.toLowerCase()
+
+    if (this.usesProportional && lowerKey === 'o' && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      event.preventDefault()
+      this.proportionalEnabled = !this.proportionalEnabled
+      this.falloffCache = null
+      this.ctx.onProportionalChange?.(this.proportionalEnabled, this.proportionalRadius)
+      this.evaluate()
+      this.ctx.onUpdatePreview()
+      this.updateStatus()
+      this.syncProportionalGuide()
+      return true
+    }
 
     // Axis constraints: X, Y, Z, Shift+X (YZ), Shift+Y (XZ), Shift+Z (XY)
     if (lowerKey === 'x' || lowerKey === 'y' || lowerKey === 'z') {
@@ -334,8 +369,19 @@ export abstract class ModalOperator {
     return false
   }
 
-  wheel(_event: WheelEvent): boolean {
-    return false
+  wheel(event: WheelEvent): boolean {
+    if (!this.usesProportional || !this.proportionalEnabled || this.ctx.isObjectMode) return false
+    event.preventDefault()
+    const step = event.shiftKey ? 1.04 : 1.12
+    const factor = event.deltaY < 0 ? step : 1 / step
+    this.proportionalRadius = Math.min(100, Math.max(0.05, this.proportionalRadius * factor))
+    this.falloffCache = null
+    this.ctx.onProportionalChange?.(true, this.proportionalRadius)
+    this.evaluate()
+    this.ctx.onUpdatePreview()
+    this.updateStatus()
+    this.syncProportionalGuide()
+    return true
   }
 
   syncPointerFromEvent(e: { clientX: number; clientY: number }) {
@@ -347,12 +393,93 @@ export abstract class ModalOperator {
   }
 
   confirm() {
+    this.clearProportionalGuide()
     this.ctx.onCommit(this.name)
   }
 
   cancel() {
+    this.clearProportionalGuide()
     this.restoreSnapshot()
     this.ctx.onCancel()
+  }
+
+  /** Connected smooth weights, or null when proportional editing is off. */
+  protected falloffWeights(sources: Set<number>): Map<number, number> | null {
+    if (!this.usesProportional || !this.proportionalEnabled || this.ctx.isObjectMode) return null
+    if (this.falloffCache && this.falloffCacheRadius === this.proportionalRadius) return this.falloffCache
+    this.falloffCacheRadius = this.proportionalRadius
+    this.falloffCache = connectedFalloffWeights(
+      this.initialVertices,
+      this.proportionalNeighbors,
+      sources,
+      this.proportionalRadius
+    )
+    return this.falloffCache
+  }
+
+  protected restoreEditPositions() {
+    for (const [id, world] of this.initialVertices) this.writeWorldPos(id, world)
+  }
+
+  protected proportionalStatus(): string {
+    if (!this.usesProportional || !this.proportionalEnabled) return ''
+    return ` | Prop ${this.proportionalRadius.toFixed(2)}`
+  }
+
+  private buildProportionalNeighbors() {
+    this.proportionalNeighbors.clear()
+    for (const edge of this.ctx.mesh.edges.values()) {
+      const a = this.proportionalNeighbors.get(edge.v1) ?? []
+      a.push(edge.v2)
+      this.proportionalNeighbors.set(edge.v1, a)
+      const b = this.proportionalNeighbors.get(edge.v2) ?? []
+      b.push(edge.v1)
+      this.proportionalNeighbors.set(edge.v2, b)
+    }
+  }
+
+  private syncProportionalGuide() {
+    const group = this.ctx?.previewGroup
+    if (!this.usesProportional || !this.proportionalEnabled || this.ctx?.isObjectMode || !group) {
+      this.clearProportionalGuide()
+      return
+    }
+    if (!this.proportionalGuide) {
+      const material = new THREE.LineBasicMaterial({
+        color: 0x7ec8ff,
+        depthTest: false,
+        transparent: true,
+        opacity: 0.9
+      })
+      this.proportionalGuide = new THREE.Line(new THREE.BufferGeometry(), material)
+      this.proportionalGuide.frustumCulled = false
+      this.proportionalGuide.renderOrder = 1000
+      group.add(this.proportionalGuide)
+    }
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.ctx.camera.quaternion)
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.ctx.camera.quaternion)
+    const pts = new Float32Array(65 * 3)
+    const radius = this.proportionalRadius
+    for (let i = 0; i <= 64; i++) {
+      const a = (i / 64) * Math.PI * 2
+      const p = this.pivot.clone()
+        .addScaledVector(right, Math.cos(a) * radius)
+        .addScaledVector(up, Math.sin(a) * radius)
+      pts[i * 3] = p.x
+      pts[i * 3 + 1] = p.y
+      pts[i * 3 + 2] = p.z
+    }
+    this.proportionalGuide.geometry.setAttribute('position', new THREE.BufferAttribute(pts, 3))
+  }
+
+  private clearProportionalGuide() {
+    if (!this.proportionalGuide) return
+    this.proportionalGuide.removeFromParent()
+    this.proportionalGuide.geometry.dispose()
+    const material = this.proportionalGuide.material
+    if (Array.isArray(material)) material.forEach(m => m.dispose())
+    else material.dispose()
+    this.proportionalGuide = null
   }
 
   abstract evaluate(): void

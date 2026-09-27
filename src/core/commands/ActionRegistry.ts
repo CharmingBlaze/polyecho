@@ -7,7 +7,7 @@ export interface CommandAction {
   shortcut?: string
   icon?: string
   scope?: ActionScope
-  handler: () => void | Promise<void>
+  handler: () => unknown
   disabled?: () => boolean
 }
 

@@ -4,6 +4,7 @@ import { AnimationClip, Armature } from '../../types/animation'
 import { meshToThreeGeometry } from '../geometry/Converters'
 import { sampleTrack, resolveMeshBoneParentId } from '../animation/Armature'
 import type { Material } from '../../types/texture'
+import { createGradientCanvas, resolveMaterialSurface } from '../materials/MaterialFill'
 
 export interface SpriteSheetOptions {
   frameWidth: number // e.g. 32, 64, 128
@@ -60,6 +61,7 @@ export function renderSpriteSheet(
 
   // Map of three.js meshes created from MeshObjects
   const threeMeshes = new Map<string, { threeMesh: THREE.Mesh; baseMesh: MeshObject }>()
+  const ownedGradientTextures: THREE.Texture[] = []
   const rootGroup = new THREE.Group()
 
   for (const meshObj of meshes) {
@@ -71,7 +73,7 @@ export function renderSpriteSheet(
       selectedFacesGeometry,
       selectedEdgesGeometry,
       edgeLinesGeometry
-    } = meshToThreeGeometry(meshObj)
+    } = meshToThreeGeometry(meshObj, [], [], 'flat', undefined, undefined, [], { scene: meshes, purpose: 'render' })
     // Only the base geometry is used here; release the rest
     wireframeGeometry.dispose()
     vertexPointsGeometry.dispose()
@@ -79,10 +81,19 @@ export function renderSpriteSheet(
     selectedEdgesGeometry.dispose()
     edgeLinesGeometry.dispose()
     const matObj = materials?.find(m => m.id === meshObj.materialId)
-    const texture = (matObj?.textureId && textureMap.get(matObj.textureId)) || null
+    const surface = resolveMaterialSurface(matObj)
+    let texture: THREE.Texture | null = null
+    if (surface.fill === 'image' && surface.textureId) {
+      texture = textureMap.get(surface.textureId) || null
+    } else if (surface.fill === 'gradient' && surface.gradient) {
+      texture = new THREE.CanvasTexture(createGradientCanvas(surface.gradient, 128, surface.color))
+      texture.colorSpace = THREE.SRGBColorSpace
+      ownedGradientTextures.push(texture)
+    }
 
     const mat = new THREE.MeshLambertMaterial({
       map: texture,
+      color: surface.color,
       vertexColors: true,
       side: THREE.DoubleSide
     })
@@ -191,5 +202,6 @@ export function renderSpriteSheet(
     }
   })
   renderer.dispose()
+  for (const tex of ownedGradientTextures) tex.dispose()
   return sheetCanvas
 }

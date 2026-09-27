@@ -17,15 +17,15 @@ Knife keeps a live preview until confirmation. Strokes can start outside an obje
 | Enter | Apply all strokes |
 | Esc | Cancel and restore the original mesh |
 
-The floating panel provides the main actions without duplicating the full shortcut line. Newly created edges remain selected after applying cuts. Edge snapping accounts for perspective, surface picking handles concave polygons, and interior cut points interpolate UV coordinates. Invalid previews restore the source mesh instead of committing damaged geometry.
+The floating panel provides the main actions without duplicating the full shortcut line. Newly created edges remain selected after applying cuts. Vertex and edge snaps stay snapped when the cut is applied, and Shift snaps to a midpoint only while it is held. Edge snapping accounts for perspective, surface picking handles concave polygons, and interior cut points interpolate UV coordinates. Invalid previews restore the source mesh instead of committing damaged geometry.
 
-This is a polygon cutting workflow, not automatic quad retopology. Interior cuts can introduce triangles or n-gons. Cut-through operates on the active mesh, not every object in the scene.
+This is a polygon cutting workflow, not automatic quad retopology. A point inside a quad or n-gon splits it with one chord through the point, so a quad becomes two quads at any face size and any distance from the centre. Only a point inside a triangle fans into triangles. When the stroke runs from a click inside one face onto the next face, the chord aims at the spot where the stroke crosses the shared edge on screen, so both faces meet at one vertex there. A straight line that leaves through the edge next to where it entered cuts off a corner, and that corner is a triangle. Cuts that end inside a face can still leave n-gons. Cut-through operates on the active mesh, not every object in the scene.
 
 ## Loop Cut
 
-Start with Ctrl+R and hover a quad face. Scroll or type a count (1–64). The first click or Enter locks the ring; move to slide, then click or press Enter to apply. Type a slide value from -1 to 1, with 0 centred. Shift gives precision movement and Ctrl snaps the slide in increments. Right-click during sliding applies centred cuts; Esc cancels the entire operation. The panel also offers Apply centered.
+Start with Ctrl+R and hover a quad or any even-sided face. The preview sits under the pointer. Scroll or type a count (1–64). Ctrl snaps that position to 10% steps. The first click or Enter locks the position; move to slide, then click or press Enter to apply. Type a slide value from -1 to 1, with 0 centred. Shift gives precision movement and Ctrl snaps the slide in increments. Right-click during sliding applies centred cuts; Esc cancels the entire operation. The panel also offers Apply centered.
 
-Ring traversal preserves direction across opposite even n-gon edges (quads, hexes, …), so off-centre previews and committed cuts agree regardless of vertex numbering. Multiple cuts remain evenly spaced and cannot collapse onto one another at the slide limits. New loop edges stay selected. Tracing stops at triangles, odd n-gons, and non-manifold edges; hovering an unsupported face does not create a fake loop.
+Ring traversal preserves direction across opposite even n-gon edges (quads, hexes, …), so off-centre previews and committed cuts agree regardless of vertex numbering. Multiple cuts remain evenly spaced and cannot collapse onto one another at the slide limits. New loop edges stay selected. Tracing stops at triangles, odd n-gons, and non-manifold edges. Hovering a face with no ring does not create a fake loop.
 
 ## Primitives
 

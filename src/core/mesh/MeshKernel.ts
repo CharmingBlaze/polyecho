@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { polygonAreaVector, polygonPlanarity } from '../geometry/PolygonGeometry'
+import { surfaceTriangles } from '../geometry/SurfaceGeometry'
 
 export interface MeshVertex {
   id: number
@@ -29,6 +30,17 @@ export interface MeshHalfEdge {
   prevId: number        // Previous half-edge in face loop
   twinId: number | null // Opposite half-edge on neighboring face
   edgeId: number        // Parent edge
+  /** Corner that carries this loop slot's UV. The face array is a cache of these. */
+  cornerId: number
+}
+
+/** One slot of a face loop: the vertex where it sits, and the UV that belongs there. */
+export interface MeshCorner {
+  id: number
+  vertexId: number
+  faceId: number
+  halfEdgeId: number
+  uv: THREE.Vector2
 }
 
 export interface MeshFace {
@@ -46,18 +58,21 @@ export interface MeshFace {
 export interface MeshSnapshot {
   vertices: { id: number; documentId?: string; color?: string; boneWeights?: Record<string, number>; position: { x: number; y: number; z: number }; edgeIds: number[]; faceIds: number[] }[]
   edges: { id: number; seam?: boolean; sharp?: boolean; v1: number; v2: number; halfEdgeIds: number[]; faceIds: number[] }[]
-  halfEdges: { id: number; vertexId: number; faceId: number; nextId: number; prevId: number; twinId: number | null; edgeId: number }[]
+  halfEdges: { id: number; vertexId: number; faceId: number; nextId: number; prevId: number; twinId: number | null; edgeId: number; cornerId?: number }[]
+  corners?: { id: number; vertexId: number; faceId: number; halfEdgeId: number; uv: { x: number; y: number } }[]
   faces: { id: number; documentId?: string; vertexIds: number[]; edgeIds: number[]; halfEdgeIds: number[]; normal: { x: number; y: number; z: number }; uvs: { x: number; y: number }[]; materialIndex: number; color?: string }[]
   nextVertexId: number
   nextEdgeId: number
   nextHalfEdgeId: number
   nextFaceId: number
+  nextCornerId?: number
 }
 
 export class EditableMesh {
   vertices = new Map<number, MeshVertex>()
   edges = new Map<number, MeshEdge>()
   halfEdges = new Map<number, MeshHalfEdge>()
+  corners = new Map<number, MeshCorner>()
   faces = new Map<number, MeshFace>()
   private edgeByVertices = new Map<string, number>()
 
@@ -65,12 +80,14 @@ export class EditableMesh {
   private nextEdgeId = 1
   private nextHalfEdgeId = 1
   private nextFaceId = 1
+  private nextCornerId = 1
 
   // Stable ID generators
   allocVertexId(): number { return this.nextVertexId++ }
   allocEdgeId(): number { return this.nextEdgeId++ }
   allocHalfEdgeId(): number { return this.nextHalfEdgeId++ }
   allocFaceId(): number { return this.nextFaceId++ }
+  allocCornerId(): number { return this.nextCornerId++ }
 
   // ----------------------------------------------------
   // Primitive Vertex/Edge/Face Management
@@ -159,6 +176,8 @@ export class EditableMesh {
     if (v2) v2.edgeIds = v2.edgeIds.filter(eid => eid !== id)
 
     for (const heId of e.halfEdgeIds) {
+      const he = this.halfEdges.get(heId)
+      if (he) this.corners.delete(he.cornerId)
       this.halfEdges.delete(heId)
     }
 
@@ -181,8 +200,9 @@ export class EditableMesh {
 
     const edgeIds: number[] = []
     const halfEdgeIds: number[] = []
+    const loopUvs = uvs ?? vertexIds.map((_, idx) => new THREE.Vector2(idx === 1 || idx === 2 ? 1 : 0, idx >= 2 ? 1 : 0))
 
-    // Allocate half edges for the face loop
+    // Allocate half edges for the face loop. Each slot gets a corner; the UV lives there.
     const n = vertexIds.length
     for (let i = 0; i < n; i++) {
       const vFrom = vertexIds[i]
@@ -192,6 +212,7 @@ export class EditableMesh {
       if (!edge.faceIds.includes(faceId)) edge.faceIds.push(faceId)
 
       const heId = this.allocHalfEdgeId()
+      const cornerId = this.allocCornerId()
       halfEdgeIds.push(heId)
 
       const he: MeshHalfEdge = {
@@ -201,9 +222,17 @@ export class EditableMesh {
         nextId: 0,
         prevId: 0,
         twinId: null,
-        edgeId: edge.id
+        edgeId: edge.id,
+        cornerId,
       }
       this.halfEdges.set(heId, he)
+      this.corners.set(cornerId, {
+        id: cornerId,
+        vertexId: vFrom,
+        faceId,
+        halfEdgeId: heId,
+        uv: loopUvs[i]!.clone(),
+      })
       edge.halfEdgeIds.push(heId)
     }
 
@@ -225,25 +254,82 @@ export class EditableMesh {
     // Calculate initial face normal
     const normal = polygonAreaVector(vertexIds.map(id => this.vertices.get(id)!.position)).normalize()
 
-    const defaultUvs = uvs || vertexIds.map((_, idx) => new THREE.Vector2(idx === 1 || idx === 2 ? 1 : 0, idx >= 2 ? 1 : 0))
-
     const face: MeshFace = {
       id: faceId,
       vertexIds: [...vertexIds],
       edgeIds,
       halfEdgeIds,
       normal,
-      uvs: defaultUvs.map(u => u.clone()),
+      uvs: [],
       materialIndex,
       color
     }
 
     this.faces.set(faceId, face)
-
-    // Rebuild twins for this face's edges
     this.updateTwinsForEdges(edgeIds)
-
+    this.publishLoop(faceId)
     return face
+  }
+
+  /** Half-edges of one face, in loop order. This walk is the polygon. */
+  walkFace(faceId: number): MeshHalfEdge[] {
+    const face = this.faces.get(faceId)
+    const start = face?.halfEdgeIds[0]
+    if (!face || start === undefined) return []
+    const out: MeshHalfEdge[] = []
+    let id: number | null = start
+    for (let i = 0; i <= face.halfEdgeIds.length && id !== null; i++) {
+      const he = this.halfEdges.get(id)
+      if (!he || he.faceId !== faceId) break
+      out.push(he)
+      id = he.nextId
+      if (id === start) break
+    }
+    return out
+  }
+
+  /**
+   * Copy the half-edge walk onto the face arrays. `face.uvs[i]` is the corner's UV
+   * object, so writing `uv.x` updates the corner.
+   */
+  publishLoop(faceId: number) {
+    const face = this.faces.get(faceId)
+    if (!face) return
+    const loop = this.walkFace(faceId)
+    if (loop.length < 3) return
+    face.halfEdgeIds = loop.map(he => he.id)
+    face.vertexIds = loop.map(he => he.vertexId)
+    face.edgeIds = loop.map(he => he.edgeId)
+    face.uvs = loop.map(he => this.corners.get(he.cornerId)?.uv ?? new THREE.Vector2())
+  }
+
+  /** Rewrite every face cache from its half-edge loop. Call before publishing to the document. */
+  syncLoops() {
+    for (const faceId of this.faces.keys()) this.publishLoop(faceId)
+  }
+
+  /** Replace the UVs on an existing loop. The corner records stay; their vectors change. */
+  setFaceUvs(faceId: number, uvs: readonly THREE.Vector2[]): boolean {
+    const loop = this.walkFace(faceId)
+    if (loop.length < 3 || uvs.length !== loop.length) return false
+    if (uvs.some(uv => !Number.isFinite(uv.x) || !Number.isFinite(uv.y))) return false
+    loop.forEach((he, i) => this.corners.get(he.cornerId)?.uv.copy(uvs[i]!))
+    this.publishLoop(faceId)
+    return true
+  }
+
+  /**
+   * Fill triangles for one face. Indices point at loop slots, so each triangle
+   * names the corners it came from. The triangles are not edges.
+   */
+  fillTriangles(faceId: number): { cornerIds: number[]; vertexIds: number[] }[] {
+    const loop = this.walkFace(faceId)
+    if (loop.length < 3) return []
+    const positions = loop.map(he => this.vertices.get(he.vertexId)!.position)
+    return surfaceTriangles(positions).map(([a, b, c]) => ({
+      cornerIds: [loop[a]!.cornerId, loop[b]!.cornerId, loop[c]!.cornerId],
+      vertexIds: [loop[a]!.vertexId, loop[b]!.vertexId, loop[c]!.vertexId],
+    }))
   }
 
   /** Replace a polygon while retaining surviving edge identities and flags. */
@@ -273,6 +359,7 @@ export class EditableMesh {
     for (const heId of f.halfEdgeIds) {
       const he = this.halfEdges.get(heId)
       if (he) {
+        this.corners.delete(he.cornerId)
         if (he.twinId !== null) {
           const twin = this.halfEdges.get(he.twinId)
           if (twin) twin.twinId = null
@@ -344,6 +431,7 @@ export class EditableMesh {
       this.edges.get(he.edgeId)!.halfEdgeIds.push(he.id)
     }
     this.updateTwinsForEdges(oldEdges)
+    this.publishLoop(faceId)
     face.normal.negate()
   }
 
@@ -377,7 +465,15 @@ export class EditableMesh {
         nextId: h.nextId,
         prevId: h.prevId,
         twinId: h.twinId,
-        edgeId: h.edgeId
+        edgeId: h.edgeId,
+        cornerId: h.cornerId,
+      })),
+      corners: Array.from(this.corners.values()).map(c => ({
+        id: c.id,
+        vertexId: c.vertexId,
+        faceId: c.faceId,
+        halfEdgeId: c.halfEdgeId,
+        uv: { x: c.uv.x, y: c.uv.y },
       })),
       faces: Array.from(this.faces.values()).map(f => ({
         id: f.id,
@@ -393,7 +489,8 @@ export class EditableMesh {
       nextVertexId: this.nextVertexId,
       nextEdgeId: this.nextEdgeId,
       nextHalfEdgeId: this.nextHalfEdgeId,
-      nextFaceId: this.nextFaceId
+      nextFaceId: this.nextFaceId,
+      nextCornerId: this.nextCornerId,
     }
   }
 
@@ -402,6 +499,7 @@ export class EditableMesh {
     this.edges.clear()
     this.edgeByVertices.clear()
     this.halfEdges.clear()
+    this.corners.clear()
     this.faces.clear()
 
     for (const sv of snapshot.vertices) {
@@ -437,8 +535,21 @@ export class EditableMesh {
         nextId: sh.nextId,
         prevId: sh.prevId,
         twinId: sh.twinId,
-        edgeId: sh.edgeId
+        edgeId: sh.edgeId,
+        cornerId: sh.cornerId ?? 0,
       })
+    }
+
+    if (snapshot.corners) {
+      for (const sc of snapshot.corners) {
+        this.corners.set(sc.id, {
+          id: sc.id,
+          vertexId: sc.vertexId,
+          faceId: sc.faceId,
+          halfEdgeId: sc.halfEdgeId,
+          uv: new THREE.Vector2(sc.uv.x, sc.uv.y),
+        })
+      }
     }
 
     for (const sf of snapshot.faces) {
@@ -459,6 +570,27 @@ export class EditableMesh {
     this.nextEdgeId = snapshot.nextEdgeId
     this.nextHalfEdgeId = snapshot.nextHalfEdgeId
     this.nextFaceId = snapshot.nextFaceId
+    this.nextCornerId = snapshot.nextCornerId ?? 1
+    if (snapshot.halfEdges.length === 0) this.corners.clear()
+    else if (!snapshot.corners) this.rebuildCornersFromCache()
+    else this.syncLoops()
+  }
+
+  /** Snapshots from before corners existed: one corner per cached loop slot. */
+  private rebuildCornersFromCache() {
+    this.corners.clear()
+    this.nextCornerId = 1
+    for (const face of this.faces.values()) {
+      face.halfEdgeIds.forEach((heId, i) => {
+        const he = this.halfEdges.get(heId)
+        if (!he) return
+        const id = this.allocCornerId()
+        const uv = face.uvs[i]?.clone() ?? new THREE.Vector2()
+        he.cornerId = id
+        this.corners.set(id, { id, vertexId: he.vertexId, faceId: face.id, halfEdgeId: he.id, uv })
+        face.uvs[i] = uv
+      })
+    }
   }
 
   clone(): EditableMesh {

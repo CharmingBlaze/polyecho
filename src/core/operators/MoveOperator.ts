@@ -5,6 +5,7 @@ import { PivotManager } from '../transform/PivotManager'
 
 export class MoveOperator extends ModalOperator {
   readonly name = 'Move'
+  protected usesProportional = true
 
   private startRay = new THREE.Ray()
   private currentRay = new THREE.Ray()
@@ -78,7 +79,9 @@ export class MoveOperator extends ModalOperator {
       return
     }
 
+    this.restoreEditPositions()
     const targetVertIds = this.collectTargetVertIds()
+    const weights = this.falloffWeights(targetVertIds)
     const worldMat = this.ctx.objectMatrix ?? new THREE.Matrix4()
     const movingWorld: THREE.Vector3[] = []
     const movingIds: number[] = []
@@ -127,8 +130,17 @@ export class MoveOperator extends ModalOperator {
       if (snap) extra.copy(snap)
     }
 
-    for (let i = 0; i < movingIds.length; i++) {
-      this.writeWorldPos(movingIds[i], movingWorld[i].add(extra))
+    const offset = delta.clone().add(extra)
+    if (weights) {
+      for (const [id, init] of this.initialVertices) {
+        const w = weights.get(id) ?? 0
+        if (w <= 1e-6) continue
+        this.writeWorldPos(id, init.clone().addScaledVector(offset, w))
+      }
+    } else {
+      for (let i = 0; i < movingIds.length; i++) {
+        this.writeWorldPos(movingIds[i], movingWorld[i].add(extra))
+      }
     }
 
     this.applyLiveSymmetry()
@@ -138,6 +150,6 @@ export class MoveOperator extends ModalOperator {
   updateStatus() {
     const constraintText = this.constraint !== 'FREE' ? ` ${this.constraint} (${this.orientation})` : ''
     const num = this.numericInput.text ? `: ${this.numericInput.text}` : ''
-    this.statusText = `Move${constraintText}${num}`
+    this.statusText = `Move${constraintText}${num}${this.proportionalStatus()}`
   }
 }

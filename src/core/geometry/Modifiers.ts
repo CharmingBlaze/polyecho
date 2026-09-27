@@ -1,17 +1,31 @@
 import { Face, MeshObject, MirrorModifier, SolidifyModifier, SubdivisionModifier, Vertex } from '../../types/mesh'
+import { evaluateMirror, type ModifierPurpose } from './MirrorModifier'
+import { evaluateSubdivision } from './SubdivisionModifier'
+import { evaluateSolidify } from './SolidifyModifier'
 
 export function defaultMirrorModifier(): MirrorModifier {
   return {
     enabled: true,
+    showEdit: true,
+    showRender: true,
     axisX: true,
     axisY: false,
     axisZ: false,
-    clipping: true,
+    bisectX: false,
+    bisectY: false,
+    bisectZ: false,
+    flipX: false,
+    flipY: false,
+    flipZ: false,
+    clipping: false,
     merge: true,
     mergeThreshold: 0.001,
+    bisectDistance: 0.001,
     flipU: false,
     flipV: false,
-    bisect: true
+    offsetU: 0,
+    offsetV: 0,
+    bisect: false
   }
 }
 
@@ -31,16 +45,23 @@ export function defaultSolidifyModifier(): SolidifyModifier {
     fillRim: true
   }
 }
-import { evaluateMirror } from './MirrorModifier'
-import { evaluateSubdivision } from './SubdivisionModifier'
-import { evaluateSolidify } from './SolidifyModifier'
+
+export interface ModifierEvalOptions {
+  scene?: readonly MeshObject[]
+  purpose?: ModifierPurpose
+  inEditMode?: boolean
+}
 
 /**
  * Non-destructive stack, Blender default generate order:
  * Mirror → Subdivision Surface → Solidify
  */
-export function evaluateModifiers(mesh: MeshObject): { vertices: Vertex[]; faces: Face[] } {
-  let { vertices, faces } = evaluateMirror(mesh)
+export function evaluateModifiers(
+  mesh: MeshObject,
+  options?: ModifierEvalOptions
+): { vertices: Vertex[]; faces: Face[] } {
+  const purpose = options?.purpose ?? 'viewport'
+  let { vertices, faces } = evaluateMirror(mesh, options?.scene, purpose, options?.inEditMode ?? false)
 
   if (mesh.subdivision?.enabled && mesh.subdivision.level > 0) {
     const type = mesh.subdivision.type === 'simple' ? 'simple' : 'catmull-clark'
@@ -66,10 +87,11 @@ export function evaluateModifiers(mesh: MeshObject): { vertices: Vertex[]; faces
 
 export function applyModifier(
   mesh: MeshObject,
-  type: 'mirror' | 'subdivision' | 'solidify' | 'all'
+  type: 'mirror' | 'subdivision' | 'solidify' | 'all',
+  scene?: readonly MeshObject[]
 ): void {
   if (type === 'all') {
-    const { vertices, faces } = evaluateModifiers(mesh)
+    const { vertices, faces } = evaluateModifiers(mesh, { scene, purpose: 'apply' })
     mesh.vertices = vertices
     mesh.faces = faces
     if (mesh.mirror) mesh.mirror.enabled = false
@@ -78,8 +100,8 @@ export function applyModifier(
     return
   }
 
-  if (type === 'mirror' && mesh.mirror?.enabled) {
-    const { vertices, faces } = evaluateMirror(mesh)
+  if (type === 'mirror' && mesh.mirror) {
+    const { vertices, faces } = evaluateMirror(mesh, scene, 'apply')
     mesh.vertices = vertices
     mesh.faces = faces
     mesh.mirror.enabled = false

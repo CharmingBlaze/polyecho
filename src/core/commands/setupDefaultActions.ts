@@ -1,5 +1,5 @@
 import { actionRegistry, type CommandAction } from './ActionRegistry'
-import { requestExport, requestModalTool, requestPrimitivePlacement, requestCameraView, requestFillFace, requestSmartUvProject, requestKnifeProject } from './editorCommands'
+import { requestExport, requestModalTool, requestPrimitivePlacement, requestCameraView, requestFillFace, requestSmartUvProject, requestKnifeProject, requestProjectFromView } from './editorCommands'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import { useAnimationStore } from '../../stores/animationStore'
@@ -114,10 +114,16 @@ export function setupDefaultActions(
     },
     {
       id: 'to_sphere',
-      label: 'To Sphere',
+      label: 'Spherize (drag)',
       category: 'Modeling',
       shortcut: 'Shift+Alt+s',
       handler: () => requestModalTool('to_sphere')
+    },
+    {
+      id: 'curve',
+      label: 'Curve',
+      category: 'Modeling',
+      handler: () => requestModalTool('curve')
     },
     {
       id: 'shapedraw',
@@ -227,6 +233,120 @@ export function setupDefaultActions(
       category: 'Transform',
       handler: () => projectStore.performDuplicateMirror('z')
     },
+    {
+      id: 'mirror_plane',
+      label: 'Mirror Across Plane',
+      category: 'Transform',
+      handler: () => projectStore.performMirror('x')
+    },
+    {
+      id: 'linear_array',
+      label: 'Linear Array',
+      category: 'Transform',
+      handler: () => projectStore.performLinearArray()
+    },
+    {
+      id: 'radial_array',
+      label: 'Radial Array',
+      category: 'Transform',
+      handler: () => projectStore.performRadialArray()
+    },
+    {
+      id: 'instance_duplicate',
+      label: 'Instance Duplicate',
+      category: 'Transform',
+      handler: () => projectStore.performInstanceDuplicate()
+    },
+    {
+      id: 'snap_grid',
+      label: 'Snap to Grid',
+      category: 'Transform',
+      handler: () => projectStore.performSnap('grid')
+    },
+    {
+      id: 'snap_vertex',
+      label: 'Snap to Vertex',
+      category: 'Transform',
+      handler: () => projectStore.performSnap('vertex')
+    },
+    {
+      id: 'snap_edge',
+      label: 'Snap to Edge',
+      category: 'Transform',
+      handler: () => projectStore.performSnap('edge')
+    },
+    {
+      id: 'snap_face',
+      label: 'Snap to Face',
+      category: 'Transform',
+      handler: () => projectStore.performSnap('face')
+    },
+    {
+      id: 'apply_rotation_scale',
+      label: 'Apply Rotation & Scale',
+      category: 'Transform',
+      handler: () => projectStore.performApplyRotationScale()
+    },
+    {
+      id: 'make_unique',
+      label: 'Make Unique',
+      category: 'Transform',
+      handler: () => projectStore.performMakeUnique()
+    },
+    {
+      id: 'align_center_x',
+      label: 'Align Center X',
+      category: 'Transform',
+      handler: () => projectStore.performAlign('x', 'center')
+    },
+    {
+      id: 'align_cursor_x',
+      label: 'Align to Cursor X',
+      category: 'Transform',
+      handler: () => projectStore.performAlign('x', 'cursor')
+    },
+    {
+      id: 'align_min_y',
+      label: 'Align Min Y',
+      category: 'Transform',
+      handler: () => projectStore.performAlign('y', 'min')
+    },
+    {
+      id: 'align_max_z',
+      label: 'Align Max Z',
+      category: 'Transform',
+      handler: () => projectStore.performAlign('z', 'max')
+    },
+    {
+      id: 'select_boundary',
+      label: 'Select Boundary',
+      category: 'Selection',
+      handler: () => projectStore.selectBoundaryEdges()
+    },
+    {
+      id: 'select_nonmanifold',
+      label: 'Select Non-manifold',
+      category: 'Selection',
+      handler: () => projectStore.selectNonManifoldEdges()
+    },
+    {
+      id: 'select_sharp',
+      label: 'Select Sharp Edges',
+      category: 'Selection',
+      handler: () => projectStore.selectSharpEdges()
+    },
+    {
+      id: 'mark_sharp',
+      label: 'Mark Sharp',
+      category: 'Shading',
+      handler: () => projectStore.markSelectedEdgesSharp()
+    },
+    {
+      id: 'clear_sharp',
+      label: 'Clear Sharp',
+      category: 'Shading',
+      handler: () => projectStore.clearSelectedEdgesSharp()
+    },
 
     // 2. TOPOLOGY
     {
@@ -242,6 +362,28 @@ export function setupDefaultActions(
           }
         }
       }
+    },
+    {
+      id: 'simple_subdivide',
+      label: 'Simple Subdivide',
+      category: 'Topology',
+      handler: () => {
+        if (toolStore.selectMode === 'object' || toolStore.selectMode === 'vertex' || toolStore.selectMode === 'edge' || toolStore.selectMode === 'face') {
+          projectStore.performSimpleSubdivide(toolStore.selectMode)
+        }
+      }
+    },
+    {
+      id: 'catmull_clark',
+      label: 'Catmull-Clark Subdivide',
+      category: 'Topology',
+      handler: () => projectStore.performCatmullClark()
+    },
+    {
+      id: 'spherize',
+      label: 'Spherize',
+      category: 'Topology',
+      handler: () => projectStore.performSpherize()
     },
     {
       id: 'poke_faces',
@@ -278,9 +420,7 @@ export function setupDefaultActions(
       label: 'Bridge Edge Loops',
       category: 'Topology',
       icon: 'bridge-edges',
-      handler: () => {
-        if (projectStore.activeMesh) projectStore.performBridgeEdges()
-      }
+      handler: () => requestModalTool('bridge')
     },
     {
       id: 'grid_fill',
@@ -324,6 +464,42 @@ export function setupDefaultActions(
           projectStore.performMerge('center')
         }
       }
+    },
+    {
+      id: 'merge_first',
+      label: 'Merge at First',
+      category: 'Topology',
+      handler: () => projectStore.performMerge('first')
+    },
+    {
+      id: 'merge_last',
+      label: 'Merge at Last',
+      category: 'Topology',
+      handler: () => projectStore.performMerge('last')
+    },
+    {
+      id: 'merge_cursor',
+      label: 'Merge at Cursor',
+      category: 'Topology',
+      handler: () => projectStore.performMerge('cursor')
+    },
+    {
+      id: 'merge_vertex',
+      label: 'Merge at Vertex',
+      category: 'Topology',
+      handler: () => projectStore.performMerge('vertex')
+    },
+    {
+      id: 'weld_distance',
+      label: 'Weld by Distance',
+      category: 'Topology',
+      handler: () => projectStore.performMerge('distance')
+    },
+    {
+      id: 'split_edge',
+      label: 'Split Edge',
+      category: 'Topology',
+      handler: () => projectStore.performSplitEdges()
     },
     {
       id: 'flip_normals',
@@ -479,7 +655,7 @@ export function setupDefaultActions(
     },
     {
       id: 'split_faces',
-      label: 'Split',
+      label: 'Detach Faces',
       category: 'Topology',
       shortcut: 'y',
       handler: () => projectStore.performSplit()
@@ -493,9 +669,21 @@ export function setupDefaultActions(
     },
     {
       id: 'solidify_faces',
-      label: 'Solidify Faces',
+      label: 'Solidify',
       category: 'Topology',
       handler: () => projectStore.performSolidifyFaces()
+    },
+    {
+      id: 'lathe',
+      label: 'Lathe / Revolve',
+      category: 'Topology',
+      handler: () => projectStore.performLathe()
+    },
+    {
+      id: 'shell',
+      label: 'Shell',
+      category: 'Topology',
+      handler: () => projectStore.performShell()
     },
     {
       id: 'symmetrize_x',
@@ -508,6 +696,24 @@ export function setupDefaultActions(
       label: 'Smooth Vertices',
       category: 'Topology',
       handler: () => projectStore.performSmoothVertices()
+    },
+    {
+      id: 'circle_loop',
+      label: 'Circle',
+      category: 'Topology',
+      handler: () => projectStore.performCircle()
+    },
+    {
+      id: 'straighten_horizontal',
+      label: 'Straighten Horizontal',
+      category: 'Topology',
+      handler: () => projectStore.performStraighten('horizontal')
+    },
+    {
+      id: 'straighten_vertical',
+      label: 'Straighten Vertical',
+      category: 'Topology',
+      handler: () => projectStore.performStraighten('vertical')
     },
     {
       id: 'randomize_verts',
@@ -578,6 +784,34 @@ export function setupDefaultActions(
       category: 'Selection',
       shortcut: 'Alt+a',
       handler: () => projectStore.deselectAll()
+    },
+    {
+      id: 'select_invert',
+      label: 'Invert Selection',
+      category: 'Selection',
+      shortcut: 'Ctrl+i',
+      handler: () => projectStore.selectInverse(toolStore.selectMode)
+    },
+    {
+      id: 'select_more',
+      label: 'Select More',
+      category: 'Selection',
+      shortcut: 'Ctrl+=',
+      handler: () => projectStore.growSelection(toolStore.selectMode)
+    },
+    {
+      id: 'select_less',
+      label: 'Select Less',
+      category: 'Selection',
+      shortcut: 'Ctrl+-',
+      handler: () => projectStore.shrinkSelection(toolStore.selectMode)
+    },
+    {
+      id: 'select_linked',
+      label: 'Select Linked',
+      category: 'Selection',
+      shortcut: 'Ctrl+l',
+      handler: () => projectStore.selectConnected(toolStore.selectMode)
     },
     {
       id: 'box_select',
@@ -799,6 +1033,15 @@ export function setupDefaultActions(
       shortcut: 'Ctrl+e',
       handler: () => requestExport('glb')
     },
+    {
+      id: 'open_help',
+      label: 'Documentation & User Manual',
+      category: 'File & Project',
+      shortcut: 'F1',
+      handler: () => {
+        window.dispatchEvent(new CustomEvent('open-help', { detail: { topic: 'overview' } }))
+      }
+    },
 
     // 8. UV & TEXTURE
     {
@@ -835,6 +1078,18 @@ export function setupDefaultActions(
       label: 'Unwrap UVs Along Seams',
       category: 'UV & Texture',
       handler: () => projectStore.performSeamUnwrap()
+    },
+    {
+      id: 'project_from_view',
+      label: 'Project From View',
+      category: 'UV & Texture',
+      handler: () => requestProjectFromView()
+    },
+    {
+      id: 'seams_from_islands',
+      label: 'Seams from UV Islands',
+      category: 'UV & Texture',
+      handler: () => projectStore.performSeamsFromIslands()
     },
     {
       id: 'pack_islands',

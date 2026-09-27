@@ -30,6 +30,7 @@ export type PaintToolType =
   | 'dither'
   | 'shade'
   | 'select'
+  | 'wand'
 
 export type RigToolType =
   | 'select_bone'
@@ -63,7 +64,7 @@ export interface SnappingSettings {
 }
 
 export interface ViewportSettings {
-  shading: 'solid' | 'wireframe' | 'textured' | 'psx'
+  shading: 'solid' | 'wireframe' | 'textured' | 'dreamcast'
   showGrid: boolean
   showAxes: boolean
   showNormals: boolean

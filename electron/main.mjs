@@ -1,4 +1,5 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, screen, session, shell } from 'electron'
+import { fitWindowBounds, minimumSizeFor, needsRefit } from './windowFit.mjs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -99,28 +100,55 @@ function boundsPath() {
 async function readBounds() {
   try {
     const raw = JSON.parse(await fs.readFile(boundsPath(), 'utf8'))
-    if (typeof raw.width === 'number' && typeof raw.height === 'number') return raw
+    if (typeof raw.width === 'number' && typeof raw.height === 'number') {
+      return {
+        width: raw.width,
+        height: raw.height,
+        x: raw.x,
+        y: raw.y,
+        maximized: raw.maximized === true,
+        fullscreen: raw.fullscreen === true
+      }
+    }
   } catch {
     /* first launch */
   }
-  return { width: 1440, height: 900 }
+  return { width: 1440, height: 900, maximized: false, fullscreen: false }
 }
 
 function writeBounds(win) {
   if (win.isDestroyed() || win.isMinimized()) return
-  const b = win.getBounds()
-  fs.writeFile(boundsPath(), JSON.stringify(b), 'utf8').catch(() => {})
+  const maximized = win.isMaximized()
+  const fullscreen = win.isFullScreen()
+  const b = maximized || fullscreen ? win.getNormalBounds() : win.getBounds()
+  fs.writeFile(boundsPath(), JSON.stringify({ ...b, maximized, fullscreen }), 'utf8').catch(() => {})
+}
+
+function workAreaFor(bounds) {
+  return screen.getDisplayMatching(bounds).workArea
+}
+
+function isPageZoomChord(input) {
+  if (input.type !== 'keyDown') return false
+  if (!(input.control || input.meta) || input.alt) return false
+  return input.key === '=' || input.key === '+' || input.key === '-' || input.key === '_' || input.key === '0'
 }
 
 async function createWindow() {
   const saved = await readBounds()
-  const win = new BrowserWindow({
+  const probe = {
+    x: typeof saved.x === 'number' ? saved.x : 0,
+    y: typeof saved.y === 'number' ? saved.y : 0,
     width: saved.width,
-    height: saved.height,
-    x: typeof saved.x === 'number' ? saved.x : undefined,
-    y: typeof saved.y === 'number' ? saved.y : undefined,
-    minWidth: 1100,
-    minHeight: 700,
+    height: saved.height
+  }
+  const work = workAreaFor(probe)
+  const min = minimumSizeFor(work)
+  const fitted = fitWindowBounds(saved, work, min)
+  const win = new BrowserWindow({
+    ...fitted,
+    minWidth: min.width,
+    minHeight: min.height,
     title: 'PolyEcho',
     icon: windowIcon(),
     backgroundColor: '#111318',
@@ -135,7 +163,46 @@ async function createWindow() {
     }
   })
 
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () => {
+    if (saved.fullscreen) win.setFullScreen(true)
+    else if (saved.maximized) win.maximize()
+    win.show()
+  })
+  let boundsTimer = null
+  const saveSoon = () => {
+    clearTimeout(boundsTimer)
+    boundsTimer = setTimeout(() => writeBounds(win), 400)
+  }
+  win.on('resize', saveSoon)
+  win.on('move', saveSoon)
+  const refitIfNeeded = () => {
+    if (win.isDestroyed()) return
+    const area = workAreaFor(win.getBounds())
+    const nextMin = minimumSizeFor(area)
+    win.setMinimumSize(nextMin.width, nextMin.height)
+    if (win.isMinimized() || win.isMaximized() || win.isFullScreen()) return
+    const current = win.getBounds()
+    if (!needsRefit(current, area)) return
+    win.setBounds(fitWindowBounds(current, area, nextMin))
+  }
+  screen.on('display-removed', refitIfNeeded)
+  screen.on('display-metrics-changed', refitIfNeeded)
+  win.on('closed', () => {
+    screen.removeListener('display-removed', refitIfNeeded)
+    screen.removeListener('display-metrics-changed', refitIfNeeded)
+  })
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown' && input.key === 'F11') {
+      event.preventDefault()
+      win.setFullScreen(!win.isFullScreen())
+      return
+    }
+    if (isPageZoomChord(input)) event.preventDefault()
+  })
+  win.webContents.on('did-finish-load', () => {
+    win.webContents.setZoomFactor(1)
+    win.webContents.setVisualZoomLevelLimits(1, 1).catch(() => {})
+  })
   win.webContents.on('did-fail-load', (_event, code, desc) => {
     console.error('[PolyEcho] load failed', code, desc)
     if (!win.isDestroyed()) win.show()
@@ -156,6 +223,9 @@ async function createWindow() {
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
     return { action: 'deny' }
+  })
+  win.webContents.on('context-menu', (event) => {
+    event.preventDefault()
   })
 
   win.webContents.on('will-navigate', (event, url) => {
@@ -343,6 +413,13 @@ ipcMain.handle('desktop:showAbout', async (event) => {
 ipcMain.handle('desktop:requestQuit', (event) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   if (win) win.close()
+})
+ipcMain.handle('desktop:toggleFullscreen', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win) return false
+  const next = !win.isFullScreen()
+  win.setFullScreen(next)
+  return next
 })
 ipcMain.handle('desktop:openPath', async (_event, filePath) => {
   if (typeof filePath !== 'string' || filePath.includes('..')) return { canceled: true }

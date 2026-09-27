@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /** UV / Paint workspace tab router. Pixel math lives in `src/core/painting/PixelCanvas.ts`. */
-import { computed, ref } from 'vue'
-import UVEditor from './UVEditor.vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
+import UVEditor, { forgetUvViewForNextOpen } from './UVEditor.vue'
 import PixelEditor from './PixelEditor.vue'
 import { useToolStore } from '../../stores/toolStore'
 import { useProjectStore } from '../../stores/projectStore'
@@ -10,6 +10,8 @@ import BlenderIcon from '../icons/BlenderIcon.vue'
 const toolStore = useToolStore()
 const projectStore = useProjectStore()
 const showHelp = ref(false)
+
+onUnmounted(forgetUvViewForNextOpen)
 
 function onShellPointerDown(e: PointerEvent) {
   const target = e.target
@@ -25,6 +27,14 @@ const activeTab = computed({
     toolStore.uvWorkspaceTab = val
   }
 })
+
+watch(
+  () => toolStore.uvWorkspaceTab,
+  (tab) => {
+    if (tab === 'paint') toolStore.setPaintTool('brush')
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
@@ -62,37 +72,10 @@ const activeTab = computed({
           <span class="uv-paint-resolution-label text-[9px] text-ui-textMuted font-bold">RES:</span>
           <span class="inspector-value font-bold">{{ projectStore.pixelBuffer.width }}×{{ projectStore.pixelBuffer.height }}</span>
         </div>
-        <div
-          v-if="activeTab === 'paint'"
-          class="flex items-center gap-1.5 bg-ui-input px-2 py-0.5 rounded-xs border border-ui-borderSubtle"
-        >
-          <span class="uv-paint-color-label text-[9px] text-ui-textMuted font-bold uppercase">Color:</span>
-          <label class="w-5 h-5 rounded-xs border border-ui-borderStrong cursor-pointer shadow-xs relative overflow-hidden block" :style="{ backgroundColor: toolStore.primaryColor }">
-            <input v-model="toolStore.primaryColor" type="color" class="opacity-0 absolute inset-0 w-full h-full cursor-pointer">
-          </label>
-          <input
-            v-model="toolStore.primaryColor"
-            type="text"
-            class="uv-paint-color-hex w-16 px-1.5 py-0.5 bg-ui-panel text-ui-textPrimary font-mono text-[10px] font-bold border border-ui-borderSubtle rounded-xs focus:outline-none focus:border-ui-accent uppercase text-center"
-            aria-label="Color hex"
-          >
-          <label class="flex items-center gap-1 text-[9px] text-ui-textMuted font-bold uppercase" title="Brush size ([ / ])">
-            Size
-            <input
-              type="number"
-              min="1"
-              max="128"
-              :value="toolStore.brushSize"
-              class="w-10 px-1 py-0.5 bg-ui-panel text-ui-textPrimary font-mono text-[10px] font-bold border border-ui-borderSubtle rounded-xs focus:outline-none focus:border-ui-accent text-center"
-              aria-label="Brush size in pixels"
-              @change="toolStore.brushSize = Math.max(1, Math.min(128, Math.round(Number(($event.target as HTMLInputElement).value) || 1)))"
-            >
-          </label>
-        </div>
       </div>
-      <button class="workspace-help-button" :aria-expanded="showHelp" title="Workspace shortcuts" @click="showHelp = !showHelp">?</button>
+      <button class="workspace-help-button" :aria-expanded="showHelp" @click="showHelp = !showHelp" title="Workspace shortcuts">?</button>
       <div v-if="showHelp" class="workspace-help" @keydown.esc="showHelp = false">
-        <div class="flex items-center justify-between mb-2"><strong>{{ activeTab === 'uv' ? 'UV Editor' : 'Pixel Paint' }} shortcuts</strong><button aria-label="Close shortcuts" @click="showHelp = false">×</button></div>
+        <div class="flex items-center justify-between mb-2"><strong>{{ activeTab === 'uv' ? 'UV Editor' : 'Pixel Paint' }} shortcuts</strong><button @click="showHelp = false" aria-label="Close shortcuts">×</button></div>
         <template v-if="activeTab === 'uv'">
           <p><kbd>1–4</kbd> Vertex / edge / face / island</p>
           <p><kbd>A</kbd> Select all <kbd>Alt+A</kbd> Deselect</p>
@@ -102,7 +85,8 @@ const activeTab = computed({
         <template v-else>
           <p><kbd>B</kbd> Brush <kbd>E</kbd> Eraser <kbd>I</kbd> Pick color</p>
           <p><kbd>G</kbd> Fill <kbd>L</kbd> Line <kbd>H</kbd> Shade</p>
-          <p><kbd>[ / ]</kbd> Brush size <kbd>X</kbd> Swap colors</p>
+          <p><kbd>[ / ]</kbd> Brush size <kbd>Shift</kbd>-drag or pen side button resizes</p>
+          <p><kbd>Alt</kbd>-wheel steps size <kbd>X</kbd> Swap colors</p>
           <p><kbd>Ctrl-click</kbd> Secondary color</p>
           <p><kbd>M</kbd> Marquee <kbd>Ctrl D</kbd> Deselect</p>
           <p><kbd>Ctrl C / V</kbd> Copy / paste pixels as layer</p>
@@ -121,15 +105,13 @@ const activeTab = computed({
         type="button"
         class="shrink-0 px-2 py-0.5 rounded-xs bg-ui-active border border-ui-borderSubtle text-ui-textAccent hover:bg-ui-hover"
         @click="toolStore.setAppMode('model')"
-      >
-        Go to Modeling
-      </button>
+      >Go to Modeling</button>
     </div>
 
     <div class="flex-1 min-h-0 min-w-0 flex">
       <div class="flex-1 min-h-0 min-w-0">
-        <UVEditor v-if="activeTab === 'uv'" key="uv-editor" />
-        <PixelEditor v-else key="pixel-editor" />
+        <UVEditor v-show="activeTab === 'uv'" key="uv-editor" />
+        <PixelEditor v-show="activeTab === 'paint'" key="pixel-editor" />
       </div>
       <div id="paint-layers-host" class="contents" />
     </div>
@@ -139,11 +121,16 @@ const activeTab = computed({
 <style>
 .uv-paint-shell { container-type: inline-size; }
 
-/* Command menus are intentionally above the canvas, viewport and inspector.
-   They are portaled into the shared workspace header, so this rule covers UV
-   and Paint without duplicating it in both editors. */
+/* UV and Paint editors each form a stacking context (container-type), and the
+   canvas chrome inside them (view controls, layers) paints after this bar.
+   The bar has to be its own context above that chrome so portaled menus,
+   which hang out of the bar, stay on top in both workspaces. */
+.uv-paint-tabs {
+  position: relative;
+  z-index: 200;
+}
 .uv-paint-command-slot .header-dropdown-menu {
-  z-index: 30 !important;
+  z-index: 1;
   overflow: visible;
 }
 
@@ -151,7 +138,8 @@ const activeTab = computed({
   .uv-paint-tabs { gap: 4px !important; padding-left: 4px !important; padding-right: 4px !important; }
   .uv-paint-resolution-label,
   .uv-paint-color-label,
-  .uv-paint-color-hex { display: none; }
+  .uv-paint-color-hex,
+  .uv-paint-size-label { display: none; }
 }
 </style>
 
@@ -169,7 +157,7 @@ const activeTab = computed({
 </style>
 
 <style>
-.uv-paint-tabs { min-height: 34px !important; height: 34px !important; }
+.uv-paint-tabs { min-height: 34px !important; height: 34px !important; position: relative; z-index: 200; }
 .uv-paint-command-slot {
   order: 0;
   flex: 1 1 auto;

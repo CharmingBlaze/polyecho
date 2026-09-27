@@ -1,6 +1,16 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
+export type ToolShelfId = 'uv' | 'paint'
+type ToolShelfState = { open: boolean; minimized: boolean; x: number; y: number }
+
+function defaultToolShelves(): Record<ToolShelfId, ToolShelfState> {
+  return {
+    uv: { open: true, minimized: false, x: 12, y: 12 },
+    paint: { open: true, minimized: false, x: 12, y: 12 }
+  }
+}
+
 export const useLayoutStore = defineStore('layout', () => {
   // Panel Visibility
   const showLeftToolbar = ref<boolean>(true)
@@ -16,6 +26,16 @@ export const useLayoutStore = defineStore('layout', () => {
   const leftToolbarHeight = ref<number>(500)
   const leftToolbarPos = ref<{ x: number; y: number }>({ x: 16, y: 46 })
   const leftToolbarHasMoved = ref(false)
+
+  const toolShelves = ref<Record<ToolShelfId, ToolShelfState>>(defaultToolShelves())
+
+  function patchToolShelf(id: ToolShelfId, patch: Partial<ToolShelfState>) {
+    toolShelves.value[id] = { ...toolShelves.value[id], ...patch }
+  }
+
+  function moveToolShelf(id: ToolShelfId, x: number, y: number) {
+    patchToolShelf(id, { x, y })
+  }
 
   // Right Sidebar States
   const rightSidebarFloating = ref<boolean>(false)
@@ -200,6 +220,11 @@ export const useLayoutStore = defineStore('layout', () => {
   }
 
   function applySidebarForMode(mode: string) {
+    if (mode === 'uvpaint') {
+      showRightSidebar.value = false
+      restoreInspectorTab(mode)
+      return
+    }
     const remembered = lastSidebarVisibleByMode.value[mode]
     showRightSidebar.value = remembered ?? defaultSidebarVisible[mode] ?? true
     restoreInspectorTab(mode)
@@ -229,6 +254,7 @@ export const useLayoutStore = defineStore('layout', () => {
     leftToolbarHeight.value = 500
     leftToolbarPos.value = { x: 16, y: typeof window !== 'undefined' ? Math.round(window.innerHeight / 2) : 400 }
     leftToolbarHasMoved.value = false
+    toolShelves.value = defaultToolShelves()
 
     rightSidebarFloating.value = false
     rightSidebarMinimized.value = false
@@ -253,6 +279,9 @@ export const useLayoutStore = defineStore('layout', () => {
     leftToolbarHeight,
     leftToolbarPos,
     leftToolbarHasMoved,
+    toolShelves,
+    patchToolShelf,
+    moveToolShelf,
     rightSidebarFloating,
     rightSidebarMinimized,
     rightSidebarWidth,

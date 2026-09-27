@@ -128,4 +128,34 @@ export class OperatorManager {
   }
 }
 
+/** Multi-step tools keep their own confirm step. A sidebar click must not bake them. */
+const MULTI_STEP_OPERATORS = new Set([
+  'Knife',
+  'Loop Cut',
+  'Shape Draw',
+  'Poly Draw',
+  'Poly Build',
+  'Blockout Sketch',
+  'Add Primitive',
+])
+
+/** Drag tools (slide, bisect, spin, grab, …) commit when the next inspector control is used. */
+export function modalCommitsOnUiInterrupt(operatorName: string): boolean {
+  return operatorName.length > 0 && !MULTI_STEP_OPERATORS.has(operatorName)
+}
+
+/** True when the event target is an inspector control that should finish the live edit first. */
+export function inspectorTargetInterruptsModal(target: EventTarget | null): boolean {
+  const el = target instanceof Element ? target : null
+  if (!el) return false
+  if (el.closest('[data-modal-action="cancel"], [data-modal-action="confirm"]')) return false
+  return !!el.closest('button, input, select, textarea')
+}
+
+/** The click that just committed a drag tool must not immediately start that tool again. */
+export function inspectorClickRestartsModal(target: EventTarget | null): boolean {
+  const el = target instanceof Element ? target : null
+  return !!el?.closest('[data-modal-tool]')
+}
+
 export const operatorManager = OperatorManager.getInstance()

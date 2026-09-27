@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createCube } from '../geometry/Primitives'
-import { exportToOBJ } from './ObjExport'
+import { exportToMTL, exportToOBJ } from './ObjExport'
 import { ObjImport } from '../import/ObjImport'
 
 describe('OBJ I/O', () => {
@@ -53,5 +53,27 @@ describe('OBJ I/O', () => {
     const imported = ObjImport.parse(autoObj).meshes[0]
     expect(imported.shadeMode).toBe('auto')
     expect(imported.autoSmoothAngle).toBe(45)
+  })
+
+  it('writes image-card opacity and alpha metadata to MTL', () => {
+    const mtl = exportToMTL([{
+      id: 'mat_tree',
+      name: 'Tree Card',
+      color: '#ffffff',
+      textureFileName: 'tree.png',
+      tileX: 3,
+      tileY: 2.5,
+      opacity: 0.65,
+      alphaTest: 0.05,
+      doubleSided: true,
+      useTextureAlpha: true,
+    }])
+
+    expect(mtl).toContain('newmtl Tree_Card')
+    expect(mtl).toContain('d 0.650')
+    expect(mtl).toContain('map_Kd -s 3 2.5 1 tree.png')
+    expect(mtl).toContain('map_d -s 3 2.5 1 -imfchan a tree.png')
+    expect(mtl).toContain('# polyecho_alpha_cutoff 0.050')
+    expect(mtl).toContain('# polyecho_double_sided true')
   })
 })

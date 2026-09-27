@@ -382,8 +382,8 @@ export class KnifeOperator extends ModalOperator {
     const ignoreSnapping = ctrlKey
     const forceMidpoint = shiftKey
 
-    const VERTEX_PX = 8
-    const EDGE_PX = 9
+    const VERTEX_PX = 12
+    const EDGE_PX = 14
     const constraintDirection = last && (this.axisLock || this.angleSnapping) ? overlay.clone().sub(last.screen).normalize() : null
     const onConstraint = (point: THREE.Vector2) => !constraintDirection || !last || Math.abs(point.clone().sub(last.screen).cross(constraintDirection)) < 0.5
 
@@ -439,7 +439,7 @@ export class KnifeOperator extends ModalOperator {
         if (distance > EDGE_PX) continue
         if (bestEdge && distance >= bestEdge.dist) continue
 
-        const midpoint = (forceMidpoint || Math.abs(t - 0.5) < 0.08) && onConstraint(this.toOverlay(p1.clone().lerp(p2, 0.5)))
+        const midpoint = forceMidpoint && onConstraint(this.toOverlay(p1.clone().lerp(p2, 0.5)))
         const finalT = midpoint ? 0.5 : perspectiveEdgeParameter(t, this.toWorld(p1), this.toWorld(p2), this.ctx.camera)
         const worldPos = p1.clone().lerp(p2, finalT)
 
@@ -571,14 +571,19 @@ export class KnifeOperator extends ModalOperator {
     this.measurementText = `${lenStr}m · ${angleDeg.toFixed(1)}°`
   }
 
+  private clonePoint(point: KnifePoint): KnifePoint {
+    return { ...point, world: point.world.clone(), screen: point.screen.clone() }
+  }
+
   evaluate() {
     this.restoreSnapshot()
     this.error = ''
     const chains = [...this.completedChains, this.currentChain].filter(c => c.length >= 2)
     if (chains.length) {
-      // Resolve against world positions; ids from a previous preview may have changed.
-      const normalized = chains.map(chain => chain.map(p => ({ ...p, targetType: 'FACE' as const, vertexId: undefined, edgeId: undefined, faceId: undefined })))
-      KnifeKernel.applyCuts(this.ctx.mesh, normalized, { cutThrough: this.cutThrough, camera: this.ctx.camera,
+      // The snapshot restore brings the original ids back, so vertex and edge snaps stay exact.
+      // applyCuts rewrites target types on the points it is given; cut copies, not the stroke.
+      const clones = chains.map(chain => chain.map(point => this.clonePoint(point)))
+      KnifeKernel.applyCuts(this.ctx.mesh, clones, { cutThrough: this.cutThrough, camera: this.ctx.camera,
         viewportRect: this.viewportRect(), quadrant: this.ctx.quadrant, objectMatrix: this.objectWorld })
       if (!MeshValidator.validate(this.ctx.mesh).valid) {
         this.restoreSnapshot(); this.error = 'This cut would create invalid faces. Undo the last point and adjust the cut.'

@@ -12,6 +12,11 @@ import type {
   TransformOrientation,
   PivotPoint
 } from '../types/tools'
+import {
+  DEFAULT_VIEWPORT_LIGHTING,
+  sanitizeViewportLighting,
+  type ViewportLightingSettings,
+} from '../core/render/ViewportLighting'
 
 export const useToolStore = defineStore('tool', () => {
   const appMode = ref<AppMode>('model')
@@ -35,6 +40,14 @@ export const useToolStore = defineStore('tool', () => {
   const brushFilled = ref<boolean>(false)
   const ditherPattern = ref<string>('bayer4x4')
   const paletteSnapEnabled = ref<boolean>(false)
+  const paintMirrorU = ref(false)
+  const paintMirrorV = ref(false)
+  const seamPadMargin = ref(2)
+  const wandConnected = ref(true)
+  /** Photoshop marquee: new selection, or add / subtract / intersect with the current one. */
+  const selectionCombine = ref<'replace' | 'add' | 'subtract' | 'intersect'>('replace')
+  const paintColorPick = ref<{ x: number; y: number; nonce: number } | null>(null)
+  const paintMarquee = ref<{ x: number; y: number; w: number; h: number; nonce: number } | null>(null)
 
   // Stylus & Touch Settings
   const stylusPressureEnabled = ref<boolean>(true)
@@ -86,9 +99,32 @@ export const useToolStore = defineStore('tool', () => {
   /** Blender Subdivide redo: Number of Cuts / Smoothness. */
   const subdivideCuts = ref(1)
   const subdivideSmoothness = ref(0)
+  const catmullLevels = ref(1)
+  const spherizeFactor = ref(1)
   const limitedDissolveAngle = ref(5)
   const bridgeSegments = ref(1)
   const bridgeTwist = ref(0)
+  /** Grab / Rotate / Scale falloff. O toggles it during the modal; scroll sets the radius. */
+  const proportionalEdit = ref(false)
+  const proportionalRadius = ref(1)
+  /** Split Edge inserts a vertex at this factor along each selected edge. */
+  const splitEdgeFactor = ref(0.5)
+  /** Weld by Distance threshold, in object-local units. */
+  const weldDistance = ref(0.05)
+  /** Vertex kept when merging onto another vertex. */
+  const mergeTargetVertexId = ref<string | null>(null)
+  const vertexBevelWidth = ref(0.1)
+  const vertexBevelSegments = ref(1)
+  const solidifyThickness = ref(0.1)
+  const shellThickness = ref(0.1)
+  const latheSteps = ref(8)
+  const latheAxis = ref<'x' | 'y' | 'z'>('y')
+  const mirrorOffset = ref(0)
+  /** Mesh waiting for a viewport click to assign its Mirror modifier object. */
+  const mirrorObjectPickForId = ref<string | null>(null)
+  const arrayCount = ref(3)
+  const arrayOffset = ref(1)
+  const arrayAxis = ref<'x' | 'y' | 'z'>('x')
 
   // Snapping & Precision
   const snapping = ref<SnappingSettings>({
@@ -127,6 +163,27 @@ export const useToolStore = defineStore('tool', () => {
     invertZoom: false,
     combinedGizmo: false,
   })
+
+  const VIEWPORT_LIGHTING_KEY = 'polyecho_viewport_lighting_v2'
+  function loadViewportLighting(): ViewportLightingSettings {
+    if (typeof localStorage === 'undefined') return { ...DEFAULT_VIEWPORT_LIGHTING }
+    try {
+      const raw = localStorage.getItem(VIEWPORT_LIGHTING_KEY)
+      if (!raw) return { ...DEFAULT_VIEWPORT_LIGHTING }
+      return sanitizeViewportLighting(JSON.parse(raw))
+    } catch {
+      return { ...DEFAULT_VIEWPORT_LIGHTING }
+    }
+  }
+  const viewportLighting = ref<ViewportLightingSettings>(loadViewportLighting())
+  watch(viewportLighting, (value) => {
+    if (typeof localStorage === 'undefined') return
+    localStorage.setItem(VIEWPORT_LIGHTING_KEY, JSON.stringify(sanitizeViewportLighting(value)))
+  }, { deep: true })
+
+  function resetViewportLighting() {
+    viewportLighting.value = { ...DEFAULT_VIEWPORT_LIGHTING }
+  }
 
   function isMeshWorkspace() {
     return appMode.value === 'model' || appMode.value === 'blockout'
@@ -202,6 +259,18 @@ export const useToolStore = defineStore('tool', () => {
     if (tool !== 'select') isBoxSelectActive.value = false
   }
 
+  /** Arms proportional move. The next viewport drag slides the selection with falloff. */
+  function toggleProportionalTool() {
+    const next = !proportionalEdit.value
+    proportionalEdit.value = next
+    if (!next) return
+    isBoxSelectActive.value = false
+    stickyViewNav.value = null
+    if (selectMode.value === 'object' || selectMode.value === 'origin') {
+      enterSelectMode('vertex')
+    }
+  }
+
   function toggleBoxSelect() {
     stickyViewNav.value = null
     isBoxSelectActive.value = !isBoxSelectActive.value
@@ -225,6 +294,14 @@ export const useToolStore = defineStore('tool', () => {
   function setRigTool(tool: RigToolType) {
     if (tool !== rigTool.value) stickyViewNav.value = null
     rigTool.value = tool
+  }
+
+  function requestPaintColorPick(x: number, y: number) {
+    paintColorPick.value = { x, y, nonce: (paintColorPick.value?.nonce ?? 0) + 1 }
+  }
+
+  function requestPaintMarquee(rect: { x: number; y: number; w: number; h: number }) {
+    paintMarquee.value = { ...rect, nonce: (paintMarquee.value?.nonce ?? 0) + 1 }
   }
 
   function setUvHoverFaceIds(ids: string[]) {
@@ -253,6 +330,15 @@ export const useToolStore = defineStore('tool', () => {
     brushFilled,
     ditherPattern,
     paletteSnapEnabled,
+    paintMirrorU,
+    paintMirrorV,
+    seamPadMargin,
+    wandConnected,
+    selectionCombine,
+    paintColorPick,
+    requestPaintColorPick,
+    paintMarquee,
+    requestPaintMarquee,
     stylusPressureEnabled,
     stylusModeNotifications,
     stickyViewportControls,
@@ -269,12 +355,33 @@ export const useToolStore = defineStore('tool', () => {
     smartUvMargin,
     subdivideCuts,
     subdivideSmoothness,
+    catmullLevels,
+    spherizeFactor,
     limitedDissolveAngle,
     bridgeSegments,
     bridgeTwist,
+    proportionalEdit,
+    proportionalRadius,
+    toggleProportionalTool,
+    splitEdgeFactor,
+    weldDistance,
+    mergeTargetVertexId,
+    vertexBevelWidth,
+    vertexBevelSegments,
+    solidifyThickness,
+    shellThickness,
+    latheSteps,
+    latheAxis,
+    mirrorOffset,
+    mirrorObjectPickForId,
+    arrayCount,
+    arrayOffset,
+    arrayAxis,
     snapping,
     cursor3D,
     viewport,
+    viewportLighting,
+    resetViewportLighting,
     isMeshWorkspace,
     isMeshSelectMode,
     enterSelectMode,
