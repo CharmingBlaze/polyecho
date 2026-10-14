@@ -2,6 +2,7 @@
 import { computed, onUnmounted, ref } from 'vue'
 import type { MaterialGradient, MaterialGradientStop } from '../../types/texture'
 import { gradientCss, gradientRampCss, reverseGradient, sampleGradient } from '../../core/materials/MaterialFill'
+import GradientChooser from './GradientChooser.vue'
 
 /** Travel direction of a linear ramp. 0° runs left to right in UV space. */
 const COMPASS: { angle: number; glyph: string; label: string; center?: boolean }[] = [
@@ -18,6 +19,7 @@ const COMPASS: { angle: number; glyph: string; label: string; center?: boolean }
 
 const props = defineProps<{
   gradient: MaterialGradient
+  foreground?: string
 }>()
 
 const emit = defineEmits<{
@@ -141,7 +143,10 @@ function startDrag(kind: 'stop' | 'midpoint', index: number, event: PointerEvent
   window.addEventListener('pointerup', endDrag)
 }
 
-onUnmounted(endDrag)
+onUnmounted(() => {
+  endDrag()
+  endAim()
+})
 
 function addStop(event: PointerEvent) {
   if (event.target !== event.currentTarget) return
@@ -162,10 +167,47 @@ function addStop(event: PointerEvent) {
   commit({ ...next, stops: order.map(entry => entry.item) })
 }
 
+const KINDS: { id: MaterialGradient['kind']; label: string }[] = [
+  { id: 'linear', label: 'Linear' },
+  { id: 'radial', label: 'Radial' },
+  { id: 'angle', label: 'Angle' },
+  { id: 'reflected', label: 'Reflect' },
+  { id: 'diamond', label: 'Diamond' }
+]
+
 function setKind(kind: MaterialGradient['kind']) {
   if (props.gradient.kind === kind) return
   emit('begin')
   commit({ ...cloneGradient(), kind })
+}
+
+const aimRef = ref<HTMLElement | null>(null)
+
+function angleFromEvent(event: PointerEvent): number {
+  const rect = aimRef.value?.getBoundingClientRect()
+  if (!rect) return props.gradient.angle
+  const deg = (Math.atan2(
+    event.clientY - (rect.top + rect.height / 2),
+    event.clientX - (rect.left + rect.width / 2)
+  ) * 180) / Math.PI
+  return ((deg % 360) + 360) % 360
+}
+
+function onAimMove(event: PointerEvent) {
+  setAngle(angleFromEvent(event))
+}
+
+function endAim() {
+  window.removeEventListener('pointermove', onAimMove)
+  window.removeEventListener('pointerup', endAim)
+}
+
+function startAim(event: PointerEvent) {
+  event.preventDefault()
+  emit('begin')
+  setAngle(angleFromEvent(event))
+  window.addEventListener('pointermove', onAimMove)
+  window.addEventListener('pointerup', endAim)
 }
 
 function setAngle(angle: number) {
@@ -238,15 +280,37 @@ const opacityPercent = computed(() => Math.round((selectedStop.value?.opacity ??
 
 <template>
   <div class="grad-editor" tabindex="0" @keydown="onKeydown">
+    <GradientChooser
+      :gradient="gradient"
+      :foreground="props.foreground"
+      @begin="emit('begin')"
+      @pick="(next) => { emit('begin'); commit(next) }"
+    />
     <div class="grad-toolbar">
-      <div class="inspector-seg">
-        <button type="button" class="inspector-seg-btn" :class="{ 'is-active': gradient.kind !== 'radial' }" @click="setKind('linear')">Linear</button>
-        <button type="button" class="inspector-seg-btn" :class="{ 'is-active': gradient.kind === 'radial' }" @click="setKind('radial')">Radial</button>
+      <div class="grad-kinds" role="group" aria-label="Gradient type">
+        <button
+          v-for="item in KINDS"
+          :key="item.id"
+          type="button"
+          class="inspector-seg-btn"
+          :class="{ 'is-active': gradient.kind === item.id }"
+          @click="setKind(item.id)"
+        >
+          {{ item.label }}
+        </button>
       </div>
       <button type="button" class="grad-flip" title="Reverse gradient" @click="flip">Flip</button>
     </div>
 
-    <div v-if="gradient.kind === 'linear'" class="grad-aim">
+    <div v-if="gradient.kind !== 'radial' && gradient.kind !== 'diamond'" class="grad-aim">
+      <button
+        ref="aimRef"
+        type="button"
+        class="grad-aim-pad"
+        :style="aimedStyle"
+        title="Drag to set direction"
+        @pointerdown="startAim"
+      />
       <div class="grad-compass" role="group" aria-label="Gradient direction">
         <template v-for="(dir, index) in COMPASS" :key="index">
           <span
@@ -254,7 +318,7 @@ const opacityPercent = computed(() => Math.round((selectedStop.value?.opacity ??
             class="grad-compass-preview"
             :style="aimedStyle"
             title="Preview of the gradient direction"
-          ></span>
+          />
           <button
             v-else
             type="button"
@@ -264,7 +328,9 @@ const opacityPercent = computed(() => Math.round((selectedStop.value?.opacity ??
             :aria-label="dir.label"
             :aria-pressed="roundedAngle === dir.angle"
             @click="chooseDirection(dir.angle)"
-          >{{ dir.glyph }}</button>
+          >
+            {{ dir.glyph }}
+          </button>
         </template>
       </div>
       <label class="grad-angle">
@@ -278,7 +344,7 @@ const opacityPercent = computed(() => Math.round((selectedStop.value?.opacity ??
           aria-label="Gradient angle"
           @pointerdown="emit('begin')"
           @input="setAngle(Number(($event.target as HTMLInputElement).value))"
-        />
+        >
         <input
           type="number"
           min="0"
@@ -287,7 +353,7 @@ const opacityPercent = computed(() => Math.round((selectedStop.value?.opacity ??
           aria-label="Gradient angle in degrees"
           @focus="emit('begin')"
           @change="setAngle(Number(($event.target as HTMLInputElement).value))"
-        />
+        >
       </label>
     </div>
 
@@ -302,14 +368,14 @@ const opacityPercent = computed(() => Math.round((selectedStop.value?.opacity ??
           :style="{ left: `${mark.left}%` }"
           title="Drag the midpoint"
           @pointerdown="startDrag('midpoint', mark.index, $event)"
-        ></button>
+        />
       </div>
       <div
         class="grad-ramp"
         :style="rampStyle"
         title="Click to add a color stop"
         @pointerdown="addStop"
-      ></div>
+      />
       <div class="grad-stop-row">
         <button
           v-for="(stop, index) in stops"
@@ -321,7 +387,7 @@ const opacityPercent = computed(() => Math.round((selectedStop.value?.opacity ??
           title="Drag along the bar. Drag down to delete."
           @pointerdown="startDrag('stop', index, $event)"
         >
-          <span class="grad-stop-swatch" :style="{ background: stop.color, opacity: stop.opacity ?? 1 }"></span>
+          <span class="grad-stop-swatch" :style="{ background: stop.color, opacity: stop.opacity ?? 1 }" />
         </button>
       </div>
     </div>
@@ -336,7 +402,7 @@ const opacityPercent = computed(() => Math.round((selectedStop.value?.opacity ??
         :value="locationPercent"
         @pointerdown="emit('begin')"
         @input="setMidpoint(Number(($event.target as HTMLInputElement).value))"
-      />
+      >
       <span class="grad-readout">{{ locationPercent }}%</span>
     </div>
 
@@ -348,13 +414,13 @@ const opacityPercent = computed(() => Math.round((selectedStop.value?.opacity ??
           :value="selectedStop.color"
           @pointerdown="emit('begin')"
           @input="patchSelected({ color: ($event.target as HTMLInputElement).value })"
-        />
+        >
         <input
           class="grad-hex"
           :value="selectedStop.color"
           @focus="emit('begin')"
           @change="patchSelected({ color: ($event.target as HTMLInputElement).value })"
-        />
+        >
         <span class="grad-label">Location</span>
         <input
           class="grad-num"
@@ -364,7 +430,7 @@ const opacityPercent = computed(() => Math.round((selectedStop.value?.opacity ??
           :value="locationPercent"
           @focus="emit('begin')"
           @change="patchSelected({ offset: Number(($event.target as HTMLInputElement).value) / 100 })"
-        />
+        >
         <button type="button" class="grad-flip" :disabled="stops.length <= 2" title="Delete stop" @click="removeSelected">Delete</button>
       </div>
       <div class="grad-fields">
@@ -377,7 +443,7 @@ const opacityPercent = computed(() => Math.round((selectedStop.value?.opacity ??
           :value="opacityPercent"
           @pointerdown="emit('begin')"
           @input="patchSelected({ opacity: Number(($event.target as HTMLInputElement).value) / 100 })"
-        />
+        >
         <span class="grad-readout">{{ opacityPercent }}%</span>
       </div>
     </div>
@@ -390,6 +456,13 @@ const opacityPercent = computed(() => Math.round((selectedStop.value?.opacity ??
   flex-direction: column;
   gap: 8px;
   outline: none;
+}
+.grad-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
 }
 .grad-toolbar,
 .grad-fields {
@@ -425,6 +498,17 @@ const opacityPercent = computed(() => Math.round((selectedStop.value?.opacity ??
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.grad-aim-pad {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  padding: 0;
+  border: 1px solid var(--ui-border-default);
+  border-radius: 4px;
+  background-color: #1a1a1a;
+  background-size: auto, 6px 6px;
+  cursor: crosshair;
 }
 .grad-compass {
   display: grid;

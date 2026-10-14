@@ -19,6 +19,7 @@ import { setIKTargetAndSolve, solveCCDIK } from '../../core/animation/IKSolver'
 import { resolveMeshBoneParentId } from '../../core/animation/Armature'
 import { sampleTrack } from '../../core/animation/Armature'
 import { SpringPhysicsSolver } from '../../core/animation/SpringPhysics'
+import { shouldConcealTransformGizmo } from '../../core/viewport/GizmoVisibility'
 import { applyConsoleTextureFiltering, createPSXMaterial } from '../../core/shaders/PSXShader'
 import { applyRealtimeDither, ditherPatternIndex, ditherSettingsFromMaterial } from '../../core/materials/RealtimeDither'
 import { createGradientCanvas, gradientKey, materialFillKey, resolveMaterialSurface } from '../../core/materials/MaterialFill'
@@ -2408,8 +2409,14 @@ function buildBoneVisuals() {
   updateBonePoses()
 }
 
-function playbackHidesTransformGizmo(): boolean {
-  return toolStore.appMode === 'animate' && animationStore.isPlaying
+function gizmoShouldHide() {
+  return shouldConcealTransformGizmo({
+    appMode: toolStore.appMode,
+    uvWorkspaceTab: toolStore.uvWorkspaceTab,
+    paintTool: toolStore.paintTool,
+    isPlaying: animationStore.isPlaying,
+    isWeightPaintActive: animationStore.isWeightPaintActive
+  })
 }
 
 function concealTransformGizmoForPlayback() {
@@ -2426,7 +2433,7 @@ function concealTransformGizmoForPlayback() {
 
 function isTransformGizmoAttached(): boolean {
   if (operatorManager.activeOperator instanceof ShapeDrawOperator) return false
-  if (playbackHidesTransformGizmo()) return false
+  if (gizmoShouldHide()) return false
   return !!(transformControls && (transformControls as { object?: THREE.Object3D | null }).object)
 }
 
@@ -2434,7 +2441,7 @@ function syncGizmoHelperVisible() {
   if (!transformControls) return
   const helper = transformControls.getHelper()
   if (!helper) return
-  if (playbackHidesTransformGizmo()) {
+  if (gizmoShouldHide()) {
     helper.visible = false
     return
   }
@@ -2450,13 +2457,33 @@ function syncGizmoHelperVisible() {
 
 function updateTransformGizmo() {
   if (!transformControls || !scene) return
-  if (playbackHidesTransformGizmo()) {
+  if (gizmoShouldHide()) {
     concealTransformGizmoForPlayback()
     return
   }
   if (isGizmoDragging) return
   applyTransformGizmoTarget()
   syncGizmoHelperVisible()
+}
+
+/** World-aligned translate gizmo at the object origin. Drops leftover rotate/scale orientation. */
+function resetOriginTransformGizmo(mesh: { position: Vector3D }) {
+  transformProxy.position.set(mesh.position.x, mesh.position.y, mesh.position.z)
+  transformProxy.rotation.set(0, 0, 0)
+  transformProxy.quaternion.identity()
+  transformProxy.scale.set(1, 1, 1)
+  transformProxy.updateMatrixWorld(true)
+
+  transformControls.setSpace('world')
+  transformControls.setMode('translate')
+  transformControls.attach(transformProxy)
+  if (transformControls instanceof TransformGizmo) {
+    transformControls.quaternion.identity()
+    transformControls.visible = true
+    transformControls.updateMatrixWorld(true)
+  } else {
+    transformControls.getHelper()?.updateMatrixWorld(true)
+  }
 }
 
 function applyTransformGizmoTarget() {
@@ -2598,12 +2625,7 @@ function applyTransformGizmoTarget() {
   }
 
   if (toolStore.selectMode === 'origin') {
-    transformProxy.position.set(activeMesh.position.x, activeMesh.position.y, activeMesh.position.z)
-    transformProxy.rotation.set(0, 0, 0)
-    transformProxy.scale.set(1, 1, 1)
-    transformProxy.updateMatrixWorld()
-    transformControls.attach(transformProxy)
-    transformControls.setMode('translate')
+    resetOriginTransformGizmo(activeMesh)
     return
   } else if (
     toolStore.selectMode === 'object' ||
@@ -2777,6 +2799,7 @@ function combinedGizmoTheme(colors: ThemeColors) {
 function applyMeshGizmoMode() {
   if (!transformControls) return
   if (toolStore.selectMode === 'origin') {
+    transformControls.setSpace('world')
     transformControls.setMode('translate')
     return
   }
@@ -3315,18 +3338,35 @@ function onGizmoObjectChange() {
   if (!activeMesh) return
 
   if (toolStore.selectMode === 'origin') {
-    const dx = transformProxy.position.x - activeMesh.position.x
-    const dy = transformProxy.position.y - activeMesh.position.y
-    const dz = transformProxy.position.z - activeMesh.position.z
+    const worldDelta = new THREE.Vector3(
+      transformProxy.position.x - activeMesh.position.x,
+      transformProxy.position.y - activeMesh.position.y,
+      transformProxy.position.z - activeMesh.position.z
+    )
+    if (worldDelta.lengthSq() < 1e-12) return
+
+    const localDelta = worldDelta.clone().applyQuaternion(
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(
+        THREE.MathUtils.degToRad(activeMesh.rotation.x),
+        THREE.MathUtils.degToRad(activeMesh.rotation.y),
+        THREE.MathUtils.degToRad(activeMesh.rotation.z)
+      )).invert()
+    )
+    const sx = activeMesh.scale.x || 1
+    const sy = activeMesh.scale.y || 1
+    const sz = activeMesh.scale.z || 1
+    localDelta.x /= sx
+    localDelta.y /= sy
+    localDelta.z /= sz
 
     activeMesh.position.x = transformProxy.position.x
     activeMesh.position.y = transformProxy.position.y
     activeMesh.position.z = transformProxy.position.z
 
     for (const v of activeMesh.vertices) {
-      v.position.x -= dx
-      v.position.y -= dy
-      v.position.z -= dz
+      v.position.x -= localDelta.x
+      v.position.y -= localDelta.y
+      v.position.z -= localDelta.z
     }
 
     const { 
@@ -4451,11 +4491,8 @@ function onPointerDown(event: PointerEvent) {
       updatePaintBrushCursor(paintHit)
       return
     }
-    if (isPerspQuadrant() && !is3DPaintToolSupported()) {
-      armLmbClickOrOrbit(event)
-      return
-    }
-    orbitControls.enabled = true
+    // Missed the mesh: same LMB click-or-orbit as Model. OrbitControls LEFT is off.
+    armLmbClickOrOrbit(event)
     return
   }
 
@@ -4650,7 +4687,9 @@ function armLmbClickOrOrbit(event: PointerEvent) {
     window.removeEventListener('pointerup', finish)
     if (!lmbClickPending) return
     lmbClickPending = false
-    if (up.button === 0) applyIdleLmbSelection(up)
+    if (up.button !== 0) return
+    if (toolStore.appMode === 'uvpaint' && toolStore.uvWorkspaceTab === 'paint') return
+    applyIdleLmbSelection(up)
   }
   window.addEventListener('pointerup', finish)
 }
@@ -6572,7 +6611,7 @@ function animate() {
   if (width < 1 || height < 1) return
 
   if (axesHelper) axesHelper.visible = toolStore.viewport.showAxes && toolStore.viewport.shading !== 'dreamcast'
-  if (playbackHidesTransformGizmo()) concealTransformGizmoForPlayback()
+  if (gizmoShouldHide()) concealTransformGizmoForPlayback()
   const gizmoSize = toolStore.viewport.quadView ? QUAD_GIZMO_SIZE : isTripleView() ? SPLIT_GIZMO_SIZE : 1
   classicControls.size = gizmoSize
   combinedControls.size = gizmoSize
@@ -6682,8 +6721,7 @@ watch(() => toolStore.appMode, async () => {
       syncGizmoPickCamera()
     }
   } else if (transformControls) {
-    transformControls.enabled = true
-    syncGizmoHelperVisible()
+    updateTransformGizmo()
   }
   scheduleRebuildMeshes()
   syncBones()
@@ -6694,9 +6732,12 @@ watch(() => toolStore.appMode, async () => {
   scheduleRecover(150)
 })
 watch(() => toolStore.uvWorkspaceTab, async () => {
+  updateTransformGizmo()
   await nextTick()
   scheduleRecover(50)
 })
+watch(() => toolStore.paintTool, updateTransformGizmo)
+watch(() => animationStore.isWeightPaintActive, updateTransformGizmo)
 watch(() => toolStore.selectMode, (mode, previous) => {
   clearTopologyHover()
   const mesh = projectStore.activeMesh
@@ -6713,6 +6754,7 @@ watch(() => toolStore.selectMode, (mode, previous) => {
   }
   toolStore.isBoxSelectActive = false
   isBoxSelectArmed.value = false
+  if (mode === 'origin') abortGizmoSession()
   if (orbitControls) orbitControls.enabled = true
   scheduleRebuildMeshes()
   updateTransformGizmo()

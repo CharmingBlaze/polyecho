@@ -39,5 +39,6 @@ describe('app icon', () => {
     writeFileSync(resolve(root, 'build', 'icon.png'), pngMaster)
     writeFileSync(resolve(root, 'build', 'icon.ico'), ico)
     writeFileSync(resolve(root, 'public', 'icon.ico'), ico)
+    writeFileSync(resolve(root, 'public', 'icon.png'), pngMaster)
   })
 })

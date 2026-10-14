@@ -6,10 +6,13 @@ import {
   gradientKey,
   materialFillKey,
   normalizeGradient,
+  paintMaterialSwatch,
   resolveMaterialFill,
   resolveMaterialSurface,
   reverseGradient,
-  sampleGradient
+  sampleGradient,
+  sphereShade,
+  gradientParameter
 } from './MaterialFill'
 
 function mat(partial: Partial<Material>): Material {
@@ -103,6 +106,38 @@ describe('material fill', () => {
     expect(gradientCss(defaultGradient('#ff00ff'))).toContain('#ff00ff')
     expect(sampleGradient(defaultGradient('#000000'), 0).color.toLowerCase()).toBe('#000000')
     expect(sampleGradient(defaultGradient('#000000'), 1).color.toLowerCase()).not.toBe('#000000')
+  })
+
+  it('shades a sphere disk and rejects outside pixels', () => {
+    expect(sphereShade(0, 0)).toBeGreaterThan(0.5)
+    expect(sphereShade(2, 0)).toBeNull()
+  })
+
+  it('paints a red swatch that is brighter in the center than the rim', () => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 32
+    canvas.height = 32
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('expected 2d context')
+    paintMaterialSwatch(ctx, 32, 32, mat({ fill: 'solid', color: '#ff0000' }))
+    const center = ctx.getImageData(16, 16, 1, 1).data
+    const bottom = ctx.getImageData(16, 27, 1, 1).data
+    const outside = ctx.getImageData(0, 0, 1, 1).data
+    expect(center[0]).toBeGreaterThan(bottom[0])
+    expect(center[0]).toBeGreaterThan(80)
+    expect(outside[0]).toBeLessThan(40)
+  })
+
+  it('maps linear, reflected, and angle samples in UV space', () => {
+    const linear = { kind: 'linear' as const, angle: 0, stops: [{ color: '#000000', offset: 0 }, { color: '#ffffff', offset: 1 }] }
+    expect(gradientParameter(linear, 0, 0.5)).toBeLessThan(0.5)
+    expect(gradientParameter(linear, 1, 0.5)).toBeGreaterThan(0.5)
+    const reflected = { ...linear, kind: 'reflected' as const }
+    expect(gradientParameter(reflected, 0.5, 0.5)).toBeGreaterThan(0.9)
+    expect(gradientParameter(reflected, 0, 0.5)).toBeLessThan(0.4)
+    const angle = { ...linear, kind: 'angle' as const, angle: 0 }
+    expect(gradientParameter(angle, 1, 0.5)).toBeCloseTo(0, 1)
+    expect(normalizeGradient({ kind: 'diamond', angle: 0, stops: linear.stops }).kind).toBe('diamond')
   })
 
   it('changes the viewport key when the fill changes', () => {

@@ -213,6 +213,10 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { id: 'toggle_edit_object', label: 'Toggle Edit/Object Mode', category: 'Selection', defaultKey: 'Tab', currentKey: 'Tab' },
 
   // VIEWPORT
+  { id: 'hide_selected', label: 'Hide Selected Objects', category: 'Viewport', defaultKey: 'Ctrl+h', currentKey: 'Ctrl+h' },
+  { id: 'hide_unselected', label: 'Hide Unselected Objects', category: 'Viewport', defaultKey: 'Ctrl+Shift+h', currentKey: 'Ctrl+Shift+h' },
+  { id: 'isolate_selected', label: 'Isolate Selected Objects', category: 'Viewport', defaultKey: 'Ctrl+Alt+i', currentKey: 'Ctrl+Alt+i' },
+  { id: 'show_hidden', label: 'Show Hidden Objects', category: 'Viewport', defaultKey: 'Ctrl+Alt+h', currentKey: 'Ctrl+Alt+h' },
   { id: 'toggle_xray', label: 'Toggle X-Ray Mode', category: 'Viewport', defaultKey: 'Alt+z', currentKey: 'Alt+z' },
   { id: 'shading_pie', label: 'Shading Pie Menu', category: 'Viewport', defaultKey: 'z', currentKey: 'z' },
   { id: 'snap_pie', label: 'Cursor & Snapping Pie', category: 'Viewport', defaultKey: 'Shift+s', currentKey: 'Shift+s' },

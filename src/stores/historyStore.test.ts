@@ -70,6 +70,26 @@ describe('historyStore', () => {
     expect(project.activeMesh?.vertices[0].position.x).toBe(startX)
   })
 
+  it('undoSteps jumps back through several records', () => {
+    const project = useProjectStore()
+    const history = useHistoryStore()
+    const mesh = project.activeMesh
+    if (!mesh) throw new Error('expected default cube')
+    const startX = mesh.vertices[0].position.x
+    history.recordState('Step A')
+    mesh.vertices[0].position.x = startX + 1
+    history.recordState('Step B')
+    mesh.vertices[0].position.x = startX + 2
+    history.recordState('Step C')
+    mesh.vertices[0].position.x = startX + 3
+    history.undoSteps(2)
+    expect(project.activeMesh?.vertices[0].position.x).toBe(startX + 1)
+    expect(history.undoStack.map(r => r.description)).toEqual(['Step A'])
+    expect(history.redoStack.map(r => r.description)).toEqual(['Step C', 'Step B'])
+    history.redoSteps(2)
+    expect(project.activeMesh?.vertices[0].position.x).toBe(startX + 3)
+  })
+
   it('markDirty makes an empty history stack count as unsaved', () => {
     const history = useHistoryStore()
     history.clearHistory()

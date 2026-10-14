@@ -90,7 +90,8 @@ function resolveDefaultPath(suggested) {
 }
 
 function windowIcon() {
-  return path.join(__dirname, '..', isPackaged ? 'dist' : 'public', 'icon.ico')
+  const base = path.join(__dirname, '..', isPackaged ? 'dist' : 'public')
+  return path.join(base, process.platform === 'win32' ? 'icon.ico' : 'icon.png')
 }
 
 function boundsPath() {

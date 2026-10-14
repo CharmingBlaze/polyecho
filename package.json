@@ -11,7 +11,8 @@
     "dev:web": "vite --host 127.0.0.1 --port 5180 --strictPort",
     "desktop": "electron .",
     "build": "vue-tsc -b && vite build",
-    "dist": "npm run icon && npm run build && electron-builder",
+    "dist": "npm run icon && npm run build && electron-builder --win nsis zip --linux dir --x64 && py -3 scripts/zip_release.py",
+    "dist:mac": "npm run icon && npm run build && electron-builder --mac dmg zip && py -3 scripts/zip_release.py",
     "preview": "vite preview",
     "typecheck": "vue-tsc -b --pretty",
     "test": "vitest run",
@@ -33,35 +34,61 @@
       "output": "release",
       "buildResources": "build"
     },
+    "copyright": "Copyright © 2026 PolyEcho",
+    "asar": true,
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true
+    },
     "files": [
       "dist/**/*",
-      "electron/**/*"
+      "!dist/stats.html",
+      "!dist/**/*.map",
+      "electron/**/*",
+      "!**/*.{ts,vue,map}",
+      "!**/*.d.mts",
+      "!**/*.d.cts"
     ],
     "extraFiles": [
       "LICENSE"
     ],
     "win": {
       "icon": "build/icon.ico",
+      "requestedExecutionLevel": "asInvoker",
       "target": [
-        "nsis"
+        "nsis",
+        "zip"
       ]
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": false,
+      "packElevateHelper": false,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "PolyEcho"
+      "shortcutName": "PolyEcho",
+      "artifactName": "PolyEcho-${version}-setup.${ext}"
     },
     "mac": {
       "icon": "build/icon.png",
       "target": [
-        "dmg"
-      ]
+        "dmg",
+        "zip"
+      ],
+      "artifactName": "PolyEcho-${version}-mac-${arch}.${ext}"
     },
     "linux": {
       "icon": "build/icon.png",
+      "executableName": "polyecho",
       "target": [
-        "AppImage"
-      ]
+        "zip"
+      ],
+      "artifactName": "PolyEcho-${version}-linux-${arch}.${ext}",
+      "category": "Graphics",
+      "maintainer": "PolyEcho <dev@polyecho.app>"
     },
     "fileAssociations": [
       {

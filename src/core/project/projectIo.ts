@@ -7,6 +7,7 @@ import { useHistoryStore } from '../../stores/historyStore'
 import { markRaw } from 'vue'
 import { PixelBuffer } from '../painting/PixelCanvas'
 import { restorePaintLayers } from '../painting/PaintLayerStorage'
+import { enqueueDocumentWrite } from './documentWriteQueue'
 
 export function serializeOpenProject(): string {
   const projectStore = useProjectStore()
@@ -29,22 +30,24 @@ export function serializeOpenProject(): string {
 }
 
 export async function saveOpenProject(options?: { saveAs?: boolean }): Promise<string | null> {
-  const projectStore = useProjectStore()
-  const suggested = `${projectStore.projectName || 'PSX_Model'}.psxproj`
-  const overwrite = options?.saveAs ? null : getLastProjectPath()
-  const saved = await saveTextDocument(
-    serializeOpenProject(),
-    suggested,
-    [{ name: 'PolyEcho Project', extensions: ['psxproj'] }],
-    overwrite
-  )
-  if (saved) {
-    setLastProjectPath(saved)
-    await addRecentProject(saved)
-    useHistoryStore().markClean()
-    await refreshDesktopTitle()
-  }
-  return saved
+  return enqueueDocumentWrite(async () => {
+    const projectStore = useProjectStore()
+    const suggested = `${projectStore.projectName || 'PSX_Model'}.psxproj`
+    const overwrite = options?.saveAs ? null : getLastProjectPath()
+    const saved = await saveTextDocument(
+      serializeOpenProject(),
+      suggested,
+      [{ name: 'PolyEcho Project', extensions: ['psxproj'] }],
+      overwrite
+    )
+    if (saved) {
+      setLastProjectPath(saved)
+      await addRecentProject(saved)
+      useHistoryStore().markClean()
+      await refreshDesktopTitle()
+    }
+    return saved
+  })
 }
 
 export async function loadOpenProject(text: string, filePath?: string | null): Promise<void> {

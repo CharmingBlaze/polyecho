@@ -18,7 +18,7 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 
 | Path | Role |
 | :--- | :--- |
-| `src/types/mesh.ts` | `MeshObject`, `Vertex`, `Face`, `Edge`, modifiers; `shadeMode` (`flat` / `smooth` / `auto`) + `autoSmoothAngle` |
+| `src/types/mesh.ts` | `MeshObject`, `Vertex`, `Face`, `Edge`, modifiers; `shadeMode` (`flat` / `smooth` / `auto`) + `autoSmoothAngle`; optional `collection` name |
 | `src/types/animation.ts` | `Armature`, `Bone`, clips, keys, bindings |
 | `src/types/texture.ts` | `Material`, `Palette`, `TextureMap` |
 | `src/types/tools.ts` | Modes, tools, snap, viewport settings |
@@ -40,8 +40,8 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/stores/toolStore.ts` | Modes, tools, snap, viewport flags; UV/Paint tab + last modeling select mode |
 | `src/test/setup.ts` | Vitest canvas 2D stub (`canvas2dStub.ts`) |
 | `src/stores/animationStore.ts` | Rig, clips, playback, weights |
-| `src/stores/historyStore.ts` | Undo / redo + dirty epoch (`isDirty` / `markClean`); resident snapshots preserve numeric edge/corner ids; `HISTORY_STACK_LIMIT` caps the stack at 50 |
-| `src/stores/layoutStore.ts` | Panel chrome, inspector tab per workspace, UV/Paint viewport shelf positions, Blockout pane split fractions |
+| `src/stores/historyStore.ts` | Undo / redo + dirty epoch (`isDirty` / `markClean`); `undoSteps` / `redoSteps` jump the stacks; resident snapshots preserve numeric edge/corner ids; `HISTORY_STACK_LIMIT` caps the stack at 50 |
+| `src/stores/layoutStore.ts` | Panel chrome, inspector tab per workspace (`material` owns Look + Pixels; old `texture` tab maps to Pixels), UV/Paint viewport shelf positions, Blockout pane split fractions |
 | `src/core/theme/` | Theme engine: tokens, color math, CSS apply, builtin presets. |
 | `src/stores/themeStore.ts` | Theme persistence, custom token edits, user presets, UI scale. Apply remaps wells away from the accent and sets `--ui-on-accent`. |
 | `src/stores/keymapStore.ts` | Live shortcut chords + Preferences remaps (`App.vue` matches events here) |
@@ -69,6 +69,8 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/core/geometry/ObjectPick.ts` | Ray / overlay pick among visible meshes (Knife / Loop Cut retarget) |
 | `src/core/geometry/ObjectSymmetry.ts` | Flip mesh through origin (H/V/Z), wrap Euler degrees, used by inspector Flip / Rotate / Mirror Copy |
 | `src/core/geometry/ObjectEditTools.ts` | Apply rotation and scale, make a linked duplicate unique, align objects or vertices |
+| `src/core/geometry/ObjectVisibility.ts` | Hide / isolate / show object `visible` flags. Viewport already skips hidden meshes. Mesh menu, outliner, Ctrl+H / Ctrl+Shift+H / Ctrl+Alt+I / Ctrl+Alt+H |
+| `src/core/geometry/ObjectCollections.ts` | Group meshes by `collection` string; assign / rename / hide / lock. Outliner **Col** button. Persists with mesh JSON |
 | `src/core/geometry/EdgeQueries.ts` | Boundary, non-manifold, and sharp edge sets for Select |
 | `src/core/geometry/DuplicateTools.ts` | Mirror across an offset plane, linear and radial object copies, linked-instance geometry lookup |
 | `src/core/geometry/MeshJoin.ts` | Join / separate on a staged resident-kernel clone: translation bake, `boneWeights`, remapped seam and sharp edges |
@@ -82,17 +84,19 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/core/geometry/SelectionConversion.ts` | Convert the current selection when switching vertex / edge / face mode |
 | `src/core/geometry/GeometryTolerance.ts` | Shared scale-relative epsilon for degeneracy and planarity |
 | `src/core/geometry/PerformanceBudget.test.ts` | 5k / 20k / 50k quad grids; CI budgets for bridge acquisition plus render triangulation |
+| `src/core/render/ViewportLayers.ts` | Named scene pass groups (`MODEL` … `HOVER`) with increasing `renderOrder`; `clearGroup` disposes child geometry |
 | `src/core/render/EditorEnvironment.ts` | Viewport key, fill, and hemisphere lights plus the contact-shadow ground. |
 | `src/core/render/ViewportLighting.ts` | Preference values for that rig (intensity, color, shadow) and the PSX shader equivalent. |
-| `src/core/render/VertexMarkers.ts` | Screen-space vertex circles (procedural discs, selection/hover fill, constant pixel size) |
+| `src/core/render/VertexMarkers.ts` | Screen-space vertex circles; instance buffers reuse `DYNAMIC_DRAW` and grow in place |
 | `src/core/render/BoneDisplay.ts` | Faceted bone shafts, L/R colors, pickable envelopes |
 | `src/core/geometry/ScreenGeometry.ts` | Screen rays, overlay mapping (`rayFromClient` / `worldToOverlay` match renderer `clientWidth`), Blockout column splits (including maximized pane = full canvas), dashed Poly Draw / Poly Build preview |
 | `src/core/view/wheelGesture.ts` | Mouse-wheel zoom vs trackpad pan (`classifyWheel`, smooth `wheelZoomFactor`) |
-| `src/core/geometry/EdgeUtils.ts` | Loops / rings; `undirectedEdgeId` / `parseUndirectedEdgeId` (ids may contain `_`) |
+| `src/core/geometry/EdgeUtils.ts` | Loops / rings; `undirectedEdgeId` / `parseUndirectedEdgeId` (ids may contain `_`); `pruneMeshEdgeFlags` drops stale seam/sharp ids |
+| `src/core/geometry/ObjectHierarchy.ts` | `isDescendantOf` for parentMesh cycle checks (self is not a descendant) |
 | `src/core/geometry/UVUnwrap.ts` | Planar / box / cylindrical / Smart UV + pack; `flattenClusters` (conformal or planar, overlap split), Project From View, seams from islands, pin restore |
 | `src/core/uv/ConformalUnwrap.ts` | LSCM charts (corner-level seams, auto-cut tubes, pin constraints), normal-angle clustering, UV overlap finder |
 | `src/core/uv/SeamUnwrapper.ts` | Unwrap Using Marked Seams: conformal islands, segment closed ones, pinned islands stay put, pack the rest |
-| `src/core/geometry/Modifiers.ts` | Stack (`Mirror` → `Subdiv` → `Solidify`) + defaults + apply |
+| `src/core/geometry/Modifiers.ts` | Stack (`Mirror` → `Subdiv` → `Solidify` unless `modifierStack` reorders) + defaults + apply |
 | `src/core/geometry/MirrorModifier.ts` | Live Blender mirror: per-axis bisect/flip, mirror object, clip, merge, UV |
 | `src/core/geometry/SubdivisionModifier.ts` | Catmull–Clark + Simple |
 | `src/core/geometry/SolidifyModifier.ts` | Thickness, offset, rim |
@@ -154,13 +158,16 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 | `src/core/painting/BrushSize.ts` | Brush diameter clamp, curved slider map, pen-pressure scale, and resize drag / wheel |
 | `src/core/painting/encodePng.ts` | 8-bit RGBA PNG from pixel bytes (no canvas `toDataURL`) |
 | `src/core/painting/DefaultTextures.ts` | Starter texture (retro atlas, solid colors, checker) + File → Properties pref |
-| `src/core/uv/` | Seams, pack, atlas bake, island find/stitch (`UVIslands.ts`: shared 3D edge + welded UVs), cell math (`AtlasCells.ts`), face-to-tile mapping (`TileMapping.ts`), 3D stamp (`TilesetStamp.ts`), UV island edit (`UVEditing.ts`) |
+| `src/core/uv/` | Seams, pack, atlas bake, island find/stitch (`UVIslands.ts`: shared 3D edge + welded UVs), cell math (`AtlasCells.ts`), face-to-tile mapping (`TileMapping.ts`), 3D stamp (`TilesetStamp.ts`), UV island edit (`UVEditing.ts`), canvas rulers (`UvRulers.ts`) |
 | `src/core/painting/TilePixels.ts` | Atlas cell pixel bounds + tile transforms |
-| `src/core/materials/MaterialFill.ts` | Surface fill: solid color, gradient (stops, midpoint, opacity), or image. Viewport and export share `resolveMaterialSurface`. |
+| `src/core/materials/MaterialFill.ts` | Surface fill: solid color, gradient (linear / radial / angle / reflected / diamond, stops, midpoint, opacity), or image. Viewport and export share `resolveMaterialSurface`. Inspector sphere via `paintMaterialSwatch`. |
 | `src/core/materials/TextureTiling.ts` | Per-material Tile X/Y defaults, `0.01–64` normalization, repeat wrapping, and shared-image-safe Three.js texture clones. |
 | `src/core/materials/RealtimeDither.ts` | Live ordered dither on PBR, flat, Gouraud, and unlit materials. Console shading uses the same patterns inside `PSXShader.ts`. |
-| `src/core/shaders/PSXShader.ts` | Retro viewport shader |
+| `src/core/materials/DitherPreview.ts` | Inspector 2D preview + `rasterizeDitheredFill` bake. Viewport still uses `RealtimeDither.ts`. |
+| `src/core/shaders/PSXShader.ts` | Retro viewport shader; `createPSXMaterial` clones a shared prototype so GLSL is not recompiled per mesh |
+| `src/core/project/documentWriteQueue.ts` | Serializes Save vs IndexedDB autosave so they do not write the document at the same time |
 | `src/core/animation/Armature.ts` | Track sampling; `resolveMeshBoneParentId` / `setMeshBoneParent` |
+| `src/core/viewport/GizmoVisibility.ts` | When the object gizmo must hide (paint tools, weight paint, animation playback) |
 | `src/core/animation/AutoSkinning.ts` | Weight assignment |
 | `src/core/animation/HumanoidRig.ts` | Landmark markers + 15/19-bone humanoid draft |
 | `src/core/animation/JointFitting.ts` | Guided joint placement with connected-endpoint + L/R mirror |
@@ -183,13 +190,17 @@ Use this to find the right file instead of scanning the whole tree. Paths are fr
 
 | Folder | Role |
 | :--- | :--- |
-| `src/components/layout/` | Header, toolbars, status; `RightSidebar.vue` (flush inspector chrome) |
+| `src/components/layout/` | Header, toolbars, status; `RightSidebar.vue` (Look vs Pixels; dock or float inspector) |
 | `src/components/viewport/` | 3D view (`Viewport3D`: picking, gizmo, fill camera, modal start). Space/pivot/snap/overlays/x-ray live in `HeaderMenu.vue`. `ShapeDrawPanel.vue` / `PolyDrawPanel.vue` are Blockout overlays. |
-| `src/components/inspector/GradientEditor.vue` | Materials gradient bar: stops, midpoints, opacity, angle |
+| `src/components/inspector/GradientEditor.vue` | Materials gradient bar: stops, midpoints, opacity, 8-way + drag-to-aim direction |
+| `src/components/inspector/GradientChooser.vue` | Photoshop-style preset grid, save current, apply to fill |
+| `src/components/inspector/MaterialProps.vue` | Material assign, fill, consoles; lit swatch in the inspector head. Dither tab hosts `DitherStudio.vue`. |
+| `src/components/inspector/DitherStudio.vue` | Split preview, pattern thumbs, source tabs, looks chips, Apply dither to image |
 | `src/components/inspector/MeshToolsProps.vue` | Modeling Tools tab: object shading, mode readout, Subdivide cuts/smooth, Faces / Edges / Vertices, Mesh |
-| `src/components/inspector/TransformProps.vue` | Object tab: Smooth shading on/off, TRS, flip/rotate, origin, parent; workspace jumps (UV / Rig) |
+| `src/components/inspector/TransformProps.vue` | Object tab: Smooth shading on/off, TRS (multi-select applies location/rotation deltas and scale ratios), flip/rotate, origin, parent; workspace jumps (UV / Rig) |
+| `src/components/inspector/ModifiersProps.vue` | Mirror / Subdivision / Solidify stack; up/down writes `modifierStack` |
 | `src/components/inspector/AnimationInspector.vue` | Animate sheet: clip readout, keys, pose, playback |
-| `src/components/outliner/` | Object tree |
+| `src/components/outliner/` | Object tree, search, History tab (click to undo/redo through a record) |
 | `src/components/uvpaint/` | UV editor, pixel editor (`PixelCanvas.vue` is the UV/Paint tab router), palettes, `PaintLayers.vue` (`inspector-head`), `TilesetEditor.vue` (floating atlas / tilemap panel) |
 | `src/components/animation/` | Timeline (no separate DopeSheet component); `PosePopout.vue` for copy/paste/mirror pose |
 | `src/components/rigging/` | Rig Inspect sheets: `SkeletonPanel`, `RiggingPanel` (Bone), `BindingsPanel`, `WeightsPanel`; `HumanoidRigWizard.vue`, `RigFitPopout.vue`, `BoneHierarchyPopout.vue` |
@@ -228,6 +239,8 @@ Cursor ↔ DeepSeek mailbox (docs + code). Protocol: `docs/collab/README.md`. Do
 | `docs/collab/BUS.md` | Real-time pairing bus spec |
 | `docs/collab/PROMPT_DEEPSEEK_BUS.md` | Standing Cline prompt (bus + claims every turn) |
 | `scripts/collab_bus.py` | JSONL + HTTP + SSE server (`npm run collab:bus`) |
+| `scripts/zip_release.py` | Portable and install zips for Windows, Linux, and macOS (`npm run dist`) |
+| `scripts/release_fuses.mjs` | Asar header hash and Electron fuse flip for the Mac zip |
 | `scripts/collab_board.py` | File claims + presence |
 | `scripts/collab_mcp.py` | MCP tools so Cursor and Cline call the bus natively |
 | `scripts/collab_live.html` | Live pairing board UI |

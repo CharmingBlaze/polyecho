@@ -84,22 +84,22 @@ const contextualHints = computed(() => {
 </script>
 
 <template>
-  <footer class="h-6 min-w-0 bg-ui-header border-t border-ui-borderSubtle px-2.5 flex items-center justify-between text-[11px] font-sans text-ui-textMuted select-none shrink-0 z-30 overflow-hidden">
+  <footer class="h-6 min-w-0 bg-ui-header border-t border-ui-borderSubtle px-2.5 flex items-center justify-between text-inspector font-sans text-ui-textMuted select-none shrink-0 z-30 overflow-hidden">
     <!-- Left: Contextual Shortcut Hints -->
     <div class="flex items-center space-x-2 truncate" :class="operatorState.active || toolStore.isBoxSelectActive || toolStore.stickyViewNav ? 'max-w-[62%]' : 'max-w-[45%]'">
-      <span class="font-semibold text-[10px] uppercase text-ui-textSecondary shrink-0">{{ statusModeLabel }}:</span>
+      <span class="font-semibold text-2xs uppercase text-ui-textSecondary shrink-0">{{ statusModeLabel }}:</span>
       <button
         v-if="projectStore.meshEditError" type="button"
-        class="text-amber-300 truncate text-[10px]" :title="projectStore.meshEditError.reason + ' (click to dismiss)'"
+        class="text-amber-300 truncate text-2xs" :title="projectStore.meshEditError.reason + ' (click to dismiss)'"
         @click="projectStore.meshEditError = null"
       >
         {{ projectStore.meshEditError.reason }}
       </button>
-      <span v-else class="text-ui-textMuted truncate text-[10px] font-mono">{{ contextualHints }}</span>
+      <span v-else class="text-ui-textMuted truncate text-2xs font-mono">{{ contextualHints }}</span>
       <button
         v-if="runtimeStore.lastError"
         type="button"
-        class="ml-2 shrink-0 max-w-[220px] truncate text-[10px] font-mono text-rose-200 bg-rose-500/15 border border-rose-400/40 rounded-xs px-1.5 py-0 hover:bg-rose-500/25"
+        class="ml-2 shrink-0 max-w-[220px] truncate text-2xs font-mono text-rose-200 bg-rose-500/15 border border-rose-400/40 rounded-xs px-1.5 py-0 hover:bg-rose-500/25"
         :title="(runtimeStore.lastErrorSource ? runtimeStore.lastErrorSource + ': ' : '') + runtimeStore.lastError + ' (click to dismiss)'"
         @click="runtimeStore.dismissError()"
       >
@@ -108,7 +108,7 @@ const contextualHints = computed(() => {
       <button
         v-if="runtimeStore.lastError && isDesktopApp()"
         type="button"
-        class="shrink-0 text-[10px] font-mono text-rose-200/80 hover:text-rose-100 underline"
+        class="shrink-0 text-2xs font-mono text-rose-200/80 hover:text-rose-100 underline"
         @click="void revealCrashLog()"
       >
         Log
@@ -116,7 +116,7 @@ const contextualHints = computed(() => {
     </div>
 
     <!-- Right: Scene Statistics, Active Profile, Snap & Mode -->
-    <div class="flex items-center space-x-2.5 shrink min-w-0 text-[10px]">
+    <div class="flex items-center space-x-2.5 shrink min-w-0 text-2xs">
       <!-- Profile Selector & Budget Alerts -->
       <div class="flex items-center space-x-1 border-r border-ui-borderSubtle pr-2.5">
         <select 

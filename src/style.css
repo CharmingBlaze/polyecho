@@ -143,13 +143,13 @@
     gap: 6px;
     min-width: 0;
     color: var(--ui-text-muted);
-    font-size: 10px;
+    font-size: 0.625rem;
     font-weight: 600;
     letter-spacing: 0.04em;
   }
   .inspector-head-name {
     color: var(--ui-text-primary);
-    font-size: 11px;
+    font-size: 0.6875rem;
     font-weight: 600;
     max-width: 58%;
     overflow: hidden;
@@ -216,7 +216,7 @@
     align-items: center;
     gap: 5px;
     border-radius: var(--ui-radius-xs);
-    font-size: 10px;
+    font-size: 0.625rem;
     font-weight: 600;
     color: var(--ui-text-muted);
     cursor: pointer;
@@ -256,7 +256,7 @@
     border: 1px solid var(--ui-border-default);
     border-radius: var(--ui-radius-xs);
     padding: 0 8px;
-    font-size: 11px;
+    font-size: 0.6875rem;
     color: var(--ui-text-primary);
     cursor: pointer;
   }
@@ -281,7 +281,7 @@
     border: 1px solid var(--ui-border-default);
     background: var(--ui-bg-input);
     color: var(--ui-text-muted);
-    font-size: 10px;
+    font-size: 0.625rem;
     font-weight: 600;
     cursor: pointer;
   }
@@ -318,7 +318,7 @@
 .dockview-theme-dark .tabs-and-actions-container {
   height: 28px !important;
   font-family: inherit;
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 
 /* ==========================================================================

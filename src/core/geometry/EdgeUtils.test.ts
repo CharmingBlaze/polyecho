@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createCube } from './Primitives'
-import { getMeshEdges, parseUndirectedEdgeId, undirectedEdgeId } from './EdgeUtils'
+import { getMeshEdges, parseUndirectedEdgeId, pruneMeshEdgeFlags, undirectedEdgeId } from './EdgeUtils'
 
 describe('EdgeUtils', () => {
   it('does not split vertex ids that contain underscores', () => {
@@ -18,5 +18,15 @@ describe('EdgeUtils', () => {
     const edges = getMeshEdges(cube)
     expect(edges).toHaveLength(12)
     expect(new Set(edges.map(e => e.id)).size).toBe(12)
+  })
+
+  it('drops seam ids that no longer belong to a face', () => {
+    const cube = createCube('Cube', 2)
+    const live = getMeshEdges(cube)[0]!.id
+    cube.seamEdgeIds = [live, 'not_an_edge']
+    cube.sharpEdgeIds = ['also_gone']
+    pruneMeshEdgeFlags(cube)
+    expect(cube.seamEdgeIds).toEqual([live])
+    expect(cube.sharpEdgeIds).toBeUndefined()
   })
 })

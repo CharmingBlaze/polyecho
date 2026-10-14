@@ -73,6 +73,19 @@ export function getMeshEdges(mesh: MeshObject): Edge[] {
   return Array.from(edgeMap.values())
 }
 
+/** Drop seam / sharp ids whose vertices are no longer an edge of any face. */
+export function pruneMeshEdgeFlags(mesh: MeshObject): void {
+  const live = new Set(getMeshEdges(mesh).map(edge => edge.id))
+  if (mesh.seamEdgeIds) {
+    const next = mesh.seamEdgeIds.filter(id => live.has(id))
+    mesh.seamEdgeIds = next.length ? next : undefined
+  }
+  if (mesh.sharpEdgeIds) {
+    const next = mesh.sharpEdgeIds.filter(id => live.has(id))
+    mesh.sharpEdgeIds = next.length ? next : undefined
+  }
+}
+
 /**
  * Finds the closest edge segment in the mesh to a given 3D ray.
  * Uses distance between line segment (v1, v2) and ray in world space.

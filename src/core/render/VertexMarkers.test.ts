@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
 import {
+  createVertexMarkerMesh,
   paintVertexMarkerColors,
+  replaceVertexMarkerGeometry,
   screenSpaceClipOffset,
   VERTEX_COLOR_IDLE,
   VERTEX_COLOR_SELECTED,
@@ -49,5 +51,33 @@ describe('VertexMarkers', () => {
     expect(colors.getY(1)).toBeCloseTo(VERTEX_COLOR_SELECTED.g)
     src.dispose()
     geo.dispose()
+  })
+
+  it('updates instance positions in place when the vertex count fits', () => {
+    const first = new THREE.BufferGeometry()
+    first.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0], 3))
+    const mesh = createVertexMarkerMesh(first)
+    const kept = mesh.geometry
+    const grown = new THREE.BufferGeometry()
+    grown.setAttribute('position', new THREE.Float32BufferAttribute([2, 3, 4], 3))
+    replaceVertexMarkerGeometry(mesh, grown)
+    expect(mesh.geometry).toBe(kept)
+    expect(mesh.geometry.instanceCount).toBe(1)
+    const inst = mesh.geometry.getAttribute('instancePosition') as THREE.InstancedBufferAttribute
+    expect(inst.getX(0)).toBeCloseTo(2)
+    expect(inst.getY(0)).toBeCloseTo(3)
+    mesh.geometry.dispose()
+  })
+
+  it('grows the instance buffer when more vertices appear', () => {
+    const first = new THREE.BufferGeometry()
+    first.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3))
+    const mesh = createVertexMarkerMesh(first)
+    const more = new THREE.BufferGeometry()
+    more.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0], 3))
+    replaceVertexMarkerGeometry(mesh, more)
+    expect(mesh.geometry.instanceCount).toBe(3)
+    expect(mesh.geometry.getAttribute('instancePosition').count).toBeGreaterThanOrEqual(3)
+    mesh.geometry.dispose()
   })
 })

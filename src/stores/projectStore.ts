@@ -8,6 +8,7 @@ import { defaultGradient } from '../core/materials/MaterialFill'
 import { normalizeTextureTile, resolveTextureTiling } from '../core/materials/TextureTiling'
 import { SelectMode } from '../types/tools'
 import { createCube } from '../core/geometry/Primitives'
+import { isDescendantOf as hierarchyIsDescendantOf } from '../core/geometry/ObjectHierarchy'
 import { 
   extrudeSelection, 
   insetFaces, 
@@ -131,6 +132,7 @@ import { useAnimationStore } from './animationStore'
 import { SpringPhysicsSolver } from '../core/animation/SpringPhysics'
 import { useToolStore } from './toolStore'
 import { ProjectStorage, type ProjectStorageData } from '../core/storage/ProjectStorage'
+import { enqueueDocumentWrite } from '../core/project/documentWriteQueue'
 
 export interface DroppedImageSource {
   name: string
@@ -405,15 +407,7 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   function isDescendantOf(childId: string, potentialAncestorId: string): boolean {
-    let cur = meshes.value.find(m => m.id === potentialAncestorId)
-    const seen = new Set<string>()
-    while (cur && cur.parentId) {
-      if (seen.has(cur.id)) return false
-      seen.add(cur.id)
-      if (cur.parentId === childId) return true
-      cur = meshes.value.find(m => m.id === cur!.parentId)
-    }
-    return false
+    return hierarchyIsDescendantOf(meshes.value, childId, potentialAncestorId)
   }
 
   function parentMesh(childId: string, parentId: string | null) {
@@ -2081,26 +2075,28 @@ export const useProjectStore = defineStore('project', () => {
         return
       }
       try {
-        const animationStore = useAnimationStore()
-        const textureData = textures.value.map(t => ({
-          id: t.id,
-          name: t.name,
-          width: t.width,
-          height: t.height,
-          dataUrl: t.pixelBuffer ? t.pixelBuffer.canvas.toDataURL() : '',
-          ...serializePaintLayers(t.pixelBuffer),
-          atlas: t.atlas ? { ...t.atlas } : undefined
-        }))
+        await enqueueDocumentWrite(async () => {
+          const animationStore = useAnimationStore()
+          const textureData = textures.value.map(t => ({
+            id: t.id,
+            name: t.name,
+            width: t.width,
+            height: t.height,
+            dataUrl: t.pixelBuffer ? t.pixelBuffer.canvas.toDataURL() : '',
+            ...serializePaintLayers(t.pixelBuffer),
+            atlas: t.atlas ? { ...t.atlas } : undefined
+          }))
 
-        await ProjectStorage.saveProject({
-          name: projectName.value,
-          meshes: JSON.parse(JSON.stringify(meshes.value)),
-          materials: JSON.parse(JSON.stringify(materials.value)),
-          activePalette: JSON.parse(JSON.stringify(activePalette.value)),
-          textures: textureData,
-          armature: JSON.parse(JSON.stringify(animationStore.armature))
+          await ProjectStorage.saveProject({
+            name: projectName.value,
+            meshes: JSON.parse(JSON.stringify(meshes.value)),
+            materials: JSON.parse(JSON.stringify(materials.value)),
+            activePalette: JSON.parse(JSON.stringify(activePalette.value)),
+            textures: textureData,
+            armature: JSON.parse(JSON.stringify(animationStore.armature))
+          })
+          hasAutosaveSession.value = true
         })
-        hasAutosaveSession.value = true
       } catch (e) {
         console.warn('Autosave error:', e)
       }

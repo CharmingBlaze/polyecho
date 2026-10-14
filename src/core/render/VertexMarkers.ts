@@ -146,7 +146,9 @@ export function vertexPointsToMarkerGeometry(src: THREE.BufferGeometry): THREE.I
   geo.setAttribute('position', quad.getAttribute('position')!.clone())
   geo.setAttribute('uv', quad.getAttribute('uv')!.clone())
   const posArr = new Float32Array((pos?.array as Float32Array | undefined) ?? [])
-  geo.setAttribute('instancePosition', new THREE.InstancedBufferAttribute(posArr, 3))
+  const inst = new THREE.InstancedBufferAttribute(posArr, 3)
+  inst.setUsage(THREE.DynamicDrawUsage)
+  geo.setAttribute('instancePosition', inst)
   geo.setAttribute('aMarkerColor', markerColorAttribute(count, col))
   geo.instanceCount = count
   const box = new THREE.Box3()
@@ -168,7 +170,71 @@ export function createVertexMarkerMesh(pointsGeometry: THREE.BufferGeometry): TH
   return mesh
 }
 
+function nextMarkerCapacity(current: number, needed: number): number {
+  let cap = Math.max(8, current)
+  while (cap < needed) cap *= 2
+  return cap
+}
+
+function syncMarkerBounds(geo: THREE.InstancedBufferGeometry, positions: Float32Array, count: number) {
+  const box = geo.boundingBox ?? new THREE.Box3()
+  if (count) box.setFromArray(positions.subarray(0, count * 3))
+  else box.setFromCenterAndSize(new THREE.Vector3(), new THREE.Vector3(0.01, 0.01, 0.01))
+  geo.boundingBox = box
+  if (!geo.boundingSphere) geo.boundingSphere = new THREE.Sphere()
+  box.getBoundingSphere(geo.boundingSphere)
+}
+
+function writeMarkerInstances(
+  geo: THREE.InstancedBufferGeometry,
+  srcPos: THREE.BufferAttribute | undefined,
+  srcCol: THREE.BufferAttribute | undefined,
+  count: number
+) {
+  let inst = geo.getAttribute('instancePosition') as THREE.InstancedBufferAttribute | undefined
+  let colors = geo.getAttribute('aMarkerColor') as THREE.InstancedBufferAttribute | undefined
+  const cap = inst?.count ?? 0
+  if (!inst || cap < count) {
+    const next = nextMarkerCapacity(cap, Math.max(count, 1))
+    const posArr = new Float32Array(next * 3)
+    const colArr = new Float32Array(next * 3)
+    if (inst) posArr.set(inst.array as Float32Array)
+    if (colors) colArr.set(colors.array as Float32Array)
+    else {
+      for (let i = 0; i < next; i++) {
+        colArr[i * 3] = VERTEX_COLOR_IDLE.r
+        colArr[i * 3 + 1] = VERTEX_COLOR_IDLE.g
+        colArr[i * 3 + 2] = VERTEX_COLOR_IDLE.b
+      }
+    }
+    inst = new THREE.InstancedBufferAttribute(posArr, 3)
+    inst.setUsage(THREE.DynamicDrawUsage)
+    colors = new THREE.InstancedBufferAttribute(colArr, 3)
+    colors.setUsage(THREE.DynamicDrawUsage)
+    geo.setAttribute('instancePosition', inst)
+    geo.setAttribute('aMarkerColor', colors)
+  }
+  const dst = inst.array as Float32Array
+  if (srcPos && count) dst.set((srcPos.array as Float32Array).subarray(0, count * 3))
+  inst.needsUpdate = true
+  if (srcCol && colors && count) {
+    ;(colors.array as Float32Array).set((srcCol.array as Float32Array).subarray(0, count * 3))
+    colors.needsUpdate = true
+  }
+  geo.instanceCount = count
+  syncMarkerBounds(geo, dst, count)
+}
+
 export function replaceVertexMarkerGeometry(mesh: THREE.Mesh, pointsGeometry: THREE.BufferGeometry) {
+  const srcPos = pointsGeometry.getAttribute('position') as THREE.BufferAttribute | undefined
+  const srcCol = pointsGeometry.getAttribute('color') as THREE.BufferAttribute | undefined
+  const count = srcPos?.count ?? 0
+  const geo = mesh.geometry
+  if (geo instanceof THREE.InstancedBufferGeometry && geo.getAttribute('instancePosition')) {
+    writeMarkerInstances(geo, srcPos, srcCol, count)
+    pointsGeometry.dispose()
+    return
+  }
   const next = vertexPointsToMarkerGeometry(pointsGeometry)
   pointsGeometry.dispose()
   mesh.geometry.dispose()
@@ -203,7 +269,8 @@ export function paintVertexMarkerColors(
   selected: Set<string>
 ) {
   const colors = geometry.getAttribute('aMarkerColor') as THREE.InstancedBufferAttribute | undefined
-  if (!colors || map.length === 0 || map.length * 3 !== colors.array.length) return false
+  const drawn = geometry instanceof THREE.InstancedBufferGeometry ? geometry.instanceCount : map.length
+  if (!colors || map.length === 0 || map.length > colors.count || map.length !== drawn) return false
   for (let i = 0; i < map.length; i++) {
     const c = selected.has(map[i]) ? VERTEX_COLOR_SELECTED : VERTEX_COLOR_IDLE
     colors.setXYZ(i, c.r, c.g, c.b)

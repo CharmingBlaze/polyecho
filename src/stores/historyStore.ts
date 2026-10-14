@@ -264,6 +264,18 @@ export const useHistoryStore = defineStore('history', () => {
     bumpDocumentEpoch()
   }
 
+  /** Undo the newest `count` records (clicking an older History row). */
+  function undoSteps(count: number) {
+    const n = Math.max(0, Math.min(Math.floor(count), undoStack.value.length))
+    for (let i = 0; i < n; i++) undo()
+  }
+
+  /** Redo the next `count` records (clicking further down the redo list). */
+  function redoSteps(count: number) {
+    const n = Math.max(0, Math.min(Math.floor(count), redoStack.value.length))
+    for (let i = 0; i < n; i++) redo()
+  }
+
   function clearHistory() {
     undoStack.value = []
     redoStack.value = []
@@ -281,6 +293,8 @@ export const useHistoryStore = defineStore('history', () => {
     pushAction,
     undo,
     redo,
+    undoSteps,
+    redoSteps,
     clearHistory,
     documentEpoch,
     markClean,

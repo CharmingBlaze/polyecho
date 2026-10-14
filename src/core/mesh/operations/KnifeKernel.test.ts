@@ -124,6 +124,17 @@ describe('KnifeKernel on arbitrary faces', () => {
     }
   })
 
+  it('collapses duplicate and near-duplicate split parameters to one vertex', () => {
+    const { mesh } = MeshBridge.meshObjectToEditableMesh(createCube('Cube', 2))
+    const edge = [...mesh.edges.values()][0]!
+    const before = mesh.vertices.size
+    expect(KnifeKernel.tKey(0.5)).toBe(KnifeKernel.tKey(0.500004))
+    const created = KnifeKernel.splitEdgeAtParameters(mesh, edge.id, [0.5, 0.5, 0.500004])
+    expect(created.size).toBe(1)
+    expect(created.get(KnifeKernel.tKey(0.5))).toBeDefined()
+    expect(mesh.vertices.size).toBe(before + 1)
+  })
+
   it('supports multi-chain cutting across different faces in one call', () => {
     const { mesh } = MeshBridge.meshObjectToEditableMesh(createCube('Cube', 2))
     const faces = [...mesh.faces.values()]

@@ -52,34 +52,87 @@ export interface ModifierEvalOptions {
   inEditMode?: boolean
 }
 
+export type GenerateModifierName = 'mirror' | 'subdivision' | 'solidify'
+
+/** Blender-style generate order when `mesh.modifierStack` is unset. */
+export const DEFAULT_MODIFIER_STACK: readonly GenerateModifierName[] = ['mirror', 'subdivision', 'solidify']
+
+function modifierPresent(mesh: MeshObject, name: GenerateModifierName): boolean {
+  if (name === 'mirror') return !!mesh.mirror
+  if (name === 'subdivision') return !!mesh.subdivision
+  return !!mesh.solidify
+}
+
+export function resolveModifierStack(mesh: MeshObject): GenerateModifierName[] {
+  const present = DEFAULT_MODIFIER_STACK.filter(name => modifierPresent(mesh, name))
+  const custom = mesh.modifierStack
+  if (!custom?.length) return present
+  const seen = new Set<GenerateModifierName>()
+  const ordered: GenerateModifierName[] = []
+  for (const name of custom) {
+    if (!present.includes(name) || seen.has(name)) continue
+    seen.add(name)
+    ordered.push(name)
+  }
+  for (const name of present) {
+    if (seen.has(name)) continue
+    ordered.push(name)
+  }
+  return ordered
+}
+
+export function moveModifier(mesh: MeshObject, name: GenerateModifierName, delta: -1 | 1): boolean {
+  const stack = resolveModifierStack(mesh)
+  const index = stack.indexOf(name)
+  const nextIndex = index + delta
+  if (index < 0 || nextIndex < 0 || nextIndex >= stack.length) return false
+  const next = [...stack]
+  const swap = next[index]!
+  next[index] = next[nextIndex]!
+  next[nextIndex] = swap
+  mesh.modifierStack = next
+  return true
+}
+
 /**
- * Non-destructive stack, Blender default generate order:
- * Mirror → Subdivision Surface → Solidify
+ * Non-destructive stack. Default generate order is Mirror → Subdivision → Solidify
+ * unless `mesh.modifierStack` reorders the present entries.
  */
 export function evaluateModifiers(
   mesh: MeshObject,
   options?: ModifierEvalOptions
 ): { vertices: Vertex[]; faces: Face[] } {
   const purpose = options?.purpose ?? 'viewport'
-  let { vertices, faces } = evaluateMirror(mesh, options?.scene, purpose, options?.inEditMode ?? false)
+  let vertices = mesh.vertices
+  let faces = mesh.faces
 
-  if (mesh.subdivision?.enabled && mesh.subdivision.level > 0) {
-    const type = mesh.subdivision.type === 'simple' ? 'simple' : 'catmull-clark'
-    const sub = evaluateSubdivision(vertices, faces, mesh.subdivision.level, type)
-    vertices = sub.vertices
-    faces = sub.faces
-  }
-
-  if (mesh.solidify?.enabled && Math.abs(mesh.solidify.thickness) > 1e-8) {
-    const sol = evaluateSolidify(
-      vertices,
-      faces,
-      mesh.solidify.thickness,
-      mesh.solidify.offset ?? -1,
-      mesh.solidify.fillRim !== false
-    )
-    vertices = sol.vertices
-    faces = sol.faces
+  for (const name of resolveModifierStack(mesh)) {
+    if (name === 'mirror') {
+      const staged = { ...mesh, vertices, faces }
+      const mirrored = evaluateMirror(staged, options?.scene, purpose, options?.inEditMode ?? false)
+      vertices = mirrored.vertices
+      faces = mirrored.faces
+      continue
+    }
+    if (name === 'subdivision') {
+      if (!mesh.subdivision?.enabled || mesh.subdivision.level <= 0) continue
+      const type = mesh.subdivision.type === 'simple' ? 'simple' : 'catmull-clark'
+      const sub = evaluateSubdivision(vertices, faces, mesh.subdivision.level, type)
+      vertices = sub.vertices
+      faces = sub.faces
+      continue
+    }
+    if (mesh.solidify?.enabled && Math.abs(mesh.solidify.thickness) > 1e-8) {
+      const sol = evaluateSolidify(
+        vertices,
+        faces,
+        mesh.solidify.thickness,
+        mesh.solidify.offset ?? -1,
+        mesh.solidify.fillRim !== false
+      )
+      vertices = sol.vertices
+      faces = sol.faces
+    }
   }
 
   return { vertices, faces }

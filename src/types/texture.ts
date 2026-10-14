@@ -79,8 +79,10 @@ export interface MaterialGradientStop {
   opacity?: number
 }
 
+export type MaterialGradientKind = 'linear' | 'radial' | 'angle' | 'reflected' | 'diamond'
+
 export interface MaterialGradient {
-  kind: 'linear' | 'radial'
+  kind: MaterialGradientKind
   /** Degrees. 0 runs left to right in UV space. */
   angle: number
   stops: MaterialGradientStop[]

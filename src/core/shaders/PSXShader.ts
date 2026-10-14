@@ -264,20 +264,20 @@ export function applyConsoleTextureFiltering(texture: THREE.Texture | null, cons
   texture.needsUpdate = true
 }
 
-export function createPSXMaterial(texture: THREE.Texture | null = null, resolution = new THREE.Vector2(320, 240)): THREE.ShaderMaterial {
-  applyConsoleTextureFiltering(texture, 0)
+let psxMaterialPrototype: THREE.ShaderMaterial | null = null
 
+function buildPSXMaterialPrototype(): THREE.ShaderMaterial {
   const uniforms: PSXShaderUniforms = {
-    uTexture: { value: texture },
+    uTexture: { value: null },
     uTextureRepeat: { value: new THREE.Vector2(1, 1) },
-    uHasTexture: { value: texture !== null },
+    uHasTexture: { value: false },
     uColor: { value: new THREE.Color(1, 1, 1) },
-    uResolution: { value: resolution },
+    uResolution: { value: new THREE.Vector2(320, 240) },
     uJitterAmount: { value: 1.0 },
     uAffineEnabled: { value: true },
     uDitherEnabled: { value: true },
     uDitherIntensity: { value: 1.0 },
-    uColorDepth: { value: 32.0 }, // 32 steps per channel (RGB555)
+    uColorDepth: { value: 32.0 },
     uBayerSize: { value: 4 },
     uDitherScale: { value: 1.0 },
     uDitherPatternType: { value: 0 },
@@ -295,7 +295,6 @@ export function createPSXMaterial(texture: THREE.Texture | null = null, resoluti
     uOpacity: { value: 1.0 },
     uAlphaTest: { value: 0.05 }
   }
-
   const material = new THREE.ShaderMaterial({
     uniforms,
     vertexShader,
@@ -304,6 +303,18 @@ export function createPSXMaterial(texture: THREE.Texture | null = null, resoluti
     side: THREE.DoubleSide,
     transparent: true
   })
+  applyPsxLightingUniforms(material.uniforms, DEFAULT_VIEWPORT_LIGHTING)
+  return material
+}
+
+/** Clones a shared program so console materials do not recompile GLSL per mesh. */
+export function createPSXMaterial(texture: THREE.Texture | null = null, resolution = new THREE.Vector2(320, 240)): THREE.ShaderMaterial {
+  applyConsoleTextureFiltering(texture, 0)
+  if (!psxMaterialPrototype) psxMaterialPrototype = buildPSXMaterialPrototype()
+  const material = psxMaterialPrototype.clone()
+  material.uniforms.uTexture.value = texture
+  material.uniforms.uHasTexture.value = texture !== null
+  material.uniforms.uResolution.value = resolution.clone()
   applyPsxLightingUniforms(material.uniforms, DEFAULT_VIEWPORT_LIGHTING)
   return material
 }

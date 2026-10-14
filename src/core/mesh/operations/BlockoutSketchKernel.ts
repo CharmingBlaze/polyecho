@@ -69,7 +69,7 @@ export class BlockoutSketchKernel {
       if (!basis) return fail('That face has no area.')
       const outerIds = [...host.vertexIds]
       const outerUv = host.uvs.map(uv => uv?.clone() ?? new THREE.Vector2())
-      let outer2 = outerIds.map(id => this.to2(mesh.vertices.get(id)!.position, basis))
+      const outer2 = outerIds.map(id => this.to2(mesh.vertices.get(id)!.position, basis))
       if (this.signedArea(outer2) < 0) {
         outerIds.reverse()
         outer2.reverse()

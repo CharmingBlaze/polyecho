@@ -9,6 +9,7 @@ const props = defineProps<{ boneId: string; depth?: number }>()
 const animationStore = useAnimationStore()
 const editing = ref(false)
 const nameDraft = ref('')
+let skipRenameCommit = false
 
 const bone = computed(() => animationStore.armature.bones.find(item => item.id === props.boneId))
 const children = computed(() => bone.value?.childrenIds
@@ -21,13 +22,32 @@ function select() {
   animationStore.selectedSocketId = null
   animationStore.selectBone(bone.value.id)
 }
+function onNameClick(event: MouseEvent) {
+  event.stopPropagation()
+  if (!bone.value) return
+  if (animationStore.selectedBoneId === bone.value.id) {
+    startRename()
+    return
+  }
+  select()
+}
 function startRename() {
   if (!bone.value) return
   nameDraft.value = bone.value.name
   editing.value = true
 }
 function commitRename() {
+  if (skipRenameCommit) {
+    skipRenameCommit = false
+    editing.value = false
+    return
+  }
   if (bone.value && nameDraft.value.trim()) animationStore.renameBone(bone.value.id, nameDraft.value.trim())
+  editing.value = false
+}
+function cancelRename() {
+  skipRenameCommit = true
+  nameDraft.value = bone.value?.name || ''
   editing.value = false
 }
 function addChild() {
@@ -54,8 +74,18 @@ function removeSocket(socketId: string) {
       <div class="flex items-center gap-1 min-w-0 flex-1">
         <span v-if="(depth || 0) > 0" class="text-ui-borderSubtle">└</span>
         <GitCommitVertical class="w-3 h-3 shrink-0" />
-        <input v-if="editing" v-model="nameDraft" class="min-w-0 w-full bg-ui-input text-ui-textPrimary px-1 py-0.5 rounded-xs border border-ui-accent focus:outline-none" autofocus @click.stop @blur="commitRename" @keydown.enter="commitRename">
-        <span v-else class="truncate" @dblclick.stop="startRename">{{ bone.name }}</span>
+        <input
+          v-if="editing"
+          v-model="nameDraft"
+          class="min-w-0 w-full bg-ui-input text-ui-textPrimary px-1 py-0.5 rounded-xs border border-ui-accent focus:outline-none"
+          autofocus
+          aria-label="Bone name"
+          @click.stop
+          @blur="commitRename"
+          @keydown.enter="commitRename"
+          @keydown.escape.prevent="cancelRename"
+        >
+        <span v-else class="truncate" title="Click a selected bone to rename" @click="onNameClick" @dblclick.stop="startRename">{{ bone.name }}</span>
       </div>
       <div class="flex items-center gap-0.5 opacity-50 group-hover:opacity-100">
         <button class="p-0.5 hover:text-ui-textPrimary" title="Add socket" @click.stop="addSocket"><Wrench class="w-3 h-3" /></button>

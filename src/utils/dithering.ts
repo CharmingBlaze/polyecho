@@ -422,7 +422,7 @@ export function getDitherMatrixValue(x: number, y: number, pattern: string): num
 }
 
 /**
- * Render an interactive live 2D preview of the dithering parameters
+ * Legacy sphere+ramp canvas preview. The Material Dither tab uses `paintDitherPreview` in DitherPreview.ts.
  */
 export function renderDitherCanvasPreview(
   canvas: HTMLCanvasElement,

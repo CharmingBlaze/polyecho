@@ -2,18 +2,93 @@ export interface GradientStop {
   id: string
   color: string
   position: number // 0 to 100
+  opacity?: number
 }
+
+export type SavedGradientType = 'Linear' | 'Radial' | 'Angle' | 'Reflected' | 'Diamond'
 
 export interface SavedGradient {
   id: string
   name: string
-  type: 'Linear' | 'Radial' | 'Angle' | 'Reflected'
+  type: SavedGradientType
   angle: number // in degrees
   stops: GradientStop[]
   isCustom?: boolean
 }
 
+export function savedTypeToKind(type: SavedGradientType): 'linear' | 'radial' | 'angle' | 'reflected' | 'diamond' {
+  if (type === 'Radial') return 'radial'
+  if (type === 'Angle') return 'angle'
+  if (type === 'Reflected') return 'reflected'
+  if (type === 'Diamond') return 'diamond'
+  return 'linear'
+}
+
+export function kindToSavedType(kind: string | undefined): SavedGradientType {
+  if (kind === 'radial') return 'Radial'
+  if (kind === 'angle') return 'Angle'
+  if (kind === 'reflected') return 'Reflected'
+  if (kind === 'diamond') return 'Diamond'
+  return 'Linear'
+}
+
 export const DEFAULT_GRADIENT_PRESETS: SavedGradient[] = [
+  {
+    id: 'fg-bg',
+    name: 'Foreground to Background',
+    type: 'Linear',
+    angle: 0,
+    stops: [
+      { id: '1', color: '#ffffff', position: 0 },
+      { id: '2', color: '#000000', position: 100 }
+    ]
+  },
+  {
+    id: 'black-white',
+    name: 'Black, White',
+    type: 'Linear',
+    angle: 0,
+    stops: [
+      { id: '1', color: '#000000', position: 0 },
+      { id: '2', color: '#ffffff', position: 100 }
+    ]
+  },
+  {
+    id: 'spectrum',
+    name: 'Spectrum',
+    type: 'Linear',
+    angle: 0,
+    stops: [
+      { id: '1', color: '#ff0000', position: 0 },
+      { id: '2', color: '#ffff00', position: 17 },
+      { id: '3', color: '#00ff00', position: 33 },
+      { id: '4', color: '#00ffff', position: 50 },
+      { id: '5', color: '#0000ff', position: 67 },
+      { id: '6', color: '#ff00ff', position: 83 },
+      { id: '7', color: '#ff0000', position: 100 }
+    ]
+  },
+  {
+    id: 'transparent',
+    name: 'Foreground to Transparent',
+    type: 'Linear',
+    angle: 0,
+    stops: [
+      { id: '1', color: '#ffffff', position: 0, opacity: 1 },
+      { id: '2', color: '#ffffff', position: 100, opacity: 0 }
+    ]
+  },
+  {
+    id: 'copper',
+    name: 'Copper',
+    type: 'Linear',
+    angle: 90,
+    stops: [
+      { id: '1', color: '#3d1c0a', position: 0 },
+      { id: '2', color: '#c4783a', position: 45 },
+      { id: '3', color: '#f6d19c', position: 100 }
+    ]
+  },
   {
     id: 'sunset-horizon',
     name: 'Sunset Horizon',

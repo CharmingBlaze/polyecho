@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { surfaceTriangles } from '../geometry/SurfaceGeometry'
 import { EditableMesh } from './MeshKernel'
 import { MeshObject, Vertex, Face } from '../../types/mesh'
-import { undirectedEdgeId } from '../geometry/EdgeUtils'
+import { pruneMeshEdgeFlags, undirectedEdgeId } from '../geometry/EdgeUtils'
 
 export class MeshBridge {
   /**
@@ -200,7 +200,7 @@ export class MeshBridge {
 
     if (typeof baseMeshObjOrName === 'string') {
       const meshId = (typeof idOrVertMap === 'string') ? idOrVertMap : `mesh_${Date.now()}_${Math.floor(Math.random() * 1000)}`
-      return {
+      const created = {
         id: meshId,
         name: baseMeshObjOrName,
         visible: true,
@@ -209,21 +209,25 @@ export class MeshBridge {
         rotation: { x: 0, y: 0, z: 0 },
         scale: { x: 1, y: 1, z: 1 },
         materialId: 'default_material',
-        shadeMode: 'flat',
+        shadeMode: 'flat' as const,
         vertices,
         faces,
         ...seamData,
         ...sharpData
       }
+      pruneMeshEdgeFlags(created)
+      return created
     }
 
-    return {
+    const updated = {
       ...baseMeshObjOrName,
       vertices,
       faces,
       ...seamData,
       ...sharpData
     }
+    pruneMeshEdgeFlags(updated)
+    return updated
   }
 
   /**

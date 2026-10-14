@@ -118,7 +118,7 @@ export class CurveChain {
       const rel = points[i].clone().sub(start)
       bow.add(rel.addScaledVector(tangent, -rel.dot(tangent)))
     }
-    let axis = bow.lengthSq() > (length * 0.02) ** 2 ? bow.normalize() : this.screenPerp(tangent, viewRight, viewUp)
+    const axis = bow.lengthSq() > (length * 0.02) ** 2 ? bow.normalize() : this.screenPerp(tangent, viewRight, viewUp)
     const travel = [0]
     for (let i = 1; i < points.length; i++) travel.push(travel[i - 1] + points[i].distanceTo(points[i - 1]))
     const total = travel[travel.length - 1] || length

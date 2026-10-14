@@ -3,6 +3,7 @@ import { Material, Palette } from '../../types/texture'
 import { Armature } from '../../types/animation'
 import type { SavedPaintLayer } from '../painting/PaintLayerStorage'
 import { ProjectSerializer } from '../project/ProjectSerializer'
+import { enqueueDocumentWrite } from '../project/documentWriteQueue'
 
 export interface TextureStorageData {
   id: string
@@ -84,6 +85,7 @@ export class ProjectStorage {
   }
 
   static async saveProject(data: Omit<ProjectStorageData, 'id' | 'updatedAt'>, id = AUTOSAVE_KEY): Promise<void> {
+    await enqueueDocumentWrite(async () => {
     try {
       const db = await getDB()
       // IndexedDB rejects Vue proxies and other non-structured-clone values.
@@ -106,6 +108,7 @@ export class ProjectStorage {
     } catch (err) {
       console.warn('Failed to save project to IndexedDB:', err)
     }
+    })
   }
 
   static async loadProject(id = AUTOSAVE_KEY): Promise<ProjectStorageData | null> {

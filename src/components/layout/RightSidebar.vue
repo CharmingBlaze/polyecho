@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useToolStore } from '../../stores/toolStore'
 import { useLayoutStore } from '../../stores/layoutStore'
+import { useFloatingDrag } from '../../composables/useFloatingDrag'
 import OutlinerTree from '../outliner/OutlinerTree.vue'
 import TransformProps from '../inspector/TransformProps.vue'
 import MaterialProps from '../inspector/MaterialProps.vue'
@@ -26,6 +28,30 @@ import {
 
 const toolStore = useToolStore()
 const layoutStore = useLayoutStore()
+const { rightSidebarPos, rightSidebarFloating, rightSidebarHeight } = storeToRefs(layoutStore)
+const { startDrag: startInspectorDrag } = useFloatingDrag(rightSidebarPos, {
+  enabled: () => rightSidebarFloating.value,
+  minY: 36,
+  maxPadX: 48,
+  maxPadY: 64
+})
+
+function toggleInspectorFloat() {
+  if (!rightSidebarFloating.value) {
+    rightSidebarPos.value = {
+      x: Math.max(16, window.innerWidth - width.value - 16),
+      y: 46
+    }
+    rightSidebarHeight.value = Math.max(280, Math.round(window.innerHeight * 0.72))
+  }
+  rightSidebarFloating.value = !rightSidebarFloating.value
+}
+
+function onHeaderPointerDown(e: PointerEvent) {
+  if (!rightSidebarFloating.value) return
+  if ((e.target as HTMLElement).closest('button')) return
+  startInspectorDrag(e)
+}
 
 /** Set when a pointer-down already committed a drag tool, so that same click does not restart it. */
 let swallowModalRestartClick = false
@@ -149,14 +175,13 @@ const standardPropTabs = computed<PropertyTabItem[]>(() => {
 
   const tools: PropertyTabItem = { id: 'tools', label: 'Tools', title: 'Mesh Tools (Subdivide, merge, fill…)', blenderIcon: 'tools' }
   const mod: PropertyTabItem = { id: 'modifiers', label: 'Modifiers', title: 'Modifiers (Mirror, Subdiv, Solidify)', blenderIcon: 'modifier' }
-  const mat: PropertyTabItem = { id: 'material', label: 'Material', title: 'Material & Shading Properties', blenderIcon: 'material' }
-  const tex: PropertyTabItem = { id: 'texture', label: 'Texture', title: 'Texture Atlas & Pixel Maps', blenderIcon: 'texture' }
+  const mat: PropertyTabItem = { id: 'material', label: 'Material', title: 'Color, gradient, image fill, and pixel atlas', blenderIcon: 'material' }
   const refs: PropertyTabItem = { id: 'refs', label: 'References', title: 'Reference Images for Blockout', blenderIcon: 'image' }
 
   if (mode === 'blockout') return [tools, objectTab, refs, mod]
-  if (mode === 'uvpaint') return [objectTab, tex, mat, mod]
-  if (mode === 'animate') return [objectTab, mod, mat, tex]
-  return [tools, objectTab, mod, mat, tex]
+  if (mode === 'uvpaint') return [objectTab, mat, mod]
+  if (mode === 'animate') return [objectTab, mod, mat]
+  return [tools, objectTab, mod, mat]
 })
 
 const rigPropTabs = computed<PropertyTabItem[]>(() => [
@@ -203,166 +228,208 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <aside 
-    class="relative h-full bg-ui-panel border-l border-ui-borderSubtle flex flex-col select-none z-30 font-sans text-xs overflow-hidden shrink-0"
-    :style="{ width: `${width}px` }"
-    @pointerdown.capture="onInspectorPointerDown"
-    @click.capture="onInspectorClickCapture"
-  >
-    <!-- Left Resize Handle -->
-    <div 
-      class="absolute left-0 top-0 w-1.5 h-full cursor-ew-resize hover:bg-ui-accent/40 transition z-50 group"
-      title="Drag to resize sidebar width"
-      @mousedown="startResizeLeft"
-    />
-
-    <div class="h-7 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between select-none shrink-0">
-      <div class="inspector-seg">
-        <button
-          type="button"
-          class="inspector-seg-btn"
-          :class="{ 'is-active': panelViewMode === 'split' }"
-          title="Split view: scene and inspector"
-          @click="panelViewMode = 'split'"
-        >
-          <BlenderIcon name="layers" :size="12" />
-          <span>Split</span>
-        </button>
-        <button
-          type="button"
-          class="inspector-seg-btn"
-          :class="{ 'is-active': panelViewMode === 'outliner' }"
-          title="Scene objects and bones"
-          @click="panelViewMode = 'outliner'"
-        >
-          <BlenderIcon name="mesh-cube" :size="12" />
-          <span>Scene</span>
-        </button>
-        <button
-          type="button"
-          class="inspector-seg-btn"
-          :class="{ 'is-active': panelViewMode === 'props' }"
-          title="Focused inspector"
-          @click="panelViewMode = 'props'"
-        >
-          <BlenderIcon name="settings" :size="12" />
-          <span>Inspect</span>
-        </button>
-      </div>
-
-      <button
-        type="button"
-        class="w-7 h-7 flex items-center justify-center rounded-xs text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover cursor-pointer"
-        title="Hide panel (N)"
-        @click="layoutStore.showRightSidebar = false"
-      >
-        <BlenderIcon name="sidebar" :size="14" />
-      </button>
-    </div>
-
-    <div
-      v-if="pendingModal"
-      class="shrink-0 flex items-center gap-1 px-2 py-1 border-b border-ui-borderSubtle bg-ui-header"
+  <Teleport to="body" :disabled="!rightSidebarFloating">
+    <aside
+      data-floating-panel
+      class="bg-ui-panel flex flex-col select-none font-sans text-xs overflow-hidden"
+      :class="rightSidebarFloating
+        ? 'fixed z-[80] border border-ui-borderSubtle rounded-xs shadow-lg'
+        : 'relative h-full z-30 border-l border-ui-borderSubtle shrink-0'"
+      :style="rightSidebarFloating
+        ? { left: `${rightSidebarPos.x}px`, top: `${rightSidebarPos.y}px`, width: `${width}px`, height: `${rightSidebarHeight}px` }
+        : { width: `${width}px` }"
+      @pointerdown.capture="onInspectorPointerDown"
+      @click.capture="onInspectorClickCapture"
     >
-      <span class="flex-1 min-w-0 truncate text-[10px] text-ui-textSecondary" :title="pendingModal.statusText">
-        {{ pendingModal.operatorName }}
-      </span>
-      <button
-        type="button"
-        data-modal-action="confirm"
-        class="px-2 py-0.5 rounded-xs bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-medium"
-        title="Keep this edit"
-        @click="operatorManager.confirm()"
-      >
-        Confirm
-      </button>
-      <button
-        type="button"
-        data-modal-action="cancel"
-        class="px-2 py-0.5 rounded-xs bg-ui-surface hover:bg-rose-950/60 hover:text-rose-300 text-ui-textMuted border border-ui-borderSubtle text-[10px]"
-        title="Cancel this edit"
-        @click="operatorManager.cancel()"
-      >
-        Cancel
-      </button>
-    </div>
+      <!-- Left Resize Handle -->
+      <div 
+        class="absolute left-0 top-0 w-1.5 h-full cursor-ew-resize hover:bg-ui-accent/40 transition z-50 group"
+        title="Drag to resize sidebar width"
+        @mousedown="startResizeLeft"
+      />
 
-    <!-- 2. BODY CONTENT: BASED ON VIEW MODE -->
-    <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
-      <div v-if="panelViewMode === 'outliner'" class="flex-1 min-h-0 flex flex-col overflow-hidden bg-ui-panel">
-        <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-          <OutlinerTree />
+      <div
+        class="h-7 bg-ui-header border-b border-ui-borderSubtle px-2 flex items-center justify-between select-none shrink-0"
+        :class="{ 'cursor-grab': rightSidebarFloating }"
+        @pointerdown="onHeaderPointerDown"
+      >
+        <div class="inspector-seg">
+          <button
+            type="button"
+            class="inspector-seg-btn"
+            :class="{ 'is-active': panelViewMode === 'split' }"
+            title="Split view: scene and inspector"
+            @click="panelViewMode = 'split'"
+          >
+            <BlenderIcon name="layers" :size="12" />
+            <span>Split</span>
+          </button>
+          <button
+            type="button"
+            class="inspector-seg-btn"
+            :class="{ 'is-active': panelViewMode === 'outliner' }"
+            title="Scene objects and bones"
+            @click="panelViewMode = 'outliner'"
+          >
+            <BlenderIcon name="mesh-cube" :size="12" />
+            <span>Scene</span>
+          </button>
+          <button
+            type="button"
+            class="inspector-seg-btn"
+            :class="{ 'is-active': panelViewMode === 'props' }"
+            title="Focused inspector"
+            @click="panelViewMode = 'props'"
+          >
+            <BlenderIcon name="settings" :size="12" />
+            <span>Inspect</span>
+          </button>
+        </div>
+
+        <div class="flex items-center gap-0.5">
+          <button
+            type="button"
+            class="w-7 h-7 flex items-center justify-center rounded-xs text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover cursor-pointer"
+            :title="rightSidebarFloating ? 'Dock inspector' : 'Float inspector'"
+            :aria-pressed="rightSidebarFloating"
+            @click="toggleInspectorFloat"
+          >
+            <BlenderIcon name="display" :size="14" />
+          </button>
+          <button
+            type="button"
+            class="w-7 h-7 flex items-center justify-center rounded-xs text-ui-textMuted hover:text-ui-textPrimary hover:bg-ui-hover cursor-pointer"
+            title="Hide panel (N)"
+            @click="layoutStore.showRightSidebar = false"
+          >
+            <BlenderIcon name="sidebar" :size="14" />
+          </button>
         </div>
       </div>
 
-      <template v-else>
-        <template v-if="panelViewMode === 'split'">
-          <div
-            class="flex flex-col min-h-0 overflow-hidden bg-ui-panel"
-            :style="{ height: `${outlinerPercent}%` }"
-          >
-            <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-              <OutlinerTree />
-            </div>
+      <div
+        v-if="pendingModal"
+        class="shrink-0 flex items-center gap-1 px-2 py-1 border-b border-ui-borderSubtle bg-ui-header"
+      >
+        <span class="flex-1 min-w-0 truncate text-[10px] text-ui-textSecondary" :title="pendingModal.statusText">
+          {{ pendingModal.operatorName }}
+        </span>
+        <button
+          type="button"
+          data-modal-action="confirm"
+          class="px-2 py-0.5 rounded-xs bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-medium"
+          title="Keep this edit"
+          @click="operatorManager.confirm()"
+        >
+          Confirm
+        </button>
+        <button
+          type="button"
+          data-modal-action="cancel"
+          class="px-2 py-0.5 rounded-xs bg-ui-surface hover:bg-rose-950/60 hover:text-rose-300 text-ui-textMuted border border-ui-borderSubtle text-[10px]"
+          title="Cancel this edit"
+          @click="operatorManager.cancel()"
+        >
+          Cancel
+        </button>
+      </div>
+
+      <!-- 2. BODY CONTENT: BASED ON VIEW MODE -->
+      <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
+        <div v-if="panelViewMode === 'outliner'" class="flex-1 min-h-0 flex flex-col overflow-hidden bg-ui-panel">
+          <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+            <OutlinerTree />
           </div>
-          <div
-            class="h-2 w-full bg-ui-header hover:bg-ui-hover border-y border-ui-borderSubtle cursor-row-resize flex items-center justify-center transition group select-none shrink-0 z-20"
-            title="Drag to resize Outliner vs Properties"
-            @mousedown="startVerticalSplit"
-          >
-            <div class="w-8 h-0.5 rounded-full bg-ui-borderDefault group-hover:bg-ui-accent transition" />
+        </div>
+
+        <template v-else>
+          <template v-if="panelViewMode === 'split'">
+            <div
+              class="flex flex-col min-h-0 overflow-hidden bg-ui-panel"
+              :style="{ height: `${outlinerPercent}%` }"
+            >
+              <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+                <OutlinerTree />
+              </div>
+            </div>
+            <div
+              class="h-2 w-full bg-ui-header hover:bg-ui-hover border-y border-ui-borderSubtle cursor-row-resize flex items-center justify-center transition group select-none shrink-0 z-20"
+              title="Drag to resize Outliner vs Properties"
+              @mousedown="startVerticalSplit"
+            >
+              <div class="w-8 h-0.5 rounded-full bg-ui-borderDefault group-hover:bg-ui-accent transition" />
+            </div>
+          </template>
+
+          <div class="flex-1 min-h-0 flex overflow-hidden bg-ui-panel">
+            <div class="inspector-rail">
+              <button
+                v-for="tab in activePropTabs"
+                :key="tab.id"
+                type="button"
+                :class="railClass(tab.id)"
+                :title="tab.title"
+                @click="activeTab = tab.id"
+              >
+                <BlenderIcon v-if="tab.blenderIcon" :name="tab.blenderIcon" :size="14" />
+                <component :is="tab.icon" v-else-if="tab.icon" class="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+              <SkeletonPanel v-if="toolStore.appMode === 'rig' && activeTab === 'skeleton'" />
+              <BindingsPanel v-else-if="toolStore.appMode === 'rig' && activeTab === 'bindings'" />
+              <WeightsPanel v-else-if="toolStore.appMode === 'rig' && activeTab === 'weights'" />
+
+              <div v-else-if="activeTab === 'props'" class="h-full flex flex-col">
+                <RiggingPanel v-if="toolStore.appMode === 'rig'" />
+                <AnimationInspector v-else-if="toolStore.appMode === 'animate'" />
+                <UVPaintProps v-else-if="toolStore.appMode === 'uvpaint'" />
+                <TransformProps v-else />
+              </div>
+
+              <div v-else-if="activeTab === 'tools'" class="h-full flex flex-col">
+                <MeshToolsProps />
+              </div>
+
+              <div v-else-if="activeTab === 'modifiers'" class="h-full flex flex-col">
+                <ModifiersProps />
+              </div>
+
+              <div v-else-if="activeTab === 'material' || activeTab === 'texture'" class="h-full flex flex-col min-h-0">
+                <div class="px-2 pt-1.5 pb-1 border-b border-ui-borderSubtle shrink-0">
+                  <nav class="inspector-seg is-stretch" aria-label="Material look or pixels">
+                    <button
+                      type="button"
+                      class="inspector-seg-btn"
+                      :class="{ 'is-active': layoutStore.materialLook !== 'pixels' }"
+                      @click="layoutStore.materialLook = 'surface'"
+                    >
+                      Look
+                    </button>
+                    <button
+                      type="button"
+                      class="inspector-seg-btn"
+                      :class="{ 'is-active': layoutStore.materialLook === 'pixels' }"
+                      @click="layoutStore.materialLook = 'pixels'"
+                    >
+                      Pixels
+                    </button>
+                  </nav>
+                </div>
+                <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+                  <TextureProps v-if="layoutStore.materialLook === 'pixels'" />
+                  <MaterialProps v-else />
+                </div>
+              </div>
+
+              <div v-else-if="activeTab === 'refs'" class="h-full flex flex-col">
+                <ReferenceProps />
+              </div>
+            </div>
           </div>
         </template>
-
-        <div class="flex-1 min-h-0 flex overflow-hidden bg-ui-panel">
-          <div class="inspector-rail">
-            <button
-              v-for="tab in activePropTabs"
-              :key="tab.id"
-              type="button"
-              :class="railClass(tab.id)"
-              :title="tab.title"
-              @click="activeTab = tab.id"
-            >
-              <BlenderIcon v-if="tab.blenderIcon" :name="tab.blenderIcon" :size="14" />
-              <component :is="tab.icon" v-else-if="tab.icon" class="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-            <SkeletonPanel v-if="toolStore.appMode === 'rig' && activeTab === 'skeleton'" />
-            <BindingsPanel v-else-if="toolStore.appMode === 'rig' && activeTab === 'bindings'" />
-            <WeightsPanel v-else-if="toolStore.appMode === 'rig' && activeTab === 'weights'" />
-
-            <div v-else-if="activeTab === 'props'" class="h-full flex flex-col">
-              <RiggingPanel v-if="toolStore.appMode === 'rig'" />
-              <AnimationInspector v-else-if="toolStore.appMode === 'animate'" />
-              <UVPaintProps v-else-if="toolStore.appMode === 'uvpaint'" />
-              <TransformProps v-else />
-            </div>
-
-            <div v-else-if="activeTab === 'tools'" class="h-full flex flex-col">
-              <MeshToolsProps />
-            </div>
-
-            <div v-else-if="activeTab === 'modifiers'" class="h-full flex flex-col">
-              <ModifiersProps />
-            </div>
-
-            <div v-else-if="activeTab === 'material'" class="h-full flex flex-col">
-              <MaterialProps />
-            </div>
-
-            <div v-else-if="activeTab === 'texture'" class="h-full flex flex-col">
-              <TextureProps />
-            </div>
-
-            <div v-else-if="activeTab === 'refs'" class="h-full flex flex-col">
-              <ReferenceProps />
-            </div>
-          </div>
-        </div>
-      </template>
-    </div>
-  </aside>
+      </div>
+    </aside>
+  </Teleport>
 </template>

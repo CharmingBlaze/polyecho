@@ -33,6 +33,7 @@ import { loadOpenProject, refreshDesktopTitle, saveOpenProject, startBlankProjec
 import { allowDesktopClose, cancelDesktopClose, confirmUnsavedClose, getLaunchProjectPath, isDesktopApp, onDesktopCloseRequest, onOpenExternalProject, openProjectPath } from './core/desktop/desktopApi'
 import { EDITOR_EVENTS, requestCameraView, requestModalTool, requestFillFace, requestPrimitiveMenu, requestOpenPie, requestToggleUvOverlay, requestSmartUvProject, requestKnifeProject } from './core/commands/editorCommands'
 import { setupDefaultActions } from './core/commands/setupDefaultActions'
+import { canHideSelected, canHideUnselected, canIsolateSelected, canShowHidden, hideSelected, hideUnselected, isolateSelected, showHidden } from './core/geometry/ObjectVisibility'
 import { operatorManager } from './core/operators/OperatorManager'
 import { useFastTitleTips } from './composables/useFastTitleTips'
 
@@ -72,8 +73,7 @@ const collapsedPropTabs = computed<DockTab[]>(() => {
   if (mode === 'uvpaint') {
     return [
       { id: 'props', title: 'UV & Seams Properties', blender: 'uv' },
-      { id: 'texture', title: 'Textures & Pixel Maps', blender: 'texture' },
-      { id: 'material', title: 'Material & Shading', blender: 'material' },
+      { id: 'material', title: 'Color, gradient, image fill, and pixel atlas', blender: 'material' },
       { id: 'modifiers', title: 'Modifiers', blender: 'modifier' },
     ]
   }
@@ -81,16 +81,14 @@ const collapsedPropTabs = computed<DockTab[]>(() => {
     return [
       { id: 'props', title: 'Animation & Keyframes', blender: 'keyframe' },
       { id: 'modifiers', title: 'Modifiers', blender: 'modifier' },
-      { id: 'material', title: 'Material & Shading', blender: 'material' },
-      { id: 'texture', title: 'Textures & Pixel Maps', blender: 'texture' },
+      { id: 'material', title: 'Color, gradient, image fill, and pixel atlas', blender: 'material' },
     ]
   }
   return [
     { id: 'tools', title: 'Mesh Tools (Subdivide, merge, fill…)', blender: 'tools' },
     { id: 'props', title: 'Transform & Object Properties', blender: 'empty-axis' },
     { id: 'modifiers', title: 'Modifiers', blender: 'modifier' },
-    { id: 'material', title: 'Material & Shading', blender: 'material' },
-    { id: 'texture', title: 'Textures & Pixel Maps', blender: 'texture' },
+    { id: 'material', title: 'Color, gradient, image fill, and pixel atlas', blender: 'material' },
   ]
 })
 
@@ -208,6 +206,7 @@ const UV_SAFE_ACTIONS = new Set([
   'undo', 'redo', 'save_project', 'export_model', 'open_preferences', 'open_help',
   'command_palette', 'toggle_left_toolbar', 'toggle_right_sidebar',
   'restore_autosave', 'toggle_xray', 'toggle_snap', 'toggle_quad_view',
+  'hide_selected', 'hide_unselected', 'isolate_selected', 'show_hidden',
   'view_top', 'view_front', 'view_right', 'view_camera',
   'mode_vertex', 'mode_edge', 'mode_face', 'mode_object',
   'mark_seam', 'clear_seam'
@@ -684,6 +683,26 @@ function runKeymapAction(id: string) {
     case 'separate_material':
       if (isMeshWorkspace()) projectStore.performSeparateByMaterial()
       return
+    case 'hide_selected':
+      if (!canHideSelected(projectStore.meshes, projectStore.selectedMeshIds)) return
+      projectStore.recordState('Hide Selected')
+      hideSelected(projectStore.meshes, projectStore.selectedMeshIds)
+      return
+    case 'hide_unselected':
+      if (!canHideUnselected(projectStore.meshes, projectStore.selectedMeshIds)) return
+      projectStore.recordState('Hide Unselected')
+      hideUnselected(projectStore.meshes, projectStore.selectedMeshIds)
+      return
+    case 'isolate_selected':
+      if (!canIsolateSelected(projectStore.meshes, projectStore.selectedMeshIds)) return
+      projectStore.recordState('Isolate Selected')
+      isolateSelected(projectStore.meshes, projectStore.selectedMeshIds)
+      return
+    case 'show_hidden':
+      if (!canShowHidden(projectStore.meshes)) return
+      projectStore.recordState('Show Hidden')
+      showHidden(projectStore.meshes)
+      return
   }
 }
 
@@ -890,7 +909,7 @@ onUnmounted(() => {
                 id="uvpaint-viewport-tools"
                 class="absolute inset-0 z-30 overflow-hidden pointer-events-none"
                 aria-live="polite"
-              ></div>
+              />
             </div>
 
             <div 

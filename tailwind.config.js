@@ -74,7 +74,11 @@ export default {
         sans: ['Segoe UI', 'system-ui', 'sans-serif'],
         mono: ['ui-monospace', 'Consolas', 'monospace'],
         pixel: ['ui-monospace', 'monospace', 'sans-serif'],
-      }
+      },
+      fontSize: {
+        '2xs': ['0.625rem', { lineHeight: '0.875rem' }],
+        inspector: ['0.6875rem', { lineHeight: '1rem' }],
+      },
     },
   },
   plugins: [],

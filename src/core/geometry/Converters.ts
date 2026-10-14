@@ -397,7 +397,7 @@ export function meshToThreeGeometry(
   modifier?: ModifierEvalOptions
 ): GeometryBundle {
   ensureMeshUVs(mesh)
-  let { vertices: evalVertices, faces: evalFaces } = evaluateModifiers(mesh, modifier)
+  const { vertices: evalVertices, faces: evalFaces } = evaluateModifiers(mesh, modifier)
 
   const posedPos = new Map<string, { x: number; y: number; z: number }>()
   if (skeletalDeformContext && skeletalDeformContext.isPoseMode && skeletalDeformContext.bones.length > 0) {

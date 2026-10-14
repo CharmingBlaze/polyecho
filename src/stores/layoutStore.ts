@@ -50,12 +50,15 @@ export const useLayoutStore = defineStore('layout', () => {
   type InspectorTab = 'outliner' | 'props' | 'tools' | 'modifiers' | 'material' | 'texture' | 'refs' | 'bindings' | 'weights' | 'skeleton'
 
   const inspectorTabsByMode: Record<string, InspectorTab[]> = {
-    model: ['outliner', 'tools', 'props', 'modifiers', 'material', 'texture'],
+    model: ['outliner', 'tools', 'props', 'modifiers', 'material'],
     blockout: ['outliner', 'tools', 'props', 'refs', 'modifiers'],
-    uvpaint: ['outliner', 'props', 'texture', 'material', 'modifiers'],
-    animate: ['outliner', 'props', 'modifiers', 'material', 'texture'],
+    uvpaint: ['outliner', 'props', 'material', 'modifiers'],
+    animate: ['outliner', 'props', 'modifiers', 'material'],
     rig: ['skeleton', 'props', 'bindings', 'weights']
   }
+
+  /** Surface look (color / gradient / image) vs pixel atlas. Same inspector tab. */
+  const materialLook = ref<'surface' | 'pixels'>('surface')
 
   const inspectorTab = ref<InspectorTab>('tools')
   const lastInspectorTabByMode = ref<Record<string, InspectorTab>>({
@@ -196,9 +199,14 @@ export const useLayoutStore = defineStore('layout', () => {
   }
 
   function setInspectorTab(tab: InspectorTab, mode?: string) {
-    inspectorTab.value = tab
+    if (tab === 'texture') {
+      materialLook.value = 'pixels'
+      inspectorTab.value = 'material'
+    } else {
+      inspectorTab.value = tab
+    }
     const key = mode || 'model'
-    lastInspectorTabByMode.value = { ...lastInspectorTabByMode.value, [key]: tab }
+    lastInspectorTabByMode.value = { ...lastInspectorTabByMode.value, [key]: inspectorTab.value }
   }
 
   function restoreInspectorTab(mode: string) {
@@ -210,7 +218,11 @@ export const useLayoutStore = defineStore('layout', () => {
       rig: 'skeleton'
     }
     const visible = visibleInspectorTabs(mode)
-    const remembered = lastInspectorTabByMode.value[mode] || defaults[mode] || 'outliner'
+    let remembered = lastInspectorTabByMode.value[mode] || defaults[mode] || 'outliner'
+    if (remembered === 'texture') {
+      remembered = 'material'
+      materialLook.value = 'pixels'
+    }
     inspectorTab.value = visible.includes(remembered) ? remembered : (visible[0] || 'outliner')
   }
 
@@ -288,6 +300,7 @@ export const useLayoutStore = defineStore('layout', () => {
     rightSidebarHeight,
     rightSidebarPos,
     inspectorTab,
+    materialLook,
     lastInspectorTabByMode,
     blockoutFrontFrac,
     blockoutSideFrac,

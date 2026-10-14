@@ -37,7 +37,7 @@ describe('Circle loop', () => {
       return Math.atan2(p.y, p.x)
     }).sort((a, b) => a - b)
     const steps = angles.map((angle, i) => {
-      let d = (i + 1 < angles.length ? angles[i + 1] : angles[0] + Math.PI * 2) - angle
+      const d = (i + 1 < angles.length ? angles[i + 1] : angles[0] + Math.PI * 2) - angle
       return d
     })
     expect(Math.max(...steps) - Math.min(...steps)).toBeLessThan(1e-5)

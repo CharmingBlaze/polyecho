@@ -195,6 +195,80 @@ describe('object-mode G/R/S', () => {
     expect(mesh.vertices.get(vertId)!.position.distanceTo(local)).toBeLessThan(1e-6)
   })
 
+  it('G moves every selected object by the same world delta', () => {
+    const a = createCube('A', 2)
+    a.position = { x: 0, y: 0, z: 0 }
+    const b = createCube('B', 2)
+    b.position = { x: 4, y: 0, z: 0 }
+    const { mesh } = MeshBridge.meshObjectToEditableMesh(a)
+    const camera = new THREE.PerspectiveCamera(50, 800 / 600, 0.1, 100)
+    camera.position.set(8, 8, 8)
+    camera.lookAt(0, 0, 0)
+    camera.updateMatrixWorld()
+    const ctx: OperatorContext = {
+      mesh,
+      selectedVertIds: [],
+      selectedFaceIds: [],
+      selectedEdgeIds: [],
+      selectedMeshIds: [a.id, b.id],
+      isObjectMode: true,
+      camera,
+      viewportElement: fakeViewport(),
+      pivotMode: 'MEDIAN',
+      allMeshes: [a, b],
+      targetMeshId: a.id,
+      onUpdatePreview: () => {},
+      onCommit: () => {},
+      onCancel: () => {},
+    }
+    const op = new MoveOperator()
+    op.begin(ctx, { x: 400, y: 300 })
+    op.keyDown(key('x'))
+    op.keyDown(key('2'))
+    expect(a.position.x).toBeCloseTo(2)
+    expect(b.position.x).toBeCloseTo(6)
+    expect(b.position.y).toBeCloseTo(0)
+  })
+
+  it('R orbits selected objects around the median origin', () => {
+    const a = createCube('A', 2)
+    a.position = { x: -2, y: 0, z: 0 }
+    const b = createCube('B', 2)
+    b.position = { x: 2, y: 0, z: 0 }
+    const { mesh } = MeshBridge.meshObjectToEditableMesh(a)
+    const camera = new THREE.PerspectiveCamera(50, 800 / 600, 0.1, 100)
+    camera.position.set(8, 8, 8)
+    camera.lookAt(0, 0, 0)
+    camera.updateMatrixWorld()
+    const ctx: OperatorContext = {
+      mesh,
+      selectedVertIds: [],
+      selectedFaceIds: [],
+      selectedEdgeIds: [],
+      selectedMeshIds: [a.id, b.id],
+      isObjectMode: true,
+      camera,
+      viewportElement: fakeViewport(),
+      pivotMode: 'MEDIAN',
+      allMeshes: [a, b],
+      targetMeshId: a.id,
+      onUpdatePreview: () => {},
+      onCommit: () => {},
+      onCancel: () => {},
+    }
+    const op = new RotateOperator()
+    op.begin(ctx, { x: 400, y: 300 })
+    op.keyDown(key('z'))
+    op.keyDown(key('9'))
+    op.keyDown(key('0'))
+    expect(a.position.x).toBeCloseTo(0, 4)
+    expect(a.position.y).toBeCloseTo(-2, 4)
+    expect(b.position.x).toBeCloseTo(0, 4)
+    expect(b.position.y).toBeCloseTo(2, 4)
+    expect(a.rotation.z).toBeCloseTo(90)
+    expect(b.rotation.z).toBeCloseTo(90)
+  })
+
   it('R rotates MeshObject.rotation and keeps verts', () => {
     const { cube, mesh, ctx } = objectContext()
     const vertId = [...mesh.vertices.keys()][0]

@@ -256,7 +256,7 @@ export class KnifeKernel {
     const tri = new THREE.Triangle()
     const closest = new THREE.Vector3()
     let bestFaceId = -1
-    let bestPoint = new THREE.Vector3()
+    const bestPoint = new THREE.Vector3()
     let bestDist = Infinity
 
     const consider = (faceId: number) => {

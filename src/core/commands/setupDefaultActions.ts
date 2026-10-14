@@ -1,5 +1,6 @@
 import { actionRegistry, type CommandAction } from './ActionRegistry'
 import { requestExport, requestModalTool, requestPrimitivePlacement, requestCameraView, requestFillFace, requestSmartUvProject, requestKnifeProject, requestProjectFromView } from './editorCommands'
+import { canHideSelected, canHideUnselected, canIsolateSelected, canShowHidden, hideSelected, hideUnselected, isolateSelected, showHidden } from '../geometry/ObjectVisibility'
 import { useProjectStore } from '../../stores/projectStore'
 import { useToolStore } from '../../stores/toolStore'
 import { useAnimationStore } from '../../stores/animationStore'
@@ -946,6 +947,50 @@ export function setupDefaultActions(
     },
 
     // 6. SHADING & VIEWPORT
+    {
+      id: 'hide_selected',
+      label: 'Hide Selected Objects',
+      category: 'Viewport',
+      shortcut: 'Ctrl+h',
+      handler: () => {
+        if (!canHideSelected(projectStore.meshes, projectStore.selectedMeshIds)) return
+        projectStore.recordState('Hide Selected')
+        hideSelected(projectStore.meshes, projectStore.selectedMeshIds)
+      }
+    },
+    {
+      id: 'hide_unselected',
+      label: 'Hide Unselected Objects',
+      category: 'Viewport',
+      shortcut: 'Ctrl+Shift+h',
+      handler: () => {
+        if (!canHideUnselected(projectStore.meshes, projectStore.selectedMeshIds)) return
+        projectStore.recordState('Hide Unselected')
+        hideUnselected(projectStore.meshes, projectStore.selectedMeshIds)
+      }
+    },
+    {
+      id: 'isolate_selected',
+      label: 'Isolate Selected Objects',
+      category: 'Viewport',
+      shortcut: 'Ctrl+Alt+i',
+      handler: () => {
+        if (!canIsolateSelected(projectStore.meshes, projectStore.selectedMeshIds)) return
+        projectStore.recordState('Isolate Selected')
+        isolateSelected(projectStore.meshes, projectStore.selectedMeshIds)
+      }
+    },
+    {
+      id: 'show_hidden',
+      label: 'Show Hidden Objects',
+      category: 'Viewport',
+      shortcut: 'Ctrl+Alt+h',
+      handler: () => {
+        if (!canShowHidden(projectStore.meshes)) return
+        projectStore.recordState('Show Hidden')
+        showHidden(projectStore.meshes)
+      }
+    },
     {
       id: 'toggle_xray',
       label: 'Toggle X-Ray Mode',

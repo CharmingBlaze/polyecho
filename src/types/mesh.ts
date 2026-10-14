@@ -109,6 +109,8 @@ export interface MeshObject {
   id: string
   name: string
   parentId?: string
+  /** Outliner collection name. Missing or blank is the ungrouped Scene list. Persists with the mesh. */
+  collection?: string
   parentBoneId?: string
   parentType?: 'object' | 'bone' | 'vertex' | 'edge' | 'face'
   vertices: Vertex[]
@@ -123,6 +125,8 @@ export interface MeshObject {
   mirror?: MirrorModifier
   subdivision?: SubdivisionModifier
   solidify?: SolidifyModifier
+  /** Evaluate / display order. Missing names keep Mirror → Subdivision → Solidify. */
+  modifierStack?: Array<'mirror' | 'subdivision' | 'solidify'>
   bevelModifier?: BevelModifierConfig
   shadeMode?: MeshShadeMode
   /** Degrees. Edges sharper than this stay flat when `shadeMode` is `auto`. Default 30. */
